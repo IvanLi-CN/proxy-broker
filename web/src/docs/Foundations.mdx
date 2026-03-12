@@ -1,0 +1,21 @@
+import { Meta } from '@storybook/blocks'
+
+<Meta title="Foundations/Operator Console" />
+
+# Operator Console Foundations
+
+This Storybook documents the `proxy-broker` web console as a light-first operator surface.
+
+## Principles
+
+- Keep API interactions explicit and close to the existing Rust contracts.
+- Prefer dense, readable layouts over decorative whitespace.
+- Treat ports, session IDs, file paths, and IPs as monospace-first data.
+- Use Storybook stories as the canonical docs surface for every committed UI component.
+
+## Coverage
+
+- `UI/*` contains shadcn/ui primitives committed into the repository.
+- `Components/*` covers app-specific building blocks.
+- `Features/*` documents feature-scoped forms and tables.
+- `Pages/*` shows route-level composition.

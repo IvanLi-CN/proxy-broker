@@ -15,6 +15,7 @@ use crate::{
         RefreshRequest,
     },
     service::BrokerService,
+    web_ui::spa_fallback,
 };
 
 #[derive(Clone)]
@@ -50,6 +51,7 @@ pub fn build_router(state: AppState) -> Router {
             "/api/v1/profiles/{profile_id}/sessions/{session_id}",
             delete(close_session),
         )
+        .fallback(spa_fallback)
         .with_state(state)
 }
 
