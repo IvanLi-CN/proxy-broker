@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, fn, userEvent, within } from "@storybook/test";
+import { expect, fn, userEvent, within } from "storybook/test";
 
 import { RefreshCard } from "@/features/overview/components/RefreshCard";
 import { refreshFixture } from "@/mocks/fixtures";

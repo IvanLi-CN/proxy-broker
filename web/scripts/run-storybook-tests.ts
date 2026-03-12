@@ -50,7 +50,17 @@ try {
   await waitForServer(storybookUrl);
   const runner = spawn(
     "bunx",
-    ["test-storybook", "--url", storybookUrl, "--ci", "--browsers", "chromium", "--failOnConsole"],
+    [
+      "test-storybook",
+      "--url",
+      storybookUrl,
+      "--ci",
+      "--browsers",
+      "chromium",
+      "--failOnConsole",
+      "--maxWorkers=2",
+      "--testTimeout=120000",
+    ],
     {
       stdio: "inherit",
       env: process.env,
