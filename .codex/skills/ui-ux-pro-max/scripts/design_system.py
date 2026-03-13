@@ -333,9 +333,11 @@ def format_ascii_box(design_system: dict) -> str:
     # Pattern section
     lines.append(f"|  PATTERN: {pattern.get('name', '')}".ljust(BOX_WIDTH) + "|")
     if pattern.get('conversion'):
-        lines.append(f"|     Conversion: {pattern.get('conversion', '')}".ljust(BOX_WIDTH) + "|")
+        for line in wrap_text(f"Conversion: {pattern.get('conversion', '')}", "|     ", BOX_WIDTH):
+            lines.append(line.ljust(BOX_WIDTH) + "|")
     if pattern.get('cta_placement'):
-        lines.append(f"|     CTA: {pattern.get('cta_placement', '')}".ljust(BOX_WIDTH) + "|")
+        for line in wrap_text(f"CTA: {pattern.get('cta_placement', '')}", "|     ", BOX_WIDTH):
+            lines.append(line.ljust(BOX_WIDTH) + "|")
     lines.append("|     Sections:".ljust(BOX_WIDTH) + "|")
     for i, section in enumerate(sections, 1):
         lines.append(f"|       {i}. {section}".ljust(BOX_WIDTH) + "|")
@@ -375,9 +377,11 @@ def format_ascii_box(design_system: dict) -> str:
         for line in wrap_text(f"Best For: {typography.get('best_for', '')}", "|     ", BOX_WIDTH):
             lines.append(line.ljust(BOX_WIDTH) + "|")
     if typography.get("google_fonts_url"):
-        lines.append(f"|     Google Fonts: {typography.get('google_fonts_url', '')}".ljust(BOX_WIDTH) + "|")
+        for line in wrap_text(f"Google Fonts: {typography.get('google_fonts_url', '')}", "|     ", BOX_WIDTH):
+            lines.append(line.ljust(BOX_WIDTH) + "|")
     if typography.get("css_import"):
-        lines.append(f"|     CSS Import: {typography.get('css_import', '')[:70]}...".ljust(BOX_WIDTH) + "|")
+        for line in wrap_text(f"CSS Import: {typography.get('css_import', '')}", "|     ", BOX_WIDTH):
+            lines.append(line.ljust(BOX_WIDTH) + "|")
     lines.append("|" + " " * BOX_WIDTH + "|")
 
     # Key Effects section
@@ -1002,17 +1006,28 @@ def _generate_intelligent_overrides(page_name: str, page_query: str, design_syst
     # Search across multiple domains for page-specific guidance
     style_search = search(combined_context, "style", max_results=1)
     ux_search = search(combined_context, "ux", max_results=3)
-    landing_search = search(page_context, "landing", max_results=1)
     
     # Extract results from search response
     style_results = style_search.get("results", [])
     ux_results = ux_search.get("results", [])
-    landing_results = landing_search.get("results", [])
     
-    # Detect page type from search results or context
-    page_type = _detect_page_type(page_context, style_results)
-    if page_type == "General" and query_lower:
-        page_type = _detect_page_type(query_lower, [])
+    # Detect page type from explicit page-name semantics first.
+    page_type = _detect_page_type(page_context, [])
+    if page_type == "General":
+        if page_lower in {"home", "homepage"} and query_lower:
+            page_type = _detect_query_page_type(query_lower)
+            if page_type == "General":
+                page_type = _detect_page_type(page_context, style_results)
+        else:
+            page_type = _detect_page_type(page_context, style_results)
+            if page_type == "General" and query_lower:
+                page_type = _detect_query_page_type(query_lower)
+                if page_type == "General":
+                    page_type = _detect_page_type(query_lower, [])
+
+    landing_query = combined_context if page_type == "Landing / Marketing" else page_context
+    landing_search = search(landing_query, "landing", max_results=1)
+    landing_results = landing_search.get("results", [])
 
     # Build overrides from search results
     layout = {}
@@ -1095,11 +1110,13 @@ def _generate_intelligent_overrides(page_name: str, page_query: str, design_syst
             components.append(f"Avoid: {dont_text}")
     
     # Extract landing pattern info for section structure
-    if landing_results and page_type in {"Landing / Marketing", "General"}:
-        landing = landing_results[0]
+    if page_type in {"Landing / Marketing", "General"}:
+        landing = landing_results[0] if landing_results else design_system.get("pattern", {})
         sections = landing.get("Section Order", "")
-        cta_placement = landing.get("Primary CTA Placement", "")
-        color_strategy = landing.get("Color Strategy", "")
+        if not sections:
+            sections = landing.get("sections", "")
+        cta_placement = landing.get("Primary CTA Placement", "") or landing.get("cta_placement", "")
+        color_strategy = landing.get("Color Strategy", "") or landing.get("color_strategy", "")
         
         if sections:
             layout["Sections"] = sections
@@ -1164,6 +1181,29 @@ def _detect_page_type(context: str, style_results: list) -> str:
         elif "landing" in best_for or "marketing" in best_for:
             return "Landing / Marketing"
     
+    return "General"
+
+
+def _detect_query_page_type(query_context: str) -> str:
+    """Detect explicit page intent from the broader query without letting product terms dominate."""
+    query_lower = query_context.lower()
+    explicit_patterns = [
+        (["login", "signin", "signup", "register", "auth", "password"], "Authentication"),
+        (["settings", "profile", "account", "preferences", "config"], "Settings / Profile"),
+        (["landing", "marketing", "homepage", "hero", "promo", "campaign"], "Landing / Marketing"),
+        (["checkout", "payment", "cart", "purchase", "order", "billing"], "Checkout / Payment"),
+        (["pricing", "plans", "subscription", "tiers", "packages"], "Pricing / Plans"),
+        (["blog", "article", "post", "news", "content", "story"], "Blog / Article"),
+        (["product", "item", "detail", "pdp", "shop", "store"], "Product Detail"),
+        (["search", "results", "browse", "filter", "catalog", "list"], "Search Results"),
+        (["empty", "404", "error", "not found", "zero"], "Empty State"),
+        (["dashboard", "admin", "analytics", "data", "metrics", "stats", "monitor", "overview"], "Dashboard / Data View"),
+    ]
+
+    for keywords, page_type in explicit_patterns:
+        if any(kw in query_lower for kw in keywords):
+            return page_type
+
     return "General"
 
 

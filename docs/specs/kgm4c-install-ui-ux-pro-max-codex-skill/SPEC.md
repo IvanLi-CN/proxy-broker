@@ -137,6 +137,8 @@ None
 - review-loop 六轮修复：仅在真正的 landing 场景下采用 landing pattern，修正持久化文档内的相对路径，并让 CLI 的持久化提示尊重 `--output-dir`。
 - merge-proof 修复：页面 override 识别改为结合 `page_query + style results`，避免 `home` 被硬判 landing、`insights` 退化成 General，同时把持久化目录创建推迟到覆盖校验之后，避免失败时留下半成品目录。
 - merge-proof 二轮修复：页面职责继续以 `page_name` 为最高优先级，避免 `login/settings` 被项目级 dashboard 查询词带偏；收紧 General 页面升级到 dashboard 布局的条件，并让显式 landing/homepage 请求优先启用 landing pattern。
+- merge-proof 三轮修复：把 query fallback 调整为“显式页面意图优先于产品语义”，让 landing override 在识别出 landing 场景后使用 `page_query` 补查 landing pattern，并修正 ASCII 输出里长字段不换行导致的边框溢出。
+- merge-proof 四轮修复：`home/homepage` 改为先按显式 query 意图判页型，避免被 style fallback 抢先带成 dashboard；当 landing override 没命中 `landing.csv` 时，回退复用主设计系统 pattern 的 sections/CTA/color strategy。
 
 ## 计划资产（Plan assets）
 
@@ -184,6 +186,8 @@ None
 - 2026-03-13: 根据六轮 review-loop 修复 dashboard pattern 误判与持久化路径提示错误。
 - 2026-03-13: 根据 merge-proof 修复 `home/insights` 页面类型误判与 persist 失败留下空目录的问题。
 - 2026-03-13: 根据 merge-proof 二轮修复 auth/settings 页面被 dashboard 上下文污染、General 页面误升 dashboard 布局与 analytics landing 场景误禁用 landing pattern 的问题。
+- 2026-03-13: 根据 merge-proof 三轮修复 home fallback 误判 dashboard、landing override 丢失 CTA/sections，以及 ASCII 长字段溢出边框的问题。
+- 2026-03-13: 根据 merge-proof 四轮修复 `home/homepage` 的 page-type 优先级，并为未命中 landing CSV 的 landing override 增加主 pattern 回退。
 
 ## 参考（References）
 
