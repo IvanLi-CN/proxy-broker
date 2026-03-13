@@ -136,6 +136,7 @@ None
 - review-loop 五轮修复：页面类型判定收敛为以 `page_name` 为主，避免通用页面被项目查询词误分类成 dashboard / landing。
 - review-loop 六轮修复：仅在真正的 landing 场景下采用 landing pattern，修正持久化文档内的相对路径，并让 CLI 的持久化提示尊重 `--output-dir`。
 - merge-proof 修复：页面 override 识别改为结合 `page_query + style results`，避免 `home` 被硬判 landing、`insights` 退化成 General，同时把持久化目录创建推迟到覆盖校验之后，避免失败时留下半成品目录。
+- merge-proof 二轮修复：页面职责继续以 `page_name` 为最高优先级，避免 `login/settings` 被项目级 dashboard 查询词带偏；收紧 General 页面升级到 dashboard 布局的条件，并让显式 landing/homepage 请求优先启用 landing pattern。
 
 ## 计划资产（Plan assets）
 
@@ -182,6 +183,7 @@ None
 - 2026-03-13: 根据五轮 review-loop 修复通用页面被项目查询词误分类的问题。
 - 2026-03-13: 根据六轮 review-loop 修复 dashboard pattern 误判与持久化路径提示错误。
 - 2026-03-13: 根据 merge-proof 修复 `home/insights` 页面类型误判与 persist 失败留下空目录的问题。
+- 2026-03-13: 根据 merge-proof 二轮修复 auth/settings 页面被 dashboard 上下文污染、General 页面误升 dashboard 布局与 analytics landing 场景误禁用 landing pattern 的问题。
 
 ## 参考（References）
 

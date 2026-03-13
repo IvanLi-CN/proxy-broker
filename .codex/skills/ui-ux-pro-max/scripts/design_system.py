@@ -37,11 +37,13 @@ SEARCH_CONFIG = {
 def use_landing_pattern(category: str, style_name: str, query: str) -> bool:
     """Only apply landing-page patterns when the request is actually landing-page oriented."""
     combined = " ".join([category, style_name, query]).lower()
+    landing_terms = ["landing", "marketing", "homepage", "hero", "promo", "campaign"]
+    if any(term in combined for term in landing_terms):
+        return True
     dashboard_terms = ["dashboard", "analytics", "admin", "monitor", "reporting", "data view", "bi/analytics"]
     if any(term in combined for term in dashboard_terms):
         return False
-    landing_terms = ["landing", "marketing", "homepage", "hero", "promo", "campaign"]
-    return any(term in combined for term in landing_terms)
+    return False
 
 
 def parse_section_order(raw_sections: str) -> list:
@@ -1008,7 +1010,9 @@ def _generate_intelligent_overrides(page_name: str, page_query: str, design_syst
     landing_results = landing_search.get("results", [])
     
     # Detect page type from search results or context
-    page_type = _detect_page_type(combined_context, style_results)
+    page_type = _detect_page_type(page_context, style_results)
+    if page_type == "General" and query_lower:
+        page_type = _detect_page_type(query_lower, [])
 
     # Build overrides from search results
     layout = {}
@@ -1057,7 +1061,14 @@ def _generate_intelligent_overrides(page_name: str, page_query: str, design_syst
         effects = style.get("Effects & Animation", "")
         
         # Infer layout from style keywords
-        if any(kw in keywords.lower() for kw in ["data", "dense", "dashboard", "grid"]) and page_type == "General":
+        best_for_lower = best_for.lower()
+        if (
+            page_type == "General"
+            and (
+                any(kw in keywords.lower() for kw in ["data", "dense", "dashboard", "analytics"])
+                or any(kw in best_for_lower for kw in ["dashboard", "analytics", "reporting", "business intelligence", "data"])
+            )
+        ):
             layout["Max Width"] = "1400px or full-width"
             layout["Grid"] = "12-column grid for data flexibility"
             layout["Layout"] = "Dense dashboard canvas with KPI row, filters, and data tables"
