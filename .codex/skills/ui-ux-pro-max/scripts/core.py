@@ -67,6 +67,9 @@ CSV_CONFIG = {
     }
 }
 
+ASCII_QUERY_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9.+-]*")
+NON_ASCII_RE = re.compile(r"[^\x00-\x7f]")
+
 STACK_CONFIG = {
     "html-tailwind": {"file": "stacks/html-tailwind.csv"},
     "react": {"file": "stacks/react.csv"},
@@ -194,28 +197,30 @@ def _search_csv(filepath, search_cols, output_cols, query, max_results):
 
 def detect_domain(query):
     """Auto-detect the most relevant domain from query"""
-    query_lower = query.lower()
-    query_tokens = set(re.findall(r"[a-z0-9][a-z0-9.+-]*", query_lower))
+    query_lower = query.casefold()
+    query_tokens = set(ASCII_QUERY_TOKEN_RE.findall(query_lower))
 
     domain_keywords = {
         "color": ["color", "palette", "hex", "#", "rgb"],
         "chart": ["chart", "graph", "visualization", "trend", "bar", "pie", "scatter", "heatmap", "funnel"],
-        "landing": ["landing", "cta", "conversion", "hero", "testimonial", "pricing", "section"],
-        "product": ["saas", "ecommerce", "e-commerce", "fintech", "healthcare", "gaming", "portfolio", "crypto", "dashboard"],
-        "style": ["style", "design", "ui", "minimalism", "glassmorphism", "neumorphism", "brutalism", "dark mode", "flat", "aurora", "prompt", "css", "implementation", "variable", "checklist", "tailwind"],
-        "ux": ["ux", "usability", "accessibility", "wcag", "touch", "scroll", "animation", "keyboard", "navigation", "mobile"],
+        "landing": ["landing", "cta", "conversion", "hero", "testimonial", "pricing", "section", "落地页", "官网", "首页", "营销"],
+        "product": ["saas", "ecommerce", "e-commerce", "fintech", "healthcare", "gaming", "portfolio", "crypto", "dashboard", "电商", "金融", "医疗", "游戏", "作品集", "加密", "仪表盘", "看板"],
+        "style": ["style", "design", "ui", "minimalism", "glassmorphism", "neumorphism", "brutalism", "dark mode", "flat", "aurora", "prompt", "css", "implementation", "variable", "checklist", "tailwind", "设计", "界面", "样式"],
+        "ux": ["ux", "usability", "accessibility", "wcag", "touch", "scroll", "animation", "keyboard", "navigation", "mobile", "可用性", "无障碍", "动效", "导航"],
         "typography": ["font", "typography", "heading", "serif", "sans"],
         "icons": ["icon", "icons", "lucide", "heroicons", "symbol", "glyph", "pictogram", "svg icon"],
         "react": ["react", "next.js", "nextjs", "suspense", "memo", "usecallback", "useeffect", "rerender", "bundle", "waterfall", "barrel", "dynamic import", "rsc", "server component"],
-        "web": ["aria", "focus", "outline", "semantic", "virtualize", "autocomplete", "form", "input type", "preconnect", "settings", "profile", "account", "login", "auth"]
+        "web": ["aria", "focus", "outline", "semantic", "virtualize", "autocomplete", "form", "input type", "preconnect", "settings", "profile", "account", "login", "auth", "设置", "资料", "账户", "登录", "注册"]
     }
 
     scores = {}
     for domain, keywords in domain_keywords.items():
         score = 0
         for kw in keywords:
-            keyword_lower = kw.lower()
+            keyword_lower = kw.casefold()
             if keyword_lower in {"#", "next.js"}:
+                matched = keyword_lower in query_lower
+            elif NON_ASCII_RE.search(keyword_lower):
                 matched = keyword_lower in query_lower
             elif " " in keyword_lower or "-" in keyword_lower:
                 matched = keyword_lower in query_lower

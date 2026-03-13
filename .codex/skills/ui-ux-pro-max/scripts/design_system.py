@@ -33,14 +33,22 @@ SEARCH_CONFIG = {
     "typography": {"max_results": 2}
 }
 
+ASCII_TOKEN_RE = re.compile(r"[a-z0-9]+")
+NON_ASCII_RE = re.compile(r"[^\x00-\x7f]")
+
 
 def _matches_keywords(text: str, keywords: list) -> bool:
     """Match keywords on token/phrase boundaries instead of raw substrings."""
-    normalized = " ".join(re.findall(r"[a-z0-9]+", text.lower()))
+    text_lower = text.casefold()
+    normalized = " ".join(ASCII_TOKEN_RE.findall(text_lower))
     token_set = set(normalized.split())
     for keyword in keywords:
-        keyword_lower = keyword.lower()
-        keyword_tokens = re.findall(r"[a-z0-9]+", keyword_lower)
+        keyword_lower = keyword.casefold()
+        if NON_ASCII_RE.search(keyword_lower):
+            if keyword_lower in text_lower:
+                return True
+            continue
+        keyword_tokens = ASCII_TOKEN_RE.findall(keyword_lower)
         if not keyword_tokens:
             continue
         if len(keyword_tokens) == 1:
@@ -48,7 +56,7 @@ def _matches_keywords(text: str, keywords: list) -> bool:
                 return True
         else:
             phrase = " ".join(keyword_tokens)
-            if re.search(rf"(?<!\\w){re.escape(phrase)}(?!\\w)", normalized):
+            if re.search(rf"(?<!\w){re.escape(phrase)}(?!\w)", normalized):
                 return True
     return False
 
@@ -105,7 +113,10 @@ def validate_persist_segment(value: str, label: str) -> str:
         raise ValueError(f"{label} must not be empty or whitespace-only")
     if any(sep in value for sep in ("/", "\\")) or ".." in value:
         raise ValueError(f"{label} must not contain path separators or '..'")
-    return slugify_name(value)
+    slug = slugify_name(value, default="")
+    if not slug:
+        raise ValueError(f"{label} must contain at least one filesystem-safe character")
+    return slug
 
 
 # ============ DESIGN SYSTEM GENERATOR ============
@@ -1301,16 +1312,16 @@ def _detect_page_type(context: str, style_results: list) -> str:
     
     # Check for common page type patterns
     page_patterns = [
-        (["dashboard", "admin", "analytics", "data", "metrics", "stats", "monitor", "overview"], "Dashboard / Data View"),
-        (["checkout", "payment", "cart", "purchase", "order", "billing"], "Checkout / Payment"),
-        (["settings", "profile", "account", "preferences", "config"], "Settings / Profile"),
-        (["landing", "marketing", "homepage", "hero", "promo"], "Landing / Marketing"),
-        (["login", "signin", "signup", "register", "auth", "password"], "Authentication"),
-        (["pricing", "plans", "subscription", "tiers", "packages"], "Pricing / Plans"),
-        (["blog", "article", "post", "news", "content", "story"], "Blog / Article"),
-        (["product", "item", "detail", "pdp", "shop", "store"], "Product Detail"),
-        (["search", "results", "browse", "filter", "catalog", "list"], "Search Results"),
-        (["empty", "404", "error", "not found", "zero"], "Empty State"),
+        (["dashboard", "admin", "analytics", "data", "metrics", "stats", "monitor", "overview", "仪表盘", "看板", "后台", "统计", "概览", "监控"], "Dashboard / Data View"),
+        (["checkout", "payment", "cart", "purchase", "order", "billing", "结账", "支付", "购物车", "订单", "账单"], "Checkout / Payment"),
+        (["settings", "profile", "account", "preferences", "config", "设置", "配置", "偏好", "账户", "账号", "个人资料"], "Settings / Profile"),
+        (["landing", "marketing", "homepage", "hero", "promo", "首页", "官网", "落地页", "营销", "宣传页"], "Landing / Marketing"),
+        (["login", "signin", "signup", "register", "auth", "password", "登录", "注册", "认证", "密码"], "Authentication"),
+        (["pricing", "plans", "subscription", "tiers", "packages", "定价", "套餐", "订阅", "计划"], "Pricing / Plans"),
+        (["blog", "article", "post", "news", "content", "story", "博客", "文章", "新闻", "资讯", "内容"], "Blog / Article"),
+        (["product", "item", "detail", "pdp", "shop", "store", "商品", "产品", "详情", "商店"], "Product Detail"),
+        (["search", "results", "browse", "filter", "catalog", "list", "搜索", "结果", "筛选", "目录", "列表", "浏览"], "Search Results"),
+        (["empty", "404", "error", "not found", "zero", "空状态", "未找到", "无结果"], "Empty State"),
     ]
     
     for keywords, page_type in page_patterns:
@@ -1334,16 +1345,16 @@ def _detect_query_page_type(query_context: str) -> str:
     """Detect explicit page intent from the broader query without letting product terms dominate."""
     query_lower = query_context.lower()
     explicit_patterns = [
-        (["login", "signin", "signup", "register", "auth", "password"], "Authentication"),
-        (["settings", "profile", "account", "preferences", "config"], "Settings / Profile"),
-        (["landing", "marketing", "homepage", "hero", "promo", "campaign"], "Landing / Marketing"),
-        (["checkout", "payment", "cart", "purchase", "order", "billing"], "Checkout / Payment"),
-        (["pricing", "plans", "subscription", "tiers", "packages"], "Pricing / Plans"),
-        (["blog", "article", "post", "news", "content", "story"], "Blog / Article"),
-        (["product", "item", "detail", "pdp", "shop", "store"], "Product Detail"),
-        (["search", "results", "browse", "filter", "catalog", "list"], "Search Results"),
-        (["empty", "404", "error", "not found", "zero"], "Empty State"),
-        (["dashboard", "admin", "analytics", "data", "metrics", "stats", "monitor", "overview"], "Dashboard / Data View"),
+        (["login", "signin", "signup", "register", "auth", "password", "登录", "注册", "认证", "密码"], "Authentication"),
+        (["settings", "profile", "account", "preferences", "config", "设置", "配置", "偏好", "账户", "账号", "个人资料"], "Settings / Profile"),
+        (["landing", "marketing", "homepage", "hero", "promo", "campaign", "首页", "官网", "落地页", "营销", "活动页"], "Landing / Marketing"),
+        (["checkout", "payment", "cart", "purchase", "order", "billing", "结账", "支付", "购物车", "订单", "账单"], "Checkout / Payment"),
+        (["pricing", "plans", "subscription", "tiers", "packages", "定价", "套餐", "订阅", "计划"], "Pricing / Plans"),
+        (["blog", "article", "post", "news", "content", "story", "博客", "文章", "新闻", "资讯", "内容"], "Blog / Article"),
+        (["product", "item", "detail", "pdp", "shop", "store", "商品", "产品", "详情", "商店"], "Product Detail"),
+        (["search", "results", "browse", "filter", "catalog", "list", "搜索", "结果", "筛选", "目录", "列表", "浏览"], "Search Results"),
+        (["empty", "404", "error", "not found", "zero", "空状态", "未找到", "无结果"], "Empty State"),
+        (["dashboard", "admin", "analytics", "data", "metrics", "stats", "monitor", "overview", "仪表盘", "看板", "后台", "统计", "概览", "监控"], "Dashboard / Data View"),
     ]
 
     for keywords, page_type in explicit_patterns:
