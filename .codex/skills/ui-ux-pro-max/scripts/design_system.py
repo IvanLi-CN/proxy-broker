@@ -109,6 +109,18 @@ def use_landing_pattern(category: str, style_name: str, query: str) -> bool:
     return False
 
 
+def _master_prefers_landing(design_system: dict, query: str) -> bool:
+    """Infer whether the master design system is already landing-oriented."""
+    pattern = design_system.get("pattern", {})
+    if pattern.get("cta_placement") or pattern.get("conversion") or pattern.get("sections"):
+        return use_landing_pattern(
+            design_system.get("category", ""),
+            design_system.get("style", {}).get("name", ""),
+            query,
+        )
+    return False
+
+
 def parse_section_order(raw_sections: str) -> list:
     """Normalize section-order strings from CSVs into a list of readable items."""
     if not raw_sections:
@@ -441,7 +453,8 @@ class DesignSystemGenerator:
                 "mood": best_typography.get("Mood/Style Keywords", reasoning.get("typography_mood", "")),
                 "best_for": best_typography.get("Best For", ""),
                 "google_fonts_url": best_typography.get("Google Fonts URL", ""),
-                "css_import": best_typography.get("CSS Import", "")
+                "css_import": best_typography.get("CSS Import", ""),
+                "notes": best_typography.get("Notes", ""),
             },
             "key_effects": combined_effects,
             "anti_patterns": reasoning.get("anti_patterns", ""),
@@ -555,6 +568,9 @@ def format_ascii_box(design_system: dict) -> str:
     if typography.get("css_import"):
         for line in wrap_text(f"CSS Import: {typography.get('css_import', '')}", "|     ", BOX_WIDTH):
             lines.append(line.ljust(BOX_WIDTH) + "|")
+    if typography.get("notes"):
+        for line in wrap_text(f"Implementation: {typography.get('notes', '')}", "|     ", BOX_WIDTH):
+            lines.append(line.ljust(BOX_WIDTH) + "|")
     lines.append("|" + " " * w + "|")
 
     # Key Effects section
@@ -656,6 +672,8 @@ def format_markdown(design_system: dict) -> str:
         lines.append(f"```css")
         lines.append(f"{typography.get('css_import', '')}")
         lines.append(f"```")
+    if typography.get("notes"):
+        lines.append(f"- **Implementation Note:** {typography.get('notes', '')}")
     lines.append("")
 
     # Key Effects section
@@ -855,6 +873,9 @@ def format_master_md(design_system: dict) -> str:
         lines.append(typography.get("css_import", ""))
         lines.append("```")
         lines.append("")
+    if typography.get("notes"):
+        lines.append(f"- **Implementation Note:** {typography.get('notes', '')}")
+        lines.append("")
     
     # Spacing Variables
     lines.append("### Spacing Variables")
@@ -931,6 +952,12 @@ def format_master_md(design_system: dict) -> str:
     lines.append("  padding: 24px;")
     lines.append("  box-shadow: var(--shadow-md);")
     lines.append("  transition: all 200ms ease;")
+    lines.append("  cursor: default;")
+    lines.append("}")
+    lines.append("")
+    lines.append(".card--interactive,")
+    lines.append("a.card,")
+    lines.append(".card[role=\"button\"] {")
     lines.append("  cursor: pointer;")
     lines.append("}")
     lines.append("")
@@ -1195,6 +1222,8 @@ def _generate_intelligent_overrides(page_name: str, page_query: str, design_syst
             page_type = _detect_query_page_type(query_lower)
             if page_type == "General":
                 page_type = _detect_page_type(page_context, style_results)
+            if page_type == "General" and _master_prefers_landing(design_system, query_lower):
+                page_type = "Landing / Marketing"
         else:
             page_type = _detect_page_type(page_context, style_results)
             if page_type == "General" and query_lower:
