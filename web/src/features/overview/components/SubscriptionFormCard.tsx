@@ -46,19 +46,26 @@ export function SubscriptionFormCard({
   });
 
   return (
-    <Card className="border-border/70 bg-card/90">
-      <CardHeader className="border-b border-border/70">
-        <CardTitle className="flex items-center gap-2 text-lg">
-          <CableIcon className="size-4 text-primary" />
-          Load subscription
-        </CardTitle>
-        <CardDescription>
-          Pull a mihomo subscription from a URL or point the service at a local file path.
-        </CardDescription>
+    <Card className="overflow-hidden border-border/70 bg-card/95 shadow-sm">
+      <CardHeader className="space-y-3 border-b border-border/70 bg-muted/20 pb-5">
+        <div className="text-xs font-semibold uppercase tracking-[0.3em] text-primary/80">
+          Primary action
+        </div>
+        <div className="space-y-2">
+          <CardTitle className="flex items-center gap-2 text-xl tracking-tight md:text-2xl">
+            <CableIcon className="size-5 text-primary" />
+            Load a fresh subscription feed
+          </CardTitle>
+          <CardDescription className="max-w-2xl text-sm leading-6 text-muted-foreground md:text-[15px]">
+            Start every operator run here. Pull a mihomo subscription from a URL, or point the Rust
+            service at a local file path on the host to refresh the pool before you inspect IPs or
+            open listeners.
+          </CardDescription>
+        </div>
       </CardHeader>
-      <CardContent className="space-y-5 pt-5">
+      <CardContent className="space-y-6 pt-6">
         <form
-          className="grid gap-4"
+          className="space-y-6"
           onSubmit={form.handleSubmit((values) =>
             onSubmit({
               source: {
@@ -68,7 +75,7 @@ export function SubscriptionFormCard({
             }),
           )}
         >
-          <div className="grid gap-4 md:grid-cols-[180px_1fr]">
+          <div className="grid gap-4 rounded-2xl border border-border/70 bg-background/80 p-4 md:grid-cols-[200px_1fr]">
             <div className="space-y-2">
               <Label htmlFor="source-type">Source type</Label>
               <Controller
@@ -108,14 +115,19 @@ export function SubscriptionFormCard({
                   {form.formState.errors.sourceValue.message}
                 </p>
               ) : (
-                <p className="text-xs text-muted-foreground">
-                  For file mode, enter the path as seen by the Rust service process.
+                <p className="text-xs leading-5 text-muted-foreground">
+                  URL mode fetches over the network; file mode resolves from the Rust service host,
+                  not the browser sandbox.
                 </p>
               )}
             </div>
           </div>
-          <div className="flex justify-end">
-            <Button disabled={isPending} type="submit">
+          <div className="flex flex-col gap-3 rounded-2xl border border-dashed border-border/70 bg-muted/20 px-4 py-4 md:flex-row md:items-center md:justify-between">
+            <p className="max-w-xl text-sm leading-6 text-muted-foreground">
+              A successful load replaces the candidate pool for the current profile. Review warnings
+              immediately if the upstream feed contains skipped or malformed records.
+            </p>
+            <Button disabled={isPending} size="lg" type="submit" className="min-w-48">
               {isPending ? "Loading subscription..." : "Load subscription"}
             </Button>
           </div>

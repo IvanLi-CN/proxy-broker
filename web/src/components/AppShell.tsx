@@ -41,13 +41,16 @@ export function AppShell({ profileId, onProfileIdChange, healthStatus, children 
     <SidebarProvider>
       <Sidebar collapsible="icon" variant="floating">
         <SidebarHeader className="gap-4 border-b border-sidebar-border/80 px-3 py-4">
-          <div className="space-y-1">
-            <div className="text-xs font-semibold uppercase tracking-[0.3em] text-sidebar-foreground/65">
+          <div className="space-y-1.5">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.34em] text-sidebar-foreground/65">
               proxy-broker
             </div>
-            <div className="text-lg font-semibold text-sidebar-foreground">Operations Console</div>
-            <div className="text-sm text-sidebar-foreground/70">
-              Tune subscriptions, probe IP pools, and open mihomo sessions.
+            <div className="text-xl font-semibold tracking-tight text-sidebar-foreground">
+              Operator console
+            </div>
+            <div className="max-w-xs text-sm leading-6 text-sidebar-foreground/70">
+              Load feeds, probe the pool, and open mihomo sessions without leaving the current
+              profile context.
             </div>
           </div>
           <ProfileSwitcher profileId={profileId} onProfileIdChange={onProfileIdChange} />
@@ -99,7 +102,7 @@ export function AppShell({ profileId, onProfileIdChange, healthStatus, children 
           <div className="flex items-center justify-between gap-3">
             <div>
               <div className="text-sm font-medium text-sidebar-foreground">UI theme</div>
-              <div className="text-xs text-sidebar-foreground/60">Optimized for operators.</div>
+              <div className="text-xs text-sidebar-foreground/60">Tuned for local operators.</div>
             </div>
             <ThemeToggle />
           </div>
@@ -115,7 +118,7 @@ export function AppShell({ profileId, onProfileIdChange, healthStatus, children 
         </SidebarFooter>
       </Sidebar>
       <SidebarInset>
-        <div className="sticky top-0 z-20 flex items-center justify-between gap-4 border-b border-border/70 bg-background/85 px-4 py-3 backdrop-blur-sm md:px-6">
+        <div className="sticky top-0 z-20 flex items-center justify-between gap-4 border-b border-border/70 bg-background/92 px-5 py-3 backdrop-blur-md md:px-7">
           <div className="flex items-center gap-3">
             <SidebarTrigger />
             <div>
@@ -132,7 +135,7 @@ export function AppShell({ profileId, onProfileIdChange, healthStatus, children 
             127.0.0.1
           </Badge>
         </div>
-        <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-4 py-6 md:px-6">
+        <div className="mx-auto flex w-full max-w-[1320px] flex-1 flex-col gap-8 px-5 py-7 md:px-7">
           {children}
         </div>
       </SidebarInset>

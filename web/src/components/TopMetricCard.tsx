@@ -21,23 +21,36 @@ export function TopMetricCard({
   return (
     <Card
       className={cn(
-        "border border-border/70 bg-card/85 backdrop-blur-sm",
-        tone === "positive" && "border-emerald-500/20 bg-emerald-500/5",
-        tone === "warning" && "border-amber-500/20 bg-amber-500/5",
+        "overflow-hidden border border-border/70 bg-card/95 shadow-sm transition-colors",
+        tone === "positive" && "border-emerald-500/25 bg-emerald-500/[0.06]",
+        tone === "warning" && "border-amber-500/25 bg-amber-500/[0.06]",
       )}
     >
-      <CardHeader className="gap-2 border-b border-border/60 pb-4">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <CardDescription className="uppercase tracking-[0.24em]">{title}</CardDescription>
-            <CardTitle className="mt-2 text-3xl font-semibold">{value}</CardTitle>
+      <div
+        className={cn(
+          "h-1 w-full bg-border/70",
+          tone === "positive" && "bg-emerald-500/70",
+          tone === "warning" && "bg-amber-500/70",
+        )}
+      />
+      <CardHeader className="gap-5 pb-3">
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-3">
+            <CardDescription className="text-[0.68rem] font-semibold uppercase tracking-[0.34em] text-muted-foreground/90">
+              {title}
+            </CardDescription>
+            <CardTitle className="text-4xl font-semibold tracking-tight text-foreground">
+              {value}
+            </CardTitle>
           </div>
-          <div className="rounded-full border border-border/70 bg-background/70 p-2">
+          <div className="rounded-2xl border border-border/70 bg-background/90 p-3 shadow-sm">
             <Icon className="size-4 text-primary" />
           </div>
         </div>
       </CardHeader>
-      <CardContent className="pt-4 text-sm text-muted-foreground">{description}</CardContent>
+      <CardContent className="pt-0 text-sm leading-6 text-muted-foreground">
+        {description}
+      </CardContent>
     </Card>
   );
 }

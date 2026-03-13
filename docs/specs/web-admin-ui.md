@@ -122,6 +122,26 @@ separate Vite and Storybook workflow for local development.
   - desktop-first split panels and data cards
   - mobile collapses into stacked sections with no hidden critical actions
 
+## Interface Snapshots
+
+### Overview Console
+
+![Overview console](assets/web-admin-ui/overview-console.png)
+
+- Primary operator landing view with profile context, health summary, and the subscription load workflow.
+
+### IP Extract Workspace
+
+![IP extract workspace](assets/web-admin-ui/ip-extract-console.png)
+
+- Filter-driven extraction screen showing candidate IP rows with probe and location metadata.
+
+### Sessions Workspace
+
+![Sessions workspace](assets/web-admin-ui/sessions-console.png)
+
+- Session operations view with open controls and the live session table used for close actions.
+
 ## Build and Tooling
 
 ### Frontend Scripts

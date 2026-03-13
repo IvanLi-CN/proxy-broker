@@ -7,6 +7,7 @@ const meta = {
   component: AppShell,
   tags: ["autodocs"],
   parameters: {
+    layout: "fullscreen",
     docs: {
       description: {
         component:

@@ -15,7 +15,7 @@ const preview: Preview = {
         date: /Date$/i,
       },
     },
-    layout: "fullscreen",
+    layout: "padded",
     backgrounds: {
       default: "slate",
       values: [
