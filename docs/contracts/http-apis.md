@@ -1,5 +1,22 @@
 # HTTP API
 
+## GET /
+
+- Change: New
+- Auth: none (localhost default)
+- Success:
+  - Returns the embedded SPA shell (`index.html`)
+- Notes:
+  - Unknown non-API frontend `GET` routes also fall back to this shell
+  - `/api/v1/*` and `/healthz` keep higher priority than the SPA fallback
+
+## GET /assets/*
+
+- Change: New
+- Auth: none (localhost default)
+- Success:
+  - Returns embedded frontend static assets from the Bun/Vite build output
+
 ## POST /api/v1/profiles/{profile_id}/subscriptions/load
 
 - Change: New

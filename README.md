@@ -1,12 +1,14 @@
 # proxy-broker
 
-`proxy-broker` is a standalone Rust crate and REST service for:
+`proxy-broker` is a standalone Rust service for:
 
 - loading mihomo subscriptions from URL or file sources,
 - building an IP-oriented pool with probe and geo metadata,
-- opening and closing local proxy listener sessions by selected IP.
+- opening and closing local proxy listener sessions by selected IP,
+- serving an embedded Bun-built operator web console from the same binary.
 
-The service binds `127.0.0.1` by default and exposes REST endpoints under `/api/v1`.
+The service binds `127.0.0.1` by default and exposes REST endpoints under
+`/api/v1`, a health probe at `/healthz`, and the SPA shell at `/`.
 
 ## Start the service
 
@@ -15,6 +17,43 @@ cargo run -- \
   --store sqlite \
   --sqlite-path .proxy-broker/state.sqlite \
   --listen 127.0.0.1:8080
+```
+
+## Web console
+
+Build the frontend before release builds:
+
+```bash
+cd web
+bun install
+bun run build
+cd ..
+```
+
+Then open the local operator UI from the Rust server:
+
+```bash
+open http://127.0.0.1:8080
+```
+
+For frontend-only development, run the Vite app on `127.0.0.1:38181` and proxy
+API calls back to the local Rust service:
+
+```bash
+cargo run -- \
+  --store sqlite \
+  --sqlite-path .proxy-broker/state.sqlite \
+  --listen 127.0.0.1:8080
+
+cd web
+bun run dev
+```
+
+Storybook runs on `127.0.0.1:38182`:
+
+```bash
+cd web
+bun run storybook
 ```
 
 ## Health check
@@ -99,9 +138,20 @@ Base path: `http://127.0.0.1:8080/api/v1/profiles/{profile_id}`
 ## Validation
 
 ```bash
+cd web
+bun install --frozen-lockfile
+bun run check
+bun run test
+bun run verify:stories
+bun run build-storybook
+bun run test-storybook
+bun run build
+bun run test:e2e
+cd ..
 cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-features
+cargo build --release
 ```
 
 ## Contracts
@@ -110,3 +160,4 @@ cargo test --all-features
 - HTTP API: `docs/contracts/http-apis.md`
 - SQLite schema: `docs/contracts/db.md`
 - Mihomo config payload: `docs/contracts/file-formats.md`
+- Web UI spec: `docs/specs/web-admin-ui.md`

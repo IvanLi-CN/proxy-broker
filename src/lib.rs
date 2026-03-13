@@ -7,6 +7,7 @@ pub mod runtime;
 pub mod service;
 pub mod store;
 pub mod subscription;
+mod web_ui;
 
 pub use api::{AppState, build_router};
 pub use models::*;
