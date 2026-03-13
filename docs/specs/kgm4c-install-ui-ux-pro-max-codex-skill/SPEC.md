@@ -153,6 +153,7 @@ None
 - merge-proof 十二轮修复：产品类别重排改为“具体垂直词优先、通用 dashboard 词降权”，避免 `government/banking/insurance/education dashboard` 被泛化成 `Analytics Dashboard`；同时服务型类别只有在 query 没显式 app/workflow 意图时才回填 landing pattern，并修正 ASCII box 的空白行宽度。
 - merge-proof 十三轮修复：`home/homepage` 在主设计系统已判定为 landing 时会继承 landing sections/CTA/color strategy；`MASTER.md` 的卡片示例改成仅对交互式卡片使用 `cursor: pointer`；Typography 输出新增 implementation note，显式说明 Fontshare 优先字体与可直接导入的 Google fallback。
 - merge-proof 十四轮修复：修复 `web-interface.csv` 与 `stacks/astro.csv` 中错位的 guideline 行，恢复 `Do/Don't/Code Example/Severity` 字段顺序，确保搜索输出与原始数据一致。
+- merge-proof 十五轮修复：style 选择新增 query/category 上下文词优先级，避免 `banking dashboard` / `banking app` 这类垂直金融场景仍被 `Exaggerated Minimalism` 之类泛化风格抢走首选结果。
 
 ## 计划资产（Plan assets）
 
@@ -216,6 +217,7 @@ None
 - 2026-03-13: 根据 merge-proof 十二轮修复垂直 dashboard 分类回退、服务型 app 误用 landing pattern，以及 ASCII box 空白行宽度不一致的问题。
 - 2026-03-13: 根据 merge-proof 十三轮修复 `home/homepage` landing 继承、静态卡片错误 pointer affordance，以及 typography 输出未说明 fallback 字体的问题。
 - 2026-03-13: 根据 merge-proof 十四轮修复 `web-interface.csv` / `stacks/astro.csv` 的字段错位数据行。
+- 2026-03-13: 根据 merge-proof 十五轮修复 style priority 抢占垂直金融风格的问题，让 `banking dashboard` / `banking app` 回到金融语义一致的样式结果。
 
 ## 参考（References）
 

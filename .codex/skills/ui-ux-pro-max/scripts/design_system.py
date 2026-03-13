@@ -238,10 +238,39 @@ class DesignSystemGenerator:
             "severity": rule.get("Severity", "MEDIUM")
         }
 
-    def _select_best_match(self, results: list, priority_keywords: list) -> dict:
+    def _select_best_match(self, results: list, priority_keywords: list, query: str = "", category: str = "") -> dict:
         """Select best matching result based on priority keywords."""
         if not results:
             return {}
+
+        generic_context_tokens = {
+            "app",
+            "platform",
+            "service",
+            "tool",
+            "portal",
+            "system",
+            "dashboard",
+            "analytics",
+            "admin",
+            "data",
+            "web",
+            "mobile",
+        }
+        context_tokens = {
+            token for token in re.findall(r"[a-z0-9][a-z0-9.+-]*", f"{query} {category}".lower())
+            if token not in generic_context_tokens
+        }
+        if context_tokens:
+            contextual_matches = []
+            for index, result in enumerate(results):
+                result_str = str(result).lower()
+                matched_tokens = [token for token in context_tokens if token in result_str]
+                if matched_tokens:
+                    contextual_matches.append((len(matched_tokens), -index, result))
+            if contextual_matches:
+                contextual_matches.sort(reverse=True)
+                return contextual_matches[0][2]
 
         if not priority_keywords:
             return results[0]
@@ -391,7 +420,12 @@ class DesignSystemGenerator:
             row for row in typography_results if row not in category_typography_results
         ]
 
-        best_style = self._select_best_match(style_results, reasoning.get("style_priority", []))
+        best_style = self._select_best_match(
+            style_results,
+            reasoning.get("style_priority", []),
+            query=query,
+            category=category,
+        )
         best_color = self._select_color_match(category, merged_color_results)
         best_typography = self._select_typography_match(category, merged_typography_results)
         best_landing = landing_results[0] if landing_results else {}
