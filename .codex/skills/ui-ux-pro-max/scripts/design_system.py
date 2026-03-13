@@ -201,6 +201,20 @@ class DesignSystemGenerator:
         """Extract results list from search result dict."""
         return search_result.get("results", [])
 
+    def _category_token_score(self, category: str, row: dict, fields: list) -> int:
+        """Score a search result row against the selected product category."""
+        category_lower = category.lower()
+        category_tokens = set(re.findall(r"[a-z0-9][a-z0-9.+-]*", category_lower))
+        haystack = " ".join(str(row.get(field, "")).lower() for field in fields)
+
+        score = 0
+        if category_lower and category_lower in haystack:
+            score += 4
+        for token in category_tokens:
+            if token and token in haystack:
+                score += 1
+        return score
+
     def _select_product_category(self, query: str, product_results: list) -> str:
         """Select the best-matching product category instead of trusting the first BM25 row blindly."""
         if not product_results:
@@ -237,6 +251,28 @@ class DesignSystemGenerator:
 
         return best_row.get("Product Type", "General")
 
+    def _select_color_match(self, category: str, color_results: list) -> dict:
+        """Prefer color palettes whose product type aligns with the resolved category."""
+        if not color_results:
+            return {}
+        return max(
+            color_results,
+            key=lambda row: self._category_token_score(category, row, ["Product Type", "Notes"])
+        )
+
+    def _select_typography_match(self, category: str, typography_results: list) -> dict:
+        """Prefer typography whose usage guidance aligns with the resolved category."""
+        if not typography_results:
+            return {}
+        return max(
+            typography_results,
+            key=lambda row: self._category_token_score(
+                category,
+                row,
+                ["Font Pairing Name", "Mood/Style Keywords", "Best For", "Notes"],
+            )
+        )
+
     def generate(self, query: str, project_name: str = None) -> dict:
         """Generate complete design system recommendation."""
         # Step 1: First search product to get category
@@ -251,16 +287,27 @@ class DesignSystemGenerator:
         # Step 3: Multi-domain search with style priority hints
         search_results = self._multi_domain_search(query, style_priority)
         search_results["product"] = product_result  # Reuse product search
+        search_results["category_color"] = search(category, "color", 3)
+        search_results["category_typography"] = search(category, "typography", 3)
 
         # Step 4: Select best matches from each domain using priority
         style_results = self._extract_results(search_results.get("style", {}))
         color_results = self._extract_results(search_results.get("color", {}))
         typography_results = self._extract_results(search_results.get("typography", {}))
         landing_results = self._extract_results(search_results.get("landing", {}))
+        category_color_results = self._extract_results(search_results.get("category_color", {}))
+        category_typography_results = self._extract_results(search_results.get("category_typography", {}))
+
+        merged_color_results = category_color_results + [
+            row for row in color_results if row not in category_color_results
+        ]
+        merged_typography_results = category_typography_results + [
+            row for row in typography_results if row not in category_typography_results
+        ]
 
         best_style = self._select_best_match(style_results, reasoning.get("style_priority", []))
-        best_color = color_results[0] if color_results else {}
-        best_typography = typography_results[0] if typography_results else {}
+        best_color = self._select_color_match(category, merged_color_results)
+        best_typography = self._select_typography_match(category, merged_typography_results)
         best_landing = landing_results[0] if landing_results else {}
         selected_pattern = reasoning.get("pattern", "Hero + Features + CTA")
         selected_sections = ""
@@ -631,6 +678,11 @@ def persist_design_system(design_system: dict, page: str = None, output_dir: str
                 f"persist target already exists: {master_file}. Re-run with --force to overwrite."
             )
 
+    if page_file and page_file.exists() and not force:
+        raise FileExistsError(
+            f"persist target already exists: {page_file}. Re-run with --force to overwrite."
+        )
+
     # Create directories only after all overwrite checks pass so failed runs stay atomic.
     design_system_dir.mkdir(parents=True, exist_ok=True)
     if page_file:
@@ -645,10 +697,6 @@ def persist_design_system(design_system: dict, page: str = None, output_dir: str
 
     # If page is specified, create page override file with intelligent content
     if page_file:
-        if page_file.exists() and not force:
-            raise FileExistsError(
-                f"persist target already exists: {page_file}. Re-run with --force to overwrite."
-            )
         page_content = format_page_override_md(design_system, page, page_query)
         with open(page_file, 'w', encoding='utf-8') as f:
             f.write(page_content)
