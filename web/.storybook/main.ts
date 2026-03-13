@@ -9,6 +9,15 @@ const config: StorybookConfig = {
       strictMode: true,
     },
   },
+  async viteFinal(config) {
+    return {
+      ...config,
+      build: {
+        ...config.build,
+        chunkSizeWarningLimit: 1400,
+      },
+    };
+  },
 };
 
 export default config;
