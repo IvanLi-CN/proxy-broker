@@ -974,8 +974,6 @@ def _generate_intelligent_overrides(page_name: str, page_query: str, design_syst
     
     # Detect page type from search results or context
     page_type = _detect_page_type(page_lower, [])
-    if page_type == "General":
-        page_type = _detect_page_type(combined_context, style_results)
 
     # Build overrides from search results
     layout = {}

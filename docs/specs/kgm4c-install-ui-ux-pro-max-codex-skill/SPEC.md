@@ -133,6 +133,7 @@ None
 - review-loop 二轮修复：让 Unicode 项目名可作为 slug 保存、让默认持久化提示与真实目录一致、在写盘前完成 page 参数校验，并保留 `AI/UI/UX/3D` 等短关键词的搜索能力。
 - review-loop 三轮修复：避免 `--page login` 被 dashboard 项目上下文误判为 dashboard 页面，并为 `--persist` 引入显式 `--force` 覆盖门禁，防止静默覆盖人工维护内容。
 - review-loop 四轮修复：允许在已有 `MASTER.md` 的前提下追加新 page override，且认证/设置类页面不再被项目级 dashboard / landing 结果污染布局。
+- review-loop 五轮修复：页面类型判定收敛为以 `page_name` 为主，避免通用页面被项目查询词误分类成 dashboard / landing。
 
 ## 计划资产（Plan assets）
 
@@ -176,6 +177,7 @@ None
 - 2026-03-13: 根据二轮 review-loop 修复 Unicode slug、短关键词搜索与持久化提示/原子性问题。
 - 2026-03-13: 根据三轮 review-loop 修复 page type 误判与 persist 静默覆盖问题。
 - 2026-03-13: 根据四轮 review-loop 修复增量 page override 工作流与 auth 页面布局污染问题。
+- 2026-03-13: 根据五轮 review-loop 修复通用页面被项目查询词误分类的问题。
 
 ## 参考（References）
 
