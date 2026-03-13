@@ -34,6 +34,29 @@ SEARCH_CONFIG = {
 }
 
 
+def use_landing_pattern(category: str, style_name: str, query: str) -> bool:
+    """Only apply landing-page patterns when the request is actually landing-page oriented."""
+    combined = " ".join([category, style_name, query]).lower()
+    dashboard_terms = ["dashboard", "analytics", "admin", "monitor", "reporting", "data view", "bi/analytics"]
+    if any(term in combined for term in dashboard_terms):
+        return False
+    landing_terms = ["landing", "marketing", "homepage", "hero", "promo", "campaign"]
+    return any(term in combined for term in landing_terms)
+
+
+def parse_section_order(raw_sections: str) -> list:
+    """Normalize section-order strings from CSVs into a list of readable items."""
+    if not raw_sections:
+        return []
+    sections = re.split(r"\s*>\s*|\s*,\s*", raw_sections)
+    cleaned = []
+    for section in sections:
+        normalized = re.sub(r"^\d+\.\s*", "", section.strip())
+        if normalized:
+            cleaned.append(normalized)
+    return cleaned
+
+
 def slugify_name(value: str, default: str = "default") -> str:
     """Convert an arbitrary label into a filesystem-safe slug."""
     slug = re.sub(r"[\W_]+", "-", value.lower(), flags=re.UNICODE).strip("-")
@@ -201,6 +224,18 @@ class DesignSystemGenerator:
         best_color = color_results[0] if color_results else {}
         best_typography = typography_results[0] if typography_results else {}
         best_landing = landing_results[0] if landing_results else {}
+        selected_pattern = reasoning.get("pattern", "Hero + Features + CTA")
+        selected_sections = "Hero > Features > CTA"
+        selected_cta = "Above fold"
+        selected_color_strategy = ""
+        selected_conversion = ""
+
+        if best_landing and use_landing_pattern(category, best_style.get("Style Category", ""), query):
+            selected_pattern = best_landing.get("Pattern Name", selected_pattern)
+            selected_sections = best_landing.get("Section Order", selected_sections)
+            selected_cta = best_landing.get("Primary CTA Placement", selected_cta)
+            selected_color_strategy = best_landing.get("Color Strategy", "")
+            selected_conversion = best_landing.get("Conversion Optimization", "")
 
         # Step 5: Build final recommendation
         # Combine effects from both reasoning and style search
@@ -212,11 +247,11 @@ class DesignSystemGenerator:
             "project_name": project_name or query.upper(),
             "category": category,
             "pattern": {
-                "name": best_landing.get("Pattern Name", reasoning.get("pattern", "Hero + Features + CTA")),
-                "sections": best_landing.get("Section Order", "Hero > Features > CTA"),
-                "cta_placement": best_landing.get("Primary CTA Placement", "Above fold"),
-                "color_strategy": best_landing.get("Color Strategy", ""),
-                "conversion": best_landing.get("Conversion Optimization", "")
+                "name": selected_pattern,
+                "sections": selected_sections,
+                "cta_placement": selected_cta,
+                "color_strategy": selected_color_strategy,
+                "conversion": selected_conversion
             },
             "style": {
                 "name": best_style.get("Style Category", "Minimalism"),
@@ -282,8 +317,7 @@ def format_ascii_box(design_system: dict) -> str:
         return lines
 
     # Build sections from pattern
-    sections = pattern.get("sections", "").split(">")
-    sections = [s.strip() for s in sections if s.strip()]
+    sections = parse_section_order(pattern.get("sections", ""))
 
     # Build output lines
     lines = []
@@ -592,7 +626,7 @@ def format_master_md(design_system: dict) -> str:
     # Logic header
     lines.append("# Design System Master File")
     lines.append("")
-    lines.append(f"> **LOGIC:** When building a specific page, first check `design-system/{project_slug}/pages/[page-name].md`.")
+    lines.append("> **LOGIC:** When building a specific page, first check `pages/[page-name].md`.")
     lines.append("> If that file exists, its rules **override** this Master file.")
     lines.append("> If not, strictly follow the rules below.")
     lines.append("")
@@ -856,7 +890,7 @@ def format_page_override_md(design_system: dict, page_name: str, page_query: str
     lines.append(f"> **Generated:** {timestamp}")
     lines.append(f"> **Page Type:** {page_overrides.get('page_type', 'General')}")
     lines.append("")
-    lines.append(f"> ⚠️ **IMPORTANT:** Rules in this file **override** the Master file (`design-system/{project_slug}/MASTER.md`).")
+    lines.append("> ⚠️ **IMPORTANT:** Rules in this file **override** the Master file (`../MASTER.md`).")
     lines.append("> Only deviations from the Master are documented here. For all other rules, refer to the Master.")
     lines.append("")
     lines.append("---")
@@ -1070,7 +1104,7 @@ def _generate_intelligent_overrides(page_name: str, page_query: str, design_syst
     if not recommendations:
         project_slug = slugify_name(design_system.get("project_name", "default"))
         recommendations = [
-            f"Refer to design-system/{project_slug}/MASTER.md for all design rules",
+            "Refer to ../MASTER.md for all design rules",
             "Add specific overrides as needed for this page"
         ]
     

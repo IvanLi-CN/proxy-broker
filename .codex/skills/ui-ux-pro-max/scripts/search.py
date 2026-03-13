@@ -18,6 +18,7 @@ Persistence (Master + Overrides pattern):
 import argparse
 import sys
 import io
+from pathlib import Path
 from core import CSV_CONFIG, AVAILABLE_STACKS, MAX_RESULTS, search, search_stack
 from design_system import generate_design_system, persist_design_system, validate_persist_segment
 
@@ -93,14 +94,15 @@ if __name__ == "__main__":
         if args.persist:
             persist_project_name = args.project_name or args.query.upper()
             project_slug = validate_persist_segment(persist_project_name, "project name")
+            persist_root = (Path(args.output_dir) if args.output_dir else Path.cwd()) / "design-system" / project_slug
             print("\n" + "=" * 60)
-            print(f"✅ Design system persisted to design-system/{project_slug}/")
-            print(f"   📄 design-system/{project_slug}/MASTER.md (Global Source of Truth)")
+            print(f"✅ Design system persisted to {persist_root}/")
+            print(f"   📄 {persist_root / 'MASTER.md'} (Global Source of Truth)")
             if args.page:
                 page_filename = validate_persist_segment(args.page, "page name")
-                print(f"   📄 design-system/{project_slug}/pages/{page_filename}.md (Page Overrides)")
+                print(f"   📄 {persist_root / 'pages' / f'{page_filename}.md'} (Page Overrides)")
             print("")
-            print(f"📖 Usage: When building a page, check design-system/{project_slug}/pages/[page].md first.")
+            print(f"📖 Usage: When building a page, check {persist_root / 'pages'}/[page].md first.")
             print(f"   If exists, its rules override MASTER.md. Otherwise, use MASTER.md.")
             print("=" * 60)
     # Stack search

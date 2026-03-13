@@ -134,6 +134,7 @@ None
 - review-loop 三轮修复：避免 `--page login` 被 dashboard 项目上下文误判为 dashboard 页面，并为 `--persist` 引入显式 `--force` 覆盖门禁，防止静默覆盖人工维护内容。
 - review-loop 四轮修复：允许在已有 `MASTER.md` 的前提下追加新 page override，且认证/设置类页面不再被项目级 dashboard / landing 结果污染布局。
 - review-loop 五轮修复：页面类型判定收敛为以 `page_name` 为主，避免通用页面被项目查询词误分类成 dashboard / landing。
+- review-loop 六轮修复：仅在真正的 landing 场景下采用 landing pattern，修正持久化文档内的相对路径，并让 CLI 的持久化提示尊重 `--output-dir`。
 
 ## 计划资产（Plan assets）
 
@@ -178,6 +179,7 @@ None
 - 2026-03-13: 根据三轮 review-loop 修复 page type 误判与 persist 静默覆盖问题。
 - 2026-03-13: 根据四轮 review-loop 修复增量 page override 工作流与 auth 页面布局污染问题。
 - 2026-03-13: 根据五轮 review-loop 修复通用页面被项目查询词误分类的问题。
+- 2026-03-13: 根据六轮 review-loop 修复 dashboard pattern 误判与持久化路径提示错误。
 
 ## 参考（References）
 
