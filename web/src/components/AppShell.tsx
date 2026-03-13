@@ -42,7 +42,7 @@ export function AppShell({ profileId, onProfileIdChange, healthStatus, children 
       <Sidebar collapsible="icon" variant="floating">
         <SidebarHeader className="gap-4 border-b border-sidebar-border/80 px-3 py-4">
           <div className="space-y-1">
-            <div className="text-xs font-semibold uppercase tracking-[0.3em] text-sidebar-foreground/55">
+            <div className="text-xs font-semibold uppercase tracking-[0.3em] text-sidebar-foreground/65">
               proxy-broker
             </div>
             <div className="text-lg font-semibold text-sidebar-foreground">Operations Console</div>
@@ -132,9 +132,9 @@ export function AppShell({ profileId, onProfileIdChange, healthStatus, children 
             127.0.0.1
           </Badge>
         </div>
-        <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-4 py-6 md:px-6">
+        <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-4 py-6 md:px-6">
           {children}
-        </main>
+        </div>
       </SidebarInset>
     </SidebarProvider>
   );

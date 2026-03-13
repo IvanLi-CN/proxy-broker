@@ -30,7 +30,7 @@ export const Default: Story = {
     const [value, setValue] = useState("lru");
     return (
       <Select onValueChange={setValue} value={value}>
-        <SelectTrigger className="w-48">
+        <SelectTrigger aria-label="Sort mode" className="w-48">
           <SelectValue placeholder="Sort mode" />
         </SelectTrigger>
         <SelectContent>

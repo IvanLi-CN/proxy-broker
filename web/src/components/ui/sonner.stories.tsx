@@ -22,8 +22,7 @@ type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {
   render: () => (
-    <div className="flex items-center gap-3">
-      <Toaster richColors position="top-right" />
+    <div className="flex items-center gap-3" role="presentation">
       <Button onClick={() => toast.success("Session opened on 127.0.0.1:10080")}>
         Trigger toast
       </Button>
