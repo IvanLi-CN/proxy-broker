@@ -129,6 +129,7 @@ None
 - 关键产物：`SKILL.md`、`scripts/{search.py,core.py,design_system.py}`、`data/*.csv`。
 - 体量摘要：共 28 个文件，目录大小约 `576K`。
 - 版本记录：npm CLI `uipro-cli@2.2.3`；调研时上游 GitHub 最新 release 为 `v2.5.0`（2026-03-10）。
+- review-loop 修复：补齐项目内命令路径、项目级持久化路径说明、持久化 slug 安全校验，以及 dashboard page override 与 master 风格一致性。
 
 ## 计划资产（Plan assets）
 
@@ -168,6 +169,7 @@ None
 
 - 2026-03-13: 创建规格，冻结为项目内安装 UI UX Pro Max Codex skill。
 - 2026-03-13: 完成项目内安装与 smoke test，等待提交、PR 与 review-loop 收敛。
+- 2026-03-13: 根据 PR review-loop 修复持久化路径逃逸与文档/override 不一致问题。
 
 ## 参考（References）
 

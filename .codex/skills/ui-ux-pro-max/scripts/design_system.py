@@ -16,6 +16,7 @@ Usage:
 import csv
 import json
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from core import search, DATA_DIR
@@ -31,6 +32,19 @@ SEARCH_CONFIG = {
     "landing": {"max_results": 2},
     "typography": {"max_results": 2}
 }
+
+
+def slugify_name(value: str, default: str = "default") -> str:
+    """Convert an arbitrary label into a filesystem-safe slug."""
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug or default
+
+
+def validate_persist_segment(value: str, label: str) -> str:
+    """Reject traversal-like input before converting it into a safe slug."""
+    if any(sep in value for sep in ("/", "\\")) or ".." in value:
+        raise ValueError(f"{label} must not contain path separators or '..'")
+    return slugify_name(value)
 
 
 # ============ DESIGN SYSTEM GENERATOR ============
@@ -505,7 +519,7 @@ def persist_design_system(design_system: dict, page: str = None, output_dir: str
     
     # Use project name for project-specific folder
     project_name = design_system.get("project_name", "default")
-    project_slug = project_name.lower().replace(' ', '-')
+    project_slug = validate_persist_segment(project_name, "project name")
     
     design_system_dir = base_dir / "design-system" / project_slug
     pages_dir = design_system_dir / "pages"
@@ -526,7 +540,8 @@ def persist_design_system(design_system: dict, page: str = None, output_dir: str
     
     # If page is specified, create page override file with intelligent content
     if page:
-        page_file = pages_dir / f"{page.lower().replace(' ', '-')}.md"
+        page_slug = validate_persist_segment(page, "page name")
+        page_file = pages_dir / f"{page_slug}.md"
         page_content = format_page_override_md(design_system, page, page_query)
         with open(page_file, 'w', encoding='utf-8') as f:
             f.write(page_content)
@@ -542,6 +557,7 @@ def persist_design_system(design_system: dict, page: str = None, output_dir: str
 def format_master_md(design_system: dict) -> str:
     """Format design system as MASTER.md with hierarchical override logic."""
     project = design_system.get("project_name", "PROJECT")
+    project_slug = slugify_name(project)
     pattern = design_system.get("pattern", {})
     style = design_system.get("style", {})
     colors = design_system.get("colors", {})
@@ -556,7 +572,7 @@ def format_master_md(design_system: dict) -> str:
     # Logic header
     lines.append("# Design System Master File")
     lines.append("")
-    lines.append("> **LOGIC:** When building a specific page, first check `design-system/pages/[page-name].md`.")
+    lines.append(f"> **LOGIC:** When building a specific page, first check `design-system/{project_slug}/pages/[page-name].md`.")
     lines.append("> If that file exists, its rules **override** this Master file.")
     lines.append("> If not, strictly follow the rules below.")
     lines.append("")
@@ -805,6 +821,7 @@ def format_master_md(design_system: dict) -> str:
 def format_page_override_md(design_system: dict, page_name: str, page_query: str = None) -> str:
     """Format a page-specific override file with intelligent AI-generated content."""
     project = design_system.get("project_name", "PROJECT")
+    project_slug = slugify_name(project)
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     page_title = page_name.replace("-", " ").replace("_", " ").title()
     
@@ -819,7 +836,7 @@ def format_page_override_md(design_system: dict, page_name: str, page_query: str
     lines.append(f"> **Generated:** {timestamp}")
     lines.append(f"> **Page Type:** {page_overrides.get('page_type', 'General')}")
     lines.append("")
-    lines.append("> ⚠️ **IMPORTANT:** Rules in this file **override** the Master file (`design-system/MASTER.md`).")
+    lines.append(f"> ⚠️ **IMPORTANT:** Rules in this file **override** the Master file (`design-system/{project_slug}/MASTER.md`).")
     lines.append("> Only deviations from the Master are documented here. For all other rules, refer to the Master.")
     lines.append("")
     lines.append("---")
@@ -936,7 +953,7 @@ def _generate_intelligent_overrides(page_name: str, page_query: str, design_syst
     
     # Detect page type from search results or context
     page_type = _detect_page_type(combined_context, style_results)
-    
+
     # Build overrides from search results
     layout = {}
     spacing = {}
@@ -945,6 +962,20 @@ def _generate_intelligent_overrides(page_name: str, page_query: str, design_syst
     components = []
     unique_components = []
     recommendations = []
+    master_style_name = design_system.get("style", {}).get("name", "").lower()
+    master_category = design_system.get("category", "").lower()
+
+    if (
+        "dashboard" in page_type.lower()
+        or "dashboard" in master_style_name
+        or "data-dense" in master_style_name
+        or "analytics" in master_category
+    ):
+        layout["Max Width"] = "1400px or full-width"
+        layout["Grid"] = "12-column grid for data density"
+        layout["Layout"] = "Dense dashboard canvas with KPI row, filters, and data tables"
+        spacing["Content Density"] = "High — optimize for information display"
+        recommendations.append("Keep page overrides aligned with the MASTER dashboard density and grid rules")
     
     # Extract style-based overrides
     if style_results:
@@ -958,12 +989,13 @@ def _generate_intelligent_overrides(page_name: str, page_query: str, design_syst
         if any(kw in keywords.lower() for kw in ["data", "dense", "dashboard", "grid"]):
             layout["Max Width"] = "1400px or full-width"
             layout["Grid"] = "12-column grid for data flexibility"
+            layout["Layout"] = "Dense dashboard canvas with KPI row, filters, and data tables"
             spacing["Content Density"] = "High — optimize for information display"
         elif any(kw in keywords.lower() for kw in ["minimal", "simple", "clean", "single"]):
             layout["Max Width"] = "800px (narrow, focused)"
             layout["Layout"] = "Single column, centered"
             spacing["Content Density"] = "Low — focus on clarity"
-        else:
+        elif not layout:
             layout["Max Width"] = "1200px (standard)"
             layout["Layout"] = "Full-width sections, centered content"
         
@@ -1000,8 +1032,9 @@ def _generate_intelligent_overrides(page_name: str, page_query: str, design_syst
         layout["Layout"] = "Responsive grid"
     
     if not recommendations:
+        project_slug = slugify_name(design_system.get("project_name", "default"))
         recommendations = [
-            "Refer to MASTER.md for all design rules",
+            f"Refer to design-system/{project_slug}/MASTER.md for all design rules",
             "Add specific overrides as needed for this page"
         ]
     
