@@ -88,7 +88,8 @@ if __name__ == "__main__":
         
         # Print persistence confirmation
         if args.persist:
-            project_slug = validate_persist_segment(args.project_name or "default", "project name")
+            persist_project_name = args.project_name or args.query.upper()
+            project_slug = validate_persist_segment(persist_project_name, "project name")
             print("\n" + "=" * 60)
             print(f"✅ Design system persisted to design-system/{project_slug}/")
             print(f"   📄 design-system/{project_slug}/MASTER.md (Global Source of Truth)")
