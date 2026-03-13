@@ -195,6 +195,7 @@ def _search_csv(filepath, search_cols, output_cols, query, max_results):
 def detect_domain(query):
     """Auto-detect the most relevant domain from query"""
     query_lower = query.lower()
+    query_tokens = set(re.findall(r"[a-z0-9][a-z0-9.+-]*", query_lower))
 
     domain_keywords = {
         "color": ["color", "palette", "hex", "#", "rgb"],
@@ -209,7 +210,20 @@ def detect_domain(query):
         "web": ["aria", "focus", "outline", "semantic", "virtualize", "autocomplete", "form", "input type", "preconnect"]
     }
 
-    scores = {domain: sum(1 for kw in keywords if kw in query_lower) for domain, keywords in domain_keywords.items()}
+    scores = {}
+    for domain, keywords in domain_keywords.items():
+        score = 0
+        for kw in keywords:
+            keyword_lower = kw.lower()
+            if keyword_lower in {"#", "next.js"}:
+                matched = keyword_lower in query_lower
+            elif " " in keyword_lower or "-" in keyword_lower:
+                matched = keyword_lower in query_lower
+            else:
+                matched = keyword_lower in query_tokens
+            if matched:
+                score += 1
+        scores[domain] = score
     best = max(scores, key=scores.get)
     return best if scores[best] > 0 else "style"
 
