@@ -227,8 +227,8 @@ class DesignSystemGenerator:
         best_typography = typography_results[0] if typography_results else {}
         best_landing = landing_results[0] if landing_results else {}
         selected_pattern = reasoning.get("pattern", "Hero + Features + CTA")
-        selected_sections = "Hero > Features > CTA"
-        selected_cta = "Above fold"
+        selected_sections = ""
+        selected_cta = ""
         selected_color_strategy = ""
         selected_conversion = ""
 
@@ -782,7 +782,9 @@ def format_master_md(design_system: dict) -> str:
     lines.append("```css")
     lines.append(".input {")
     lines.append("  padding: 12px 16px;")
-    lines.append("  border: 1px solid #E2E8F0;")
+    lines.append(f"  background: {colors.get('background', '#FFFFFF')};")
+    lines.append(f"  color: {colors.get('text', '#1E293B')};")
+    lines.append(f"  border: 1px solid {colors.get('secondary', colors.get('primary', '#2563EB'))}33;")
     lines.append("  border-radius: 8px;")
     lines.append("  font-size: 16px;")
     lines.append("  transition: border-color 200ms ease;")
@@ -806,7 +808,8 @@ def format_master_md(design_system: dict) -> str:
     lines.append("}")
     lines.append("")
     lines.append(".modal {")
-    lines.append("  background: white;")
+    lines.append(f"  background: {colors.get('background', '#FFFFFF')};")
+    lines.append(f"  color: {colors.get('text', '#1E293B')};")
     lines.append("  border-radius: 16px;")
     lines.append("  padding: 32px;")
     lines.append("  box-shadow: var(--shadow-xl);")
@@ -1034,6 +1037,13 @@ def _generate_intelligent_overrides(page_name: str, page_query: str, design_syst
                 if page_type == "General":
                     page_type = _detect_page_type(query_lower, [])
 
+    # Authentication/settings pages should prioritize page-local context over project-wide query terms.
+    if page_type in {"Authentication", "Settings / Profile"}:
+        style_search = search(page_context, "style", max_results=1)
+        ux_search = search(page_context, "ux", max_results=3)
+        style_results = style_search.get("results", [])
+        ux_results = ux_search.get("results", [])
+
     landing_query = combined_context if page_type == "Landing / Marketing" else page_context
     landing_search = search(landing_query, "landing", max_results=1)
     landing_results = landing_search.get("results", [])
@@ -1105,7 +1115,7 @@ def _generate_intelligent_overrides(page_name: str, page_query: str, design_syst
             layout["Max Width"] = "1200px (standard)"
             layout["Layout"] = "Full-width sections, centered content"
         
-        if effects:
+        if effects and page_type not in {"Authentication", "Settings / Profile"}:
             recommendations.append(f"Effects: {effects}")
     
     # Extract UX guidelines as recommendations
