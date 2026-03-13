@@ -143,6 +143,7 @@ None
 - merge-proof 六轮修复：非 landing 设计系统不再默认写入 `Hero > Features > CTA`；auth/settings override 改为优先使用页面自身查询上下文，避免被项目级 dashboard 风格污染；`MASTER.md` 组件示例改为复用实际生成的 palette token。
 - merge-proof 七轮修复：产品类别不再盲信 product 搜索首条结果，domain 自动识别改成基于 token/短语匹配避免 `toolbar -> bar chart` 误判，并禁止空白 project/page 名静默落到 `default` 持久化路径。
 - merge-proof 七轮补充：设计系统入口对 `product` 域改为至少读取前 3 条候选结果后再重排，避免强信号查询仍因为只取首条结果而失去分类纠偏机会。
+- merge-proof 七轮补充 2：ASCII 头部标题改为同样走换行包装，避免超长项目名把 box 顶坏。
 
 ## 计划资产（Plan assets）
 
@@ -196,6 +197,7 @@ None
 - 2026-03-13: 根据 merge-proof 六轮修复非 landing pattern 的营销结构默认值、auth/settings 的项目查询词污染，以及 `MASTER.md` 组件示例中的浅色硬编码问题。
 - 2026-03-13: 根据 merge-proof 七轮修复产品类别首条命中偏差、domain 子串误判，以及空白持久化 slug 被静默写入 `default` 的问题。
 - 2026-03-13: 根据 merge-proof 七轮补充，把 design-system 的 product 搜索从只读 1 条扩展为读取前 3 条后再选择分类。
+- 2026-03-13: 根据 merge-proof 七轮补充，修复 ASCII 头部在超长项目名下的边框溢出。
 
 ## 参考（References）
 

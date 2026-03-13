@@ -371,7 +371,8 @@ def format_ascii_box(design_system: dict) -> str:
     w = BOX_WIDTH - 1
 
     lines.append("+" + "-" * w + "+")
-    lines.append(f"|  TARGET: {project} - RECOMMENDED DESIGN SYSTEM".ljust(BOX_WIDTH) + "|")
+    for line in wrap_text(f"TARGET: {project} - RECOMMENDED DESIGN SYSTEM", "|  ", BOX_WIDTH):
+        lines.append(line.ljust(BOX_WIDTH) + "|")
     lines.append("+" + "-" * w + "+")
     lines.append("|" + " " * BOX_WIDTH + "|")
 
