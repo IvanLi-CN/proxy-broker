@@ -20,7 +20,13 @@ import sys
 import io
 from pathlib import Path
 from core import CSV_CONFIG, AVAILABLE_STACKS, MAX_RESULTS, search, search_stack
-from design_system import generate_design_system, persist_design_system, validate_persist_segment
+from design_system import (
+    DesignSystemGenerator,
+    format_ascii_box,
+    format_markdown,
+    persist_design_system,
+    validate_persist_segment,
+)
 
 # Force UTF-8 for stdout/stderr to handle emojis on Windows (cp1252 default)
 if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
@@ -77,34 +83,51 @@ if __name__ == "__main__":
     # Design system takes priority
     if args.design_system:
         try:
-            result = generate_design_system(
-                args.query,
-                args.project_name,
-                args.format,
-                persist=args.persist,
-                page=args.page,
-                output_dir=args.output_dir,
-                force=args.force
-            )
+            design_system = DesignSystemGenerator().generate(args.query, args.project_name)
+            persist_result = None
+            if args.persist:
+                persist_result = persist_design_system(
+                    design_system,
+                    args.page,
+                    args.output_dir,
+                    args.query,
+                    force=args.force
+                )
         except (ValueError, FileExistsError) as exc:
             parser.error(str(exc))
-        print(result)
-        
-        # Print persistence confirmation
-        if args.persist:
-            persist_project_name = args.project_name or args.query.upper()
-            project_slug = validate_persist_segment(persist_project_name, "project name")
-            persist_root = (Path(args.output_dir) if args.output_dir else Path.cwd()) / "design-system" / project_slug
-            print("\n" + "=" * 60)
-            print(f"✅ Design system persisted to {persist_root}/")
-            print(f"   📄 {persist_root / 'MASTER.md'} (Global Source of Truth)")
-            if args.page:
-                page_filename = validate_persist_segment(args.page, "page name")
-                print(f"   📄 {persist_root / 'pages' / f'{page_filename}.md'} (Page Overrides)")
-            print("")
-            print(f"📖 Usage: When building a page, check {persist_root / 'pages'}/[page].md first.")
-            print(f"   If exists, its rules override MASTER.md. Otherwise, use MASTER.md.")
-            print("=" * 60)
+
+        if args.json:
+            import json
+            payload = {
+                "query": args.query,
+                "project_name": design_system.get("project_name"),
+                "format": args.format,
+                "design_system": design_system,
+            }
+            if persist_result is not None:
+                payload["persist"] = persist_result
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
+        else:
+            if args.format == "markdown":
+                print(format_markdown(design_system))
+            else:
+                print(format_ascii_box(design_system))
+
+            # Print persistence confirmation
+            if args.persist:
+                persist_project_name = args.project_name or args.query.upper()
+                project_slug = validate_persist_segment(persist_project_name, "project name")
+                persist_root = (Path(args.output_dir) if args.output_dir else Path.cwd()) / "design-system" / project_slug
+                print("\n" + "=" * 60)
+                print(f"✅ Design system persisted to {persist_root}/")
+                print(f"   📄 {persist_root / 'MASTER.md'} (Global Source of Truth)")
+                if args.page:
+                    page_filename = validate_persist_segment(args.page, "page name")
+                    print(f"   📄 {persist_root / 'pages' / f'{page_filename}.md'} (Page Overrides)")
+                print("")
+                print(f"📖 Usage: When building a page, check {persist_root / 'pages'}/[page].md first.")
+                print(f"   If exists, its rules override MASTER.md. Otherwise, use MASTER.md.")
+                print("=" * 60)
     # Stack search
     elif args.stack:
         result = search_stack(args.query, args.stack, args.max_results)

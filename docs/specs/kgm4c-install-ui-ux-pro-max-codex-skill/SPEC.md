@@ -139,6 +139,7 @@ None
 - merge-proof 二轮修复：页面职责继续以 `page_name` 为最高优先级，避免 `login/settings` 被项目级 dashboard 查询词带偏；收紧 General 页面升级到 dashboard 布局的条件，并让显式 landing/homepage 请求优先启用 landing pattern。
 - merge-proof 三轮修复：把 query fallback 调整为“显式页面意图优先于产品语义”，让 landing override 在识别出 landing 场景后使用 `page_query` 补查 landing pattern，并修正 ASCII 输出里长字段不换行导致的边框溢出。
 - merge-proof 四轮修复：`home/homepage` 改为先按显式 query 意图判页型，避免被 style fallback 抢先带成 dashboard；当 landing override 没命中 `landing.csv` 时，回退复用主设计系统 pattern 的 sections/CTA/color strategy。
+- merge-proof 五轮修复：landing 回退仅对真正的 landing 页面生效，避免 `General` 页面被写成 Hero/CTA 营销结构；ASCII 包装逻辑新增超长 token 硬切分，并让 `--design-system --json` 返回结构化 payload（含 persist 结果）。
 
 ## 计划资产（Plan assets）
 
@@ -188,6 +189,7 @@ None
 - 2026-03-13: 根据 merge-proof 二轮修复 auth/settings 页面被 dashboard 上下文污染、General 页面误升 dashboard 布局与 analytics landing 场景误禁用 landing pattern 的问题。
 - 2026-03-13: 根据 merge-proof 三轮修复 home fallback 误判 dashboard、landing override 丢失 CTA/sections，以及 ASCII 长字段溢出边框的问题。
 - 2026-03-13: 根据 merge-proof 四轮修复 `home/homepage` 的 page-type 优先级，并为未命中 landing CSV 的 landing override 增加主 pattern 回退。
+- 2026-03-13: 根据 merge-proof 五轮修复 General 页面误注入 landing 结构、ASCII 长 token 溢出，以及 design-system 分支忽略 `--json` 的问题。
 
 ## 参考（References）
 

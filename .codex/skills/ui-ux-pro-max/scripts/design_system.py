@@ -304,7 +304,16 @@ def format_ascii_box(design_system: dict) -> str:
         """Wrap long text into multiple lines."""
         if not text:
             return []
-        words = text.split()
+        max_content_width = max(1, width - 2 - len(prefix))
+        words = []
+        for raw_word in text.split():
+            if len(raw_word) <= max_content_width:
+                words.append(raw_word)
+                continue
+            start = 0
+            while start < len(raw_word):
+                words.append(raw_word[start:start + max_content_width])
+                start += max_content_width
         lines = []
         current_line = prefix
         for word in words:
@@ -1110,7 +1119,7 @@ def _generate_intelligent_overrides(page_name: str, page_query: str, design_syst
             components.append(f"Avoid: {dont_text}")
     
     # Extract landing pattern info for section structure
-    if page_type in {"Landing / Marketing", "General"}:
+    if page_type == "Landing / Marketing":
         landing = landing_results[0] if landing_results else design_system.get("pattern", {})
         sections = landing.get("Section Order", "")
         if not sections:
