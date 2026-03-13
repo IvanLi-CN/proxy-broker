@@ -67,6 +67,27 @@ def use_landing_pattern(category: str, style_name: str, query: str) -> bool:
     landing_terms = ["landing", "marketing", "homepage", "hero", "promo", "campaign"]
     if _matches_keywords(combined, landing_terms):
         return True
+    product_intent_terms = [
+        "app",
+        "portal",
+        "dashboard",
+        "admin",
+        "analytics",
+        "settings",
+        "profile",
+        "login",
+        "auth",
+        "checkout",
+        "payment",
+        "search",
+        "results",
+        "booking",
+        "reservation",
+        "workflow",
+        "mobile",
+    ]
+    if _matches_keywords(query, product_intent_terms):
+        return False
     marketing_category_terms = [
         "service",
         "agency",
@@ -267,31 +288,37 @@ class DesignSystemGenerator:
 
         query_lower = query.lower()
         query_tokens = set(re.findall(r"[a-z0-9][a-z0-9.+-]*", query_lower))
-        strong_signals = [
-            ("Fintech/Crypto", {"fintech", "finance", "banking", "payment", "trading", "crypto"}),
-            ("Healthcare App", {"healthcare", "medical", "clinic", "hospital", "patient"}),
-            ("E-commerce", {"ecommerce", "e-commerce", "commerce", "store", "shop", "retail"}),
-            ("Analytics Dashboard", {"analytics", "dashboard", "reporting", "bi", "data", "panel", "admin"}),
-        ]
-
-        for category_name, signals in strong_signals:
-            if query_tokens.intersection(signals):
-                for row in product_results:
-                    row_type = row.get("Product Type", "")
-                    if row_type.lower() == category_name.lower():
-                        return row_type
-                return category_name
+        generic_tokens = {
+            "dashboard",
+            "analytics",
+            "admin",
+            "data",
+            "app",
+            "platform",
+            "service",
+            "tool",
+            "portal",
+            "system",
+            "software",
+            "mobile",
+            "web",
+        }
 
         best_row = product_results[0]
-        best_score = -1
-        for row in product_results:
+        best_score = float("-inf")
+        for index, row in enumerate(product_results):
+            product_type = row.get("Product Type", "")
+            product_type_lower = product_type.lower()
             haystack = " ".join(str(value).lower() for value in row.values())
             score = 0
             for token in query_tokens:
                 if token and token in haystack:
-                    score += 1
-            if row.get("Product Type", "").lower() in query_lower:
-                score += 2
+                    score += 1 if token in generic_tokens else 3
+                if token and token in product_type_lower:
+                    score += 1 if token in generic_tokens else 2
+            if product_type_lower and product_type_lower in query_lower:
+                score += 6
+            score -= index * 0.01
             if score > best_score:
                 best_score = score
                 best_row = row
@@ -474,7 +501,7 @@ def format_ascii_box(design_system: dict) -> str:
     for line in wrap_text(f"TARGET: {project} - RECOMMENDED DESIGN SYSTEM", "|  ", BOX_WIDTH):
         lines.append(line.ljust(BOX_WIDTH) + "|")
     lines.append("+" + "-" * w + "+")
-    lines.append("|" + " " * BOX_WIDTH + "|")
+    lines.append("|" + " " * w + "|")
 
     # Pattern section
     lines.append(f"|  PATTERN: {pattern.get('name', '')}".ljust(BOX_WIDTH) + "|")
@@ -487,7 +514,7 @@ def format_ascii_box(design_system: dict) -> str:
     lines.append("|     Sections:".ljust(BOX_WIDTH) + "|")
     for i, section in enumerate(sections, 1):
         lines.append(f"|       {i}. {section}".ljust(BOX_WIDTH) + "|")
-    lines.append("|" + " " * BOX_WIDTH + "|")
+    lines.append("|" + " " * w + "|")
 
     # Style section
     lines.append(f"|  STYLE: {style.get('name', '')}".ljust(BOX_WIDTH) + "|")
@@ -500,7 +527,7 @@ def format_ascii_box(design_system: dict) -> str:
     if style.get("performance") or style.get("accessibility"):
         perf_a11y = f"Performance: {style.get('performance', '')} | Accessibility: {style.get('accessibility', '')}"
         lines.append(f"|     {perf_a11y}".ljust(BOX_WIDTH) + "|")
-    lines.append("|" + " " * BOX_WIDTH + "|")
+    lines.append("|" + " " * w + "|")
 
     # Colors section
     lines.append("|  COLORS:".ljust(BOX_WIDTH) + "|")
@@ -512,7 +539,7 @@ def format_ascii_box(design_system: dict) -> str:
     if colors.get("notes"):
         for line in wrap_text(f"Notes: {colors.get('notes', '')}", "|     ", BOX_WIDTH):
             lines.append(line.ljust(BOX_WIDTH) + "|")
-    lines.append("|" + " " * BOX_WIDTH + "|")
+    lines.append("|" + " " * w + "|")
 
     # Typography section
     lines.append(f"|  TYPOGRAPHY: {typography.get('heading', '')} / {typography.get('body', '')}".ljust(BOX_WIDTH) + "|")
@@ -528,21 +555,21 @@ def format_ascii_box(design_system: dict) -> str:
     if typography.get("css_import"):
         for line in wrap_text(f"CSS Import: {typography.get('css_import', '')}", "|     ", BOX_WIDTH):
             lines.append(line.ljust(BOX_WIDTH) + "|")
-    lines.append("|" + " " * BOX_WIDTH + "|")
+    lines.append("|" + " " * w + "|")
 
     # Key Effects section
     if effects:
         lines.append("|  KEY EFFECTS:".ljust(BOX_WIDTH) + "|")
         for line in wrap_text(effects, "|     ", BOX_WIDTH):
             lines.append(line.ljust(BOX_WIDTH) + "|")
-        lines.append("|" + " " * BOX_WIDTH + "|")
+        lines.append("|" + " " * w + "|")
 
     # Anti-patterns section
     if anti_patterns:
         lines.append("|  AVOID (Anti-patterns):".ljust(BOX_WIDTH) + "|")
         for line in wrap_text(anti_patterns, "|     ", BOX_WIDTH):
             lines.append(line.ljust(BOX_WIDTH) + "|")
-        lines.append("|" + " " * BOX_WIDTH + "|")
+        lines.append("|" + " " * w + "|")
 
     # Pre-Delivery Checklist section
     lines.append("|  PRE-DELIVERY CHECKLIST:".ljust(BOX_WIDTH) + "|")
@@ -557,7 +584,7 @@ def format_ascii_box(design_system: dict) -> str:
     ]
     for item in checklist_items:
         lines.append(f"|     {item}".ljust(BOX_WIDTH) + "|")
-    lines.append("|" + " " * BOX_WIDTH + "|")
+    lines.append("|" + " " * w + "|")
 
     lines.append("+" + "-" * w + "+")
 
