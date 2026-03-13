@@ -34,14 +34,33 @@ SEARCH_CONFIG = {
 }
 
 
+def _matches_keywords(text: str, keywords: list) -> bool:
+    """Match keywords on token/phrase boundaries instead of raw substrings."""
+    normalized = " ".join(re.findall(r"[a-z0-9]+", text.lower()))
+    token_set = set(normalized.split())
+    for keyword in keywords:
+        keyword_lower = keyword.lower()
+        keyword_tokens = re.findall(r"[a-z0-9]+", keyword_lower)
+        if not keyword_tokens:
+            continue
+        if len(keyword_tokens) == 1:
+            if keyword_tokens[0] in token_set:
+                return True
+        else:
+            phrase = " ".join(keyword_tokens)
+            if re.search(rf"(?<!\\w){re.escape(phrase)}(?!\\w)", normalized):
+                return True
+    return False
+
+
 def use_landing_pattern(category: str, style_name: str, query: str) -> bool:
     """Only apply landing-page patterns when the request is actually landing-page oriented."""
     combined = " ".join([category, style_name, query]).lower()
     landing_terms = ["landing", "marketing", "homepage", "hero", "promo", "campaign"]
-    if any(term in combined for term in landing_terms):
+    if _matches_keywords(combined, landing_terms):
         return True
     dashboard_terms = ["dashboard", "analytics", "admin", "monitor", "reporting", "data view", "bi/analytics"]
-    if any(term in combined for term in dashboard_terms):
+    if _matches_keywords(combined, dashboard_terms):
         return False
     return False
 
@@ -1272,7 +1291,7 @@ def _detect_page_type(context: str, style_results: list) -> str:
     ]
     
     for keywords, page_type in page_patterns:
-        if any(kw in context_lower for kw in keywords):
+        if _matches_keywords(context_lower, keywords):
             return page_type
     
     # Fallback: try to infer from style results
@@ -1305,7 +1324,7 @@ def _detect_query_page_type(query_context: str) -> str:
     ]
 
     for keywords, page_type in explicit_patterns:
-        if any(kw in query_lower for kw in keywords):
+        if _matches_keywords(query_lower, keywords):
             return page_type
 
     return "General"

@@ -146,6 +146,7 @@ None
 - merge-proof 七轮补充 2：ASCII 头部标题改为同样走换行包装，避免超长项目名把 box 顶坏。
 - merge-proof 八轮修复：设计系统在确定产品类别后，会再按类别重排 color/typography 结果，避免 `Analytics Dashboard` 却落到 `Micro SaaS` 调色板；同时把 page override 的页面文件冲突校验前移到任何写盘之前，并移除 landing 自动识别里的裸 `page` 关键词。
 - merge-proof 八轮补充：分类确定后会额外用该分类词再补查 `color` / `typography` 域，避免 query-first 候选集里本来就缺失目标分类的 palette / 字体结果。
+- merge-proof 九轮修复：landing 与 page type 的意图识别全部改成 token/短语边界匹配，避免 `heroic -> hero`、`accounting -> account`、`cartography -> cart` 这类子串误判。
 
 ## 计划资产（Plan assets）
 
@@ -202,6 +203,7 @@ None
 - 2026-03-13: 根据 merge-proof 七轮补充，修复 ASCII 头部在超长项目名下的边框溢出。
 - 2026-03-13: 根据 merge-proof 八轮修复 color/typography 与分类不一致、page override 冲突时的半成品写盘，以及 `settings page` 被误判 landing 的问题。
 - 2026-03-13: 根据 merge-proof 八轮补充，引入 category-aware 的 color/typography 二次搜索，修复 `Analytics Dashboard` 仍落到 `Micro SaaS` 颜色的遗漏。
+- 2026-03-13: 根据 merge-proof 九轮修复 landing/page-type 启发式的子串误判问题。
 
 ## 参考（References）
 
