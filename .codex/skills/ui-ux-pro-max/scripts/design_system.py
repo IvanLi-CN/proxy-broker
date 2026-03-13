@@ -570,10 +570,6 @@ def persist_design_system(design_system: dict, page: str = None, output_dir: str
 
     created_files = []
 
-    # Create directories only after validation so failed runs do not leave partial output behind.
-    design_system_dir.mkdir(parents=True, exist_ok=True)
-    pages_dir.mkdir(parents=True, exist_ok=True)
-
     if master_file.exists():
         if page_file and not page_file.exists() and not force:
             # Reuse the existing MASTER.md so users can add page overrides incrementally.
@@ -582,6 +578,11 @@ def persist_design_system(design_system: dict, page: str = None, output_dir: str
             raise FileExistsError(
                 f"persist target already exists: {master_file}. Re-run with --force to overwrite."
             )
+
+    # Create directories only after all overwrite checks pass so failed runs stay atomic.
+    design_system_dir.mkdir(parents=True, exist_ok=True)
+    if page_file:
+        pages_dir.mkdir(parents=True, exist_ok=True)
 
     # Generate and write MASTER.md when bootstrapping or force-overwriting.
     if force or not master_file.exists():
@@ -997,7 +998,7 @@ def _generate_intelligent_overrides(page_name: str, page_query: str, design_syst
     page_context = page_lower
     
     # Search across multiple domains for page-specific guidance
-    style_search = search(page_context, "style", max_results=1)
+    style_search = search(combined_context, "style", max_results=1)
     ux_search = search(combined_context, "ux", max_results=3)
     landing_search = search(page_context, "landing", max_results=1)
     
@@ -1007,7 +1008,7 @@ def _generate_intelligent_overrides(page_name: str, page_query: str, design_syst
     landing_results = landing_search.get("results", [])
     
     # Detect page type from search results or context
-    page_type = _detect_page_type(page_lower, [])
+    page_type = _detect_page_type(combined_context, style_results)
 
     # Build overrides from search results
     layout = {}
@@ -1129,7 +1130,7 @@ def _detect_page_type(context: str, style_results: list) -> str:
         (["dashboard", "admin", "analytics", "data", "metrics", "stats", "monitor", "overview"], "Dashboard / Data View"),
         (["checkout", "payment", "cart", "purchase", "order", "billing"], "Checkout / Payment"),
         (["settings", "profile", "account", "preferences", "config"], "Settings / Profile"),
-        (["landing", "marketing", "homepage", "hero", "home", "promo"], "Landing / Marketing"),
+        (["landing", "marketing", "homepage", "hero", "promo"], "Landing / Marketing"),
         (["login", "signin", "signup", "register", "auth", "password"], "Authentication"),
         (["pricing", "plans", "subscription", "tiers", "packages"], "Pricing / Plans"),
         (["blog", "article", "post", "news", "content", "story"], "Blog / Article"),

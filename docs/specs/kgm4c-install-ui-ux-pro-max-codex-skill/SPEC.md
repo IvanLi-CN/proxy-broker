@@ -135,6 +135,7 @@ None
 - review-loop 四轮修复：允许在已有 `MASTER.md` 的前提下追加新 page override，且认证/设置类页面不再被项目级 dashboard / landing 结果污染布局。
 - review-loop 五轮修复：页面类型判定收敛为以 `page_name` 为主，避免通用页面被项目查询词误分类成 dashboard / landing。
 - review-loop 六轮修复：仅在真正的 landing 场景下采用 landing pattern，修正持久化文档内的相对路径，并让 CLI 的持久化提示尊重 `--output-dir`。
+- merge-proof 修复：页面 override 识别改为结合 `page_query + style results`，避免 `home` 被硬判 landing、`insights` 退化成 General，同时把持久化目录创建推迟到覆盖校验之后，避免失败时留下半成品目录。
 
 ## 计划资产（Plan assets）
 
@@ -180,6 +181,7 @@ None
 - 2026-03-13: 根据四轮 review-loop 修复增量 page override 工作流与 auth 页面布局污染问题。
 - 2026-03-13: 根据五轮 review-loop 修复通用页面被项目查询词误分类的问题。
 - 2026-03-13: 根据六轮 review-loop 修复 dashboard pattern 误判与持久化路径提示错误。
+- 2026-03-13: 根据 merge-proof 修复 `home/insights` 页面类型误判与 persist 失败留下空目录的问题。
 
 ## 参考（References）
 
