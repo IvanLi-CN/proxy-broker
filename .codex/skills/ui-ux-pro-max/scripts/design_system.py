@@ -473,8 +473,9 @@ def format_markdown(design_system: dict) -> str:
 
 
 # ============ MAIN ENTRY POINT ============
-def generate_design_system(query: str, project_name: str = None, output_format: str = "ascii", 
-                           persist: bool = False, page: str = None, output_dir: str = None) -> str:
+def generate_design_system(query: str, project_name: str = None, output_format: str = "ascii",
+                           persist: bool = False, page: str = None, output_dir: str = None,
+                           force: bool = False) -> str:
     """
     Main entry point for design system generation.
 
@@ -494,7 +495,7 @@ def generate_design_system(query: str, project_name: str = None, output_format: 
     
     # Persist to files if requested
     if persist:
-        persist_design_system(design_system, page, output_dir, query)
+        persist_design_system(design_system, page, output_dir, query, force=force)
 
     if output_format == "markdown":
         return format_markdown(design_system)
@@ -502,7 +503,8 @@ def generate_design_system(query: str, project_name: str = None, output_format: 
 
 
 # ============ PERSISTENCE FUNCTIONS ============
-def persist_design_system(design_system: dict, page: str = None, output_dir: str = None, page_query: str = None) -> dict:
+def persist_design_system(design_system: dict, page: str = None, output_dir: str = None,
+                          page_query: str = None, force: bool = False) -> dict:
     """
     Persist design system to design-system/<project>/ folder using Master + Overrides pattern.
     
@@ -527,24 +529,32 @@ def persist_design_system(design_system: dict, page: str = None, output_dir: str
 
     design_system_dir = base_dir / "design-system" / project_slug
     pages_dir = design_system_dir / "pages"
-    
+    master_file = design_system_dir / "MASTER.md"
+    page_file = None
+    if page:
+        page_file = pages_dir / f"{page_slug}.md"
+
+    existing_files = [path for path in (master_file, page_file) if path and path.exists()]
+    if existing_files and not force:
+        existing_str = ", ".join(str(path) for path in existing_files)
+        raise FileExistsError(
+            f"persist target already exists: {existing_str}. Re-run with --force to overwrite."
+        )
+
     created_files = []
-    
-    # Create directories
+
+    # Create directories only after validation so failed runs do not leave partial output behind.
     design_system_dir.mkdir(parents=True, exist_ok=True)
     pages_dir.mkdir(parents=True, exist_ok=True)
-    
-    master_file = design_system_dir / "MASTER.md"
-    
+
     # Generate and write MASTER.md
     master_content = format_master_md(design_system)
     with open(master_file, 'w', encoding='utf-8') as f:
         f.write(master_content)
     created_files.append(str(master_file))
-    
+
     # If page is specified, create page override file with intelligent content
-    if page:
-        page_file = pages_dir / f"{page_slug}.md"
+    if page_file:
         page_content = format_page_override_md(design_system, page, page_query)
         with open(page_file, 'w', encoding='utf-8') as f:
             f.write(page_content)
@@ -955,7 +965,9 @@ def _generate_intelligent_overrides(page_name: str, page_query: str, design_syst
     landing_results = landing_search.get("results", [])
     
     # Detect page type from search results or context
-    page_type = _detect_page_type(combined_context, style_results)
+    page_type = _detect_page_type(page_lower, [])
+    if page_type == "General":
+        page_type = _detect_page_type(combined_context, style_results)
 
     # Build overrides from search results
     layout = {}
@@ -968,17 +980,21 @@ def _generate_intelligent_overrides(page_name: str, page_query: str, design_syst
     master_style_name = design_system.get("style", {}).get("name", "").lower()
     master_category = design_system.get("category", "").lower()
 
-    if (
-        "dashboard" in page_type.lower()
-        or "dashboard" in master_style_name
-        or "data-dense" in master_style_name
-        or "analytics" in master_category
-    ):
+    if "dashboard" in page_type.lower():
         layout["Max Width"] = "1400px or full-width"
         layout["Grid"] = "12-column grid for data density"
         layout["Layout"] = "Dense dashboard canvas with KPI row, filters, and data tables"
         spacing["Content Density"] = "High — optimize for information display"
         recommendations.append("Keep page overrides aligned with the MASTER dashboard density and grid rules")
+    elif (
+        page_type == "General"
+        and (
+            "dashboard" in master_style_name
+            or "data-dense" in master_style_name
+            or "analytics" in master_category
+        )
+    ):
+        recommendations.append("Use the MASTER dashboard rules as the starting point for this general page")
     
     # Extract style-based overrides
     if style_results:

@@ -5,6 +5,7 @@ UI/UX Pro Max Search - BM25 search engine for UI/UX style guides
 Usage: python search.py "<query>" [--domain <domain>] [--stack <stack>] [--max-results 3]
        python search.py "<query>" --design-system [-p "Project Name"]
        python search.py "<query>" --design-system --persist [-p "Project Name"] [--page "dashboard"]
+       python search.py "<query>" --design-system --persist --force [-p "Project Name"]
 
 Domains: style, color, chart, landing, product, ux, typography, icons, react, web
 Stacks: html-tailwind, react, nextjs
@@ -68,6 +69,7 @@ if __name__ == "__main__":
     parser.add_argument("--persist", action="store_true", help="Save design system to design-system/<project-slug>/MASTER.md (creates hierarchical structure)")
     parser.add_argument("--page", type=str, default=None, help="Create page-specific override file in design-system/<project-slug>/pages/")
     parser.add_argument("--output-dir", "-o", type=str, default=None, help="Output directory for persisted files (default: current directory)")
+    parser.add_argument("--force", action="store_true", help="Overwrite existing persisted design-system files")
 
     args = parser.parse_args()
 
@@ -80,9 +82,10 @@ if __name__ == "__main__":
                 args.format,
                 persist=args.persist,
                 page=args.page,
-                output_dir=args.output_dir
+                output_dir=args.output_dir,
+                force=args.force
             )
-        except ValueError as exc:
+        except (ValueError, FileExistsError) as exc:
             parser.error(str(exc))
         print(result)
         

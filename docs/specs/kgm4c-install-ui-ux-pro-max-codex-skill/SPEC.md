@@ -131,6 +131,7 @@ None
 - 版本记录：npm CLI `uipro-cli@2.2.3`；调研时上游 GitHub 最新 release 为 `v2.5.0`（2026-03-10）。
 - review-loop 修复：补齐项目内命令路径、项目级持久化路径说明、持久化 slug 安全校验，以及 dashboard page override 与 master 风格一致性。
 - review-loop 二轮修复：让 Unicode 项目名可作为 slug 保存、让默认持久化提示与真实目录一致、在写盘前完成 page 参数校验，并保留 `AI/UI/UX/3D` 等短关键词的搜索能力。
+- review-loop 三轮修复：避免 `--page login` 被 dashboard 项目上下文误判为 dashboard 页面，并为 `--persist` 引入显式 `--force` 覆盖门禁，防止静默覆盖人工维护内容。
 
 ## 计划资产（Plan assets）
 
@@ -172,6 +173,7 @@ None
 - 2026-03-13: 完成项目内安装与 smoke test，等待提交、PR 与 review-loop 收敛。
 - 2026-03-13: 根据 PR review-loop 修复持久化路径逃逸与文档/override 不一致问题。
 - 2026-03-13: 根据二轮 review-loop 修复 Unicode slug、短关键词搜索与持久化提示/原子性问题。
+- 2026-03-13: 根据三轮 review-loop 修复 page type 误判与 persist 静默覆盖问题。
 
 ## 参考（References）
 

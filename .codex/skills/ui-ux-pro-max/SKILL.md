@@ -72,6 +72,8 @@ To save the design system for hierarchical retrieval across sessions, add `--per
 python3 .codex/skills/ui-ux-pro-max/scripts/search.py "<query>" --design-system --persist -p "Project Name"
 ```
 
+If the target files already exist and you intentionally want to replace them, re-run with `--force`.
+
 This creates:
 - `design-system/<project-slug>/MASTER.md` — Global Source of Truth with all design rules
 - `design-system/<project-slug>/pages/` — Folder for page-specific overrides
