@@ -73,6 +73,7 @@ python3 .codex/skills/ui-ux-pro-max/scripts/search.py "<query>" --design-system 
 ```
 
 If the target files already exist and you intentionally want to replace them, re-run with `--force`.
+If `MASTER.md` already exists and you are only adding a new page override, you can re-run with `--page <name>` without `--force`; only the new page file will be created.
 
 This creates:
 - `design-system/<project-slug>/MASTER.md` — Global Source of Truth with all design rules

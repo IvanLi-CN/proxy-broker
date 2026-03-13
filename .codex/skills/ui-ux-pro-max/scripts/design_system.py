@@ -534,27 +534,34 @@ def persist_design_system(design_system: dict, page: str = None, output_dir: str
     if page:
         page_file = pages_dir / f"{page_slug}.md"
 
-    existing_files = [path for path in (master_file, page_file) if path and path.exists()]
-    if existing_files and not force:
-        existing_str = ", ".join(str(path) for path in existing_files)
-        raise FileExistsError(
-            f"persist target already exists: {existing_str}. Re-run with --force to overwrite."
-        )
-
     created_files = []
 
     # Create directories only after validation so failed runs do not leave partial output behind.
     design_system_dir.mkdir(parents=True, exist_ok=True)
     pages_dir.mkdir(parents=True, exist_ok=True)
 
-    # Generate and write MASTER.md
-    master_content = format_master_md(design_system)
-    with open(master_file, 'w', encoding='utf-8') as f:
-        f.write(master_content)
-    created_files.append(str(master_file))
+    if master_file.exists():
+        if page_file and not page_file.exists() and not force:
+            # Reuse the existing MASTER.md so users can add page overrides incrementally.
+            pass
+        elif not force:
+            raise FileExistsError(
+                f"persist target already exists: {master_file}. Re-run with --force to overwrite."
+            )
+
+    # Generate and write MASTER.md when bootstrapping or force-overwriting.
+    if force or not master_file.exists():
+        master_content = format_master_md(design_system)
+        with open(master_file, 'w', encoding='utf-8') as f:
+            f.write(master_content)
+        created_files.append(str(master_file))
 
     # If page is specified, create page override file with intelligent content
     if page_file:
+        if page_file.exists() and not force:
+            raise FileExistsError(
+                f"persist target already exists: {page_file}. Re-run with --force to overwrite."
+            )
         page_content = format_page_override_md(design_system, page, page_query)
         with open(page_file, 'w', encoding='utf-8') as f:
             f.write(page_content)
@@ -953,11 +960,12 @@ def _generate_intelligent_overrides(page_name: str, page_query: str, design_syst
     page_lower = page_name.lower()
     query_lower = (page_query or "").lower()
     combined_context = f"{page_lower} {query_lower}"
+    page_context = page_lower
     
     # Search across multiple domains for page-specific guidance
-    style_search = search(combined_context, "style", max_results=1)
+    style_search = search(page_context, "style", max_results=1)
     ux_search = search(combined_context, "ux", max_results=3)
-    landing_search = search(combined_context, "landing", max_results=1)
+    landing_search = search(page_context, "landing", max_results=1)
     
     # Extract results from search response
     style_results = style_search.get("results", [])
@@ -979,6 +987,17 @@ def _generate_intelligent_overrides(page_name: str, page_query: str, design_syst
     recommendations = []
     master_style_name = design_system.get("style", {}).get("name", "").lower()
     master_category = design_system.get("category", "").lower()
+
+    if page_type == "Authentication":
+        layout["Max Width"] = "480px"
+        layout["Layout"] = "Single-column auth card centered in viewport"
+        spacing["Content Density"] = "Low — focus on the primary form"
+        recommendations.append("Keep authentication pages minimal and task-focused")
+    elif page_type == "Settings / Profile":
+        layout["Max Width"] = "960px"
+        layout["Layout"] = "Two-column settings shell with persistent navigation"
+        spacing["Content Density"] = "Medium — prioritize scannable sections"
+        recommendations.append("Use grouped sections and sticky local navigation for settings")
 
     if "dashboard" in page_type.lower():
         layout["Max Width"] = "1400px or full-width"
@@ -1005,12 +1024,12 @@ def _generate_intelligent_overrides(page_name: str, page_query: str, design_syst
         effects = style.get("Effects & Animation", "")
         
         # Infer layout from style keywords
-        if any(kw in keywords.lower() for kw in ["data", "dense", "dashboard", "grid"]):
+        if any(kw in keywords.lower() for kw in ["data", "dense", "dashboard", "grid"]) and page_type == "General":
             layout["Max Width"] = "1400px or full-width"
             layout["Grid"] = "12-column grid for data flexibility"
             layout["Layout"] = "Dense dashboard canvas with KPI row, filters, and data tables"
             spacing["Content Density"] = "High — optimize for information display"
-        elif any(kw in keywords.lower() for kw in ["minimal", "simple", "clean", "single"]):
+        elif any(kw in keywords.lower() for kw in ["minimal", "simple", "clean", "single"]) and page_type == "General":
             layout["Max Width"] = "800px (narrow, focused)"
             layout["Layout"] = "Single column, centered"
             spacing["Content Density"] = "Low — focus on clarity"
@@ -1032,7 +1051,7 @@ def _generate_intelligent_overrides(page_name: str, page_query: str, design_syst
             components.append(f"Avoid: {dont_text}")
     
     # Extract landing pattern info for section structure
-    if landing_results:
+    if landing_results and page_type in {"Landing / Marketing", "General"}:
         landing = landing_results[0]
         sections = landing.get("Section Order", "")
         cta_placement = landing.get("Primary CTA Placement", "")
