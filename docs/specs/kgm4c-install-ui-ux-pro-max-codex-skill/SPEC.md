@@ -149,6 +149,10 @@ None
 - merge-proof 九轮修复：landing 与 page type 的意图识别全部改成 token/短语边界匹配，避免 `heroic -> hero`、`accounting -> account`、`cartography -> cart` 这类子串误判。
 - merge-proof 十轮修复：产品分类的强信号优先级调整为“垂直行业先于通用 dashboard 桶”，避免 `healthcare dashboard` / `banking dashboard` 被统一压成 `Analytics Dashboard`；同时对明显服务/营销型产品类别自动启用 landing pattern 元数据回填。
 - merge-proof 十轮补充：当强行业信号命中但 product top-k 没带回精确行时，直接回退到 canonical category（如 `Fintech/Crypto` / `Healthcare App`），避免又被通用 dashboard 桶吞掉。
+- merge-proof 十一轮修复：持久化输入校验改为拒绝 slug 化后为空的 project/page 名，token/phrase 匹配补上真正的单词边界，并为常见中文页面语义与 domain 自动识别增加 Unicode 关键词支持。
+- merge-proof 十二轮修复：产品类别重排改为“具体垂直词优先、通用 dashboard 词降权”，避免 `government/banking/insurance/education dashboard` 被泛化成 `Analytics Dashboard`；同时服务型类别只有在 query 没显式 app/workflow 意图时才回填 landing pattern，并修正 ASCII box 的空白行宽度。
+- merge-proof 十三轮修复：`home/homepage` 在主设计系统已判定为 landing 时会继承 landing sections/CTA/color strategy；`MASTER.md` 的卡片示例改成仅对交互式卡片使用 `cursor: pointer`；Typography 输出新增 implementation note，显式说明 Fontshare 优先字体与可直接导入的 Google fallback。
+- merge-proof 十四轮修复：修复 `web-interface.csv` 与 `stacks/astro.csv` 中错位的 guideline 行，恢复 `Do/Don't/Code Example/Severity` 字段顺序，确保搜索输出与原始数据一致。
 
 ## 计划资产（Plan assets）
 
@@ -208,6 +212,10 @@ None
 - 2026-03-13: 根据 merge-proof 九轮修复 landing/page-type 启发式的子串误判问题。
 - 2026-03-13: 根据 merge-proof 十轮修复垂直行业被 dashboard 桶抢分类，以及服务型产品默认缺失 landing sections/CTA 的问题。
 - 2026-03-13: 根据 merge-proof 十轮补充，在强行业信号命中但 product top-k 缺行时直接使用 canonical category。
+- 2026-03-13: 根据 merge-proof 十一轮修复空 slug 输入、phrase 边界误判与中文页面语义识别缺失的问题。
+- 2026-03-13: 根据 merge-proof 十二轮修复垂直 dashboard 分类回退、服务型 app 误用 landing pattern，以及 ASCII box 空白行宽度不一致的问题。
+- 2026-03-13: 根据 merge-proof 十三轮修复 `home/homepage` landing 继承、静态卡片错误 pointer affordance，以及 typography 输出未说明 fallback 字体的问题。
+- 2026-03-13: 根据 merge-proof 十四轮修复 `web-interface.csv` / `stacks/astro.csv` 的字段错位数据行。
 
 ## 参考（References）
 
