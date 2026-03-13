@@ -147,6 +147,8 @@ None
 - merge-proof 八轮修复：设计系统在确定产品类别后，会再按类别重排 color/typography 结果，避免 `Analytics Dashboard` 却落到 `Micro SaaS` 调色板；同时把 page override 的页面文件冲突校验前移到任何写盘之前，并移除 landing 自动识别里的裸 `page` 关键词。
 - merge-proof 八轮补充：分类确定后会额外用该分类词再补查 `color` / `typography` 域，避免 query-first 候选集里本来就缺失目标分类的 palette / 字体结果。
 - merge-proof 九轮修复：landing 与 page type 的意图识别全部改成 token/短语边界匹配，避免 `heroic -> hero`、`accounting -> account`、`cartography -> cart` 这类子串误判。
+- merge-proof 十轮修复：产品分类的强信号优先级调整为“垂直行业先于通用 dashboard 桶”，避免 `healthcare dashboard` / `banking dashboard` 被统一压成 `Analytics Dashboard`；同时对明显服务/营销型产品类别自动启用 landing pattern 元数据回填。
+- merge-proof 十轮补充：当强行业信号命中但 product top-k 没带回精确行时，直接回退到 canonical category（如 `Fintech/Crypto` / `Healthcare App`），避免又被通用 dashboard 桶吞掉。
 
 ## 计划资产（Plan assets）
 
@@ -204,6 +206,8 @@ None
 - 2026-03-13: 根据 merge-proof 八轮修复 color/typography 与分类不一致、page override 冲突时的半成品写盘，以及 `settings page` 被误判 landing 的问题。
 - 2026-03-13: 根据 merge-proof 八轮补充，引入 category-aware 的 color/typography 二次搜索，修复 `Analytics Dashboard` 仍落到 `Micro SaaS` 颜色的遗漏。
 - 2026-03-13: 根据 merge-proof 九轮修复 landing/page-type 启发式的子串误判问题。
+- 2026-03-13: 根据 merge-proof 十轮修复垂直行业被 dashboard 桶抢分类，以及服务型产品默认缺失 landing sections/CTA 的问题。
+- 2026-03-13: 根据 merge-proof 十轮补充，在强行业信号命中但 product top-k 缺行时直接使用 canonical category。
 
 ## 参考（References）
 

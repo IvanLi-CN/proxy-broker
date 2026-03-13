@@ -59,6 +59,21 @@ def use_landing_pattern(category: str, style_name: str, query: str) -> bool:
     landing_terms = ["landing", "marketing", "homepage", "hero", "promo", "campaign"]
     if _matches_keywords(combined, landing_terms):
         return True
+    marketing_category_terms = [
+        "service",
+        "agency",
+        "portfolio",
+        "beauty",
+        "spa",
+        "wellness",
+        "clinic",
+        "charity",
+        "non profit",
+        "luxury",
+        "insurance",
+    ]
+    if _matches_keywords(category, marketing_category_terms):
+        return True
     dashboard_terms = ["dashboard", "analytics", "admin", "monitor", "reporting", "data view", "bi/analytics"]
     if _matches_keywords(combined, dashboard_terms):
         return False
@@ -242,17 +257,19 @@ class DesignSystemGenerator:
         query_lower = query.lower()
         query_tokens = set(re.findall(r"[a-z0-9][a-z0-9.+-]*", query_lower))
         strong_signals = [
-            ("Analytics Dashboard", {"analytics", "dashboard", "reporting", "bi", "data", "panel", "admin"}),
-            ("Fintech", {"fintech", "finance", "banking", "payment", "trading", "crypto"}),
-            ("Healthcare", {"healthcare", "medical", "clinic", "hospital", "patient"}),
+            ("Fintech/Crypto", {"fintech", "finance", "banking", "payment", "trading", "crypto"}),
+            ("Healthcare App", {"healthcare", "medical", "clinic", "hospital", "patient"}),
             ("E-commerce", {"ecommerce", "e-commerce", "commerce", "store", "shop", "retail"}),
+            ("Analytics Dashboard", {"analytics", "dashboard", "reporting", "bi", "data", "panel", "admin"}),
         ]
 
         for category_name, signals in strong_signals:
             if query_tokens.intersection(signals):
                 for row in product_results:
-                    if row.get("Product Type", "").lower() == category_name.lower():
-                        return row.get("Product Type", category_name)
+                    row_type = row.get("Product Type", "")
+                    if row_type.lower() == category_name.lower():
+                        return row_type
+                return category_name
 
         best_row = product_results[0]
         best_score = -1
@@ -333,6 +350,12 @@ class DesignSystemGenerator:
         selected_cta = ""
         selected_color_strategy = ""
         selected_conversion = ""
+
+        if not best_landing and use_landing_pattern(category, best_style.get("Style Category", ""), query):
+            pattern_search = search(selected_pattern, "landing", 1)
+            pattern_results = self._extract_results(pattern_search)
+            if pattern_results:
+                best_landing = pattern_results[0]
 
         if best_landing and use_landing_pattern(category, best_style.get("Style Category", ""), query):
             selected_pattern = best_landing.get("Pattern Name", selected_pattern)
