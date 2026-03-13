@@ -67,6 +67,8 @@ def slugify_name(value: str, default: str = "default") -> str:
 
 def validate_persist_segment(value: str, label: str) -> str:
     """Reject traversal-like input before converting it into a safe slug."""
+    if not value or not value.strip():
+        raise ValueError(f"{label} must not be empty or whitespace-only")
     if any(sep in value for sep in ("/", "\\")) or ".." in value:
         raise ValueError(f"{label} must not contain path separators or '..'")
     return slugify_name(value)
@@ -199,14 +201,48 @@ class DesignSystemGenerator:
         """Extract results list from search result dict."""
         return search_result.get("results", [])
 
+    def _select_product_category(self, query: str, product_results: list) -> str:
+        """Select the best-matching product category instead of trusting the first BM25 row blindly."""
+        if not product_results:
+            return "General"
+
+        query_lower = query.lower()
+        query_tokens = set(re.findall(r"[a-z0-9][a-z0-9.+-]*", query_lower))
+        strong_signals = [
+            ("Analytics Dashboard", {"analytics", "dashboard", "reporting", "bi", "data", "panel", "admin"}),
+            ("Fintech", {"fintech", "finance", "banking", "payment", "trading", "crypto"}),
+            ("Healthcare", {"healthcare", "medical", "clinic", "hospital", "patient"}),
+            ("E-commerce", {"ecommerce", "e-commerce", "commerce", "store", "shop", "retail"}),
+        ]
+
+        for category_name, signals in strong_signals:
+            if query_tokens.intersection(signals):
+                for row in product_results:
+                    if row.get("Product Type", "").lower() == category_name.lower():
+                        return row.get("Product Type", category_name)
+
+        best_row = product_results[0]
+        best_score = -1
+        for row in product_results:
+            haystack = " ".join(str(value).lower() for value in row.values())
+            score = 0
+            for token in query_tokens:
+                if token and token in haystack:
+                    score += 1
+            if row.get("Product Type", "").lower() in query_lower:
+                score += 2
+            if score > best_score:
+                best_score = score
+                best_row = row
+
+        return best_row.get("Product Type", "General")
+
     def generate(self, query: str, project_name: str = None) -> dict:
         """Generate complete design system recommendation."""
         # Step 1: First search product to get category
-        product_result = search(query, "product", 1)
+        product_result = search(query, "product", 3)
         product_results = product_result.get("results", [])
-        category = "General"
-        if product_results:
-            category = product_results[0].get("Product Type", "General")
+        category = self._select_product_category(query, product_results)
 
         # Step 2: Get reasoning rules for this category
         reasoning = self._apply_reasoning(category, {})

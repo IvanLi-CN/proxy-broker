@@ -141,6 +141,8 @@ None
 - merge-proof 四轮修复：`home/homepage` 改为先按显式 query 意图判页型，避免被 style fallback 抢先带成 dashboard；当 landing override 没命中 `landing.csv` 时，回退复用主设计系统 pattern 的 sections/CTA/color strategy。
 - merge-proof 五轮修复：landing 回退仅对真正的 landing 页面生效，避免 `General` 页面被写成 Hero/CTA 营销结构；ASCII 包装逻辑新增超长 token 硬切分，并让 `--design-system --json` 返回结构化 payload（含 persist 结果）。
 - merge-proof 六轮修复：非 landing 设计系统不再默认写入 `Hero > Features > CTA`；auth/settings override 改为优先使用页面自身查询上下文，避免被项目级 dashboard 风格污染；`MASTER.md` 组件示例改为复用实际生成的 palette token。
+- merge-proof 七轮修复：产品类别不再盲信 product 搜索首条结果，domain 自动识别改成基于 token/短语匹配避免 `toolbar -> bar chart` 误判，并禁止空白 project/page 名静默落到 `default` 持久化路径。
+- merge-proof 七轮补充：设计系统入口对 `product` 域改为至少读取前 3 条候选结果后再重排，避免强信号查询仍因为只取首条结果而失去分类纠偏机会。
 
 ## 计划资产（Plan assets）
 
@@ -192,6 +194,8 @@ None
 - 2026-03-13: 根据 merge-proof 四轮修复 `home/homepage` 的 page-type 优先级，并为未命中 landing CSV 的 landing override 增加主 pattern 回退。
 - 2026-03-13: 根据 merge-proof 五轮修复 General 页面误注入 landing 结构、ASCII 长 token 溢出，以及 design-system 分支忽略 `--json` 的问题。
 - 2026-03-13: 根据 merge-proof 六轮修复非 landing pattern 的营销结构默认值、auth/settings 的项目查询词污染，以及 `MASTER.md` 组件示例中的浅色硬编码问题。
+- 2026-03-13: 根据 merge-proof 七轮修复产品类别首条命中偏差、domain 子串误判，以及空白持久化 slug 被静默写入 `default` 的问题。
+- 2026-03-13: 根据 merge-proof 七轮补充，把 design-system 的 product 搜索从只读 1 条扩展为读取前 3 条后再选择分类。
 
 ## 参考（References）
 
