@@ -126,9 +126,9 @@ test.beforeEach(async ({ page }) => {
 
 test("operator can drive the main workflows", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByText("Operations Console")).toBeVisible();
+  await expect(page.getByText("Operator console")).toBeVisible();
   await expect(page.getByText("Local API")).toBeVisible();
-  await expect(page.getByText("Polled from /healthz")).toBeVisible();
+  await expect(page.getByText("Polled from /healthz", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: /load subscription/i }).click();
   await expect(page.getByText("Loaded 48 proxies across 26 distinct IPs.")).toBeVisible();
