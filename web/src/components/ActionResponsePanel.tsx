@@ -31,9 +31,7 @@ export function ActionResponsePanel({
           "border-amber-500/25 bg-amber-500/[0.1] text-amber-950 dark:text-amber-50",
       )}
     >
-      <div className="flex size-9 items-center justify-center rounded-full border border-current/12 bg-background/70">
-        <Icon className="size-4" />
-      </div>
+      <Icon className="size-4" />
       <AlertTitle className="text-sm font-semibold tracking-tight">{title}</AlertTitle>
       <AlertDescription className="space-y-3 text-sm leading-6">
         <p>{description}</p>

@@ -13,7 +13,10 @@ const getErrorMessage = (error: unknown) =>
 
 export function IpExtractRoute() {
   const { profileId } = useOutletContext<RootOutletContext>();
-  const [lastRequest, setLastRequest] = useState<ExtractIpRequest | null>(null);
+  const [lastRequestByProfile, setLastRequestByProfile] = useState<
+    Record<string, ExtractIpRequest | null>
+  >({});
+
   const mutation = useMutation({
     mutationFn: (payload: Parameters<typeof api.extractIps>[1]) =>
       api.extractIps(profileId, payload),
@@ -27,9 +30,9 @@ export function IpExtractRoute() {
     <IpExtractPage
       error={mutation.isError ? getErrorMessage(mutation.error) : null}
       isPending={mutation.isPending}
-      lastRequest={lastRequest}
+      lastRequest={lastRequestByProfile[profileId] ?? null}
       onSubmit={async (payload) => {
-        setLastRequest(payload);
+        setLastRequestByProfile((current) => ({ ...current, [profileId]: payload }));
         await mutation.mutateAsync(payload);
       }}
       response={mutation.data ?? null}

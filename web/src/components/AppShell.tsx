@@ -129,7 +129,7 @@ export function AppShell({ profileId, onProfileIdChange, healthStatus, children 
                         <div className="mt-0.5 rounded-xl border border-sidebar-border/80 bg-background/70 p-2 text-sidebar-primary">
                           <item.icon className="size-4" />
                         </div>
-                        <div className="min-w-0 flex-1 space-y-1">
+                        <div className="min-w-0 flex-1 space-y-1 group-data-[collapsible=icon]:hidden">
                           <div className="flex items-center gap-2 text-sm font-semibold">
                             <span>{item.label}</span>
                             <ChevronRightIcon className="size-3.5 text-sidebar-foreground/45 transition-transform group-hover/nav:translate-x-0.5" />
