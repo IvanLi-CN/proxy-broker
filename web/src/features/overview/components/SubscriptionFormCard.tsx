@@ -1,5 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CableIcon, FileJsonIcon, Link2Icon } from "lucide-react";
+import { useEffect } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -24,12 +25,20 @@ const schema = z.object({
 });
 
 type FormValues = z.infer<typeof schema>;
+export type SubscriptionFormValues = FormValues;
+
+export const DEFAULT_SUBSCRIPTION_FORM_VALUES: SubscriptionFormValues = {
+  sourceType: "url",
+  sourceValue: "https://example.com/subscription.yaml",
+};
 
 interface SubscriptionFormCardProps {
   isPending: boolean;
   response?: LoadSubscriptionResponse | null;
   error?: string | null;
   onSubmit: (payload: LoadSubscriptionRequest) => void | Promise<void>;
+  initialValues?: SubscriptionFormValues;
+  onValuesChange?: (values: SubscriptionFormValues) => void;
 }
 
 export function SubscriptionFormCard({
@@ -37,15 +46,30 @@ export function SubscriptionFormCard({
   response,
   error,
   onSubmit,
+  initialValues = DEFAULT_SUBSCRIPTION_FORM_VALUES,
+  onValuesChange,
 }: SubscriptionFormCardProps) {
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: {
-      sourceType: "url",
-      sourceValue: "https://example.com/subscription.yaml",
-    },
+    defaultValues: initialValues,
   });
   const sourceType = form.watch("sourceType");
+
+  useEffect(() => {
+    if (JSON.stringify(form.getValues()) !== JSON.stringify(initialValues)) {
+      form.reset(initialValues);
+    }
+  }, [form, initialValues]);
+
+  useEffect(() => {
+    if (!onValuesChange) {
+      return;
+    }
+    const subscription = form.watch((values) => {
+      onValuesChange(values as SubscriptionFormValues);
+    });
+    return () => subscription.unsubscribe();
+  }, [form, onValuesChange]);
 
   return (
     <Card className="overflow-hidden border-border/70 bg-card/96 shadow-[0_24px_70px_-44px_rgba(15,23,42,0.55)]">

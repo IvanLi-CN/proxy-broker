@@ -1,5 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { PlusIcon, Rows4Icon, Trash2Icon } from "lucide-react";
+import { useEffect } from "react";
 import { Controller, useFieldArray, useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -35,10 +36,10 @@ const schema = z.object({
   requests: z.array(rowSchema).min(1),
 });
 
-type BatchRequestRow = z.infer<typeof rowSchema>;
-type FormValues = z.infer<typeof schema>;
+export type BatchRequestRow = z.infer<typeof rowSchema>;
+export type OpenBatchFormValues = z.infer<typeof schema>;
 
-const emptyRow = (): BatchRequestRow => ({
+export const emptyBatchRequestRow = (): BatchRequestRow => ({
   specifiedIp: "",
   desiredPort: "",
   countryCodes: "JP",
@@ -54,16 +55,44 @@ interface OpenBatchFormProps {
   response?: OpenBatchResponse | null;
   error?: string | null;
   onSubmit: (payload: OpenBatchRequest) => void | Promise<void>;
+  initialValues?: OpenBatchFormValues;
+  onValuesChange?: (values: OpenBatchFormValues) => void;
 }
 
-export function OpenBatchForm({ isPending, response, error, onSubmit }: OpenBatchFormProps) {
-  const form = useForm<FormValues>({
+export function OpenBatchForm({
+  isPending,
+  response,
+  error,
+  onSubmit,
+  initialValues = {
+    requests: [
+      emptyBatchRequestRow(),
+      { ...emptyBatchRequestRow(), desiredPort: "10081", cities: "Osaka" },
+    ],
+  },
+  onValuesChange,
+}: OpenBatchFormProps) {
+  const form = useForm<OpenBatchFormValues>({
     resolver: zodResolver(schema),
-    defaultValues: {
-      requests: [emptyRow(), { ...emptyRow(), desiredPort: "10081", cities: "Osaka" }],
-    },
+    defaultValues: initialValues,
   });
   const fieldArray = useFieldArray({ control: form.control, name: "requests" });
+
+  useEffect(() => {
+    if (JSON.stringify(form.getValues()) !== JSON.stringify(initialValues)) {
+      form.reset(initialValues);
+    }
+  }, [form, initialValues]);
+
+  useEffect(() => {
+    if (!onValuesChange) {
+      return;
+    }
+    const subscription = form.watch((values) => {
+      onValuesChange(values as OpenBatchFormValues);
+    });
+    return () => subscription.unsubscribe();
+  }, [form, onValuesChange]);
 
   return (
     <Card className="overflow-hidden border-border/70 bg-card/96 shadow-[0_24px_70px_-44px_rgba(15,23,42,0.55)]">
@@ -234,7 +263,11 @@ export function OpenBatchForm({ isPending, response, error, onSubmit }: OpenBatc
             ))}
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-[28px] border border-border/70 bg-[linear-gradient(135deg,rgba(59,130,246,0.08),rgba(20,184,166,0.06))] p-4">
-            <Button type="button" variant="outline" onClick={() => fieldArray.append(emptyRow())}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => fieldArray.append(emptyBatchRequestRow())}
+            >
               <PlusIcon />
               Add request row
             </Button>

@@ -18,6 +18,7 @@ const meta = {
     status: "ok",
     activeSessions: 2,
     hasWarnings: false,
+    initialized: true,
     loadedProxies: 48,
     refreshedIps: 26,
   },
@@ -32,6 +33,14 @@ export const WarningState: Story = {
   args: {
     hasWarnings: true,
     status: "stale",
+    refreshedIps: null,
+  },
+};
+
+export const UninitializedProject: Story = {
+  args: {
+    initialized: false,
+    loadedProxies: 0,
     refreshedIps: null,
   },
 };

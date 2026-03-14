@@ -96,6 +96,21 @@ pub struct ExtractIpResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListProfilesResponse {
+    pub profiles: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProfileSummaryResponse {
+    pub profile_id: String,
+    pub initialized: bool,
+    pub proxy_count: usize,
+    pub distinct_ip_count: usize,
+    pub session_count: usize,
+    pub probe_ip_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListSessionsResponse {
     pub sessions: Vec<SessionRecord>,
 }

@@ -33,6 +33,8 @@
 
 - `BrokerService`
   - `reconcile_startup_sessions()`
+  - `list_profiles()`
+  - `profile_summary(profile_id)`
   - `load_subscription(profile_id, source)`
   - `refresh(profile_id, request)`
   - `extract_ips(profile_id, request)`

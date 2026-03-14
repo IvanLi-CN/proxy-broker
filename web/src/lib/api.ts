@@ -3,6 +3,7 @@ import type {
   ExtractIpRequest,
   ExtractIpResponse,
   HealthResponse,
+  ListProfilesResponse,
   ListSessionsResponse,
   LoadSubscriptionRequest,
   LoadSubscriptionResponse,
@@ -10,6 +11,7 @@ import type {
   OpenBatchResponse,
   OpenSessionRequest,
   OpenSessionResponse,
+  ProfileSummaryResponse,
   RefreshRequest,
   RefreshResponse,
 } from "@/lib/types";
@@ -64,6 +66,9 @@ export { ApiError };
 
 export const api = {
   getHealth: () => request<HealthResponse>("/healthz"),
+  listProfiles: () => request<ListProfilesResponse>("/api/v1/profiles"),
+  getProfileSummary: (profileId: string) =>
+    request<ProfileSummaryResponse>(profilePath(profileId, "/summary")),
   listSessions: (profileId: string) =>
     request<ListSessionsResponse>(profilePath(profileId, "/sessions")),
   loadSubscription: (profileId: string, payload: LoadSubscriptionRequest) =>

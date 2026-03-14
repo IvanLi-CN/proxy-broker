@@ -64,6 +64,8 @@ curl http://127.0.0.1:8080/healthz
 
 ## REST API
 
+Project list endpoint: `GET http://127.0.0.1:8080/api/v1/profiles`
+Project summary endpoint: `GET http://127.0.0.1:8080/api/v1/profiles/{profile_id}/summary`
 Base path: `http://127.0.0.1:8080/api/v1/profiles/{profile_id}`
 
 ### Load subscription

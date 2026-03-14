@@ -15,5 +15,5 @@
 
 | ID   | Title | Status | Spec | Last | Notes |
 |-----:|-------|--------|------|------|-------|
-| s3zu5 | 管理台 UI 控制室重构 | PR 收敛完成 | `s3zu5-admin-ui-refresh/SPEC.md` | 2026-03-14 | PR #3 checks 与 review-loop 已清零，保持 API 合同不变 |
+| s3zu5 | 管理台 UI 控制室重构 | 部分完成（2/3） | `s3zu5-admin-ui-refresh/SPEC.md` | 2026-03-15 | 新增项目级 Profile 工作台、列表/摘要接口与本地工作台持久化，待本轮 PR 收敛 |
 | kgm4c | 安装 UI UX Pro Max Codex 项目技能 | 部分完成（2/3） | `kgm4c-install-ui-ux-pro-max-codex-skill/SPEC.md` | 2026-03-13 | 项目内 Codex skill 已安装，待 PR 收敛 |

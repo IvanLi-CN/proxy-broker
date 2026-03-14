@@ -18,6 +18,18 @@ const meta = {
   },
   args: {
     isPending: false,
+    initialized: true,
+    initializationLoading: false,
+    profileId: "default",
+    filtersFormValues: {
+      countryCodes: "JP, US",
+      cities: "Tokyo",
+      specifiedIps: "",
+      blacklistIps: "",
+      limit: "20",
+      sortMode: "lru",
+    },
+    onFormValuesChange: fn(),
     response: ipResultsFixture,
     error: null,
     lastRequest: {
@@ -46,5 +58,12 @@ export const ErrorState: Story = {
   args: {
     response: null,
     error: "ip_conflict_blacklist: the same IP appears in both include and blacklist lists",
+  },
+};
+
+export const UninitializedProject: Story = {
+  args: {
+    initialized: false,
+    response: null,
   },
 };

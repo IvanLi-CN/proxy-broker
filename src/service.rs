@@ -23,10 +23,10 @@ use crate::{
     },
     error::{BrokerError, BrokerResult},
     models::{
-        ExtractIpItem, ExtractIpRequest, ExtractIpResponse, IpRecord, ListSessionsResponse,
-        LoadSubscriptionResponse, OpenBatchRequest, OpenBatchResponse, OpenSessionRequest,
-        OpenSessionResponse, ProbeRecord, ProxyNode, RefreshRequest, RefreshResponse,
-        SessionRecord, now_epoch_sec,
+        ExtractIpItem, ExtractIpRequest, ExtractIpResponse, IpRecord, ListProfilesResponse,
+        ListSessionsResponse, LoadSubscriptionResponse, OpenBatchRequest, OpenBatchResponse,
+        OpenSessionRequest, OpenSessionResponse, ProbeRecord, ProfileSummaryResponse, ProxyNode,
+        RefreshRequest, RefreshResponse, SessionRecord, now_epoch_sec,
     },
     runtime::MihomoRuntime,
     store::BrokerStore,
@@ -132,6 +132,52 @@ impl BrokerService {
             }
         }
         Ok(())
+    }
+
+    pub async fn list_profiles(&self) -> BrokerResult<ListProfilesResponse> {
+        let profiles = self
+            .store
+            .list_profiles()
+            .await
+            .map_err(BrokerError::from)?;
+        Ok(ListProfilesResponse { profiles })
+    }
+
+    pub async fn profile_summary(&self, profile_id: &str) -> BrokerResult<ProfileSummaryResponse> {
+        let nodes = self
+            .store
+            .list_subscription(profile_id)
+            .await
+            .map_err(BrokerError::from)?;
+        let ip_records = self
+            .store
+            .list_ip_records(profile_id)
+            .await
+            .map_err(BrokerError::from)?;
+        let probe_records = self
+            .store
+            .list_probe_records(profile_id)
+            .await
+            .map_err(BrokerError::from)?;
+        let sessions = self
+            .store
+            .list_sessions(profile_id)
+            .await
+            .map_err(BrokerError::from)?;
+        let probe_ip_count = probe_records
+            .iter()
+            .map(|record| record.ip.as_str())
+            .collect::<HashSet<_>>()
+            .len();
+
+        Ok(ProfileSummaryResponse {
+            profile_id: profile_id.to_string(),
+            initialized: !nodes.is_empty(),
+            proxy_count: nodes.len(),
+            distinct_ip_count: ip_records.len(),
+            session_count: sessions.len(),
+            probe_ip_count,
+        })
     }
 
     async fn reconcile_profile_sessions(&self, profile_id: &str) -> BrokerResult<()> {
@@ -2037,6 +2083,98 @@ proxies:
             "unexpected error: {err:?}"
         );
         assert_eq!(runtime.apply_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn list_profiles_and_summary_reflect_store_state() {
+        let profile_id = "p-summary";
+        let store = Arc::new(MemoryStore::new());
+        store
+            .replace_subscription(
+                profile_id,
+                &[
+                    make_node("node-a", "1.1.1.1"),
+                    make_node("node-b", "2.2.2.2"),
+                ],
+            )
+            .await
+            .expect("seed subscription should succeed");
+        store
+            .replace_ip_records(
+                profile_id,
+                &[sample_ip("1.1.1.1", None), sample_ip("2.2.2.2", Some(99))],
+            )
+            .await
+            .expect("seed ip records should succeed");
+        store
+            .replace_probe_records(
+                profile_id,
+                &[
+                    ProbeRecord {
+                        proxy_name: "node-a".to_string(),
+                        ip: "1.1.1.1".to_string(),
+                        target_url: "https://example.com".to_string(),
+                        ok: true,
+                        latency_ms: Some(10),
+                        updated_at: 1,
+                    },
+                    ProbeRecord {
+                        proxy_name: "node-b".to_string(),
+                        ip: "2.2.2.2".to_string(),
+                        target_url: "https://example.com".to_string(),
+                        ok: true,
+                        latency_ms: Some(20),
+                        updated_at: 1,
+                    },
+                ],
+            )
+            .await
+            .expect("seed probe records should succeed");
+        store
+            .insert_session(profile_id, &make_session("s1", "node-a", "1.1.1.1", 1))
+            .await
+            .expect("seed session should succeed");
+
+        let service = BrokerService::new(
+            store,
+            Arc::new(TestRuntime::default()),
+            BrokerServiceOptions::default(),
+        );
+
+        let profiles = service
+            .list_profiles()
+            .await
+            .expect("list profiles should succeed");
+        assert_eq!(profiles.profiles, vec![profile_id.to_string()]);
+
+        let summary = service
+            .profile_summary(profile_id)
+            .await
+            .expect("summary should succeed");
+        assert!(summary.initialized);
+        assert_eq!(summary.proxy_count, 2);
+        assert_eq!(summary.distinct_ip_count, 2);
+        assert_eq!(summary.session_count, 1);
+        assert_eq!(summary.probe_ip_count, 2);
+    }
+
+    #[tokio::test]
+    async fn profile_summary_returns_empty_state_for_new_profile() {
+        let service = BrokerService::new(
+            Arc::new(MemoryStore::new()),
+            Arc::new(TestRuntime::default()),
+            BrokerServiceOptions::default(),
+        );
+
+        let summary = service
+            .profile_summary("brand-new")
+            .await
+            .expect("summary should succeed for empty profile");
+        assert!(!summary.initialized);
+        assert_eq!(summary.proxy_count, 0);
+        assert_eq!(summary.distinct_ip_count, 0);
+        assert_eq!(summary.session_count, 0);
+        assert_eq!(summary.probe_ip_count, 0);
     }
 
     fn sample_ip(ip: &str, last_used_at: Option<i64>) -> IpRecord {
