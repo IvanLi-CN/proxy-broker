@@ -92,7 +92,7 @@ export function SubscriptionFormCard({
             }),
           )}
         >
-          <div className="grid gap-4 rounded-[28px] border border-border/70 bg-background/80 p-4 md:grid-cols-[220px_1fr]">
+          <div className="grid gap-4 rounded-[28px] border border-border/70 bg-background/80 p-4 md:grid-cols-[minmax(280px,0.34fr)_minmax(0,1fr)]">
             <div className="space-y-2">
               <Label htmlFor="source-type">Source type</Label>
               <Controller
@@ -100,16 +100,16 @@ export function SubscriptionFormCard({
                 name="sourceType"
                 render={({ field }) => (
                   <Select onValueChange={field.onChange} value={field.value}>
-                    <SelectTrigger id="source-type" className="w-full bg-card">
+                    <SelectTrigger id="source-type" size="lg" className="w-full bg-card">
                       <SelectValue placeholder="Choose source type" />
                     </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="url">
+                    <SelectContent size="lg">
+                      <SelectItem size="lg" value="url">
                         <span className="flex items-center gap-2">
                           <Link2Icon className="size-4" /> URL
                         </span>
                       </SelectItem>
-                      <SelectItem value="file">
+                      <SelectItem size="lg" value="file">
                         <span className="flex items-center gap-2">
                           <FileJsonIcon className="size-4" /> File path
                         </span>
@@ -118,24 +118,25 @@ export function SubscriptionFormCard({
                   </Select>
                 )}
               />
-              <div className="rounded-2xl border border-dashed border-border/70 bg-muted/25 px-3 py-2 text-xs leading-5 text-muted-foreground">
+              <p className="min-h-12 text-xs leading-5 text-muted-foreground">
                 URL mode fetches remotely; file mode resolves from the Rust host filesystem.
-              </div>
+              </p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="source-value">Value</Label>
               <Input
                 id="source-value"
+                size="lg"
                 {...form.register("sourceValue")}
                 placeholder="https://example.com/subscription.yaml"
-                className="h-11 bg-card font-mono text-xs md:text-sm"
+                className="bg-card font-mono text-xs md:text-sm"
               />
               {form.formState.errors.sourceValue ? (
-                <p className="text-xs text-destructive" role="alert">
+                <p className="min-h-12 text-xs text-destructive" role="alert">
                   {form.formState.errors.sourceValue.message}
                 </p>
               ) : (
-                <p className="text-xs leading-5 text-muted-foreground">
+                <p className="min-h-12 text-xs leading-5 text-muted-foreground">
                   {sourceType === "url"
                     ? "Use the upstream subscription URL that the backend can fetch directly."
                     : "Provide a server-local path that the Rust process can read on disk."}
