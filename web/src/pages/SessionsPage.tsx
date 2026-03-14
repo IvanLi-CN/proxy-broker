@@ -47,7 +47,12 @@ export function SessionsPage({
   onOpenBatch,
   onCloseSession,
 }: SessionsPageProps) {
-  const newestListen = openResponse?.listen ?? batchResponse?.sessions[0]?.listen;
+  const newestSession = sessions.reduce<SessionRecord | null>(
+    (latest, session) =>
+      latest && latest.created_at > session.created_at ? latest : session,
+    null,
+  );
+  const newestListen = newestSession?.listen ?? null;
 
   return (
     <div className="space-y-8">

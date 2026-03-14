@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
 import { useOutletContext } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -45,6 +46,12 @@ export function SessionsRoute() {
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   });
+
+  useEffect(() => {
+    openMutation.reset();
+    batchMutation.reset();
+    closeMutation.reset();
+  }, [profileId]);
 
   return (
     <SessionsPage
