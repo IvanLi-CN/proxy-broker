@@ -1,5 +1,4 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef } from "react";
 import { useOutletContext } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -11,77 +10,112 @@ const getErrorMessage = (error: unknown) =>
   error instanceof ApiError ? `${error.code}: ${error.message}` : "Unexpected request error";
 
 export function SessionsRoute() {
-  const { profileId } = useOutletContext<RootOutletContext>();
-  const previousProfileId = useRef(profileId);
+  const {
+    profileId,
+    profileSummary,
+    profileSummaryLoading,
+    sessionsWorkspace,
+    updateSessionsWorkspace,
+    writeSessionsWorkspace,
+  } = useOutletContext<RootOutletContext>();
   const queryClient = useQueryClient();
   const sessionsQuery = useQuery({
     queryKey: ["sessions", profileId],
     queryFn: () => api.listSessions(profileId),
+    enabled: profileSummary?.initialized !== false,
     refetchInterval: 5_000,
   });
 
   const openMutation = useMutation({
-    mutationFn: (payload: Parameters<typeof api.openSession>[1]) =>
-      api.openSession(profileId, payload),
-    onSuccess: async (data) => {
+    mutationFn: ({
+      profileId: requestedProfileId,
+      payload,
+    }: {
+      profileId: string;
+      payload: Parameters<typeof api.openSession>[1];
+    }) => api.openSession(requestedProfileId, payload),
+    onSuccess: async (data, { profileId: requestedProfileId }) => {
+      writeSessionsWorkspace(requestedProfileId, (current) => ({ ...current, openResponse: data }));
       toast.success(`Opened ${data.listen}`);
-      await queryClient.invalidateQueries({ queryKey: ["sessions", profileId] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["sessions", requestedProfileId] }),
+        queryClient.invalidateQueries({ queryKey: ["profile-summary", requestedProfileId] }),
+      ]);
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   });
 
   const batchMutation = useMutation({
-    mutationFn: (payload: Parameters<typeof api.openBatch>[1]) => api.openBatch(profileId, payload),
-    onSuccess: async (data) => {
+    mutationFn: ({
+      profileId: requestedProfileId,
+      payload,
+    }: {
+      profileId: string;
+      payload: Parameters<typeof api.openBatch>[1];
+    }) => api.openBatch(requestedProfileId, payload),
+    onSuccess: async (data, { profileId: requestedProfileId }) => {
+      writeSessionsWorkspace(requestedProfileId, (current) => ({
+        ...current,
+        batchResponse: data,
+      }));
       toast.success(`Opened ${data.sessions.length} sessions in batch`);
-      await queryClient.invalidateQueries({ queryKey: ["sessions", profileId] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["sessions", requestedProfileId] }),
+        queryClient.invalidateQueries({ queryKey: ["profile-summary", requestedProfileId] }),
+      ]);
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   });
 
   const closeMutation = useMutation({
-    mutationFn: (sessionId: string) => api.closeSession(profileId, sessionId),
-    onSuccess: async (_, sessionId) => {
+    mutationFn: ({
+      profileId: requestedProfileId,
+      sessionId,
+    }: {
+      profileId: string;
+      sessionId: string;
+    }) => api.closeSession(requestedProfileId, sessionId),
+    onSuccess: async (_, { profileId: requestedProfileId, sessionId }) => {
       toast.success(`Closed ${sessionId}`);
-      await queryClient.invalidateQueries({ queryKey: ["sessions", profileId] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["sessions", requestedProfileId] }),
+        queryClient.invalidateQueries({ queryKey: ["profile-summary", requestedProfileId] }),
+      ]);
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   });
 
-  const { reset: resetOpenMutation } = openMutation;
-  const { reset: resetBatchMutation } = batchMutation;
-  const { reset: resetCloseMutation } = closeMutation;
-
-  useEffect(() => {
-    if (previousProfileId.current === profileId) {
-      return;
-    }
-    previousProfileId.current = profileId;
-    resetOpenMutation();
-    resetBatchMutation();
-    resetCloseMutation();
-  }, [profileId, resetOpenMutation, resetBatchMutation, resetCloseMutation]);
-
   return (
     <SessionsPage
       batchError={batchMutation.isError ? getErrorMessage(batchMutation.error) : null}
+      batchFormValues={sessionsWorkspace.batchForm}
       batchOpening={batchMutation.isPending}
-      batchResponse={batchMutation.data ?? null}
-      closingSessionId={closeMutation.isPending ? closeMutation.variables : null}
+      batchResponse={sessionsWorkspace.batchResponse}
+      closingSessionId={closeMutation.isPending ? closeMutation.variables?.sessionId : null}
+      initialized={profileSummary?.initialized ?? false}
+      initializationLoading={profileSummaryLoading}
+      onBatchFormValuesChange={(values) =>
+        updateSessionsWorkspace((current) => ({ ...current, batchForm: values }))
+      }
       onCloseSession={async (sessionId) => {
-        await closeMutation.mutateAsync(sessionId);
+        await closeMutation.mutateAsync({ profileId, sessionId });
       }}
       onOpenBatch={async (payload) => {
-        await batchMutation.mutateAsync(payload);
+        await batchMutation.mutateAsync({ profileId, payload });
       }}
       onOpenSession={async (payload) => {
-        await openMutation.mutateAsync(payload);
+        await openMutation.mutateAsync({ profileId, payload });
       }}
+      onOpenFormValuesChange={(values) =>
+        updateSessionsWorkspace((current) => ({ ...current, openForm: values }))
+      }
       openError={openMutation.isError ? getErrorMessage(openMutation.error) : null}
-      openResponse={openMutation.data ?? null}
+      openFormValues={sessionsWorkspace.openForm}
+      openResponse={sessionsWorkspace.openResponse}
       opening={openMutation.isPending}
-      sessions={sessionsQuery.data?.sessions ?? []}
-      sessionsLoading={sessionsQuery.isLoading}
+      profileId={profileId}
+      sessions={profileSummary?.initialized === false ? [] : (sessionsQuery.data?.sessions ?? [])}
+      sessionsLoading={profileSummaryLoading || sessionsQuery.isLoading || sessionsQuery.isFetching}
     />
   );
 }

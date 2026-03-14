@@ -4,13 +4,14 @@ import {
   CommandIcon,
   GlobeIcon,
   LayoutDashboardIcon,
+  LoaderCircleIcon,
   RadioTowerIcon,
   RouteIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { NavLink } from "react-router-dom";
 
-import { ProfileSwitcher } from "@/components/ProfileSwitcher";
+import { ProfilePicker } from "@/components/ProfilePicker";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -34,8 +35,12 @@ import { cn } from "@/lib/utils";
 
 interface AppShellProps {
   profileId: string;
-  onProfileIdChange: (value: string) => void;
+  knownProfiles: string[];
+  recentProfileIds: string[];
+  onProfileIdChange: (value: string) => boolean | undefined;
   healthStatus: string;
+  profileLoading?: boolean;
+  profilesLoading?: boolean;
   children?: ReactNode;
 }
 
@@ -60,7 +65,16 @@ const navItems = [
   },
 ];
 
-export function AppShell({ profileId, onProfileIdChange, healthStatus, children }: AppShellProps) {
+export function AppShell({
+  profileId,
+  knownProfiles,
+  recentProfileIds,
+  onProfileIdChange,
+  healthStatus,
+  profileLoading = false,
+  profilesLoading = false,
+  children,
+}: AppShellProps) {
   const isHealthy = (healthStatus ?? "").toLowerCase() === "ok";
 
   return (
@@ -105,7 +119,15 @@ export function AppShell({ profileId, onProfileIdChange, healthStatus, children 
               </Badge>
             </div>
           </div>
-          <ProfileSwitcher profileId={profileId} onProfileIdChange={onProfileIdChange} />
+          <ProfilePicker
+            activeProfileId={profileId}
+            profiles={knownProfiles}
+            recentProfileIds={recentProfileIds}
+            isLoading={profilesLoading}
+            isSwitching={profileLoading}
+            onSelectProfileId={onProfileIdChange}
+            onCreateProfileId={onProfileIdChange}
+          />
         </SidebarHeader>
         <SidebarContent className="px-2 py-4">
           <SidebarGroup>
@@ -209,6 +231,15 @@ export function AppShell({ profileId, onProfileIdChange, healthStatus, children 
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {profileLoading ? (
+              <Badge
+                variant="outline"
+                className="rounded-full bg-background/80 px-3 py-1 font-mono text-[11px] uppercase tracking-[0.18em]"
+              >
+                <LoaderCircleIcon className="mr-1 size-3.5 animate-spin" />
+                loading workspace
+              </Badge>
+            ) : null}
             <Badge
               variant="outline"
               className="rounded-full bg-background/80 px-3 py-1 font-mono text-[11px] uppercase tracking-[0.18em]"

@@ -68,6 +68,19 @@ export interface ExtractIpResponse {
   items: ExtractIpItem[];
 }
 
+export interface ListProfilesResponse {
+  profiles: string[];
+}
+
+export interface ProfileSummaryResponse {
+  profile_id: string;
+  initialized: boolean;
+  proxy_count: number;
+  distinct_ip_count: number;
+  session_count: number;
+  probe_ip_count: number;
+}
+
 export interface SessionRecord {
   session_id: string;
   listen: string;

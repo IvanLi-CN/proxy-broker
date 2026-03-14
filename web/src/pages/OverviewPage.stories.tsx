@@ -24,8 +24,19 @@ const meta = {
   args: {
     health: healthFixture,
     activeSessions: sessionsFixture.sessions.length,
+    initialized: true,
+    initializationLoading: false,
+    profileId: "default",
+    poolInventory: subscriptionFixture.loaded_proxies,
+    subscriptionFormValues: {
+      sourceType: "url",
+      sourceValue: "https://example.com/subscription.yaml",
+    },
+    onSubscriptionFormValuesChange: fn(),
     loadResponse: subscriptionFixture,
     loadError: null,
+    refreshFormValues: { force: false },
+    onRefreshFormValuesChange: fn(),
     refreshResponse: refreshFixture,
     refreshError: null,
     loadingSubscription: false,
@@ -52,6 +63,15 @@ export const ErrorState: Story = {
 export const QuietState: Story = {
   args: {
     activeSessions: 0,
+    loadResponse: null,
+    refreshResponse: null,
+  },
+};
+
+export const UninitializedProject: Story = {
+  args: {
+    initialized: false,
+    poolInventory: 0,
     loadResponse: null,
     refreshResponse: null,
   },

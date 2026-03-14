@@ -1,10 +1,8 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useOutletContext } from "react-router-dom";
 import { toast } from "sonner";
 
 import { ApiError, api } from "@/lib/api";
-import type { LoadSubscriptionResponse, RefreshResponse } from "@/lib/types";
 import { OverviewPage } from "@/pages/OverviewPage";
 import type { RootOutletContext } from "@/routes/RootRoute";
 
@@ -12,23 +10,19 @@ const getErrorMessage = (error: unknown) =>
   error instanceof ApiError ? `${error.code}: ${error.message}` : "Unexpected request error";
 
 export function OverviewRoute() {
-  const { profileId } = useOutletContext<RootOutletContext>();
-  const previousProfileId = useRef(profileId);
-  const [loadResponseByProfile, setLoadResponseByProfile] = useState<
-    Record<string, LoadSubscriptionResponse | null>
-  >({});
-  const [refreshResponseByProfile, setRefreshResponseByProfile] = useState<
-    Record<string, RefreshResponse | null>
-  >({});
+  const {
+    profileId,
+    profileSummary,
+    profileSummaryLoading,
+    overviewWorkspace,
+    updateOverviewWorkspace,
+    writeOverviewWorkspace,
+  } = useOutletContext<RootOutletContext>();
+  const queryClient = useQueryClient();
   const healthQuery = useQuery({
     queryKey: ["health"],
     queryFn: api.getHealth,
     refetchInterval: 10_000,
-  });
-  const sessionsQuery = useQuery({
-    queryKey: ["sessions", profileId],
-    queryFn: () => api.listSessions(profileId),
-    refetchInterval: 5_000,
   });
 
   const loadMutation = useMutation({
@@ -39,9 +33,13 @@ export function OverviewRoute() {
       profileId: string;
       payload: Parameters<typeof api.loadSubscription>[1];
     }) => api.loadSubscription(requestedProfileId, payload),
-    onSuccess: (data, { profileId: requestedProfileId }) => {
-      setLoadResponseByProfile((current) => ({ ...current, [requestedProfileId]: data }));
+    onSuccess: async (data, { profileId: requestedProfileId }) => {
+      writeOverviewWorkspace(requestedProfileId, (current) => ({ ...current, loadResponse: data }));
       toast.success(`Loaded ${data.loaded_proxies} proxies for ${requestedProfileId}`);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["profiles"] }),
+        queryClient.invalidateQueries({ queryKey: ["profile-summary", requestedProfileId] }),
+      ]);
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   });
@@ -54,31 +52,25 @@ export function OverviewRoute() {
       profileId: string;
       payload: Parameters<typeof api.refreshProfile>[1];
     }) => api.refreshProfile(requestedProfileId, payload),
-    onSuccess: (data, { profileId: requestedProfileId }) => {
-      setRefreshResponseByProfile((current) => ({ ...current, [requestedProfileId]: data }));
+    onSuccess: async (data, { profileId: requestedProfileId }) => {
+      writeOverviewWorkspace(requestedProfileId, (current) => ({
+        ...current,
+        refreshResponse: data,
+      }));
       toast.success(`Refreshed ${data.probed_ips} probe entries`);
+      await queryClient.invalidateQueries({ queryKey: ["profile-summary", requestedProfileId] });
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   });
 
-  const { reset: resetLoadMutation } = loadMutation;
-  const { reset: resetRefreshMutation } = refreshMutation;
-
-  useEffect(() => {
-    if (previousProfileId.current === profileId) {
-      return;
-    }
-    previousProfileId.current = profileId;
-    resetLoadMutation();
-    resetRefreshMutation();
-  }, [profileId, resetLoadMutation, resetRefreshMutation]);
-
   return (
     <OverviewPage
-      activeSessions={sessionsQuery.data?.sessions.length ?? 0}
+      activeSessions={profileSummary?.session_count ?? 0}
       health={healthQuery.data ?? { status: "checking" }}
+      initialized={profileSummary?.initialized ?? false}
+      initializationLoading={profileSummaryLoading}
       loadError={loadMutation.isError ? getErrorMessage(loadMutation.error) : null}
-      loadResponse={loadResponseByProfile[profileId] ?? null}
+      loadResponse={overviewWorkspace.loadResponse}
       loadingSubscription={loadMutation.isPending}
       onLoadSubscription={async (payload) => {
         await loadMutation.mutateAsync({ profileId, payload });
@@ -86,9 +78,21 @@ export function OverviewRoute() {
       onRefresh={async (payload) => {
         await refreshMutation.mutateAsync({ profileId, payload });
       }}
+      poolInventory={
+        profileSummary?.proxy_count ?? overviewWorkspace.loadResponse?.loaded_proxies ?? null
+      }
+      profileId={profileId}
       refreshError={refreshMutation.isError ? getErrorMessage(refreshMutation.error) : null}
-      refreshResponse={refreshResponseByProfile[profileId] ?? null}
+      refreshResponse={overviewWorkspace.refreshResponse}
       refreshing={refreshMutation.isPending}
+      subscriptionFormValues={overviewWorkspace.subscriptionForm}
+      onSubscriptionFormValuesChange={(values) =>
+        updateOverviewWorkspace((current) => ({ ...current, subscriptionForm: values }))
+      }
+      refreshFormValues={overviewWorkspace.refreshForm}
+      onRefreshFormValuesChange={(values) =>
+        updateOverviewWorkspace((current) => ({ ...current, refreshForm: values }))
+      }
     />
   );
 }

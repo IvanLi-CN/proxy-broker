@@ -225,6 +225,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn profiles_api_route_is_not_shadowed_by_spa_fallback() {
+        let response = test_router()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/profiles")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("router should respond");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "application/json"
+        );
+    }
+
+    #[tokio::test]
+    async fn profile_summary_api_route_is_not_shadowed_by_spa_fallback() {
+        let response = test_router()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/profiles/default/summary")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("router should respond");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "application/json"
+        );
+    }
+
+    #[tokio::test]
     async fn non_get_requests_do_not_receive_spa_fallback() {
         let response = spa_fallback(Method::POST, Uri::from_static("/sessions")).await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND);

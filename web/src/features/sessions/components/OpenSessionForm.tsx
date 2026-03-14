@@ -1,5 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CableCarIcon } from "lucide-react";
+import { useEffect } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -32,8 +33,9 @@ const schema = z.object({
 });
 
 type FormValues = z.infer<typeof schema>;
+export type OpenSessionFormValues = FormValues;
 
-const defaultValues: FormValues = {
+export const DEFAULT_OPEN_SESSION_FORM_VALUES: OpenSessionFormValues = {
   specifiedIp: "",
   desiredPort: "10080",
   countryCodes: "JP",
@@ -49,13 +51,38 @@ interface OpenSessionFormProps {
   response?: OpenSessionResponse | null;
   error?: string | null;
   onSubmit: (payload: OpenSessionRequest) => void | Promise<void>;
+  initialValues?: OpenSessionFormValues;
+  onValuesChange?: (values: OpenSessionFormValues) => void;
 }
 
-export function OpenSessionForm({ isPending, response, error, onSubmit }: OpenSessionFormProps) {
+export function OpenSessionForm({
+  isPending,
+  response,
+  error,
+  onSubmit,
+  initialValues = DEFAULT_OPEN_SESSION_FORM_VALUES,
+  onValuesChange,
+}: OpenSessionFormProps) {
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues,
+    defaultValues: initialValues,
   });
+
+  useEffect(() => {
+    if (JSON.stringify(form.getValues()) !== JSON.stringify(initialValues)) {
+      form.reset(initialValues);
+    }
+  }, [form, initialValues]);
+
+  useEffect(() => {
+    if (!onValuesChange) {
+      return;
+    }
+    const subscription = form.watch((values) => {
+      onValuesChange(values as OpenSessionFormValues);
+    });
+    return () => subscription.unsubscribe();
+  }, [form, onValuesChange]);
 
   return (
     <Card className="overflow-hidden border-border/70 bg-card/96 shadow-[0_24px_70px_-44px_rgba(15,23,42,0.55)]">

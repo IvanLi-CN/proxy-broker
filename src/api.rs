@@ -26,9 +26,14 @@ pub struct AppState {
 pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
+        .route("/api/v1/profiles", get(list_profiles))
         .route(
             "/api/v1/profiles/{profile_id}/subscriptions/load",
             post(load_subscription),
+        )
+        .route(
+            "/api/v1/profiles/{profile_id}/summary",
+            get(profile_summary),
         )
         .route(
             "/api/v1/profiles/{profile_id}/refresh",
@@ -71,6 +76,21 @@ async fn load_subscription(
         .service
         .load_subscription(&profile_id, &request.source)
         .await?;
+    Ok(Json(resp))
+}
+
+async fn list_profiles(
+    State(state): State<AppState>,
+) -> Result<Json<crate::models::ListProfilesResponse>, BrokerError> {
+    let resp = state.service.list_profiles().await?;
+    Ok(Json(resp))
+}
+
+async fn profile_summary(
+    State(state): State<AppState>,
+    Path(profile_id): Path<String>,
+) -> Result<Json<crate::models::ProfileSummaryResponse>, BrokerError> {
+    let resp = state.service.profile_summary(&profile_id).await?;
     Ok(Json(resp))
 }
 

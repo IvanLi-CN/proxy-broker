@@ -40,24 +40,32 @@ separate Vite and Storybook workflow for local development.
 
 - `/`
   - service health card
-  - profile selector
+  - project picker (known profiles dropdown + new ID confirmation)
+  - project summary hydration and uninitialized guidance
   - subscription load form (`url` or server-side file path)
   - refresh card and latest refresh summary
 - `/ips`
   - extract filter form
   - extracted IP table with geo/probe metadata
+  - uninitialized-project guidance back to Overview
 - `/sessions`
   - single open form
   - batch open form
   - active sessions table with close action
+  - uninitialized-project guidance back to Overview
 
 ### Persistence
 
-- The browser stores only UI-local preferences:
-  - last used `profile_id`
-  - last selected source type
-  - last used extract presets if implemented as convenience state
-- No client-side authoritative data cache beyond TanStack Query.
+- The browser stores UI-local project workspace state in localStorage:
+  - active `profile_id`
+  - recent profile list
+  - overview subscription/refresh form drafts and latest successful responses
+  - IP extract form draft, latest successful request, and latest successful result
+  - session open/batch form drafts and latest successful responses
+- Historical error banners and failed responses are not restored across project
+  switches.
+- No client-side authoritative data cache beyond TanStack Query and the browser
+  workspace cache above.
 
 ## Component Boundaries
 

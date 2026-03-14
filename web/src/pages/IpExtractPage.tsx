@@ -1,17 +1,25 @@
 import { RadarIcon, ScanSearchIcon } from "lucide-react";
+import { Link } from "react-router-dom";
 
 import { ActionResponsePanel } from "@/components/ActionResponsePanel";
 import { DataTablePanel } from "@/components/DataTablePanel";
+import { EmptyPanel } from "@/components/EmptyPanel";
 import { RouteHero } from "@/components/RouteHero";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { WorkflowRail } from "@/components/WorkflowRail";
-import { IpFiltersForm } from "@/features/ips/components/IpFiltersForm";
+import { IpFiltersForm, type IpFiltersFormValues } from "@/features/ips/components/IpFiltersForm";
 import { IpResultsTable } from "@/features/ips/components/IpResultsTable";
 import type { ExtractIpRequest, ExtractIpResponse } from "@/lib/types";
 
 interface IpExtractPageProps {
   isPending: boolean;
+  initialized: boolean;
+  initializationLoading: boolean;
+  profileId: string;
+  filtersFormValues: IpFiltersFormValues;
+  onFormValuesChange: (values: IpFiltersFormValues) => void;
   response?: ExtractIpResponse | null;
   error?: string | null;
   lastRequest?: ExtractIpRequest | null;
@@ -52,6 +60,11 @@ function summarizeRequest(request?: ExtractIpRequest | null, count = 0) {
 
 export function IpExtractPage({
   isPending,
+  initialized,
+  initializationLoading,
+  profileId,
+  filtersFormValues,
+  onFormValuesChange,
   response,
   error,
   lastRequest,
@@ -71,8 +84,12 @@ export function IpExtractPage({
             tone: resultCount > 0 ? "positive" : "neutral",
           },
           {
-            label: isPending ? "extract running" : "ready for request",
-            tone: isPending ? "warning" : "positive",
+            label: initializationLoading
+              ? `loading ${profileId}`
+              : initialized
+                ? "workspace ready"
+                : "needs subscription",
+            tone: initializationLoading ? "warning" : initialized ? "positive" : "warning",
           },
           {
             label: error ? "request error" : "no active error",
@@ -103,9 +120,23 @@ export function IpExtractPage({
         }
       />
 
+      {!initializationLoading && !initialized ? (
+        <EmptyPanel
+          title="Project not initialized"
+          description="Load a subscription on the Overview page before you try to extract a shortlist for this project."
+          icon={RadarIcon}
+          hint="This page will restore your saved filter draft, but it needs a backend pool before any request can return rows."
+        />
+      ) : null}
+
       <section className="grid gap-6 xl:grid-cols-[420px_minmax(0,1fr)]">
         <div className="space-y-6">
-          <IpFiltersForm isPending={isPending} onSubmit={onSubmit} />
+          <IpFiltersForm
+            initialValues={filtersFormValues}
+            isPending={isPending || !initialized}
+            onSubmit={onSubmit}
+            onValuesChange={onFormValuesChange}
+          />
           <Card className="border-border/70 bg-card/96 shadow-[0_20px_60px_-42px_rgba(15,23,42,0.5)]">
             <CardHeader className="space-y-3 border-b border-border/70 pb-5">
               <div className="text-[11px] font-semibold uppercase tracking-[0.32em] text-primary/80">
@@ -130,6 +161,11 @@ export function IpExtractPage({
               >
                 mobile tables scroll horizontally
               </Badge>
+              {!initialized ? (
+                <Button asChild variant="outline" className="w-full justify-center">
+                  <Link to="/">Go load a subscription</Link>
+                </Button>
+              ) : null}
             </CardContent>
           </Card>
         </div>
@@ -158,7 +194,10 @@ export function IpExtractPage({
                 <RadarIcon className="size-4 text-primary" />
                 Candidate table
               </div>
-              <IpResultsTable items={response?.items ?? []} isLoading={isPending} />
+              <IpResultsTable
+                items={response?.items ?? []}
+                isLoading={isPending || initializationLoading}
+              />
             </div>
           </DataTablePanel>
         </div>

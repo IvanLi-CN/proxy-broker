@@ -19,6 +19,35 @@ const meta = {
   args: {
     sessions: sessionsFixture.sessions,
     sessionsLoading: false,
+    initialized: true,
+    initializationLoading: false,
+    profileId: "default",
+    openFormValues: {
+      specifiedIp: "",
+      desiredPort: "10080",
+      countryCodes: "JP",
+      cities: "",
+      selectorSpecifiedIps: "",
+      blacklistIps: "",
+      limit: "1",
+      sortMode: "lru",
+    },
+    onOpenFormValuesChange: fn(),
+    batchFormValues: {
+      requests: [
+        {
+          specifiedIp: "",
+          desiredPort: "10080",
+          countryCodes: "JP",
+          cities: "Tokyo",
+          selectorSpecifiedIps: "",
+          blacklistIps: "",
+          limit: "1",
+          sortMode: "lru",
+        },
+      ],
+    },
+    onBatchFormValuesChange: fn(),
     openError: null,
     batchError: null,
     openResponse: sessionFixture,
@@ -48,5 +77,12 @@ export const EmptyState: Story = {
 export const ClosingState: Story = {
   args: {
     closingSessionId: sessionsFixture.sessions[0]?.session_id,
+  },
+};
+
+export const UninitializedProject: Story = {
+  args: {
+    initialized: false,
+    sessions: [],
   },
 };

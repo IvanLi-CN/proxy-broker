@@ -1,13 +1,18 @@
 import { CircleAlertIcon, CircleCheckBigIcon, SparklesIcon } from "lucide-react";
+import { Link } from "react-router-dom";
 
 import { ActionResponsePanel } from "@/components/ActionResponsePanel";
 import { RouteHero } from "@/components/RouteHero";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { WorkflowRail } from "@/components/WorkflowRail";
 import { HealthSummaryCard } from "@/features/overview/components/HealthSummaryCard";
-import { RefreshCard } from "@/features/overview/components/RefreshCard";
-import { SubscriptionFormCard } from "@/features/overview/components/SubscriptionFormCard";
+import { RefreshCard, type RefreshFormValues } from "@/features/overview/components/RefreshCard";
+import {
+  SubscriptionFormCard,
+  type SubscriptionFormValues,
+} from "@/features/overview/components/SubscriptionFormCard";
 import type {
   HealthResponse,
   LoadSubscriptionRequest,
@@ -19,8 +24,16 @@ import type {
 interface OverviewPageProps {
   health: HealthResponse;
   activeSessions: number;
+  initialized: boolean;
+  initializationLoading: boolean;
+  profileId: string;
+  poolInventory?: number | null;
+  subscriptionFormValues: SubscriptionFormValues;
+  onSubscriptionFormValuesChange: (values: SubscriptionFormValues) => void;
   loadResponse?: LoadSubscriptionResponse | null;
   loadError?: string | null;
+  refreshFormValues: RefreshFormValues;
+  onRefreshFormValuesChange: (values: RefreshFormValues) => void;
   refreshResponse?: RefreshResponse | null;
   refreshError?: string | null;
   loadingSubscription: boolean;
@@ -53,8 +66,16 @@ const recommendedFlow = [
 export function OverviewPage({
   health,
   activeSessions,
+  initialized,
+  initializationLoading,
+  profileId,
+  poolInventory,
+  subscriptionFormValues,
+  onSubscriptionFormValuesChange,
   loadResponse,
   loadError,
+  refreshFormValues,
+  onRefreshFormValuesChange,
   refreshResponse,
   refreshError,
   loadingSubscription,
@@ -72,8 +93,12 @@ export function OverviewPage({
         description="This surface keeps the pool ingest path, health state, and next-step guidance visible at the same time so you can move from feed refresh to listener orchestration without second-guessing the basics."
         badges={[
           {
-            label: health.status === "ok" ? "service healthy" : "service review",
-            tone: health.status === "ok" ? "positive" : "warning",
+            label: initializationLoading
+              ? `loading ${profileId}`
+              : initialized
+                ? `${profileId} ready`
+                : `${profileId} needs setup`,
+            tone: initializationLoading ? "warning" : initialized ? "positive" : "warning",
           },
           { label: `${activeSessions} active sessions`, tone: "neutral" },
           {
@@ -88,11 +113,24 @@ export function OverviewPage({
         }
       />
 
+      {!initializationLoading && !initialized ? (
+        <ActionResponsePanel
+          title="This project is not initialized yet"
+          description="Load a subscription feed for this project first. Once the pool exists, refresh, extract, and session workflows will light up automatically."
+          tone="warning"
+          bullets={[
+            "Use the subscription card below to create the project inventory.",
+            "The project ID is already active, so the first successful load will persist it to the backend.",
+          ]}
+        />
+      ) : null}
+
       <HealthSummaryCard
         status={health.status}
         activeSessions={activeSessions}
         hasWarnings={hasWarnings}
-        loadedProxies={loadResponse?.loaded_proxies ?? null}
+        initialized={initialized}
+        loadedProxies={poolInventory ?? null}
         refreshedIps={refreshResponse?.probed_ips ?? null}
       />
 
@@ -100,14 +138,18 @@ export function OverviewPage({
         <div className="space-y-6">
           <SubscriptionFormCard
             error={loadError}
+            initialValues={subscriptionFormValues}
             isPending={loadingSubscription}
             onSubmit={onLoadSubscription}
+            onValuesChange={onSubscriptionFormValuesChange}
             response={loadResponse}
           />
           <RefreshCard
             error={refreshError}
+            initialValues={refreshFormValues}
             isPending={refreshing}
             onSubmit={onRefresh}
+            onValuesChange={onRefreshFormValuesChange}
             response={refreshResponse}
           />
         </div>
@@ -171,6 +213,19 @@ export function OverviewPage({
                   </p>
                 </div>
               </div>
+              {!initialized && !initializationLoading ? (
+                <div className="rounded-2xl border border-amber-500/30 bg-amber-500/8 p-4 text-sm leading-6 text-muted-foreground">
+                  This project does not have a pool yet. Load a subscription below, then move on to
+                  <Button asChild variant="link" className="h-auto px-1 align-baseline">
+                    <Link to="/ips">IP Extract</Link>
+                  </Button>
+                  and
+                  <Button asChild variant="link" className="h-auto px-1 align-baseline">
+                    <Link to="/sessions">Sessions</Link>
+                  </Button>
+                  once the inventory exists.
+                </div>
+              ) : null}
               {loadResponse?.warnings.length ? (
                 <ActionResponsePanel
                   title="Subscription warnings"

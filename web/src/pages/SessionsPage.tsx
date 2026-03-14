@@ -1,14 +1,23 @@
 import { BinaryIcon, Rows3Icon, ShieldCheckIcon } from "lucide-react";
+import { Link } from "react-router-dom";
 
 import { ActionResponsePanel } from "@/components/ActionResponsePanel";
 import { DataTablePanel } from "@/components/DataTablePanel";
+import { EmptyPanel } from "@/components/EmptyPanel";
 import { RouteHero } from "@/components/RouteHero";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { WorkflowRail } from "@/components/WorkflowRail";
-import { OpenBatchForm } from "@/features/sessions/components/OpenBatchForm";
-import { OpenSessionForm } from "@/features/sessions/components/OpenSessionForm";
+import {
+  OpenBatchForm,
+  type OpenBatchFormValues,
+} from "@/features/sessions/components/OpenBatchForm";
+import {
+  OpenSessionForm,
+  type OpenSessionFormValues,
+} from "@/features/sessions/components/OpenSessionForm";
 import { SessionsTable } from "@/features/sessions/components/SessionsTable";
 import type {
   OpenBatchRequest,
@@ -21,6 +30,13 @@ import type {
 interface SessionsPageProps {
   sessions: SessionRecord[];
   sessionsLoading: boolean;
+  initialized: boolean;
+  initializationLoading: boolean;
+  profileId: string;
+  openFormValues: OpenSessionFormValues;
+  onOpenFormValuesChange: (values: OpenSessionFormValues) => void;
+  batchFormValues: OpenBatchFormValues;
+  onBatchFormValuesChange: (values: OpenBatchFormValues) => void;
   openError?: string | null;
   batchError?: string | null;
   openResponse?: OpenSessionResponse | null;
@@ -36,6 +52,13 @@ interface SessionsPageProps {
 export function SessionsPage({
   sessions,
   sessionsLoading,
+  initialized,
+  initializationLoading,
+  profileId,
+  openFormValues,
+  onOpenFormValuesChange,
+  batchFormValues,
+  onBatchFormValuesChange,
   openError,
   batchError,
   openResponse,
@@ -65,8 +88,12 @@ export function SessionsPage({
             tone: sessions.length > 0 ? "positive" : "neutral",
           },
           {
-            label: opening || batchOpening ? "open request active" : "open deck idle",
-            tone: opening || batchOpening ? "warning" : "positive",
+            label: initializationLoading
+              ? `loading ${profileId}`
+              : initialized
+                ? "workspace ready"
+                : "needs subscription",
+            tone: initializationLoading ? "warning" : initialized ? "positive" : "warning",
           },
           {
             label: closingSessionId ? `closing ${closingSessionId}` : "no close in flight",
@@ -95,6 +122,15 @@ export function SessionsPage({
         }
       />
 
+      {!initializationLoading && !initialized ? (
+        <EmptyPanel
+          title="Project not initialized"
+          description="Load a subscription on the Overview page before you try to open listeners for this project."
+          icon={ShieldCheckIcon}
+          hint="Your open/batch form drafts are preserved for this project, but the backend needs an inventory before it can allocate sessions."
+        />
+      ) : null}
+
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1.02fr)_minmax(0,0.98fr)]">
         <div className="space-y-6">
           <Tabs defaultValue="single" className="space-y-4">
@@ -111,16 +147,20 @@ export function SessionsPage({
             <TabsContent value="single" className="mt-0">
               <OpenSessionForm
                 error={openError}
-                isPending={opening}
+                initialValues={openFormValues}
+                isPending={opening || !initialized}
                 onSubmit={onOpenSession}
+                onValuesChange={onOpenFormValuesChange}
                 response={openResponse}
               />
             </TabsContent>
             <TabsContent value="batch" className="mt-0">
               <OpenBatchForm
                 error={batchError}
-                isPending={batchOpening}
+                initialValues={batchFormValues}
+                isPending={batchOpening || !initialized}
                 onSubmit={onOpenBatch}
+                onValuesChange={onBatchFormValuesChange}
                 response={batchResponse}
               />
             </TabsContent>
@@ -149,6 +189,11 @@ export function SessionsPage({
                 >
                   newest listen {newestListen}
                 </Badge>
+              ) : null}
+              {!initialized ? (
+                <Button asChild variant="outline" className="w-full justify-center">
+                  <Link to="/">Go load a subscription</Link>
+                </Button>
               ) : null}
             </CardContent>
           </Card>

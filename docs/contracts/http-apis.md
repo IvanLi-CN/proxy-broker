@@ -17,6 +17,27 @@
 - Success:
   - Returns embedded frontend static assets from the Bun/Vite build output
 
+## GET /api/v1/profiles
+
+- Change: New
+- Auth: none (localhost default)
+- Success:
+  - `profiles[]`: unique backend-known profile IDs in ascending order
+
+## GET /api/v1/profiles/{profile_id}/summary
+
+- Change: New
+- Auth: none (localhost default)
+- Success:
+  - `profile_id`
+  - `initialized`: `bool`
+  - `proxy_count`: `u32`
+  - `distinct_ip_count`: `u32`
+  - `session_count`: `u32`
+  - `probe_ip_count`: `u32`
+- Notes:
+  - Empty/new projects return zero counts with `initialized=false` instead of 404
+
 ## POST /api/v1/profiles/{profile_id}/subscriptions/load
 
 - Change: New

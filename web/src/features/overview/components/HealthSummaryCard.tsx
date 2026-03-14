@@ -6,6 +6,7 @@ interface HealthSummaryCardProps {
   status: string;
   activeSessions: number;
   hasWarnings: boolean;
+  initialized: boolean;
   loadedProxies?: number | null;
   refreshedIps?: number | null;
 }
@@ -14,6 +15,7 @@ export function HealthSummaryCard({
   status,
   activeSessions,
   hasWarnings,
+  initialized,
   loadedProxies,
   refreshedIps,
 }: HealthSummaryCardProps) {
@@ -45,7 +47,11 @@ export function HealthSummaryCard({
         <TopMetricCard
           title="Pool inventory"
           value={loadedProxies == null ? "--" : String(loadedProxies)}
-          description="Most recent successful subscription load reflected in the runway."
+          description={
+            initialized
+              ? "Current project inventory from the latest saved backend state."
+              : "Load a subscription to create the first inventory snapshot for this project."
+          }
           icon={RefreshCwIcon}
         />
         <TopMetricCard

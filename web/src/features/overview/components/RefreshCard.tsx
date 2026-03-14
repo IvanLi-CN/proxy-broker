@@ -1,5 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { RefreshCwIcon } from "lucide-react";
+import { useEffect } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -16,19 +17,46 @@ const schema = z.object({
 });
 
 type FormValues = z.infer<typeof schema>;
+export type RefreshFormValues = FormValues;
+export const DEFAULT_REFRESH_FORM_VALUES: RefreshFormValues = { force: false };
 
 interface RefreshCardProps {
   isPending: boolean;
   response?: RefreshResponse | null;
   error?: string | null;
   onSubmit: (payload: RefreshRequest) => void | Promise<void>;
+  initialValues?: RefreshFormValues;
+  onValuesChange?: (values: RefreshFormValues) => void;
 }
 
-export function RefreshCard({ isPending, response, error, onSubmit }: RefreshCardProps) {
+export function RefreshCard({
+  isPending,
+  response,
+  error,
+  onSubmit,
+  initialValues = DEFAULT_REFRESH_FORM_VALUES,
+  onValuesChange,
+}: RefreshCardProps) {
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: { force: false },
+    defaultValues: initialValues,
   });
+
+  useEffect(() => {
+    if (JSON.stringify(form.getValues()) !== JSON.stringify(initialValues)) {
+      form.reset(initialValues);
+    }
+  }, [form, initialValues]);
+
+  useEffect(() => {
+    if (!onValuesChange) {
+      return;
+    }
+    const subscription = form.watch((values) => {
+      onValuesChange(values as RefreshFormValues);
+    });
+    return () => subscription.unsubscribe();
+  }, [form, onValuesChange]);
 
   return (
     <Card className="overflow-hidden border-border/70 bg-card/96 shadow-[0_24px_70px_-44px_rgba(15,23,42,0.55)]">

@@ -11,7 +11,7 @@ const meta = {
     docs: {
       description: {
         component:
-          "Primary application chrome with profile switcher, sidebar navigation, and top status rail.",
+          "Primary application chrome with profile picker, sidebar navigation, and top status rail.",
       },
     },
   },
@@ -24,14 +24,22 @@ const meta = {
   ),
   args: {
     profileId: "default",
+    knownProfiles: ["default", "alpha", "beta"],
+    recentProfileIds: ["default", "alpha"],
     healthStatus: "ok",
-    onProfileIdChange: () => undefined,
+    onProfileIdChange: () => true,
+    profileLoading: false,
+    profilesLoading: false,
   },
 } satisfies Meta<typeof AppShell>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const Default: Story = {
-  args: {},
+export const Default: Story = {};
+
+export const LoadingWorkspace: Story = {
+  args: {
+    profileLoading: true,
+  },
 };
