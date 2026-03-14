@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { ActionResponsePanel } from "@/components/ActionResponsePanel";
 import { StringListField } from "@/components/StringListField";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -57,15 +58,29 @@ export function OpenSessionForm({ isPending, response, error, onSubmit }: OpenSe
   });
 
   return (
-    <Card className="border-border/70 bg-card/90">
-      <CardHeader className="border-b border-border/70">
-        <CardTitle className="flex items-center gap-2 text-lg">
-          <CableCarIcon className="size-4 text-primary" />
-          Open single session
-        </CardTitle>
-        <CardDescription>
-          Pick a single IP or let the selector choose the next best candidate for this profile.
-        </CardDescription>
+    <Card className="overflow-hidden border-border/70 bg-card/96 shadow-[0_24px_70px_-44px_rgba(15,23,42,0.55)]">
+      <CardHeader className="gap-4 border-b border-border/70 bg-muted/15 pb-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="space-y-2">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.32em] text-primary/80">
+              Single open
+            </div>
+            <CardTitle className="flex items-center gap-2 text-xl tracking-tight">
+              <CableCarIcon className="size-4 text-primary" />
+              Open one listener fast
+            </CardTitle>
+            <CardDescription className="text-sm leading-6 text-muted-foreground md:text-[15px]">
+              Pin a specific IP when you know exactly what you want, or let the selector pick the
+              next best edge for the active profile.
+            </CardDescription>
+          </div>
+          <Badge
+            variant="outline"
+            className="rounded-full px-3 py-1 font-mono text-[11px] uppercase tracking-[0.16em]"
+          >
+            selector limit 1
+          </Badge>
+        </div>
       </CardHeader>
       <CardContent className="space-y-5 pt-5">
         <form
@@ -74,14 +89,14 @@ export function OpenSessionForm({ isPending, response, error, onSubmit }: OpenSe
             await onSubmit(buildOpenSessionRequest(values));
           })}
         >
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 rounded-[28px] border border-border/70 bg-background/80 p-4 md:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="specified-ip">Specified IP</Label>
               <Input
                 id="specified-ip"
                 {...form.register("specifiedIp")}
                 placeholder="203.0.113.10"
-                className="font-mono text-xs md:text-sm"
+                className="bg-card font-mono text-xs md:text-sm"
               />
             </div>
             <div className="space-y-2">
@@ -91,7 +106,7 @@ export function OpenSessionForm({ isPending, response, error, onSubmit }: OpenSe
                 {...form.register("desiredPort")}
                 inputMode="numeric"
                 placeholder="10080"
-                className="font-mono text-xs md:text-sm"
+                className="bg-card font-mono text-xs md:text-sm"
               />
             </div>
           </div>
@@ -153,7 +168,7 @@ export function OpenSessionForm({ isPending, response, error, onSubmit }: OpenSe
               )}
             />
           </div>
-          <div className="grid gap-4 md:grid-cols-[160px_200px_1fr]">
+          <div className="grid gap-4 rounded-[28px] border border-border/70 bg-background/80 p-4 md:grid-cols-[160px_200px_1fr]">
             <div className="space-y-2">
               <Label htmlFor="selector-limit">Selector limit</Label>
               <Input
@@ -161,6 +176,7 @@ export function OpenSessionForm({ isPending, response, error, onSubmit }: OpenSe
                 {...form.register("limit")}
                 inputMode="numeric"
                 placeholder="1"
+                className="bg-card"
               />
             </div>
             <div className="space-y-2">
@@ -170,7 +186,7 @@ export function OpenSessionForm({ isPending, response, error, onSubmit }: OpenSe
                 name="sortMode"
                 render={({ field }) => (
                   <Select onValueChange={field.onChange} value={field.value}>
-                    <SelectTrigger id="session-sort-mode" className="w-full">
+                    <SelectTrigger id="session-sort-mode" className="w-full bg-card">
                       <SelectValue placeholder="Sort mode" />
                     </SelectTrigger>
                     <SelectContent>
@@ -182,7 +198,7 @@ export function OpenSessionForm({ isPending, response, error, onSubmit }: OpenSe
               />
             </div>
             <div className="flex items-end justify-end">
-              <Button disabled={isPending} type="submit">
+              <Button disabled={isPending} type="submit" size="lg" className="min-w-40">
                 {isPending ? "Opening..." : "Open session"}
               </Button>
             </div>

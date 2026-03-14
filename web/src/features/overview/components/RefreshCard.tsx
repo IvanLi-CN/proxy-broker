@@ -4,6 +4,7 @@ import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 
 import { ActionResponsePanel } from "@/components/ActionResponsePanel";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -30,20 +31,28 @@ export function RefreshCard({ isPending, response, error, onSubmit }: RefreshCar
   });
 
   return (
-    <Card className="overflow-hidden border-border/70 bg-card/95 shadow-sm">
-      <CardHeader className="space-y-3 border-b border-border/70 bg-muted/20 pb-5">
-        <div className="text-xs font-semibold uppercase tracking-[0.3em] text-primary/80">
-          Secondary action
-        </div>
-        <div className="space-y-2">
-          <CardTitle className="flex items-center gap-2 text-xl tracking-tight">
-            <RefreshCwIcon className="size-5 text-primary" />
-            Refresh probes and geo hints
-          </CardTitle>
-          <CardDescription className="text-sm leading-6 text-muted-foreground md:text-[15px]">
-            Run this after loading a new feed, or whenever upstream latency and geo attribution look
-            stale. It updates the selection pool without changing your profile identity.
-          </CardDescription>
+    <Card className="overflow-hidden border-border/70 bg-card/96 shadow-[0_24px_70px_-44px_rgba(15,23,42,0.55)]">
+      <CardHeader className="gap-4 border-b border-border/70 bg-muted/15 pb-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="space-y-2">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.32em] text-primary/80">
+              Probe refresh
+            </div>
+            <CardTitle className="flex items-center gap-2 text-xl tracking-tight">
+              <RefreshCwIcon className="size-5 text-primary" />
+              Refresh probes and geo hints
+            </CardTitle>
+            <CardDescription className="text-sm leading-6 text-muted-foreground md:text-[15px]">
+              Use this when latency or geo attribution feels stale. The refresh updates operator
+              hints without changing profile identity.
+            </CardDescription>
+          </div>
+          <Badge
+            variant="outline"
+            className="rounded-full px-3 py-1 font-mono text-[11px] uppercase tracking-[0.16em]"
+          >
+            safe to repeat
+          </Badge>
         </div>
       </CardHeader>
       <CardContent className="space-y-6 pt-6">
@@ -57,33 +66,37 @@ export function RefreshCard({ isPending, response, error, onSubmit }: RefreshCar
             control={form.control}
             name="force"
             render={({ field }) => (
-              <div className="flex items-start gap-3 rounded-2xl border border-border/70 bg-background/80 p-4">
+              <div className="grid gap-4 rounded-[28px] border border-border/70 bg-background/80 p-4 md:grid-cols-[auto_1fr]">
                 <Checkbox
                   checked={field.value}
                   onCheckedChange={(checked) => field.onChange(Boolean(checked))}
                   id="force-refresh"
+                  className="mt-1"
                 />
                 <div className="space-y-1.5">
                   <Label htmlFor="force-refresh">Force refresh stale entries</Label>
                   <p className="text-sm leading-6 text-muted-foreground">
-                    Ignore cached probe hints and attempt a full refresh for every matching IP. Use
-                    this when upstream geo changed sharply or results look suspiciously old.
+                    Ignore cached probe hints and attempt a full refresh for every matching IP when
+                    the current metadata looks suspiciously old.
                   </p>
                 </div>
               </div>
             )}
           />
-          <div className="flex flex-col gap-3 rounded-2xl border border-dashed border-border/70 bg-muted/20 px-4 py-4 md:flex-row md:items-center md:justify-between">
-            <p className="max-w-xl text-sm leading-6 text-muted-foreground">
-              A refresh is safe to repeat. If extraction starts returning empty sets, run this once
-              before assuming the subscription itself is bad.
-            </p>
+          <div className="grid gap-3 rounded-[28px] border border-border/70 bg-[linear-gradient(135deg,rgba(59,130,246,0.08),rgba(245,158,11,0.08))] p-4 md:grid-cols-[1fr_auto] md:items-center">
+            <div className="space-y-1">
+              <div className="text-sm font-semibold text-foreground">Operator hint</div>
+              <p className="max-w-xl text-sm leading-6 text-muted-foreground">
+                If extracts suddenly return empty or geo labels look wrong, run this once before
+                assuming the feed itself is bad.
+              </p>
+            </div>
             <Button
               disabled={isPending}
               size="lg"
               type="submit"
               variant="secondary"
-              className="min-w-44"
+              className="min-w-48"
             >
               {isPending ? "Refreshing..." : "Refresh metadata"}
             </Button>

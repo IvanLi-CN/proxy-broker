@@ -4,6 +4,7 @@ import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 
 import { StringListField } from "@/components/StringListField";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -50,19 +51,33 @@ export function IpFiltersForm({ isPending, onSubmit }: IpFiltersFormProps) {
   });
 
   return (
-    <Card className="border-border/70 bg-card/90">
-      <CardHeader className="border-b border-border/70">
-        <CardTitle className="flex items-center gap-2 text-lg">
-          <FilterIcon className="size-4 text-primary" />
-          Extract IPs
-        </CardTitle>
-        <CardDescription>
-          Build an operator slice of the IP pool by geo hints, allow-lists, and LRU/MRU ordering.
-        </CardDescription>
+    <Card className="overflow-hidden border-border/70 bg-card/96 shadow-[0_24px_70px_-44px_rgba(15,23,42,0.55)]">
+      <CardHeader className="gap-4 border-b border-border/70 bg-muted/15 pb-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="space-y-2">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.32em] text-primary/80">
+              Filter builder
+            </div>
+            <CardTitle className="flex items-center gap-2 text-xl tracking-tight">
+              <FilterIcon className="size-4 text-primary" />
+              Shape the candidate slice
+            </CardTitle>
+            <CardDescription className="text-sm leading-6 text-muted-foreground md:text-[15px]">
+              Start broad with country and city hints, then tighten the set with allow-lists or
+              blacklist fences once probe feedback starts telling a story.
+            </CardDescription>
+          </div>
+          <Badge
+            variant="outline"
+            className="rounded-full px-3 py-1 font-mono text-[11px] uppercase tracking-[0.16em]"
+          >
+            default sort lru
+          </Badge>
+        </div>
       </CardHeader>
       <CardContent className="space-y-5 pt-5">
         <form
-          className="grid gap-4"
+          className="grid gap-5"
           onSubmit={form.handleSubmit(async (values) => {
             await onSubmit(buildExtractRequest(values));
           })}
@@ -103,7 +118,7 @@ export function IpFiltersForm({ isPending, onSubmit }: IpFiltersFormProps) {
                 <StringListField
                   id="specified-ips"
                   label="Specified IPs"
-                  helper="Force include these IPs before sorting."
+                  helper="Force-include these IPs before sorting."
                   onChange={field.onChange}
                   placeholder="203.0.113.10"
                   value={field.value}
@@ -117,7 +132,7 @@ export function IpFiltersForm({ isPending, onSubmit }: IpFiltersFormProps) {
                 <StringListField
                   id="blacklist-ips"
                   label="Blacklist IPs"
-                  helper="IPs to exclude from the response."
+                  helper="IPs the extractor must exclude."
                   onChange={field.onChange}
                   placeholder="198.51.100.42"
                   value={field.value}
@@ -125,10 +140,16 @@ export function IpFiltersForm({ isPending, onSubmit }: IpFiltersFormProps) {
               )}
             />
           </div>
-          <div className="grid gap-4 md:grid-cols-[160px_200px_1fr]">
+          <div className="grid gap-4 rounded-[28px] border border-border/70 bg-background/80 p-4 md:grid-cols-[160px_200px_1fr]">
             <div className="space-y-2">
               <Label htmlFor="limit">Limit</Label>
-              <Input id="limit" {...form.register("limit")} inputMode="numeric" placeholder="20" />
+              <Input
+                id="limit"
+                {...form.register("limit")}
+                inputMode="numeric"
+                placeholder="20"
+                className="bg-card"
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="sort-mode">Sort mode</Label>
@@ -137,7 +158,7 @@ export function IpFiltersForm({ isPending, onSubmit }: IpFiltersFormProps) {
                 name="sortMode"
                 render={({ field }) => (
                   <Select onValueChange={field.onChange} value={field.value}>
-                    <SelectTrigger id="sort-mode" className="w-full">
+                    <SelectTrigger id="sort-mode" className="w-full bg-card">
                       <SelectValue placeholder="Sort mode" />
                     </SelectTrigger>
                     <SelectContent>
@@ -149,7 +170,7 @@ export function IpFiltersForm({ isPending, onSubmit }: IpFiltersFormProps) {
               />
             </div>
             <div className="flex items-end justify-end">
-              <Button disabled={isPending} type="submit">
+              <Button disabled={isPending} type="submit" size="lg" className="min-w-40">
                 {isPending ? "Extracting..." : "Extract IPs"}
               </Button>
             </div>

@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn } from "storybook/test";
+
 import { ipResultsFixture } from "@/mocks/fixtures";
 import { IpExtractPage } from "@/pages/IpExtractPage";
 
@@ -11,7 +12,7 @@ const meta = {
     docs: {
       description: {
         component:
-          "IP extraction route that pairs the filter form with the resulting candidate table and operator guidance.",
+          "IP extraction route that pairs the filter builder with a dense candidate deck and request summary chips.",
       },
     },
   },
@@ -19,6 +20,12 @@ const meta = {
     isPending: false,
     response: ipResultsFixture,
     error: null,
+    lastRequest: {
+      country_codes: ["JP", "US"],
+      cities: ["Tokyo"],
+      limit: 20,
+      sort_mode: "lru",
+    },
     onSubmit: fn(),
   },
 } satisfies Meta<typeof IpExtractPage>;
@@ -27,6 +34,13 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {};
+
+export const Loading: Story = {
+  args: {
+    response: null,
+    isPending: true,
+  },
+};
 
 export const ErrorState: Story = {
   args: {

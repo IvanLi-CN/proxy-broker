@@ -1,4 +1,4 @@
-import { HeartPulseIcon, RefreshCwIcon, RouterIcon } from "lucide-react";
+import { AlertTriangleIcon, HeartPulseIcon, RefreshCwIcon, RouterIcon } from "lucide-react";
 
 import { TopMetricCard } from "@/components/TopMetricCard";
 
@@ -6,40 +6,59 @@ interface HealthSummaryCardProps {
   status: string;
   activeSessions: number;
   hasWarnings: boolean;
+  loadedProxies?: number | null;
+  refreshedIps?: number | null;
 }
 
-export function HealthSummaryCard({ status, activeSessions, hasWarnings }: HealthSummaryCardProps) {
+export function HealthSummaryCard({
+  status,
+  activeSessions,
+  hasWarnings,
+  loadedProxies,
+  refreshedIps,
+}: HealthSummaryCardProps) {
   return (
     <section className="space-y-4">
       <div className="space-y-2">
-        <div className="text-xs font-semibold uppercase tracking-[0.3em] text-primary/80">
-          Flight deck
+        <div className="text-[11px] font-semibold uppercase tracking-[0.32em] text-primary/80">
+          Command strip
         </div>
         <div className="max-w-3xl text-sm leading-6 text-muted-foreground md:text-[15px]">
-          Read this strip before touching the pool. It tells you whether the service is healthy, how
-          many listeners are already consuming the profile, and whether operator follow-up is
-          waiting in the queue.
+          Read this row before you touch the pool. It surfaces service state, live listener load,
+          the latest ingest pulse, and whether follow-up is waiting in the queue.
         </div>
       </div>
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <TopMetricCard
           title="Service pulse"
           value={status.toUpperCase()}
-          description="Polled from /healthz every 10 seconds so you can sanity-check the operator plane at a glance."
+          description="Polled from /healthz every 10 seconds so the shell stays honest."
           icon={HeartPulseIcon}
           tone={status === "ok" ? "positive" : "warning"}
         />
         <TopMetricCard
-          title="Active listeners"
+          title="Live listeners"
           value={String(activeSessions)}
-          description="Sessions currently carved out from the selected profile. Use this to avoid colliding with live traffic."
+          description="Sessions currently consuming the active profile."
           icon={RouterIcon}
         />
         <TopMetricCard
-          title="Attention queue"
-          value={hasWarnings ? "Review" : "Clear"}
-          description="Subscription warnings and probe skips surface here first, before they turn into bad extract results."
+          title="Pool inventory"
+          value={loadedProxies == null ? "--" : String(loadedProxies)}
+          description="Most recent successful subscription load reflected in the runway."
           icon={RefreshCwIcon}
+        />
+        <TopMetricCard
+          title="Attention queue"
+          value={hasWarnings ? "Review" : refreshedIps == null ? "Clear" : `${refreshedIps}`}
+          description={
+            hasWarnings
+              ? "Warnings are waiting. Review them before opening long-lived listeners."
+              : refreshedIps == null
+                ? "No warnings are queued right now."
+                : "Latest refresh completed cleanly and updated probe metadata."
+          }
+          icon={AlertTriangleIcon}
           tone={hasWarnings ? "warning" : "positive"}
         />
       </div>

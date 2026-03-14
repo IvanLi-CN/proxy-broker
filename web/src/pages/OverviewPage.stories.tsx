@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn } from "storybook/test";
+
 import {
   healthFixture,
   refreshFixture,
@@ -16,7 +17,7 @@ const meta = {
     docs: {
       description: {
         component:
-          "Overview route composition for health, subscription loading, refresh actions, and active session summary.",
+          "Overview route composition for health, subscription loading, refresh actions, and runway guidance inside the operator control room.",
       },
     },
   },
@@ -45,5 +46,13 @@ export const ErrorState: Story = {
     loadError: "subscription_invalid: malformed upstream payload",
     refreshResponse: null,
     refreshError: "mihomo_unavailable: controller not reachable",
+  },
+};
+
+export const QuietState: Story = {
+  args: {
+    activeSessions: 0,
+    loadResponse: null,
+    refreshResponse: null,
   },
 };

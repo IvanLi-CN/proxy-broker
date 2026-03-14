@@ -15,4 +15,5 @@
 
 | ID   | Title | Status | Spec | Last | Notes |
 |-----:|-------|--------|------|------|-------|
+| s3zu5 | 管理台 UI 控制室重构 | 待实现 | `s3zu5-admin-ui-refresh/SPEC.md` | 2026-03-14 | 快车道执行，保持 API 合同不变 |
 | kgm4c | 安装 UI UX Pro Max Codex 项目技能 | 部分完成（2/3） | `kgm4c-install-ui-ux-pro-max-codex-skill/SPEC.md` | 2026-03-13 | 项目内 Codex skill 已安装，待 PR 收敛 |
