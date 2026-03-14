@@ -16,6 +16,7 @@ export function IpExtractRoute() {
     profileSummaryLoading,
     ipExtractWorkspace,
     updateIpExtractWorkspace,
+    writeIpExtractWorkspace,
   } = useOutletContext<RootOutletContext>();
 
   const mutation = useMutation({
@@ -26,8 +27,8 @@ export function IpExtractRoute() {
       profileId: string;
       payload: Parameters<typeof api.extractIps>[1];
     }) => api.extractIps(requestedProfileId, payload),
-    onSuccess: (data, { payload }) => {
-      updateIpExtractWorkspace((current) => ({
+    onSuccess: (data, { profileId: requestedProfileId, payload }) => {
+      writeIpExtractWorkspace(requestedProfileId, (current) => ({
         ...current,
         lastRequest: payload,
         response: data,

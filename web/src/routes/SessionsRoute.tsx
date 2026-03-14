@@ -16,6 +16,7 @@ export function SessionsRoute() {
     profileSummaryLoading,
     sessionsWorkspace,
     updateSessionsWorkspace,
+    writeSessionsWorkspace,
   } = useOutletContext<RootOutletContext>();
   const queryClient = useQueryClient();
   const sessionsQuery = useQuery({
@@ -26,39 +27,59 @@ export function SessionsRoute() {
   });
 
   const openMutation = useMutation({
-    mutationFn: (payload: Parameters<typeof api.openSession>[1]) =>
-      api.openSession(profileId, payload),
-    onSuccess: async (data) => {
-      updateSessionsWorkspace((current) => ({ ...current, openResponse: data }));
+    mutationFn: ({
+      profileId: requestedProfileId,
+      payload,
+    }: {
+      profileId: string;
+      payload: Parameters<typeof api.openSession>[1];
+    }) => api.openSession(requestedProfileId, payload),
+    onSuccess: async (data, { profileId: requestedProfileId }) => {
+      writeSessionsWorkspace(requestedProfileId, (current) => ({ ...current, openResponse: data }));
       toast.success(`Opened ${data.listen}`);
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["sessions", profileId] }),
-        queryClient.invalidateQueries({ queryKey: ["profile-summary", profileId] }),
+        queryClient.invalidateQueries({ queryKey: ["sessions", requestedProfileId] }),
+        queryClient.invalidateQueries({ queryKey: ["profile-summary", requestedProfileId] }),
       ]);
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   });
 
   const batchMutation = useMutation({
-    mutationFn: (payload: Parameters<typeof api.openBatch>[1]) => api.openBatch(profileId, payload),
-    onSuccess: async (data) => {
-      updateSessionsWorkspace((current) => ({ ...current, batchResponse: data }));
+    mutationFn: ({
+      profileId: requestedProfileId,
+      payload,
+    }: {
+      profileId: string;
+      payload: Parameters<typeof api.openBatch>[1];
+    }) => api.openBatch(requestedProfileId, payload),
+    onSuccess: async (data, { profileId: requestedProfileId }) => {
+      writeSessionsWorkspace(requestedProfileId, (current) => ({
+        ...current,
+        batchResponse: data,
+      }));
       toast.success(`Opened ${data.sessions.length} sessions in batch`);
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["sessions", profileId] }),
-        queryClient.invalidateQueries({ queryKey: ["profile-summary", profileId] }),
+        queryClient.invalidateQueries({ queryKey: ["sessions", requestedProfileId] }),
+        queryClient.invalidateQueries({ queryKey: ["profile-summary", requestedProfileId] }),
       ]);
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   });
 
   const closeMutation = useMutation({
-    mutationFn: (sessionId: string) => api.closeSession(profileId, sessionId),
-    onSuccess: async (_, sessionId) => {
+    mutationFn: ({
+      profileId: requestedProfileId,
+      sessionId,
+    }: {
+      profileId: string;
+      sessionId: string;
+    }) => api.closeSession(requestedProfileId, sessionId),
+    onSuccess: async (_, { profileId: requestedProfileId, sessionId }) => {
       toast.success(`Closed ${sessionId}`);
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["sessions", profileId] }),
-        queryClient.invalidateQueries({ queryKey: ["profile-summary", profileId] }),
+        queryClient.invalidateQueries({ queryKey: ["sessions", requestedProfileId] }),
+        queryClient.invalidateQueries({ queryKey: ["profile-summary", requestedProfileId] }),
       ]);
     },
     onError: (error) => toast.error(getErrorMessage(error)),
@@ -70,20 +91,20 @@ export function SessionsRoute() {
       batchFormValues={sessionsWorkspace.batchForm}
       batchOpening={batchMutation.isPending}
       batchResponse={sessionsWorkspace.batchResponse}
-      closingSessionId={closeMutation.isPending ? closeMutation.variables : null}
+      closingSessionId={closeMutation.isPending ? closeMutation.variables?.sessionId : null}
       initialized={profileSummary?.initialized ?? false}
       initializationLoading={profileSummaryLoading}
       onBatchFormValuesChange={(values) =>
         updateSessionsWorkspace((current) => ({ ...current, batchForm: values }))
       }
       onCloseSession={async (sessionId) => {
-        await closeMutation.mutateAsync(sessionId);
+        await closeMutation.mutateAsync({ profileId, sessionId });
       }}
       onOpenBatch={async (payload) => {
-        await batchMutation.mutateAsync(payload);
+        await batchMutation.mutateAsync({ profileId, payload });
       }}
       onOpenSession={async (payload) => {
-        await openMutation.mutateAsync(payload);
+        await openMutation.mutateAsync({ profileId, payload });
       }}
       onOpenFormValuesChange={(values) =>
         updateSessionsWorkspace((current) => ({ ...current, openForm: values }))

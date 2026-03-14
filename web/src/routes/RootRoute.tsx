@@ -18,11 +18,23 @@ export interface RootOutletContext {
   overviewWorkspace: OverviewWorkspaceState;
   ipExtractWorkspace: IpExtractWorkspaceState;
   sessionsWorkspace: SessionsWorkspaceState;
+  writeOverviewWorkspace: (
+    profileId: string,
+    updater: (value: OverviewWorkspaceState) => OverviewWorkspaceState,
+  ) => void;
   updateOverviewWorkspace: (
     updater: (value: OverviewWorkspaceState) => OverviewWorkspaceState,
   ) => void;
+  writeIpExtractWorkspace: (
+    profileId: string,
+    updater: (value: IpExtractWorkspaceState) => IpExtractWorkspaceState,
+  ) => void;
   updateIpExtractWorkspace: (
     updater: (value: IpExtractWorkspaceState) => IpExtractWorkspaceState,
+  ) => void;
+  writeSessionsWorkspace: (
+    profileId: string,
+    updater: (value: SessionsWorkspaceState) => SessionsWorkspaceState,
   ) => void;
   updateSessionsWorkspace: (
     updater: (value: SessionsWorkspaceState) => SessionsWorkspaceState,
@@ -93,10 +105,16 @@ export function RootRoute() {
             overviewWorkspace: workspace.overview,
             ipExtractWorkspace: workspace.ipExtract,
             sessionsWorkspace: workspace.sessions,
+            writeOverviewWorkspace: (profileId, updater) =>
+              updateProfileWorkspace(profileId, "overview", updater),
             updateOverviewWorkspace: (updater) =>
               updateProfileWorkspace(activeProfileId, "overview", updater),
+            writeIpExtractWorkspace: (profileId, updater) =>
+              updateProfileWorkspace(profileId, "ipExtract", updater),
             updateIpExtractWorkspace: (updater) =>
               updateProfileWorkspace(activeProfileId, "ipExtract", updater),
+            writeSessionsWorkspace: (profileId, updater) =>
+              updateProfileWorkspace(profileId, "sessions", updater),
             updateSessionsWorkspace: (updater) =>
               updateProfileWorkspace(activeProfileId, "sessions", updater),
           } satisfies RootOutletContext

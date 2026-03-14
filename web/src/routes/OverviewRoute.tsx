@@ -16,6 +16,7 @@ export function OverviewRoute() {
     profileSummaryLoading,
     overviewWorkspace,
     updateOverviewWorkspace,
+    writeOverviewWorkspace,
   } = useOutletContext<RootOutletContext>();
   const queryClient = useQueryClient();
   const healthQuery = useQuery({
@@ -33,7 +34,7 @@ export function OverviewRoute() {
       payload: Parameters<typeof api.loadSubscription>[1];
     }) => api.loadSubscription(requestedProfileId, payload),
     onSuccess: async (data, { profileId: requestedProfileId }) => {
-      updateOverviewWorkspace((current) => ({ ...current, loadResponse: data }));
+      writeOverviewWorkspace(requestedProfileId, (current) => ({ ...current, loadResponse: data }));
       toast.success(`Loaded ${data.loaded_proxies} proxies for ${requestedProfileId}`);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["profiles"] }),
@@ -52,7 +53,10 @@ export function OverviewRoute() {
       payload: Parameters<typeof api.refreshProfile>[1];
     }) => api.refreshProfile(requestedProfileId, payload),
     onSuccess: async (data, { profileId: requestedProfileId }) => {
-      updateOverviewWorkspace((current) => ({ ...current, refreshResponse: data }));
+      writeOverviewWorkspace(requestedProfileId, (current) => ({
+        ...current,
+        refreshResponse: data,
+      }));
       toast.success(`Refreshed ${data.probed_ips} probe entries`);
       await queryClient.invalidateQueries({ queryKey: ["profile-summary", requestedProfileId] });
     },
