@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -13,6 +13,7 @@ const getErrorMessage = (error: unknown) =>
 
 export function OverviewRoute() {
   const { profileId } = useOutletContext<RootOutletContext>();
+  const previousProfileId = useRef(profileId);
   const [loadResponseByProfile, setLoadResponseByProfile] = useState<
     Record<string, LoadSubscriptionResponse | null>
   >({});
@@ -31,29 +32,46 @@ export function OverviewRoute() {
   });
 
   const loadMutation = useMutation({
-    mutationFn: (payload: Parameters<typeof api.loadSubscription>[1]) =>
-      api.loadSubscription(profileId, payload),
-    onSuccess: (data) => {
-      setLoadResponseByProfile((current) => ({ ...current, [profileId]: data }));
-      toast.success(`Loaded ${data.loaded_proxies} proxies for ${profileId}`);
+    mutationFn: ({
+      profileId: requestedProfileId,
+      payload,
+    }: {
+      profileId: string;
+      payload: Parameters<typeof api.loadSubscription>[1];
+    }) => api.loadSubscription(requestedProfileId, payload),
+    onSuccess: (data, { profileId: requestedProfileId }) => {
+      setLoadResponseByProfile((current) => ({ ...current, [requestedProfileId]: data }));
+      toast.success(`Loaded ${data.loaded_proxies} proxies for ${requestedProfileId}`);
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   });
 
   const refreshMutation = useMutation({
-    mutationFn: (payload: Parameters<typeof api.refreshProfile>[1]) =>
-      api.refreshProfile(profileId, payload),
-    onSuccess: (data) => {
-      setRefreshResponseByProfile((current) => ({ ...current, [profileId]: data }));
+    mutationFn: ({
+      profileId: requestedProfileId,
+      payload,
+    }: {
+      profileId: string;
+      payload: Parameters<typeof api.refreshProfile>[1];
+    }) => api.refreshProfile(requestedProfileId, payload),
+    onSuccess: (data, { profileId: requestedProfileId }) => {
+      setRefreshResponseByProfile((current) => ({ ...current, [requestedProfileId]: data }));
       toast.success(`Refreshed ${data.probed_ips} probe entries`);
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   });
 
+  const { reset: resetLoadMutation } = loadMutation;
+  const { reset: resetRefreshMutation } = refreshMutation;
+
   useEffect(() => {
-    loadMutation.reset();
-    refreshMutation.reset();
-  }, [profileId]);
+    if (previousProfileId.current === profileId) {
+      return;
+    }
+    previousProfileId.current = profileId;
+    resetLoadMutation();
+    resetRefreshMutation();
+  }, [profileId, resetLoadMutation, resetRefreshMutation]);
 
   return (
     <OverviewPage
@@ -63,10 +81,10 @@ export function OverviewRoute() {
       loadResponse={loadResponseByProfile[profileId] ?? null}
       loadingSubscription={loadMutation.isPending}
       onLoadSubscription={async (payload) => {
-        await loadMutation.mutateAsync(payload);
+        await loadMutation.mutateAsync({ profileId, payload });
       }}
       onRefresh={async (payload) => {
-        await refreshMutation.mutateAsync(payload);
+        await refreshMutation.mutateAsync({ profileId, payload });
       }}
       refreshError={refreshMutation.isError ? getErrorMessage(refreshMutation.error) : null}
       refreshResponse={refreshResponseByProfile[profileId] ?? null}

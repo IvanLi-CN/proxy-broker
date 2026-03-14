@@ -48,8 +48,7 @@ export function SessionsPage({
   onCloseSession,
 }: SessionsPageProps) {
   const newestSession = sessions.reduce<SessionRecord | null>(
-    (latest, session) =>
-      latest && latest.created_at > session.created_at ? latest : session,
+    (latest, session) => (latest && latest.created_at > session.created_at ? latest : session),
     null,
   );
   const newestListen = newestSession?.listen ?? null;
