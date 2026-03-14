@@ -45,3 +45,15 @@ operate.
 - `bun run build`
 - `bun run build-storybook`
 - `bun run test:e2e`
+
+## Outcome
+
+- The control-room shell, overview runway, IP extract workspace, and sessions
+  workspace are implemented on the current PR branch without changing backend
+  contracts.
+- Shared field controls now use an explicit size system so large trigger,
+  content, and item surfaces stay visually consistent across the real app and
+  Storybook.
+- Route-level UI summaries now keep successful results scoped to the profile
+  that produced them, preventing stale cross-profile state from leaking into
+  the operator panels.
