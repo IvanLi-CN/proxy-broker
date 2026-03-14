@@ -110,7 +110,7 @@ export function OpenSessionForm({ isPending, response, error, onSubmit }: OpenSe
               />
             </div>
           </div>
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4">
             <Controller
               control={form.control}
               name="countryCodes"
@@ -168,7 +168,7 @@ export function OpenSessionForm({ isPending, response, error, onSubmit }: OpenSe
               )}
             />
           </div>
-          <div className="grid gap-4 rounded-[28px] border border-border/70 bg-background/80 p-4 md:grid-cols-[160px_200px_1fr]">
+          <div className="grid gap-4 rounded-[28px] border border-border/70 bg-background/80 p-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="selector-limit">Selector limit</Label>
               <Input
@@ -197,7 +197,7 @@ export function OpenSessionForm({ isPending, response, error, onSubmit }: OpenSe
                 )}
               />
             </div>
-            <div className="flex items-end justify-end">
+            <div className="flex items-end justify-stretch sm:col-span-2 sm:justify-end">
               <Button disabled={isPending} type="submit" size="lg" className="min-w-40">
                 {isPending ? "Opening..." : "Open session"}
               </Button>

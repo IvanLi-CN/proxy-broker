@@ -125,7 +125,7 @@ export function OpenBatchForm({ isPending, response, error, onSubmit }: OpenBatc
                     <Trash2Icon />
                   </Button>
                 </div>
-                <div className="grid gap-4 md:grid-cols-2">
+                <div className="grid gap-4">
                   <div className="space-y-2">
                     <Label htmlFor={`batch-specified-ip-${index}`}>Specified IP</Label>
                     <Input
@@ -201,7 +201,7 @@ export function OpenBatchForm({ isPending, response, error, onSubmit }: OpenBatc
                     )}
                   />
                 </div>
-                <div className="mt-4 grid gap-4 md:grid-cols-[160px_200px]">
+                <div className="mt-4 grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
                     <Label htmlFor={`batch-limit-${index}`}>Selector limit</Label>
                     <Input

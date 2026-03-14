@@ -3,7 +3,7 @@ import { LoaderCircleIcon, PlugZapIcon } from "lucide-react";
 import { EmptyPanel } from "@/components/EmptyPanel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import {
   Table,
   TableBody,
@@ -52,7 +52,7 @@ export function SessionsTable({
 
   return (
     <ScrollArea className="rounded-[28px] border border-border/70 bg-card/90 shadow-sm">
-      <Table>
+      <Table className="min-w-[860px]">
         <TableHeader>
           <TableRow className="border-b border-border/70 bg-muted/20">
             <TableHead className="px-4">Session ID</TableHead>
@@ -105,6 +105,7 @@ export function SessionsTable({
           })}
         </TableBody>
       </Table>
+      <ScrollBar orientation="horizontal" />
     </ScrollArea>
   );
 }
