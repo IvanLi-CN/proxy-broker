@@ -82,7 +82,7 @@ export function IpFiltersForm({ isPending, onSubmit }: IpFiltersFormProps) {
             await onSubmit(buildExtractRequest(values));
           })}
         >
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4">
             <Controller
               control={form.control}
               name="countryCodes"
@@ -140,7 +140,7 @@ export function IpFiltersForm({ isPending, onSubmit }: IpFiltersFormProps) {
               )}
             />
           </div>
-          <div className="grid gap-4 rounded-[28px] border border-border/70 bg-background/80 p-4 md:grid-cols-[160px_200px_1fr]">
+          <div className="grid gap-4 rounded-[28px] border border-border/70 bg-background/80 p-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="limit">Limit</Label>
               <Input
@@ -169,7 +169,7 @@ export function IpFiltersForm({ isPending, onSubmit }: IpFiltersFormProps) {
                 )}
               />
             </div>
-            <div className="flex items-end justify-end">
+            <div className="flex items-end justify-stretch sm:col-span-2 sm:justify-end">
               <Button disabled={isPending} type="submit" size="lg" className="min-w-40">
                 {isPending ? "Extracting..." : "Extract IPs"}
               </Button>
