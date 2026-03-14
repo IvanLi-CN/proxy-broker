@@ -1,4 +1,4 @@
-import { MapPinnedIcon } from "lucide-react";
+import { LoaderCircleIcon, MapPinnedIcon } from "lucide-react";
 
 import { EmptyPanel } from "@/components/EmptyPanel";
 import { Badge } from "@/components/ui/badge";
@@ -13,12 +13,25 @@ import {
 } from "@/components/ui/table";
 import { formatLatency, formatTimestamp } from "@/lib/format";
 import type { ExtractIpItem } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 interface IpResultsTableProps {
   items: ExtractIpItem[];
+  isLoading?: boolean;
 }
 
-export function IpResultsTable({ items }: IpResultsTableProps) {
+export function IpResultsTable({ items, isLoading }: IpResultsTableProps) {
+  if (isLoading && items.length === 0) {
+    return (
+      <EmptyPanel
+        title="Extracting candidate IPs"
+        description="The backend is applying your filters and assembling the current shortlist."
+        icon={LoaderCircleIcon}
+        hint="Results will land here with probe, geo, and last-used metadata once the request returns."
+      />
+    );
+  }
+
   if (items.length === 0) {
     return (
       <EmptyPanel
@@ -30,11 +43,11 @@ export function IpResultsTable({ items }: IpResultsTableProps) {
   }
 
   return (
-    <ScrollArea className="rounded-2xl border border-border/70 bg-card/90 shadow-sm">
+    <ScrollArea className="rounded-[28px] border border-border/70 bg-card/90 shadow-sm">
       <Table>
         <TableHeader>
-          <TableRow>
-            <TableHead>IP</TableHead>
+          <TableRow className="border-b border-border/70 bg-muted/20">
+            <TableHead className="px-4">IP</TableHead>
             <TableHead>Geo</TableHead>
             <TableHead>Probe</TableHead>
             <TableHead>Latency</TableHead>
@@ -43,8 +56,8 @@ export function IpResultsTable({ items }: IpResultsTableProps) {
         </TableHeader>
         <TableBody>
           {items.map((item) => (
-            <TableRow key={item.ip}>
-              <TableCell className="font-mono text-xs md:text-sm">{item.ip}</TableCell>
+            <TableRow key={item.ip} className="[&_td]:py-3">
+              <TableCell className="px-4 font-mono text-xs md:text-sm">{item.ip}</TableCell>
               <TableCell>
                 <div className="space-y-1">
                   <div className="font-medium">
@@ -57,12 +70,24 @@ export function IpResultsTable({ items }: IpResultsTableProps) {
                 </div>
               </TableCell>
               <TableCell>
-                <Badge variant={item.probe_ok ? "secondary" : "outline"}>
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    "rounded-full px-3 py-1 text-[11px] uppercase tracking-[0.14em]",
+                    item.probe_ok
+                      ? "border-emerald-500/20 bg-emerald-500/[0.08] text-emerald-700 dark:text-emerald-300"
+                      : "border-amber-500/25 bg-amber-500/[0.1] text-amber-700 dark:text-amber-300",
+                  )}
+                >
                   {item.probe_ok ? "Reachable" : "Unverified"}
                 </Badge>
               </TableCell>
-              <TableCell>{formatLatency(item.best_latency_ms)}</TableCell>
-              <TableCell>{formatTimestamp(item.last_used_at)}</TableCell>
+              <TableCell className="font-mono text-xs md:text-sm">
+                {formatLatency(item.best_latency_ms)}
+              </TableCell>
+              <TableCell className="text-xs md:text-sm">
+                {formatTimestamp(item.last_used_at)}
+              </TableCell>
             </TableRow>
           ))}
         </TableBody>

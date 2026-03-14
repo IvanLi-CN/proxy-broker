@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
 import { useOutletContext } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -11,6 +12,7 @@ const getErrorMessage = (error: unknown) =>
 
 export function SessionsRoute() {
   const { profileId } = useOutletContext<RootOutletContext>();
+  const previousProfileId = useRef(profileId);
   const queryClient = useQueryClient();
   const sessionsQuery = useQuery({
     queryKey: ["sessions", profileId],
@@ -45,6 +47,20 @@ export function SessionsRoute() {
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   });
+
+  const { reset: resetOpenMutation } = openMutation;
+  const { reset: resetBatchMutation } = batchMutation;
+  const { reset: resetCloseMutation } = closeMutation;
+
+  useEffect(() => {
+    if (previousProfileId.current === profileId) {
+      return;
+    }
+    previousProfileId.current = profileId;
+    resetOpenMutation();
+    resetBatchMutation();
+    resetCloseMutation();
+  }, [profileId, resetOpenMutation, resetBatchMutation, resetCloseMutation]);
 
   return (
     <SessionsPage

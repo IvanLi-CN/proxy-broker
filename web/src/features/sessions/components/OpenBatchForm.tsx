@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { ActionResponsePanel } from "@/components/ActionResponsePanel";
 import { StringListField } from "@/components/StringListField";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -65,15 +66,29 @@ export function OpenBatchForm({ isPending, response, error, onSubmit }: OpenBatc
   const fieldArray = useFieldArray({ control: form.control, name: "requests" });
 
   return (
-    <Card className="border-border/70 bg-card/90">
-      <CardHeader className="border-b border-border/70">
-        <CardTitle className="flex items-center gap-2 text-lg">
-          <Rows4Icon className="size-4 text-primary" />
-          Open batch
-        </CardTitle>
-        <CardDescription>
-          Queue multiple open-session requests and let the backend roll back if any row fails.
-        </CardDescription>
+    <Card className="overflow-hidden border-border/70 bg-card/96 shadow-[0_24px_70px_-44px_rgba(15,23,42,0.55)]">
+      <CardHeader className="gap-4 border-b border-border/70 bg-muted/15 pb-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="space-y-2">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.32em] text-primary/80">
+              Batch open
+            </div>
+            <CardTitle className="flex items-center gap-2 text-xl tracking-tight">
+              <Rows4Icon className="size-4 text-primary" />
+              Queue a transactional batch
+            </CardTitle>
+            <CardDescription className="text-sm leading-6 text-muted-foreground md:text-[15px]">
+              Stage multiple open-session requests and let the backend roll the whole set back if
+              any row fails validation or allocation.
+            </CardDescription>
+          </div>
+          <Badge
+            variant="outline"
+            className="rounded-full px-3 py-1 font-mono text-[11px] uppercase tracking-[0.16em]"
+          >
+            rollback on failure
+          </Badge>
+        </div>
       </CardHeader>
       <CardContent className="space-y-5 pt-5">
         <form
@@ -86,14 +101,17 @@ export function OpenBatchForm({ isPending, response, error, onSubmit }: OpenBatc
         >
           <div className="space-y-4">
             {fieldArray.fields.map((field, index) => (
-              <div key={field.id} className="rounded-2xl border border-border/70 bg-muted/30 p-4">
+              <div
+                key={field.id}
+                className="rounded-[28px] border border-border/70 bg-background/80 p-4"
+              >
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div>
                     <div className="text-sm font-semibold text-foreground">
                       Request #{index + 1}
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      Compact selector for one session entry.
+                      Compact selector for one listener entry.
                     </div>
                   </div>
                   <Button
@@ -107,14 +125,14 @@ export function OpenBatchForm({ isPending, response, error, onSubmit }: OpenBatc
                     <Trash2Icon />
                   </Button>
                 </div>
-                <div className="grid gap-4 md:grid-cols-2">
+                <div className="grid gap-4">
                   <div className="space-y-2">
                     <Label htmlFor={`batch-specified-ip-${index}`}>Specified IP</Label>
                     <Input
                       id={`batch-specified-ip-${index}`}
                       {...form.register(`requests.${index}.specifiedIp`)}
                       placeholder="203.0.113.10"
-                      className="font-mono text-xs md:text-sm"
+                      className="bg-card font-mono text-xs md:text-sm"
                     />
                   </div>
                   <div className="space-y-2">
@@ -123,7 +141,7 @@ export function OpenBatchForm({ isPending, response, error, onSubmit }: OpenBatc
                       id={`batch-desired-port-${index}`}
                       {...form.register(`requests.${index}.desiredPort`)}
                       placeholder="10080"
-                      className="font-mono text-xs md:text-sm"
+                      className="bg-card font-mono text-xs md:text-sm"
                     />
                   </div>
                   <Controller
@@ -183,13 +201,14 @@ export function OpenBatchForm({ isPending, response, error, onSubmit }: OpenBatc
                     )}
                   />
                 </div>
-                <div className="mt-4 grid gap-4 md:grid-cols-[160px_200px]">
+                <div className="mt-4 grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
                     <Label htmlFor={`batch-limit-${index}`}>Selector limit</Label>
                     <Input
                       id={`batch-limit-${index}`}
                       {...form.register(`requests.${index}.limit`)}
                       placeholder="1"
+                      className="bg-card"
                     />
                   </div>
                   <div className="space-y-2">
@@ -199,7 +218,7 @@ export function OpenBatchForm({ isPending, response, error, onSubmit }: OpenBatc
                       name={`requests.${index}.sortMode`}
                       render={({ field }) => (
                         <Select onValueChange={field.onChange} value={field.value}>
-                          <SelectTrigger id={`batch-sort-mode-${index}`} className="w-full">
+                          <SelectTrigger id={`batch-sort-mode-${index}`} className="w-full bg-card">
                             <SelectValue placeholder="Sort mode" />
                           </SelectTrigger>
                           <SelectContent>
@@ -214,12 +233,12 @@ export function OpenBatchForm({ isPending, response, error, onSubmit }: OpenBatc
               </div>
             ))}
           </div>
-          <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-[28px] border border-border/70 bg-[linear-gradient(135deg,rgba(59,130,246,0.08),rgba(20,184,166,0.06))] p-4">
             <Button type="button" variant="outline" onClick={() => fieldArray.append(emptyRow())}>
               <PlusIcon />
               Add request row
             </Button>
-            <Button disabled={isPending} type="submit">
+            <Button disabled={isPending} type="submit" size="lg" className="min-w-40">
               {isPending ? "Opening batch..." : "Open batch"}
             </Button>
           </div>

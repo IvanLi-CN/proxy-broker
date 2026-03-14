@@ -22,3 +22,13 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {};
+
+export const FieldSizes: Story = {
+  render: (args) => (
+    <div className="grid max-w-md gap-4">
+      <Input {...args} size="sm" placeholder="Small field" />
+      <Input {...args} placeholder="Default field" />
+      <Input {...args} size="lg" placeholder="Large field" />
+    </div>
+  ),
+};

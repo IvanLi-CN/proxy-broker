@@ -10,7 +10,7 @@ const meta = {
     docs: {
       description: {
         component:
-          "Top-level summary card group for service health, active sessions, and operator warnings.",
+          "Top-level metric strip for service health, active listeners, pool inventory, and queued operator attention.",
       },
     },
   },
@@ -18,6 +18,8 @@ const meta = {
     status: "ok",
     activeSessions: 2,
     hasWarnings: false,
+    loadedProxies: 48,
+    refreshedIps: 26,
   },
 } satisfies Meta<typeof HealthSummaryCard>;
 
@@ -30,5 +32,6 @@ export const WarningState: Story = {
   args: {
     hasWarnings: true,
     status: "stale",
+    refreshedIps: null,
   },
 };

@@ -11,12 +11,13 @@ const meta = {
     docs: {
       description: {
         component:
-          "Results table for extracted candidates with geo, probe, and last-used metadata.",
+          "Results table for extracted candidates with geo, probe, and last-used metadata plus loading and empty states.",
       },
     },
   },
   args: {
     items: ipResultsFixture.items,
+    isLoading: false,
   },
 } satisfies Meta<typeof IpResultsTable>;
 
@@ -25,8 +26,16 @@ type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {};
 
+export const Loading: Story = {
+  args: {
+    items: [],
+    isLoading: true,
+  },
+};
+
 export const Empty: Story = {
   args: {
     items: [],
+    isLoading: false,
   },
 };

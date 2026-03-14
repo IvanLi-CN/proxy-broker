@@ -15,6 +15,7 @@ export function ThemeToggle() {
           variant="outline"
           size="icon-sm"
           aria-label="Toggle theme"
+          className="border-sidebar-border bg-background/70 hover:bg-background"
           onClick={() => setTheme(isDark ? "light" : "dark")}
         >
           {isDark ? <SunMediumIcon /> : <MoonStarIcon />}
