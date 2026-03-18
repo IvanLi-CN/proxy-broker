@@ -44,9 +44,9 @@ deployments.
 - `cd web && bun run check`
 - `cd web && bun run test`
 - `cd web && bun run build`
-- Shared testbox smoke: build the container, run it with wildcard binds, load a
-  sample subscription, open a session, and verify the resulting listener binds
-  on `0.0.0.0`.
+- Shared testbox smoke: verify wildcard binds with both the native Linux
+  release binary and a containerized runtime, load a sample subscription, open
+  a session, and confirm the resulting listener binds on `0.0.0.0`.
 
 ## Outcome
 
