@@ -1,0 +1,7 @@
+.codex
+.git
+.github
+.proxy-broker
+target
+web/node_modules
+web/dist
