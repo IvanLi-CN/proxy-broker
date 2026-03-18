@@ -17,6 +17,26 @@
 - Success:
   - Returns embedded frontend static assets from the Bun/Vite build output
 
+## GET /api/v1/profiles
+
+- Change: New
+- Auth: none
+- Success:
+  - `profiles[]`
+  - Sorted by `profile_id` ascending
+
+## POST /api/v1/profiles
+
+- Change: New
+- Auth: none
+- Body:
+  - `profile_id`: `string`
+- Success:
+  - `profile_id`
+- Error:
+  - `invalid_request` (400) when `profile_id` is empty after `trim`
+  - `profile_exists` (409) when the exact `profile_id` already exists
+
 ## POST /api/v1/profiles/{profile_id}/subscriptions/load
 
 - Change: New

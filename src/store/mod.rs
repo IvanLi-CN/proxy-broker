@@ -11,6 +11,7 @@ pub use sqlite::SqliteStore;
 #[async_trait]
 pub trait BrokerStore: Send + Sync {
     async fn list_profiles(&self) -> anyhow::Result<Vec<String>>;
+    async fn create_profile(&self, profile_id: &str, created_at: i64) -> anyhow::Result<()>;
 
     async fn replace_subscription(
         &self,

@@ -61,6 +61,15 @@ impl BrokerStore for MemoryStore {
         Ok(profiles)
     }
 
+    async fn create_profile(&self, profile_id: &str, _created_at: i64) -> anyhow::Result<()> {
+        let mut guard = self
+            .inner
+            .write()
+            .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
+        guard.entry(profile_id.to_string()).or_default();
+        Ok(())
+    }
+
     async fn replace_subscription(
         &self,
         profile_id: &str,
@@ -309,6 +318,19 @@ impl BrokerStore for MemoryStore {
 mod tests {
     use super::MemoryStore;
     use crate::{models::SessionRecord, store::BrokerStore};
+
+    #[tokio::test]
+    async fn create_profile_persists_empty_profiles_in_list() {
+        let store = MemoryStore::new();
+
+        store
+            .create_profile("empty-profile", 1)
+            .await
+            .expect("create should succeed");
+
+        let profiles = store.list_profiles().await.expect("list should succeed");
+        assert_eq!(profiles, vec!["empty-profile"]);
+    }
 
     #[tokio::test]
     async fn list_sessions_is_sorted_by_created_at_then_session_id() {

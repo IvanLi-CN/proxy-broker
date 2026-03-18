@@ -34,7 +34,13 @@ import { cn } from "@/lib/utils";
 
 interface AppShellProps {
   profileId: string;
+  profiles: string[];
+  profilesLoading?: boolean;
+  profilesCreating?: boolean;
+  profilesError?: string | null;
   onProfileIdChange: (value: string) => void;
+  onCreateProfile: (value: string) => Promise<string>;
+  onRetryProfiles?: () => void;
   healthStatus: string;
   children?: ReactNode;
 }
@@ -60,7 +66,18 @@ const navItems = [
   },
 ];
 
-export function AppShell({ profileId, onProfileIdChange, healthStatus, children }: AppShellProps) {
+export function AppShell({
+  profileId,
+  profiles,
+  profilesLoading = false,
+  profilesCreating = false,
+  profilesError = null,
+  onProfileIdChange,
+  onCreateProfile,
+  onRetryProfiles,
+  healthStatus,
+  children,
+}: AppShellProps) {
   const isHealthy = (healthStatus ?? "").toLowerCase() === "ok";
 
   return (
@@ -105,7 +122,16 @@ export function AppShell({ profileId, onProfileIdChange, healthStatus, children 
               </Badge>
             </div>
           </div>
-          <ProfileSwitcher profileId={profileId} onProfileIdChange={onProfileIdChange} />
+          <ProfileSwitcher
+            profileId={profileId}
+            profiles={profiles}
+            isLoading={profilesLoading}
+            isCreating={profilesCreating}
+            loadError={profilesError}
+            onProfileIdChange={onProfileIdChange}
+            onCreateProfile={onCreateProfile}
+            onRetryProfiles={onRetryProfiles}
+          />
         </SidebarHeader>
         <SidebarContent className="px-2 py-4">
           <SidebarGroup>

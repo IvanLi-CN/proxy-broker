@@ -2,6 +2,10 @@
 
 ## Schema (SQLite)
 
+- `profiles`
+  - `profile_id TEXT PRIMARY KEY`
+  - `created_at INTEGER NOT NULL`
+
 - `subscription_nodes`
   - `profile_id TEXT NOT NULL`
   - `proxy_name TEXT NOT NULL`
@@ -47,4 +51,5 @@
 ## Rollout
 
 - SQLite `open()` 自动 `create_if_missing`。
+- `profiles` 表用于持久化空 profile，使其在尚无业务数据时仍能被重新列出。
 - `probe_records` 支持从旧版主键 `(profile_id, ip, target_url)` 迁移到新版主键（新增 `proxy_name`）。

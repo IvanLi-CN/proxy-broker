@@ -18,3 +18,4 @@
 | r2m7k | PR Label 发版与通配监听 | 已完成 | `r2m7k-pr-label-release-and-wildcard-listen/SPEC.md` | 2026-03-18 | 补齐 label-driven release、GHCR 发布与 `0.0.0.0` 监听链路 |
 | s3zu5 | 管理台 UI 控制室重构 | PR 收敛完成 | `s3zu5-admin-ui-refresh/SPEC.md` | 2026-03-14 | PR #3 checks 与 review-loop 已清零，保持 API 合同不变 |
 | kgm4c | 安装 UI UX Pro Max Codex 项目技能 | 部分完成（2/3） | `kgm4c-install-ui-ux-pro-max-codex-skill/SPEC.md` | 2026-03-13 | 项目内 Codex skill 已安装，待 PR 收敛 |
+| 6b2xu | Profile catalog 与可新建选择器 | 已完成 | `6b2xu-profile-catalog-combobox/SPEC.md` | 2026-03-19 | 为空 profile 引入持久化 catalog，并把侧栏输入框升级为 searchable combobox |

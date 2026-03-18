@@ -21,6 +21,8 @@ pub enum BrokerError {
     SessionNotFound,
     #[error("port already in use")]
     PortInUse,
+    #[error("profile already exists")]
+    ProfileExists,
     #[error("invalid port")]
     InvalidPort,
     #[error("invalid request: {0}")]
@@ -42,6 +44,7 @@ impl BrokerError {
             Self::IpConflictBlacklist(_) => "ip_conflict_blacklist",
             Self::SessionNotFound => "session_not_found",
             Self::PortInUse => "port_in_use",
+            Self::ProfileExists => "profile_exists",
             Self::InvalidPort => "invalid_port",
             Self::InvalidRequest(_) => "invalid_request",
             Self::MihomoUnavailable(_) => "mihomo_unavailable",
@@ -58,6 +61,7 @@ impl BrokerError {
             Self::IpConflictBlacklist(_) => StatusCode::BAD_REQUEST,
             Self::SessionNotFound => StatusCode::NOT_FOUND,
             Self::PortInUse => StatusCode::CONFLICT,
+            Self::ProfileExists => StatusCode::CONFLICT,
             Self::InvalidPort => StatusCode::BAD_REQUEST,
             Self::InvalidRequest(_) => StatusCode::BAD_REQUEST,
             Self::MihomoUnavailable(_) => StatusCode::BAD_GATEWAY,
