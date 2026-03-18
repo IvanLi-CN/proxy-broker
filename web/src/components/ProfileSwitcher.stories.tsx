@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState } from "react";
+import { userEvent, within } from "storybook/test";
 
 import { ProfileSwitcher } from "@/components/ProfileSwitcher";
 
@@ -54,9 +55,14 @@ export const SearchNoMatch: Story = {
   args: {
     profiles: ["default"],
   },
-  play: async ({ canvas, userEvent }) => {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const overlay = within(canvasElement.ownerDocument.body);
     await userEvent.click(canvas.getByRole("combobox"));
-    await userEvent.type(canvas.getByPlaceholderText("Search profiles or type a new ID"), "tokyo");
+    await userEvent.type(
+      await overlay.findByPlaceholderText("Search profiles or type a new ID"),
+      "tokyo",
+    );
   },
 };
 
@@ -64,10 +70,12 @@ export const Creating: Story = {
   args: {
     isCreating: true,
   },
-  play: async ({ canvas, userEvent }) => {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const overlay = within(canvasElement.ownerDocument.body);
     await userEvent.click(canvas.getByRole("combobox"));
     await userEvent.type(
-      canvas.getByPlaceholderText("Search profiles or type a new ID"),
+      await overlay.findByPlaceholderText("Search profiles or type a new ID"),
       "fresh-lab",
     );
   },
