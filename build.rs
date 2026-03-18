@@ -4,8 +4,13 @@ use std::{
 };
 
 fn main() {
+    println!("cargo:rerun-if-env-changed=APP_EFFECTIVE_VERSION");
     println!("cargo:rerun-if-changed=web/dist");
     println!("cargo:rerun-if-changed=web/dist/assets");
+
+    let effective_version =
+        env::var("APP_EFFECTIVE_VERSION").unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string());
+    println!("cargo:rustc-env=PROXY_BROKER_BUILD_VERSION={effective_version}");
 
     if let Err(err) = generate_embedded_web_assets() {
         panic!("failed to generate embedded web assets: {err}");

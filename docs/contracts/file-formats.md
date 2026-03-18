@@ -13,6 +13,6 @@
 
 - `name`: `broker-<session_id>`
 - `type`: `mixed`
-- `listen`: `127.0.0.1`
+- `listen`: configured session listener bind IP (`127.0.0.1` by default, `0.0.0.0` for wildcard deployments)
 - `port`: allocated port
 - `proxy`: `broker-ip-<hash>`（由 `proxy_name + selected_ip` 派生）

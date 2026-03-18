@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     hash::{Hash, Hasher},
-    net::IpAddr,
+    net::{IpAddr, Ipv4Addr},
     path::PathBuf,
     str::FromStr,
     sync::Arc,
@@ -19,7 +19,7 @@ use crate::{
     constants::{
         DEFAULT_GEO_ONLINE_CONCURRENCY, DEFAULT_GEO_TTL_SEC, DEFAULT_MMDB_URL,
         DEFAULT_ONLINE_GEO_BASE, DEFAULT_PROBE_CONCURRENCY, DEFAULT_PROBE_TARGETS,
-        DEFAULT_PROBE_TIMEOUT_MS, DEFAULT_PROBE_TTL_SEC,
+        DEFAULT_PROBE_TIMEOUT_MS, DEFAULT_PROBE_TTL_SEC, DEFAULT_SESSION_LISTEN_IP,
     },
     error::{BrokerError, BrokerResult},
     models::{
@@ -44,6 +44,7 @@ pub struct BrokerServiceOptions {
     pub online_geo_base: String,
     pub mmdb_url: String,
     pub data_dir: PathBuf,
+    pub session_listen_ip: IpAddr,
 }
 
 impl Default for BrokerServiceOptions {
@@ -58,6 +59,9 @@ impl Default for BrokerServiceOptions {
             online_geo_base: DEFAULT_ONLINE_GEO_BASE.to_string(),
             mmdb_url: DEFAULT_MMDB_URL.to_string(),
             data_dir: PathBuf::from(".proxy-broker/data"),
+            session_listen_ip: DEFAULT_SESSION_LISTEN_IP
+                .parse()
+                .unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST)),
         }
     }
 }
@@ -965,18 +969,24 @@ impl BrokerService {
         let max_attempts = if retryable { 3usize } else { 1usize };
 
         for attempt in 1..=max_attempts {
-            let prepared =
-                match prepare_session(request, &nodes, &ip_records, &probe_records, &existing) {
-                    Ok(prepared) => prepared,
-                    Err(err)
-                        if retryable
-                            && attempt < max_attempts
-                            && matches!(&err, BrokerError::PortInUse) =>
-                    {
-                        continue;
-                    }
-                    Err(err) => return Err(err),
-                };
+            let prepared = match prepare_session(
+                request,
+                &nodes,
+                &ip_records,
+                &probe_records,
+                &existing,
+                self.options.session_listen_ip,
+            ) {
+                Ok(prepared) => prepared,
+                Err(err)
+                    if retryable
+                        && attempt < max_attempts
+                        && matches!(&err, BrokerError::PortInUse) =>
+                {
+                    continue;
+                }
+                Err(err) => return Err(err),
+            };
 
             let mut merged = existing.clone();
             merged.push(prepared.clone());
@@ -1096,6 +1106,7 @@ impl BrokerService {
                 &ip_records,
                 &probe_records,
                 &existing,
+                self.options.session_listen_ip,
             ) {
                 Ok(staged) => staged,
                 Err(err)
@@ -1608,7 +1619,11 @@ fn choose_proxy_for_ip(
         .ok_or(BrokerError::IpNotFound)
 }
 
-fn allocate_port(existing: &[SessionRecord], desired: Option<u16>) -> BrokerResult<u16> {
+fn allocate_port(
+    existing: &[SessionRecord],
+    desired: Option<u16>,
+    listen_ip: IpAddr,
+) -> BrokerResult<u16> {
     let used: HashSet<u16> = existing.iter().map(|s| s.port).collect();
     if let Some(port) = desired {
         if port == 0 {
@@ -1617,7 +1632,7 @@ fn allocate_port(existing: &[SessionRecord], desired: Option<u16>) -> BrokerResu
         if used.contains(&port) {
             return Err(BrokerError::PortInUse);
         }
-        if std::net::TcpListener::bind(("127.0.0.1", port)).is_err() {
+        if std::net::TcpListener::bind((listen_ip, port)).is_err() {
             return Err(BrokerError::PortInUse);
         }
         return Ok(port);
@@ -1625,7 +1640,7 @@ fn allocate_port(existing: &[SessionRecord], desired: Option<u16>) -> BrokerResu
 
     for _ in 0..32 {
         let socket =
-            std::net::TcpListener::bind(("127.0.0.1", 0)).map_err(|_| BrokerError::PortInUse)?;
+            std::net::TcpListener::bind((listen_ip, 0)).map_err(|_| BrokerError::PortInUse)?;
         let port = socket
             .local_addr()
             .map_err(|_| BrokerError::PortInUse)?
@@ -1643,15 +1658,16 @@ fn prepare_session(
     ip_records: &[IpRecord],
     probes: &[ProbeRecord],
     existing: &[SessionRecord],
+    listen_ip: IpAddr,
 ) -> BrokerResult<SessionRecord> {
     let ip = choose_ip_for_open(request, ip_records, probes)?;
     let proxy_name = choose_proxy_for_ip(&ip, nodes, probes)?;
-    let port = allocate_port(existing, request.desired_port)?;
+    let port = allocate_port(existing, request.desired_port, listen_ip)?;
     let now = now_epoch_sec();
 
     Ok(SessionRecord {
         session_id: uuid::Uuid::new_v4().to_string(),
-        listen: crate::constants::DEFAULT_LISTEN_IP.to_string(),
+        listen: listen_ip.to_string(),
         port,
         selected_ip: ip,
         proxy_name,
@@ -1665,12 +1681,20 @@ fn stage_batch_sessions(
     ip_records: &[IpRecord],
     probe_records: &[ProbeRecord],
     existing: &[SessionRecord],
+    listen_ip: IpAddr,
 ) -> BrokerResult<Vec<SessionRecord>> {
     let mut staged = Vec::new();
     for request in requests {
         let mut all_sessions = existing.to_vec();
         all_sessions.extend(staged.clone());
-        let prepared = prepare_session(request, nodes, ip_records, probe_records, &all_sessions)?;
+        let prepared = prepare_session(
+            request,
+            nodes,
+            ip_records,
+            probe_records,
+            &all_sessions,
+            listen_ip,
+        )?;
         staged.push(prepared);
     }
     Ok(staged)
@@ -2270,8 +2294,15 @@ proxies:
         }];
         let nodes = vec![sample_node("proxy-a", "1.1.1.1")];
         let ips = vec![sample_ip("1.1.1.1", None)];
-        let err = stage_batch_sessions(&requests, &nodes, &ips, &[], &[])
-            .expect_err("non-existent specified ip should fail");
+        let err = stage_batch_sessions(
+            &requests,
+            &nodes,
+            &ips,
+            &[],
+            &[],
+            Ipv4Addr::LOCALHOST.into(),
+        )
+        .expect_err("non-existent specified ip should fail");
         assert!(matches!(err, BrokerError::IpNotFound));
     }
 
@@ -2311,7 +2342,45 @@ proxies:
 
     #[test]
     fn desired_port_zero_is_invalid() {
-        let err = allocate_port(&[], Some(0)).expect_err("port 0 should be rejected");
+        let err = allocate_port(&[], Some(0), Ipv4Addr::LOCALHOST.into())
+            .expect_err("port 0 should be rejected");
         assert!(matches!(err, BrokerError::InvalidPort));
+    }
+
+    #[test]
+    fn allocate_port_respects_configured_listen_ip() {
+        let occupied = std::net::TcpListener::bind(("0.0.0.0", 0))
+            .expect("should reserve an externally visible port");
+        let occupied_port = occupied
+            .local_addr()
+            .expect("listener should expose local addr")
+            .port();
+
+        let err = allocate_port(&[], Some(occupied_port), Ipv4Addr::UNSPECIFIED.into())
+            .expect_err("occupied wildcard port should be rejected");
+        assert!(matches!(err, BrokerError::PortInUse));
+    }
+
+    #[test]
+    fn prepare_session_uses_configured_listen_ip() {
+        let request = OpenSessionRequest {
+            specified_ip: Some("1.1.1.1".to_string()),
+            selector: None,
+            desired_port: None,
+        };
+        let nodes = vec![sample_node("proxy-a", "1.1.1.1")];
+        let ips = vec![sample_ip("1.1.1.1", None)];
+
+        let session = prepare_session(
+            &request,
+            &nodes,
+            &ips,
+            &[],
+            &[],
+            Ipv4Addr::UNSPECIFIED.into(),
+        )
+        .expect("session should be prepared");
+
+        assert_eq!(session.listen, "0.0.0.0");
     }
 }

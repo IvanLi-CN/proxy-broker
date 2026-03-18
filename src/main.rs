@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{net::IpAddr, path::PathBuf, sync::Arc};
 
 use anyhow::Context;
 use clap::{ArgAction, Parser};
@@ -10,10 +10,25 @@ use tracing_subscriber::prelude::*;
 use tracing_subscriber::{EnvFilter, fmt};
 
 #[derive(Debug, Parser)]
-#[command(author, version, about = "proxy-broker REST service")]
+#[command(
+    author,
+    version = env!("PROXY_BROKER_BUILD_VERSION"),
+    about = "proxy-broker REST service"
+)]
 struct Cli {
-    #[arg(long, default_value = proxy_broker::constants::DEFAULT_SERVICE_ADDR)]
+    #[arg(
+        long,
+        env = "PROXY_BROKER_LISTEN_ADDR",
+        default_value = proxy_broker::constants::DEFAULT_SERVICE_ADDR
+    )]
     listen: String,
+
+    #[arg(
+        long,
+        env = "PROXY_BROKER_SESSION_LISTEN_IP",
+        default_value = proxy_broker::constants::DEFAULT_SESSION_LISTEN_IP
+    )]
+    session_listen_ip: IpAddr,
 
     #[arg(long, default_value = "sqlite")]
     store: String,
@@ -110,6 +125,7 @@ async fn main() -> anyhow::Result<()> {
         geo_online_concurrency: args.geo_online_concurrency.max(1),
         online_geo_base: args.online_geo_base,
         mmdb_url: args.mmdb_url,
+        session_listen_ip: args.session_listen_ip,
         ..BrokerServiceOptions::default()
     };
     let service = Arc::new(BrokerService::new(store, runtime, service_opts));
