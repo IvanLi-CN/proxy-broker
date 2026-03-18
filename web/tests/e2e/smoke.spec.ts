@@ -126,7 +126,7 @@ test.beforeEach(async ({ page }) => {
 
 test("operator can drive the main workflows", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByText("Operator control room")).toBeVisible();
+  await expect(page.getByText(/^Proxy broker$/i)).toBeVisible();
   await expect(page.getByText("Local API heartbeat")).toBeVisible();
   await expect(
     page.getByText("Run the operator plane like a control room, not a note pile."),
