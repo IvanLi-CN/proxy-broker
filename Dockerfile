@@ -10,8 +10,7 @@ FROM rust:1-bookworm AS builder
 ARG APP_EFFECTIVE_VERSION
 ENV APP_EFFECTIVE_VERSION=${APP_EFFECTIVE_VERSION}
 
-RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
-    && printf 'Acquire::Retries \"5\";\nAcquire::https::Timeout \"30\";\n' > /etc/apt/apt.conf.d/80codex-retries \
+RUN printf 'Acquire::Retries \"5\";\nAcquire::http::Timeout \"30\";\nAcquire::https::Timeout \"30\";\n' > /etc/apt/apt.conf.d/80codex-retries \
     && apt-get update \
     && apt-get install -y --no-install-recommends pkg-config libsqlite3-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -26,8 +25,7 @@ FROM debian:bookworm-slim AS runtime
 
 ARG APP_EFFECTIVE_VERSION
 
-RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
-    && printf 'Acquire::Retries \"5\";\nAcquire::https::Timeout \"30\";\n' > /etc/apt/apt.conf.d/80codex-retries \
+RUN printf 'Acquire::Retries \"5\";\nAcquire::http::Timeout \"30\";\nAcquire::https::Timeout \"30\";\n' > /etc/apt/apt.conf.d/80codex-retries \
     && apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
