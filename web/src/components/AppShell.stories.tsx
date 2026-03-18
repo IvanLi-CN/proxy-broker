@@ -11,7 +11,7 @@ const meta = {
     docs: {
       description: {
         component:
-          "Primary application chrome with profile switcher, sidebar navigation, and top status rail.",
+          "Primary application chrome with a compact sidebar brand strip, profile switcher, navigation, and top status rail.",
       },
     },
   },

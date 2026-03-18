@@ -66,43 +66,20 @@ export function AppShell({ profileId, onProfileIdChange, healthStatus, children 
   return (
     <SidebarProvider>
       <Sidebar collapsible="icon" variant="floating" className="p-3">
-        <SidebarHeader className="gap-4 rounded-[28px] border border-sidebar-border/80 bg-sidebar/96 px-3 py-4 shadow-[0_24px_60px_-40px_rgba(15,23,42,0.5)]">
-          <div className="rounded-[28px] border border-sidebar-border/80 bg-[linear-gradient(150deg,rgba(255,255,255,0.95),rgba(232,240,255,0.9)_48%,rgba(229,245,245,0.88))] p-4 text-sidebar-foreground dark:bg-[linear-gradient(150deg,rgba(18,25,38,0.98),rgba(22,31,52,0.94)_48%,rgba(12,44,50,0.9))]">
+        <SidebarHeader className="gap-3 rounded-[26px] border border-sidebar-border/80 bg-sidebar/96 px-3 py-3 shadow-[0_24px_60px_-40px_rgba(15,23,42,0.5)]">
+          <div className="rounded-[22px] border border-sidebar-border/80 bg-[linear-gradient(150deg,rgba(255,255,255,0.95),rgba(232,240,255,0.9)_48%,rgba(229,245,245,0.88))] px-3 py-3 text-sidebar-foreground dark:bg-[linear-gradient(150deg,rgba(18,25,38,0.98),rgba(22,31,52,0.94)_48%,rgba(12,44,50,0.9))]">
             <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.34em] text-sidebar-foreground/68">
-                  proxy-broker
+              <div className="min-w-0">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.32em] text-sidebar-foreground/62">
+                  Proxy broker
                 </div>
-                <div className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-sidebar-foreground">
-                  Operator control room
+                <div className="mt-1 text-sm font-semibold tracking-[-0.02em] text-sidebar-foreground">
+                  Operator plane
                 </div>
               </div>
-              <div className="rounded-2xl border border-sidebar-border/80 bg-background/70 p-3">
+              <div className="rounded-xl border border-sidebar-border/80 bg-background/75 p-2.5">
                 <CommandIcon className="size-4 text-sidebar-primary" />
               </div>
-            </div>
-            <p className="mt-3 max-w-xs text-sm leading-6 text-sidebar-foreground/72">
-              Keep the pool fresh, inspect candidate edges, and control live listeners from one
-              tighter console.
-            </p>
-            <div className="mt-4 flex flex-wrap gap-2">
-              <Badge
-                variant="outline"
-                className={cn(
-                  "rounded-full bg-background/65 px-3 py-1 font-mono text-[11px] uppercase tracking-[0.18em]",
-                  isHealthy
-                    ? "border-emerald-500/20 text-emerald-700 dark:text-emerald-300"
-                    : "border-amber-500/25 text-amber-700 dark:text-amber-300",
-                )}
-              >
-                {isHealthy ? "service healthy" : healthStatus || "checking"}
-              </Badge>
-              <Badge
-                variant="outline"
-                className="rounded-full border-sidebar-border/80 bg-background/65 px-3 py-1 font-mono text-[11px] uppercase tracking-[0.18em] text-sidebar-foreground/70"
-              >
-                host 127.0.0.1
-              </Badge>
             </div>
           </div>
           <ProfileSwitcher profileId={profileId} onProfileIdChange={onProfileIdChange} />
