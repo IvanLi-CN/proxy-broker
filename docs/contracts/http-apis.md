@@ -65,6 +65,8 @@
   - `desired_port`: `u16?`
 - Success:
   - `session_id`, `listen`, `port`, `selected_ip`, `proxy_name`
+  - `listen` echoes the configured session listener bind IP (`127.0.0.1` for
+    local runs, `0.0.0.0` for wildcard deployments)
 - Error:
   - `invalid_request` (400) when JSON body is malformed
 

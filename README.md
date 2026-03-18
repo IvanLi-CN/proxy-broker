@@ -7,8 +7,9 @@
 - opening and closing local proxy listener sessions by selected IP,
 - serving an embedded Bun-built operator web console from the same binary.
 
-The service binds `127.0.0.1` by default and exposes REST endpoints under
-`/api/v1`, a health probe at `/healthz`, and the SPA shell at `/`.
+The service binds `127.0.0.1` by default, session listeners also default to
+`127.0.0.1`, and it exposes REST endpoints under `/api/v1`, a health probe at
+`/healthz`, and the SPA shell at `/`.
 
 ## Start the service
 
@@ -16,8 +17,21 @@ The service binds `127.0.0.1` by default and exposes REST endpoints under
 cargo run -- \
   --store sqlite \
   --sqlite-path .proxy-broker/state.sqlite \
-  --listen 127.0.0.1:8080
+  --listen 127.0.0.1:8080 \
+  --session-listen-ip 127.0.0.1
 ```
+
+For container or remote-host deployments, publish both the HTTP service and
+session listeners on wildcard binds:
+
+```bash
+docker run --rm -p 8080:8080 ghcr.io/ivanli-cn/proxy-broker:latest
+```
+
+The published container image defaults to:
+
+- `--listen 0.0.0.0:8080`
+- `--session-listen-ip 0.0.0.0`
 
 ## Web console
 
@@ -43,7 +57,8 @@ API calls back to the local Rust service:
 cargo run -- \
   --store sqlite \
   --sqlite-path .proxy-broker/state.sqlite \
-  --listen 127.0.0.1:8080
+  --listen 127.0.0.1:8080 \
+  --session-listen-ip 127.0.0.1
 
 cd web
 bun run dev
@@ -122,6 +137,8 @@ Base path: `http://127.0.0.1:8080/api/v1/profiles/{profile_id}`
   "desired_port": 10080
 }
 ```
+
+The response `listen` field reflects the configured session listener bind IP.
 
 ### Open sessions in batch
 
