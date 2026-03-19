@@ -11,8 +11,8 @@ use axum::{
 use crate::{
     error::BrokerError,
     models::{
-        HealthResponse, LoadSubscriptionRequest, OpenBatchRequest, OpenSessionRequest,
-        RefreshRequest,
+        CreateProfileRequest, CreateProfileResponse, HealthResponse, LoadSubscriptionRequest,
+        OpenBatchRequest, OpenSessionRequest, RefreshRequest,
     },
     service::BrokerService,
     web_ui::spa_fallback,
@@ -26,6 +26,7 @@ pub struct AppState {
 pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
+        .route("/api/v1/profiles", get(list_profiles).post(create_profile))
         .route(
             "/api/v1/profiles/{profile_id}/subscriptions/load",
             post(load_subscription),
@@ -59,6 +60,22 @@ async fn healthz() -> Json<HealthResponse> {
     Json(HealthResponse {
         status: "ok".to_string(),
     })
+}
+
+async fn list_profiles(
+    State(state): State<AppState>,
+) -> Result<Json<crate::models::ListProfilesResponse>, BrokerError> {
+    let resp = state.service.list_profiles().await?;
+    Ok(Json(resp))
+}
+
+async fn create_profile(
+    State(state): State<AppState>,
+    payload: Result<Json<CreateProfileRequest>, JsonRejection>,
+) -> Result<(StatusCode, Json<CreateProfileResponse>), BrokerError> {
+    let request = parse_json_payload(payload, "create_profile")?;
+    let resp = state.service.create_profile(&request.profile_id).await?;
+    Ok((StatusCode::CREATED, Json(resp)))
 }
 
 async fn load_subscription(

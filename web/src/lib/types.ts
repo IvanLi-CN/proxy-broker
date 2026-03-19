@@ -6,6 +6,14 @@ export interface LoadSubscriptionRequest {
   source: SubscriptionSource;
 }
 
+export interface CreateProfileRequest {
+  profile_id: string;
+}
+
+export interface CreateProfileResponse {
+  profile_id: string;
+}
+
 export interface LoadSubscriptionResponse {
   loaded_proxies: number;
   distinct_ips: number;
@@ -79,6 +87,10 @@ export interface SessionRecord {
 
 export interface ListSessionsResponse {
   sessions: SessionRecord[];
+}
+
+export interface ListProfilesResponse {
+  profiles: string[];
 }
 
 export interface HealthResponse {

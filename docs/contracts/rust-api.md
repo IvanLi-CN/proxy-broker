@@ -4,6 +4,7 @@
 
 - `BrokerStore`
   - `list_profiles()`
+  - `create_profile(profile_id, created_at)`
   - `replace_subscription(profile_id, nodes)`
   - `apply_subscription_snapshot(profile_id, nodes, ip_records, probe_records, removed_session_ids)`
   - `list_subscription(profile_id)`
@@ -33,6 +34,8 @@
 
 - `BrokerService`
   - `reconcile_startup_sessions()`
+  - `list_profiles()`
+  - `create_profile(profile_id)`
   - `load_subscription(profile_id, source)`
   - `refresh(profile_id, request)`
   - `extract_ips(profile_id, request)`

@@ -87,7 +87,7 @@ mod tests {
     use anyhow::anyhow;
     use async_trait::async_trait;
     use axum::{
-        body::Body,
+        body::{Body, to_bytes},
         http::{Method, Request, StatusCode, Uri},
     };
     use tower::ServiceExt;
@@ -222,6 +222,48 @@ mod tests {
             response.headers().get("content-type").unwrap(),
             "application/json"
         );
+    }
+
+    #[tokio::test]
+    async fn profile_routes_create_and_list_profiles() {
+        let app = test_router();
+
+        let created = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/profiles")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"profile_id":"  edge-jp  "}"#))
+                    .unwrap(),
+            )
+            .await
+            .expect("router should respond");
+        assert_eq!(created.status(), StatusCode::CREATED);
+        let created_body = to_bytes(created.into_body(), usize::MAX)
+            .await
+            .expect("body should be readable");
+        let created_json: serde_json::Value =
+            serde_json::from_slice(&created_body).expect("body should be json");
+        assert_eq!(created_json["profile_id"], "edge-jp");
+
+        let listed = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/profiles")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("router should respond");
+        assert_eq!(listed.status(), StatusCode::OK);
+        let listed_body = to_bytes(listed.into_body(), usize::MAX)
+            .await
+            .expect("body should be readable");
+        let listed_json: serde_json::Value =
+            serde_json::from_slice(&listed_body).expect("body should be json");
+        assert_eq!(listed_json["profiles"], serde_json::json!(["edge-jp"]));
     }
 
     #[tokio::test]

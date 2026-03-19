@@ -1,8 +1,11 @@
 import type {
+  CreateProfileRequest,
+  CreateProfileResponse,
   ErrorResponse,
   ExtractIpRequest,
   ExtractIpResponse,
   HealthResponse,
+  ListProfilesResponse,
   ListSessionsResponse,
   LoadSubscriptionRequest,
   LoadSubscriptionResponse,
@@ -64,6 +67,12 @@ export { ApiError };
 
 export const api = {
   getHealth: () => request<HealthResponse>("/healthz"),
+  listProfiles: () => request<ListProfilesResponse>("/api/v1/profiles"),
+  createProfile: (payload: CreateProfileRequest) =>
+    request<CreateProfileResponse>("/api/v1/profiles", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
   listSessions: (profileId: string) =>
     request<ListSessionsResponse>(profilePath(profileId, "/sessions")),
   loadSubscription: (profileId: string, payload: LoadSubscriptionRequest) =>

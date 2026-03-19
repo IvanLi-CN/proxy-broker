@@ -24,3 +24,19 @@ Object.defineProperty(window, "ResizeObserver", {
   writable: true,
   value: ResizeObserverMock,
 });
+
+class PointerEventMock extends Event {
+  button = 0;
+  ctrlKey = false;
+  pointerType = "mouse";
+}
+
+Object.defineProperty(window, "PointerEvent", {
+  writable: true,
+  value: PointerEventMock,
+});
+
+Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+  writable: true,
+  value: () => {},
+});

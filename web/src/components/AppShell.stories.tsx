@@ -24,8 +24,14 @@ const meta = {
   ),
   args: {
     profileId: "default",
+    profiles: ["default", "edge-jp", "lab-us"],
+    profilesLoading: false,
+    profilesCreating: false,
+    profilesError: null,
     healthStatus: "ok",
     onProfileIdChange: () => undefined,
+    onCreateProfile: async (value: string) => value,
+    onRetryProfiles: () => undefined,
   },
 } satisfies Meta<typeof AppShell>;
 

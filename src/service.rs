@@ -23,10 +23,10 @@ use crate::{
     },
     error::{BrokerError, BrokerResult},
     models::{
-        ExtractIpItem, ExtractIpRequest, ExtractIpResponse, IpRecord, ListSessionsResponse,
-        LoadSubscriptionResponse, OpenBatchRequest, OpenBatchResponse, OpenSessionRequest,
-        OpenSessionResponse, ProbeRecord, ProxyNode, RefreshRequest, RefreshResponse,
-        SessionRecord, now_epoch_sec,
+        CreateProfileResponse, ExtractIpItem, ExtractIpRequest, ExtractIpResponse, IpRecord,
+        ListProfilesResponse, ListSessionsResponse, LoadSubscriptionResponse, OpenBatchRequest,
+        OpenBatchResponse, OpenSessionRequest, OpenSessionResponse, ProbeRecord, ProxyNode,
+        RefreshRequest, RefreshResponse, SessionRecord, now_epoch_sec,
     },
     runtime::MihomoRuntime,
     store::BrokerStore,
@@ -1194,6 +1194,45 @@ impl BrokerService {
         Err(BrokerError::BatchOpenFailed)
     }
 
+    pub async fn list_profiles(&self) -> BrokerResult<ListProfilesResponse> {
+        let profiles = self
+            .store
+            .list_profiles()
+            .await
+            .map_err(BrokerError::from)?;
+        Ok(ListProfilesResponse { profiles })
+    }
+
+    pub async fn create_profile(&self, profile_id: &str) -> BrokerResult<CreateProfileResponse> {
+        let normalized = profile_id.trim();
+        if normalized.is_empty() {
+            return Err(BrokerError::InvalidRequest(
+                "profile_id must not be empty".to_string(),
+            ));
+        }
+
+        let _profile_guard = self.lock_profile(normalized).await;
+        let exists = self
+            .store
+            .list_profiles()
+            .await
+            .map_err(BrokerError::from)?
+            .into_iter()
+            .any(|item| item == normalized);
+        if exists {
+            return Err(BrokerError::ProfileExists);
+        }
+
+        self.store
+            .create_profile(normalized, now_epoch_sec())
+            .await
+            .map_err(BrokerError::from)?;
+
+        Ok(CreateProfileResponse {
+            profile_id: normalized.to_string(),
+        })
+    }
+
     pub async fn list_sessions(&self, profile_id: &str) -> BrokerResult<ListSessionsResponse> {
         let sessions = self
             .store
@@ -2061,6 +2100,43 @@ proxies:
             "unexpected error: {err:?}"
         );
         assert_eq!(runtime.apply_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn create_profile_trims_and_lists_empty_profile() {
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
+
+        let created = service
+            .create_profile("  fresh-lab  ")
+            .await
+            .expect("create should succeed");
+        assert_eq!(created.profile_id, "fresh-lab");
+
+        let profiles = service
+            .list_profiles()
+            .await
+            .expect("list should succeed")
+            .profiles;
+        assert_eq!(profiles, vec!["fresh-lab"]);
+    }
+
+    #[tokio::test]
+    async fn create_profile_rejects_duplicates() {
+        let store = Arc::new(MemoryStore::new());
+        store
+            .create_profile("default", 1)
+            .await
+            .expect("seed create should succeed");
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
+
+        let err = service
+            .create_profile("default")
+            .await
+            .expect_err("duplicate create should fail");
+        assert!(matches!(err, BrokerError::ProfileExists));
     }
 
     fn sample_ip(ip: &str, last_used_at: Option<i64>) -> IpRecord {

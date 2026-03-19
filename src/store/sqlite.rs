@@ -39,6 +39,17 @@ impl SqliteStore {
     async fn migrate(&self) -> anyhow::Result<()> {
         sqlx::query(
             r#"
+            CREATE TABLE IF NOT EXISTS profiles (
+              profile_id TEXT PRIMARY KEY,
+              created_at INTEGER NOT NULL
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"
             CREATE TABLE IF NOT EXISTS subscription_nodes (
               profile_id TEXT NOT NULL,
               proxy_name TEXT NOT NULL,
@@ -165,6 +176,8 @@ impl BrokerStore for SqliteStore {
             r#"
             SELECT profile_id
             FROM (
+              SELECT profile_id FROM profiles
+              UNION
               SELECT profile_id FROM subscription_nodes
               UNION
               SELECT profile_id FROM ip_records
@@ -182,6 +195,20 @@ impl BrokerStore for SqliteStore {
         rows.into_iter()
             .map(|row| row.try_get("profile_id").map_err(anyhow::Error::from))
             .collect()
+    }
+
+    async fn create_profile(&self, profile_id: &str, created_at: i64) -> anyhow::Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO profiles (profile_id, created_at)
+            VALUES (?1, ?2)
+            "#,
+        )
+        .bind(profile_id)
+        .bind(created_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     async fn replace_subscription(
@@ -709,5 +736,64 @@ impl BrokerStore for SqliteStore {
         }
         tx.commit().await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SqliteStore;
+    use crate::{models::ProxyNode, store::BrokerStore};
+
+    async fn open_temp_store() -> (SqliteStore, std::path::PathBuf) {
+        let path =
+            std::env::temp_dir().join(format!("proxy-broker-store-{}.db", uuid::Uuid::new_v4()));
+        let store = SqliteStore::open(&path)
+            .await
+            .expect("sqlite store should open");
+        (store, path)
+    }
+
+    fn sample_node(profile_name: &str, ip: &str) -> ProxyNode {
+        ProxyNode {
+            proxy_name: profile_name.to_string(),
+            proxy_type: "socks5".to_string(),
+            server: ip.to_string(),
+            resolved_ips: vec![ip.to_string()],
+            raw_proxy: serde_json::json!({
+                "name": profile_name,
+                "type": "socks5",
+                "server": ip
+            }),
+        }
+    }
+
+    #[tokio::test]
+    async fn create_profile_lists_empty_profile_without_other_records() {
+        let (store, path) = open_temp_store().await;
+
+        store
+            .create_profile("empty-profile", 1)
+            .await
+            .expect("create should succeed");
+
+        let profiles = store.list_profiles().await.expect("list should succeed");
+        assert_eq!(profiles, vec!["empty-profile"]);
+
+        let _ = tokio::fs::remove_file(path).await;
+    }
+
+    #[tokio::test]
+    async fn list_profiles_keeps_legacy_profiles_from_runtime_tables() {
+        let (store, path) = open_temp_store().await;
+
+        store
+            .replace_subscription("legacy-profile", &[sample_node("node-a", "1.1.1.1")])
+            .await
+            .expect("seed subscription should succeed");
+
+        let profiles = store.list_profiles().await.expect("list should succeed");
+        assert_eq!(profiles, vec!["legacy-profile"]);
+
+        let _ = tokio::fs::remove_file(path).await;
     }
 }

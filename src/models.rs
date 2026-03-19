@@ -22,6 +22,16 @@ pub struct LoadSubscriptionResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateProfileRequest {
+    pub profile_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateProfileResponse {
+    pub profile_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RefreshRequest {
     #[serde(default)]
     pub force: bool,
@@ -98,6 +108,11 @@ pub struct ExtractIpResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListSessionsResponse {
     pub sessions: Vec<SessionRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListProfilesResponse {
+    pub profiles: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
