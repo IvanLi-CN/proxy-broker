@@ -42,10 +42,8 @@ export function RootRoute() {
     } catch (error) {
       if (error instanceof ApiError && error.code === "profile_exists") {
         const existingProfileId = nextProfileId.trim();
-        setProfileId(existingProfileId);
-        toast.info(`Profile ${existingProfileId} already exists. Switched to it instead.`);
+        toast.info(`Profile ${existingProfileId} already exists. Refreshing catalog.`);
         await queryClient.invalidateQueries({ queryKey: ["profiles"] });
-        return existingProfileId;
       }
       toast.error(getErrorMessage(error));
       throw error;
@@ -62,7 +60,9 @@ export function RootRoute() {
       }}
       profiles={profiles}
       profilesCreating={createProfileMutation.isPending}
-      profilesError={profilesQuery.isError ? getErrorMessage(profilesQuery.error) : null}
+      profilesError={
+        profilesQuery.isError && !profilesQuery.data ? getErrorMessage(profilesQuery.error) : null
+      }
       profilesLoading={profilesQuery.isLoading}
       profileId={profileId}
     >
