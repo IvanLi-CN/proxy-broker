@@ -6,6 +6,7 @@ import { AccessControlCard } from "@/features/overview/components/AccessControlC
 const meta = {
   title: "Features/Overview/AccessControlCard",
   component: AccessControlCard,
+  tags: ["autodocs"],
   args: {
     identity: {
       authenticated: true,
