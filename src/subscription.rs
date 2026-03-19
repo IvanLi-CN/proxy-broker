@@ -2,10 +2,13 @@ use std::{collections::HashSet, net::IpAddr, sync::Arc};
 
 use anyhow::{Context, anyhow};
 use base64::Engine;
+use reqwest::header::USER_AGENT;
 use serde_yaml::Value;
 use thiserror::Error;
 
 use crate::{constants::DEFAULT_DNS_CONCURRENCY, models::ProxyNode};
+
+pub const SUBSCRIPTION_FETCH_USER_AGENT: &str = "mihomo/1.18.3";
 
 fn decode_base64_yaml(input: &str) -> anyhow::Result<String> {
     let compact: String = input.chars().filter(|c| !c.is_whitespace()).collect();
@@ -91,6 +94,7 @@ pub async fn load_from_source(
     let raw = match source {
         crate::models::SubscriptionSource::Url(url) => client
             .get(url)
+            .header(USER_AGENT, SUBSCRIPTION_FETCH_USER_AGENT)
             .send()
             .await
             .map_err(|err| {
@@ -201,8 +205,70 @@ impl ArcSemaphore {
 
 #[cfg(test)]
 mod tests {
-    use super::{SubscriptionLoadError, load_from_source};
+    use super::{SUBSCRIPTION_FETCH_USER_AGENT, SubscriptionLoadError, load_from_source};
     use crate::models::SubscriptionSource;
+    use axum::{
+        Router,
+        extract::State,
+        http::{HeaderMap, StatusCode},
+        routing::get,
+    };
+    use std::sync::Arc;
+    use tokio::net::TcpListener;
+
+    #[derive(Clone)]
+    struct TestSubscriptionServerState {
+        success_payload: Arc<str>,
+        invalid_payload: Arc<str>,
+    }
+
+    async fn test_subscription_handler(
+        State(state): State<TestSubscriptionServerState>,
+        headers: HeaderMap,
+    ) -> (StatusCode, String) {
+        let user_agent = headers
+            .get(reqwest::header::USER_AGENT)
+            .and_then(|value| value.to_str().ok());
+        if user_agent == Some(SUBSCRIPTION_FETCH_USER_AGENT) {
+            (StatusCode::OK, state.success_payload.to_string())
+        } else {
+            (StatusCode::OK, state.invalid_payload.to_string())
+        }
+    }
+
+    async fn test_forbidden_handler() -> (StatusCode, &'static str) {
+        (StatusCode::FORBIDDEN, "blocked")
+    }
+
+    async fn spawn_test_server() -> (String, tokio::task::JoinHandle<()>) {
+        let app = Router::new()
+            .route("/subscription", get(test_subscription_handler))
+            .route("/forbidden", get(test_forbidden_handler))
+            .with_state(TestSubscriptionServerState {
+                success_payload: Arc::<str>::from(
+                    r#"
+proxies:
+  - name: ua-ok
+    type: socks5
+    server: 1.1.1.1
+"#,
+                ),
+                invalid_payload: Arc::<str>::from("not-a-clash-subscription"),
+            });
+
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("test listener should bind");
+        let addr = listener
+            .local_addr()
+            .expect("test listener should expose local addr");
+        let handle = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("test server should serve requests");
+        });
+        (format!("http://{addr}"), handle)
+    }
 
     #[tokio::test]
     async fn missing_file_is_reported_as_invalid_payload() {
@@ -212,5 +278,38 @@ mod tests {
             .await
             .expect_err("missing file should fail");
         assert!(matches!(err, SubscriptionLoadError::InvalidPayload(_)));
+    }
+
+    #[tokio::test]
+    async fn url_source_uses_mihomo_user_agent_and_loads_yaml_payload() {
+        let client = reqwest::Client::new();
+        let (base_url, server) = spawn_test_server().await;
+        let source = SubscriptionSource::Url(format!("{base_url}/subscription"));
+
+        let result = load_from_source(&client, &source)
+            .await
+            .expect("url source should load when compatibility ua is applied");
+
+        server.abort();
+
+        assert_eq!(result.0.len(), 1);
+        assert_eq!(result.0[0].proxy_name, "ua-ok");
+    }
+
+    #[tokio::test]
+    async fn url_source_reports_fetch_error_on_non_2xx_response() {
+        let client = reqwest::Client::new();
+        let (base_url, server) = spawn_test_server().await;
+        let source = SubscriptionSource::Url(format!("{base_url}/forbidden"));
+
+        let err = load_from_source(&client, &source)
+            .await
+            .expect_err("non-2xx source should fail");
+
+        server.abort();
+
+        assert!(
+            matches!(err, SubscriptionLoadError::SourceRead(message) if message.contains("returned non-2xx"))
+        );
     }
 }

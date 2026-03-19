@@ -84,6 +84,8 @@ Base path: `http://127.0.0.1:8080/api/v1/profiles/{profile_id}`
 ### Load subscription
 
 - `POST /subscriptions/load`
+- URL sources are fetched server-side with `User-Agent: mihomo/1.18.3` for
+  upstream compatibility.
 - Request body:
 
 ```json

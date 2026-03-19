@@ -58,6 +58,8 @@ separate Vite and Storybook workflow for local development.
   - last selected source type
   - last used extract presets if implemented as convenience state
 - No client-side authoritative data cache beyond TanStack Query.
+- URL subscription downloads remain server-side and use a fixed Mihomo
+  compatibility UA (`mihomo/1.18.3`); the UI does not expose a custom UA field.
 
 ## Component Boundaries
 
@@ -189,6 +191,8 @@ separate Vite and Storybook workflow for local development.
   - open single or batch sessions
   - list and close sessions
 - The built SPA is reachable from the Rust server root in production.
+- URL subscription loads work with upstream providers that gate Clash/Mihomo
+  payloads on the request UA, without changing the UI payload shape.
 - Every committed UI component/page in scope has Storybook docs and stories.
 - CI rejects missing stories or missing autodocs metadata.
 - The repo remains Bun-first for frontend workflows and Cargo-first for backend
