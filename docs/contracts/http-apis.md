@@ -45,9 +45,11 @@
   - `source.type`: `url|file`
   - `source.value`: `string`
 - Notes:
-  - `source.type=url` is fetched server-side with `User-Agent: mihomo/1.18.3`
+  - `source.type=url` is fetched server-side with a compatibility UA fallback
+    set, currently trying `Clash.Meta/1.18.3`, `mihomo/1.18.3`, then
+    `Clash Verge/1.7.7`
   - The request/response JSON contract does not change when the compatibility
-    UA is applied
+    UA fallback is applied
 - Success:
   - `loaded_proxies`, `distinct_ips`, `warnings`
 - Error:

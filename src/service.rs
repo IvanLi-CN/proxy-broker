@@ -1768,7 +1768,7 @@ mod tests {
         models::{SortMode, SubscriptionSource},
         runtime::MihomoRuntime,
         store::{BrokerStore, MemoryStore},
-        subscription::SUBSCRIPTION_FETCH_USER_AGENT,
+        subscription::SUBSCRIPTION_FETCH_USER_AGENTS,
     };
     use anyhow::anyhow;
     use async_trait::async_trait;
@@ -1881,7 +1881,7 @@ mod tests {
     struct TestSubscriptionServerState {
         payload: Arc<str>,
         status: StatusCode,
-        require_ua: bool,
+        accepted_user_agent: Option<Arc<str>>,
     }
 
     async fn test_subscription_handler(
@@ -1891,7 +1891,9 @@ mod tests {
         let user_agent = headers
             .get(reqwest::header::USER_AGENT)
             .and_then(|value| value.to_str().ok());
-        if state.require_ua && user_agent != Some(SUBSCRIPTION_FETCH_USER_AGENT) {
+        if let Some(accepted_user_agent) = state.accepted_user_agent.as_deref()
+            && user_agent != Some(accepted_user_agent)
+        {
             return (StatusCode::OK, "invalid-without-compat-ua".to_string());
         }
         (state.status, state.payload.to_string())
@@ -1900,14 +1902,14 @@ mod tests {
     async fn spawn_subscription_server(
         payload: &'static str,
         status: StatusCode,
-        require_ua: bool,
+        accepted_user_agent: Option<&'static str>,
     ) -> (String, tokio::task::JoinHandle<()>) {
         let app = Router::new()
             .route("/subscription", get(test_subscription_handler))
             .with_state(TestSubscriptionServerState {
                 payload: Arc::<str>::from(payload),
                 status,
-                require_ua,
+                accepted_user_agent: accepted_user_agent.map(Arc::<str>::from),
             });
         let listener = TcpListener::bind(("127.0.0.1", 0))
             .await
@@ -2065,7 +2067,7 @@ proxies:
     server: 8.8.8.8
 "#,
             StatusCode::OK,
-            true,
+            Some(SUBSCRIPTION_FETCH_USER_AGENTS[1]),
         )
         .await;
 
@@ -2078,6 +2080,8 @@ proxies:
         let response = result.expect("service should load url subscription");
         assert_eq!(response.loaded_proxies, 1);
         assert_eq!(response.distinct_ips, 1);
+        assert_eq!(response.warnings.len(), 1);
+        assert!(response.warnings[0].contains(SUBSCRIPTION_FETCH_USER_AGENTS[1]));
     }
 
     #[tokio::test]
@@ -2087,7 +2091,7 @@ proxies:
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
         let (url, server) =
-            spawn_subscription_server("still-not-a-subscription", StatusCode::OK, false).await;
+            spawn_subscription_server("still-not-a-subscription", StatusCode::OK, None).await;
 
         let result = service
             .load_subscription(profile_id, &SubscriptionSource::Url(url))
@@ -2104,8 +2108,7 @@ proxies:
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
-        let (url, server) =
-            spawn_subscription_server("blocked", StatusCode::FORBIDDEN, false).await;
+        let (url, server) = spawn_subscription_server("blocked", StatusCode::FORBIDDEN, None).await;
 
         let result = service
             .load_subscription(profile_id, &SubscriptionSource::Url(url))

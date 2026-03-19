@@ -58,8 +58,9 @@ separate Vite and Storybook workflow for local development.
   - last selected source type
   - last used extract presets if implemented as convenience state
 - No client-side authoritative data cache beyond TanStack Query.
-- URL subscription downloads remain server-side and use a fixed Mihomo
-  compatibility UA (`mihomo/1.18.3`); the UI does not expose a custom UA field.
+- URL subscription downloads remain server-side and use a compatibility UA
+  fallback set (`Clash.Meta/1.18.3`, `mihomo/1.18.3`, `Clash Verge/1.7.7`);
+  the UI does not expose a custom UA field.
 
 ## Component Boundaries
 

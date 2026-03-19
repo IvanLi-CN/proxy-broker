@@ -8,7 +8,8 @@ use thiserror::Error;
 
 use crate::{constants::DEFAULT_DNS_CONCURRENCY, models::ProxyNode};
 
-pub const SUBSCRIPTION_FETCH_USER_AGENT: &str = "mihomo/1.18.3";
+pub const SUBSCRIPTION_FETCH_USER_AGENTS: &[&str] =
+    &["Clash.Meta/1.18.3", "mihomo/1.18.3", "Clash Verge/1.7.7"];
 
 fn decode_base64_yaml(input: &str) -> anyhow::Result<String> {
     let compact: String = input.chars().filter(|c| !c.is_whitespace()).collect();
@@ -87,53 +88,101 @@ async fn resolve_server_ips(server: &str) -> anyhow::Result<Vec<String>> {
     }
 }
 
-pub async fn load_from_source(
-    client: &reqwest::Client,
-    source: &crate::models::SubscriptionSource,
-) -> Result<(Vec<ProxyNode>, Vec<String>), SubscriptionLoadError> {
-    let raw = match source {
-        crate::models::SubscriptionSource::Url(url) => client
-            .get(url)
-            .header(USER_AGENT, SUBSCRIPTION_FETCH_USER_AGENT)
-            .send()
-            .await
-            .map_err(|err| {
-                SubscriptionLoadError::SourceRead(format!(
-                    "failed to fetch subscription url `{url}`: {err}"
-                ))
-            })?
-            .error_for_status()
-            .map_err(|err| {
-                SubscriptionLoadError::SourceRead(format!(
-                    "subscription url `{url}` returned non-2xx: {err}"
-                ))
-            })?
-            .text()
-            .await
-            .map_err(|err| {
-                SubscriptionLoadError::SourceRead(format!(
-                    "failed to read subscription response body: {err}"
-                ))
-            })?,
-        crate::models::SubscriptionSource::File(path) => {
-            tokio::fs::read_to_string(path).await.map_err(|err| {
-                SubscriptionLoadError::InvalidPayload(format!(
-                    "failed to read subscription file `{path}`: {err}"
-                ))
-            })?
-        }
-    };
-
-    let proxies = match extract_proxies_from_yaml(&raw) {
-        Ok(p) => p,
+fn parse_subscription_payload(raw: &str) -> Result<Vec<Value>, SubscriptionLoadError> {
+    match extract_proxies_from_yaml(raw) {
+        Ok(proxies) => Ok(proxies),
         Err(yaml_err) => {
-            let decoded = decode_base64_yaml(&raw).map_err(|base64_err| {
+            let decoded = decode_base64_yaml(raw).map_err(|base64_err| {
                 SubscriptionLoadError::InvalidPayload(format!(
                     "yaml parse failed: {yaml_err}; base64 fallback failed: {base64_err}"
                 ))
             })?;
             extract_proxies_from_yaml(&decoded)
-                .map_err(|err| SubscriptionLoadError::InvalidPayload(err.to_string()))?
+                .map_err(|err| SubscriptionLoadError::InvalidPayload(err.to_string()))
+        }
+    }
+}
+
+async fn fetch_url_source(
+    client: &reqwest::Client,
+    url: &str,
+) -> Result<(Vec<Value>, Vec<String>), SubscriptionLoadError> {
+    let mut fetch_errors = Vec::new();
+    let mut parse_errors = Vec::new();
+
+    for (index, user_agent) in SUBSCRIPTION_FETCH_USER_AGENTS.iter().enumerate() {
+        let raw = match client.get(url).header(USER_AGENT, *user_agent).send().await {
+            Ok(response) => match response.error_for_status() {
+                Ok(response) => response.text().await.map_err(|err| {
+                    SubscriptionLoadError::SourceRead(format!(
+                        "failed to read subscription response body with User-Agent `{}`: {}",
+                        user_agent, err
+                    ))
+                }),
+                Err(err) => Err(SubscriptionLoadError::SourceRead(format!(
+                    "subscription url `{url}` returned non-2xx with User-Agent `{}`: {}",
+                    user_agent, err
+                ))),
+            },
+            Err(err) => Err(SubscriptionLoadError::SourceRead(format!(
+                "failed to fetch subscription url `{url}` with User-Agent `{}`: {}",
+                user_agent, err
+            ))),
+        };
+
+        let raw = match raw {
+            Ok(raw) => raw,
+            Err(SubscriptionLoadError::SourceRead(message)) => {
+                fetch_errors.push(message);
+                continue;
+            }
+            Err(err) => return Err(err),
+        };
+
+        match parse_subscription_payload(&raw) {
+            Ok(proxies) => {
+                let mut warnings = Vec::new();
+                if index > 0 {
+                    warnings.push(format!(
+                        "subscription payload required fallback User-Agent `{}`",
+                        user_agent
+                    ));
+                }
+                return Ok((proxies, warnings));
+            }
+            Err(SubscriptionLoadError::InvalidPayload(message)) => {
+                parse_errors.push(format!("User-Agent `{}`: {}", user_agent, message));
+            }
+            Err(err) => return Err(err),
+        }
+    }
+
+    if !parse_errors.is_empty() {
+        return Err(SubscriptionLoadError::InvalidPayload(format!(
+            "subscription payload was not parseable with any compatibility user agent: {}",
+            parse_errors.join(" | ")
+        )));
+    }
+
+    Err(SubscriptionLoadError::SourceRead(format!(
+        "failed to fetch subscription url `{url}` with all compatibility user agents: {}",
+        fetch_errors.join(" | ")
+    )))
+}
+
+pub async fn load_from_source(
+    client: &reqwest::Client,
+    source: &crate::models::SubscriptionSource,
+) -> Result<(Vec<ProxyNode>, Vec<String>), SubscriptionLoadError> {
+    let (proxies, mut warnings) = match source {
+        crate::models::SubscriptionSource::Url(url) => fetch_url_source(client, url).await?,
+        crate::models::SubscriptionSource::File(path) => {
+            let raw = tokio::fs::read_to_string(path).await.map_err(|err| {
+                SubscriptionLoadError::InvalidPayload(format!(
+                    "failed to read subscription file `{path}`: {err}"
+                ))
+            })?;
+            (parse_subscription_payload(&raw)?, Vec::new())
         }
     };
 
@@ -170,7 +219,6 @@ pub async fn load_from_source(
     }
 
     let mut nodes = Vec::new();
-    let mut warnings = Vec::new();
     for task in tasks {
         match task.await {
             Ok(Ok((node, node_warnings))) => {
@@ -205,7 +253,7 @@ impl ArcSemaphore {
 
 #[cfg(test)]
 mod tests {
-    use super::{SUBSCRIPTION_FETCH_USER_AGENT, SubscriptionLoadError, load_from_source};
+    use super::{SUBSCRIPTION_FETCH_USER_AGENTS, SubscriptionLoadError, load_from_source};
     use crate::models::SubscriptionSource;
     use axum::{
         Router,
@@ -218,8 +266,8 @@ mod tests {
 
     #[derive(Clone)]
     struct TestSubscriptionServerState {
+        accepted_user_agent: Arc<str>,
         success_payload: Arc<str>,
-        invalid_payload: Arc<str>,
     }
 
     async fn test_subscription_handler(
@@ -229,10 +277,10 @@ mod tests {
         let user_agent = headers
             .get(reqwest::header::USER_AGENT)
             .and_then(|value| value.to_str().ok());
-        if user_agent == Some(SUBSCRIPTION_FETCH_USER_AGENT) {
+        if user_agent == Some(state.accepted_user_agent.as_ref()) {
             (StatusCode::OK, state.success_payload.to_string())
         } else {
-            (StatusCode::OK, state.invalid_payload.to_string())
+            (StatusCode::OK, "not-a-clash-subscription".to_string())
         }
     }
 
@@ -245,6 +293,7 @@ mod tests {
             .route("/subscription", get(test_subscription_handler))
             .route("/forbidden", get(test_forbidden_handler))
             .with_state(TestSubscriptionServerState {
+                accepted_user_agent: Arc::<str>::from(SUBSCRIPTION_FETCH_USER_AGENTS[1]),
                 success_payload: Arc::<str>::from(
                     r#"
 proxies:
@@ -253,7 +302,6 @@ proxies:
     server: 1.1.1.1
 "#,
                 ),
-                invalid_payload: Arc::<str>::from("not-a-clash-subscription"),
             });
 
         let listener = TcpListener::bind(("127.0.0.1", 0))
@@ -288,12 +336,14 @@ proxies:
 
         let result = load_from_source(&client, &source)
             .await
-            .expect("url source should load when compatibility ua is applied");
+            .expect("url source should load when a compatibility ua succeeds");
 
         server.abort();
 
         assert_eq!(result.0.len(), 1);
         assert_eq!(result.0[0].proxy_name, "ua-ok");
+        assert_eq!(result.1.len(), 1);
+        assert!(result.1[0].contains(SUBSCRIPTION_FETCH_USER_AGENTS[1]));
     }
 
     #[tokio::test]
