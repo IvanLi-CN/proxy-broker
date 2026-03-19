@@ -1768,14 +1768,22 @@ mod tests {
         models::{SortMode, SubscriptionSource},
         runtime::MihomoRuntime,
         store::{BrokerStore, MemoryStore},
+        subscription::SUBSCRIPTION_FETCH_USER_AGENTS,
     };
     use anyhow::anyhow;
     use async_trait::async_trait;
+    use axum::{
+        Router,
+        extract::State,
+        http::{HeaderMap, StatusCode},
+        routing::get,
+    };
     use std::collections::HashSet;
     use std::sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     };
+    use tokio::net::TcpListener;
 
     #[derive(Default)]
     struct TestRuntime {
@@ -1867,6 +1875,54 @@ mod tests {
                 "server": ip
             }),
         }
+    }
+
+    #[derive(Clone)]
+    struct TestSubscriptionServerState {
+        payload: Arc<str>,
+        status: StatusCode,
+        accepted_user_agent: Option<Arc<str>>,
+    }
+
+    async fn test_subscription_handler(
+        State(state): State<TestSubscriptionServerState>,
+        headers: HeaderMap,
+    ) -> (StatusCode, String) {
+        let user_agent = headers
+            .get(reqwest::header::USER_AGENT)
+            .and_then(|value| value.to_str().ok());
+        if let Some(accepted_user_agent) = state.accepted_user_agent.as_deref()
+            && user_agent != Some(accepted_user_agent)
+        {
+            return (StatusCode::OK, "invalid-without-compat-ua".to_string());
+        }
+        (state.status, state.payload.to_string())
+    }
+
+    async fn spawn_subscription_server(
+        payload: &'static str,
+        status: StatusCode,
+        accepted_user_agent: Option<&'static str>,
+    ) -> (String, tokio::task::JoinHandle<()>) {
+        let app = Router::new()
+            .route("/subscription", get(test_subscription_handler))
+            .with_state(TestSubscriptionServerState {
+                payload: Arc::<str>::from(payload),
+                status,
+                accepted_user_agent: accepted_user_agent.map(Arc::<str>::from),
+            });
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("test listener should bind");
+        let addr = listener
+            .local_addr()
+            .expect("test listener should expose local addr");
+        let handle = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("test server should serve requests");
+        });
+        (format!("http://{addr}/subscription"), handle)
     }
 
     fn make_session(
@@ -1995,6 +2051,74 @@ proxies:
         let _ = tokio::fs::remove_file(&source_path).await;
 
         assert!(matches!(result, Err(BrokerError::SubscriptionInvalid)));
+    }
+
+    #[tokio::test]
+    async fn load_subscription_from_url_accepts_ua_gated_payload() {
+        let profile_id = "p-url-success";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
+        let (url, server) = spawn_subscription_server(
+            r#"
+proxies:
+  - name: url-node
+    type: socks5
+    server: 8.8.8.8
+"#,
+            StatusCode::OK,
+            Some(SUBSCRIPTION_FETCH_USER_AGENTS[1]),
+        )
+        .await;
+
+        let result = service
+            .load_subscription(profile_id, &SubscriptionSource::Url(url))
+            .await;
+
+        server.abort();
+
+        let response = result.expect("service should load url subscription");
+        assert_eq!(response.loaded_proxies, 1);
+        assert_eq!(response.distinct_ips, 1);
+        assert_eq!(response.warnings.len(), 1);
+        assert!(response.warnings[0].contains(SUBSCRIPTION_FETCH_USER_AGENTS[1]));
+    }
+
+    #[tokio::test]
+    async fn load_subscription_from_url_maps_invalid_payload_to_subscription_invalid() {
+        let profile_id = "p-url-invalid";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
+        let (url, server) =
+            spawn_subscription_server("still-not-a-subscription", StatusCode::OK, None).await;
+
+        let result = service
+            .load_subscription(profile_id, &SubscriptionSource::Url(url))
+            .await;
+
+        server.abort();
+
+        assert!(matches!(result, Err(BrokerError::SubscriptionInvalid)));
+    }
+
+    #[tokio::test]
+    async fn load_subscription_from_url_maps_non_2xx_to_subscription_fetch_failed() {
+        let profile_id = "p-url-fetch";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
+        let (url, server) = spawn_subscription_server("blocked", StatusCode::FORBIDDEN, None).await;
+
+        let result = service
+            .load_subscription(profile_id, &SubscriptionSource::Url(url))
+            .await;
+
+        server.abort();
+
+        assert!(
+            matches!(result, Err(BrokerError::SubscriptionFetch(message)) if message.contains("returned non-2xx"))
+        );
     }
 
     #[tokio::test]

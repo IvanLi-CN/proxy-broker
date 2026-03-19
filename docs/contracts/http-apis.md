@@ -44,10 +44,20 @@
 - Body:
   - `source.type`: `url|file`
   - `source.value`: `string`
+- Notes:
+  - `source.type=url` is fetched server-side with a compatibility UA fallback
+    set, currently trying `Clash.Meta/1.18.3`, `mihomo/1.18.3`, then
+    `Clash Verge/1.7.7`
+  - The request/response JSON contract does not change when the compatibility
+    UA fallback is applied
 - Success:
   - `loaded_proxies`, `distinct_ips`, `warnings`
 - Error:
   - `invalid_request` (400) when JSON body is malformed
+  - `subscription_invalid` (400) when the upstream returns 2xx but the payload
+    is not a supported Clash/Mihomo subscription
+  - `subscription_fetch_failed` (502) when the upstream URL is unreachable or
+    returns non-2xx
 
 ## POST /api/v1/profiles/{profile_id}/refresh
 
