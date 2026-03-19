@@ -3,8 +3,9 @@ use std::{net::IpAddr, path::PathBuf, sync::Arc};
 use anyhow::Context;
 use clap::{ArgAction, Parser};
 use proxy_broker::{
-    AppState, BrokerService, BrokerServiceOptions, BrokerStore, ManagedMihomoRuntime, MemoryStore,
-    MihomoRuntime, MihomoRuntimeOptions, SqliteStore, build_router,
+    AppState, AuthConfig, AuthConfigOptions, BrokerService, BrokerServiceOptions, BrokerStore,
+    ManagedMihomoRuntime, MemoryStore, MihomoRuntime, MihomoRuntimeOptions, SqliteStore,
+    build_router,
 };
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{EnvFilter, fmt};
@@ -77,6 +78,61 @@ struct Cli {
 
     #[arg(long)]
     log_json: bool,
+
+    #[arg(
+        long,
+        env = "PROXY_BROKER_AUTH_MODE",
+        default_value = proxy_broker::constants::DEFAULT_AUTH_MODE
+    )]
+    auth_mode: String,
+
+    #[arg(
+        long,
+        env = "PROXY_BROKER_AUTH_SUBJECT_HEADERS",
+        default_value = proxy_broker::constants::DEFAULT_AUTH_SUBJECT_HEADERS
+    )]
+    auth_subject_headers: String,
+
+    #[arg(
+        long,
+        env = "PROXY_BROKER_AUTH_EMAIL_HEADERS",
+        default_value = proxy_broker::constants::DEFAULT_AUTH_EMAIL_HEADERS
+    )]
+    auth_email_headers: String,
+
+    #[arg(
+        long,
+        env = "PROXY_BROKER_AUTH_GROUPS_HEADERS",
+        default_value = proxy_broker::constants::DEFAULT_AUTH_GROUPS_HEADERS
+    )]
+    auth_groups_headers: String,
+
+    #[arg(long, env = "PROXY_BROKER_AUTH_ADMIN_USERS", default_value = "")]
+    auth_admin_users: String,
+
+    #[arg(long, env = "PROXY_BROKER_AUTH_ADMIN_GROUPS", default_value = "")]
+    auth_admin_groups: String,
+
+    #[arg(
+        long,
+        env = "PROXY_BROKER_AUTH_DEV_USER",
+        default_value = proxy_broker::constants::DEFAULT_AUTH_DEV_USER
+    )]
+    auth_dev_user: String,
+
+    #[arg(
+        long,
+        env = "PROXY_BROKER_AUTH_DEV_EMAIL",
+        default_value = proxy_broker::constants::DEFAULT_AUTH_DEV_EMAIL
+    )]
+    auth_dev_email: String,
+
+    #[arg(
+        long,
+        env = "PROXY_BROKER_AUTH_DEV_GROUPS",
+        default_value = proxy_broker::constants::DEFAULT_AUTH_DEV_GROUPS
+    )]
+    auth_dev_groups: String,
 }
 
 #[tokio::main]
@@ -134,7 +190,22 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("failed to reconcile startup sessions")?;
 
-    let app = build_router(AppState { service });
+    let auth = AuthConfig::from_options(AuthConfigOptions {
+        mode: args.auth_mode,
+        subject_headers: args.auth_subject_headers,
+        email_headers: args.auth_email_headers,
+        groups_headers: args.auth_groups_headers,
+        admin_users: args.auth_admin_users,
+        admin_groups: args.auth_admin_groups,
+        dev_user: args.auth_dev_user,
+        dev_email: args.auth_dev_email,
+        dev_groups: args.auth_dev_groups,
+    })?;
+
+    let app = build_router(AppState {
+        service,
+        auth: Arc::new(auth),
+    });
     let listener = tokio::net::TcpListener::bind(&args.listen)
         .await
         .with_context(|| format!("failed to bind listen address: {}", args.listen))?;

@@ -73,6 +73,16 @@ describe("RootRoute", () => {
         data: { status: "healthy" },
       })
       .mockReturnValueOnce({
+        data: {
+          authenticated: true,
+          principal_type: "human",
+          subject: "admin@example.com",
+          email: "admin@example.com",
+          groups: ["admins"],
+          is_admin: true,
+        },
+      })
+      .mockReturnValueOnce({
         data: { profiles: ["default", "edge-jp"] },
         error: new ApiError(500, {
           code: "http_500",
@@ -102,6 +112,16 @@ describe("RootRoute", () => {
     mockUseQuery
       .mockReturnValueOnce({
         data: { status: "healthy" },
+      })
+      .mockReturnValueOnce({
+        data: {
+          authenticated: true,
+          principal_type: "human",
+          subject: "admin@example.com",
+          email: "admin@example.com",
+          groups: ["admins"],
+          is_admin: true,
+        },
       })
       .mockReturnValueOnce({
         data: { profiles: ["default", "edge-jp"] },

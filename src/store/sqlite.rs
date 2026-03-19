@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use sqlx::{Row, SqlitePool, sqlite::SqliteConnectOptions, sqlite::SqlitePoolOptions};
 
 use crate::{
-    models::{IpRecord, ProbeRecord, ProxyNode, SessionRecord},
+    models::{ApiKeyRecord, IpRecord, ProbeRecord, ProxyNode, SessionRecord},
     store::BrokerStore,
 };
 
@@ -120,6 +120,34 @@ impl SqliteStore {
         .execute(&self.pool)
         .await?;
 
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS api_keys (
+              key_id TEXT PRIMARY KEY,
+              profile_id TEXT NOT NULL,
+              name TEXT NOT NULL,
+              secret_prefix TEXT NOT NULL,
+              secret_salt TEXT NOT NULL,
+              secret_hash TEXT NOT NULL,
+              created_by_subject TEXT NOT NULL,
+              created_at INTEGER NOT NULL,
+              last_used_at INTEGER,
+              revoked_at INTEGER
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_secret_hash
+            ON api_keys(secret_hash)
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
         Ok(())
     }
 
@@ -185,6 +213,8 @@ impl BrokerStore for SqliteStore {
               SELECT profile_id FROM probe_records
               UNION
               SELECT profile_id FROM sessions
+              UNION
+              SELECT profile_id FROM api_keys
             )
             ORDER BY profile_id ASC
             "#,
@@ -698,6 +728,100 @@ impl BrokerStore for SqliteStore {
             .collect()
     }
 
+    async fn insert_api_key(&self, api_key: &ApiKeyRecord) -> anyhow::Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO api_keys (
+              key_id, profile_id, name, secret_prefix, secret_salt, secret_hash,
+              created_by_subject, created_at, last_used_at, revoked_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+            "#,
+        )
+        .bind(&api_key.key_id)
+        .bind(&api_key.profile_id)
+        .bind(&api_key.name)
+        .bind(&api_key.secret_prefix)
+        .bind(&api_key.secret_salt)
+        .bind(&api_key.secret_hash)
+        .bind(&api_key.created_by_subject)
+        .bind(api_key.created_at)
+        .bind(api_key.last_used_at)
+        .bind(api_key.revoked_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn get_api_key(&self, key_id: &str) -> anyhow::Result<Option<ApiKeyRecord>> {
+        let row = sqlx::query(
+            r#"
+            SELECT key_id, profile_id, name, secret_prefix, secret_salt, secret_hash,
+                   created_by_subject, created_at, last_used_at, revoked_at
+            FROM api_keys
+            WHERE key_id = ?1
+            "#,
+        )
+        .bind(key_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(map_api_key_row).transpose()
+    }
+
+    async fn list_api_keys(&self, profile_id: &str) -> anyhow::Result<Vec<ApiKeyRecord>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT key_id, profile_id, name, secret_prefix, secret_salt, secret_hash,
+                   created_by_subject, created_at, last_used_at, revoked_at
+            FROM api_keys
+            WHERE profile_id = ?1
+            ORDER BY created_at DESC, key_id ASC
+            "#,
+        )
+        .bind(profile_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(map_api_key_row).collect()
+    }
+
+    async fn revoke_api_key(
+        &self,
+        profile_id: &str,
+        key_id: &str,
+        revoked_at: i64,
+    ) -> anyhow::Result<bool> {
+        let result = sqlx::query(
+            r#"
+            UPDATE api_keys
+            SET revoked_at = ?3
+            WHERE profile_id = ?1 AND key_id = ?2
+            "#,
+        )
+        .bind(profile_id)
+        .bind(key_id)
+        .bind(revoked_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    async fn touch_api_key_last_used(&self, key_id: &str, last_used_at: i64) -> anyhow::Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE api_keys
+            SET last_used_at = ?2
+            WHERE key_id = ?1
+            "#,
+        )
+        .bind(key_id)
+        .bind(last_used_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     async fn touch_ip_usage(
         &self,
         profile_id: &str,
@@ -739,10 +863,25 @@ impl BrokerStore for SqliteStore {
     }
 }
 
+fn map_api_key_row(row: sqlx::sqlite::SqliteRow) -> anyhow::Result<ApiKeyRecord> {
+    Ok(ApiKeyRecord {
+        key_id: row.try_get("key_id")?,
+        profile_id: row.try_get("profile_id")?,
+        name: row.try_get("name")?,
+        secret_prefix: row.try_get("secret_prefix")?,
+        secret_salt: row.try_get("secret_salt")?,
+        secret_hash: row.try_get("secret_hash")?,
+        created_by_subject: row.try_get("created_by_subject")?,
+        created_at: row.try_get("created_at")?,
+        last_used_at: row.try_get("last_used_at")?,
+        revoked_at: row.try_get("revoked_at")?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::SqliteStore;
-    use crate::{models::ProxyNode, store::BrokerStore};
+    use crate::{auth::issue_api_key, models::ProxyNode, store::BrokerStore};
 
     async fn open_temp_store() -> (SqliteStore, std::path::PathBuf) {
         let path =
@@ -793,6 +932,50 @@ mod tests {
 
         let profiles = store.list_profiles().await.expect("list should succeed");
         assert_eq!(profiles, vec!["legacy-profile"]);
+
+        let _ = tokio::fs::remove_file(path).await;
+    }
+
+    #[tokio::test]
+    async fn api_keys_round_trip_and_touch_last_used() {
+        let (store, path) = open_temp_store().await;
+        let issued = issue_api_key("alpha", "ci-bot", "admin@example.com");
+
+        store
+            .insert_api_key(&issued.record)
+            .await
+            .expect("insert should succeed");
+        store
+            .touch_api_key_last_used(&issued.record.key_id, 77)
+            .await
+            .expect("touch should succeed");
+
+        let fetched = store
+            .get_api_key(&issued.record.key_id)
+            .await
+            .expect("get should succeed")
+            .expect("api key should exist");
+        assert_eq!(fetched.last_used_at, Some(77));
+
+        let listed = store
+            .list_api_keys("alpha")
+            .await
+            .expect("list should succeed");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].name, "ci-bot");
+
+        let revoked = store
+            .revoke_api_key("alpha", &issued.record.key_id, 99)
+            .await
+            .expect("revoke should succeed");
+        assert!(revoked);
+
+        let revoked_record = store
+            .get_api_key(&issued.record.key_id)
+            .await
+            .expect("get should succeed")
+            .expect("api key should exist");
+        assert_eq!(revoked_record.revoked_at, Some(99));
 
         let _ = tokio::fs::remove_file(path).await;
     }

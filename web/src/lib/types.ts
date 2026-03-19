@@ -97,6 +97,43 @@ export interface HealthResponse {
   status: string;
 }
 
+export type AuthPrincipalType = "human" | "api_key" | "development";
+
+export interface AuthMeResponse {
+  authenticated: boolean;
+  principal_type: AuthPrincipalType;
+  subject: string;
+  email?: string | null;
+  groups: string[];
+  is_admin: boolean;
+  profile_id?: string | null;
+  api_key_id?: string | null;
+}
+
+export interface CreateApiKeyRequest {
+  name: string;
+}
+
+export interface ApiKeySummary {
+  key_id: string;
+  profile_id: string;
+  name: string;
+  prefix: string;
+  created_by: string;
+  created_at: number;
+  last_used_at?: number | null;
+  revoked_at?: number | null;
+}
+
+export interface ListApiKeysResponse {
+  api_keys: ApiKeySummary[];
+}
+
+export interface CreateApiKeyResponse {
+  api_key: ApiKeySummary;
+  secret: string;
+}
+
 export interface ErrorResponse {
   code: string;
   message: string;

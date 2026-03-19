@@ -5,9 +5,11 @@ import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { useProfilePreference } from "@/hooks/use-profile-preference";
 import { ApiError, api } from "@/lib/api";
+import type { AuthMeResponse } from "@/lib/types";
 
 export interface RootOutletContext {
   profileId: string;
+  authMe: AuthMeResponse | null;
 }
 
 const getErrorMessage = (error: unknown) =>
@@ -20,6 +22,11 @@ export function RootRoute() {
     queryKey: ["health"],
     queryFn: api.getHealth,
     refetchInterval: 10_000,
+  });
+  const authMeQuery = useQuery({
+    queryKey: ["auth-me"],
+    queryFn: api.getAuthMe,
+    refetchInterval: 30_000,
   });
   const profilesQuery = useQuery({
     queryKey: ["profiles"],
@@ -53,6 +60,7 @@ export function RootRoute() {
   return (
     <AppShell
       healthStatus={healthQuery.data?.status ?? "checking"}
+      identity={authMeQuery.data ?? null}
       onCreateProfile={handleCreateProfile}
       onProfileIdChange={setProfileId}
       onRetryProfiles={() => {
@@ -66,7 +74,9 @@ export function RootRoute() {
       profilesLoading={profilesQuery.isLoading}
       profileId={profileId}
     >
-      <Outlet context={{ profileId } satisfies RootOutletContext} />
+      <Outlet
+        context={{ profileId, authMe: authMeQuery.data ?? null } satisfies RootOutletContext}
+      />
     </AppShell>
   );
 }

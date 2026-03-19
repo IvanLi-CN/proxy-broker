@@ -7,7 +7,7 @@ use thiserror::Error;
 
 use crate::models::ErrorResponse;
 
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Error)]
 pub enum BrokerError {
     #[error("invalid subscription payload")]
     SubscriptionInvalid,
@@ -23,10 +23,24 @@ pub enum BrokerError {
     PortInUse,
     #[error("profile already exists")]
     ProfileExists,
+    #[error("profile not found")]
+    ProfileNotFound,
     #[error("invalid port")]
     InvalidPort,
     #[error("invalid request: {0}")]
     InvalidRequest(String),
+    #[error("authentication required")]
+    AuthenticationRequired,
+    #[error("admin access required")]
+    AdminRequired,
+    #[error("api key invalid")]
+    ApiKeyInvalid,
+    #[error("api key revoked")]
+    ApiKeyRevoked,
+    #[error("api key not found")]
+    ApiKeyNotFound,
+    #[error("profile access denied")]
+    ProfileAccessDenied,
     #[error("mihomo runtime unavailable: {0}")]
     MihomoUnavailable(String),
     #[error("batch open failed")]
@@ -45,8 +59,15 @@ impl BrokerError {
             Self::SessionNotFound => "session_not_found",
             Self::PortInUse => "port_in_use",
             Self::ProfileExists => "profile_exists",
+            Self::ProfileNotFound => "profile_not_found",
             Self::InvalidPort => "invalid_port",
             Self::InvalidRequest(_) => "invalid_request",
+            Self::AuthenticationRequired => "authentication_required",
+            Self::AdminRequired => "admin_required",
+            Self::ApiKeyInvalid => "api_key_invalid",
+            Self::ApiKeyRevoked => "api_key_revoked",
+            Self::ApiKeyNotFound => "api_key_not_found",
+            Self::ProfileAccessDenied => "profile_access_denied",
             Self::MihomoUnavailable(_) => "mihomo_unavailable",
             Self::BatchOpenFailed => "batch_open_failed",
             Self::Internal(_) => "internal_error",
@@ -62,8 +83,15 @@ impl BrokerError {
             Self::SessionNotFound => StatusCode::NOT_FOUND,
             Self::PortInUse => StatusCode::CONFLICT,
             Self::ProfileExists => StatusCode::CONFLICT,
+            Self::ProfileNotFound => StatusCode::NOT_FOUND,
             Self::InvalidPort => StatusCode::BAD_REQUEST,
             Self::InvalidRequest(_) => StatusCode::BAD_REQUEST,
+            Self::AuthenticationRequired => StatusCode::UNAUTHORIZED,
+            Self::AdminRequired => StatusCode::FORBIDDEN,
+            Self::ApiKeyInvalid => StatusCode::UNAUTHORIZED,
+            Self::ApiKeyRevoked => StatusCode::UNAUTHORIZED,
+            Self::ApiKeyNotFound => StatusCode::NOT_FOUND,
+            Self::ProfileAccessDenied => StatusCode::FORBIDDEN,
             Self::MihomoUnavailable(_) => StatusCode::BAD_GATEWAY,
             Self::BatchOpenFailed => StatusCode::CONFLICT,
             Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,

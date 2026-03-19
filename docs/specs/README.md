@@ -15,6 +15,7 @@
 
 | ID   | Title | Status | Spec | Last | Notes |
 |-----:|-------|--------|------|------|-------|
+| h2w7p | Forward Auth 身份识别、管理员授权与 Profile API Key | 已完成 | `h2w7p-forward-auth-admin-and-profile-keys/SPEC.md` | 2026-03-20 | 新增 Forward Auth 身份解析、管理员白名单、开发模式与 Profile 级 API Key 管理 |
 | r2m7k | PR Label 发版与通配监听 | 已完成 | `r2m7k-pr-label-release-and-wildcard-listen/SPEC.md` | 2026-03-18 | 补齐 label-driven release、GHCR 发布与 `0.0.0.0` 监听链路 |
 | s3zu5 | 管理台 UI 控制室重构 | 已完成 | `s3zu5-admin-ui-refresh/SPEC.md` | 2026-03-19 | 侧栏头部紧凑化与 Storybook 视觉证据已补齐，保持 API 合同不变 |
 | kgm4c | 安装 UI UX Pro Max Codex 项目技能 | 部分完成（2/3） | `kgm4c-install-ui-ux-pro-max-codex-skill/SPEC.md` | 2026-03-13 | 项目内 Codex skill 已安装，待 PR 收敛 |

@@ -5,10 +5,14 @@ import { RouteHero } from "@/components/RouteHero";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { WorkflowRail } from "@/components/WorkflowRail";
+import { AccessControlCard } from "@/features/overview/components/AccessControlCard";
 import { HealthSummaryCard } from "@/features/overview/components/HealthSummaryCard";
 import { RefreshCard } from "@/features/overview/components/RefreshCard";
 import { SubscriptionFormCard } from "@/features/overview/components/SubscriptionFormCard";
 import type {
+  ApiKeySummary,
+  AuthMeResponse,
+  CreateApiKeyResponse,
   HealthResponse,
   LoadSubscriptionRequest,
   LoadSubscriptionResponse,
@@ -25,8 +29,17 @@ interface OverviewPageProps {
   refreshError?: string | null;
   loadingSubscription: boolean;
   refreshing: boolean;
+  identity?: AuthMeResponse | null;
+  apiKeys?: ApiKeySummary[];
+  latestCreatedApiKey?: CreateApiKeyResponse | null;
+  apiKeysLoading?: boolean;
+  apiKeysError?: string | null;
+  creatingApiKey?: boolean;
+  revokingApiKeyId?: string | null;
   onLoadSubscription: (payload: LoadSubscriptionRequest) => void | Promise<void>;
   onRefresh: (payload: RefreshRequest) => void | Promise<void>;
+  onCreateApiKey: (name: string) => void | Promise<void>;
+  onRevokeApiKey: (keyId: string) => void | Promise<void>;
 }
 
 const operatorChecklist = [
@@ -59,8 +72,17 @@ export function OverviewPage({
   refreshError,
   loadingSubscription,
   refreshing,
+  identity = null,
+  apiKeys = [],
+  latestCreatedApiKey = null,
+  apiKeysLoading = false,
+  apiKeysError = null,
+  creatingApiKey = false,
+  revokingApiKeyId = null,
   onLoadSubscription,
   onRefresh,
+  onCreateApiKey,
+  onRevokeApiKey,
 }: OverviewPageProps) {
   const hasWarnings = Boolean(loadResponse?.warnings.length);
 
@@ -189,6 +211,18 @@ export function OverviewPage({
               ) : null}
             </CardContent>
           </Card>
+
+          <AccessControlCard
+            identity={identity}
+            apiKeys={apiKeys}
+            latestCreatedKey={latestCreatedApiKey}
+            apiKeysLoading={apiKeysLoading}
+            apiKeysError={apiKeysError}
+            creatingApiKey={creatingApiKey}
+            revokingKeyId={revokingApiKeyId}
+            onCreateApiKey={onCreateApiKey}
+            onRevokeApiKey={onRevokeApiKey}
+          />
         </div>
       </section>
     </div>
