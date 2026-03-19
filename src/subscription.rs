@@ -147,12 +147,10 @@ async fn fetch_url_source(
                     attempt_label, err
                 ))),
             },
-            Err(err) => {
-                return Err(SubscriptionLoadError::SourceRead(format!(
-                    "failed to fetch subscription url `{url}` with {}: {}",
-                    attempt_label, err
-                )));
-            }
+            Err(err) => Err(SubscriptionLoadError::SourceRead(format!(
+                "failed to fetch subscription url `{url}` with {}: {}",
+                attempt_label, err
+            ))),
         };
 
         let raw = match raw {
@@ -299,8 +297,9 @@ mod tests {
         Arc,
         atomic::{AtomicUsize, Ordering},
     };
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
-    use tokio::time::{Duration, sleep};
+    use tokio::time::Duration;
 
     #[derive(Clone)]
     struct TestSubscriptionServerState {
@@ -488,7 +487,7 @@ proxies:
     }
 
     #[tokio::test]
-    async fn url_source_does_not_retry_transport_failures_for_each_user_agent() {
+    async fn url_source_retries_after_transport_failure_until_a_compatibility_ua_succeeds() {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_millis(200))
             .build()
@@ -500,26 +499,71 @@ proxies:
         let accepts = Arc::new(AtomicUsize::new(0));
         let accepts_task = accepts.clone();
         let server = tokio::spawn(async move {
-            while let Ok((_stream, _peer)) = listener.accept().await {
-                accepts_task.fetch_add(1, Ordering::SeqCst);
-                tokio::spawn(async move {
-                    sleep(Duration::from_secs(2)).await;
-                });
+            while let Ok((mut stream, _peer)) = listener.accept().await {
+                let attempt = accepts_task.fetch_add(1, Ordering::SeqCst);
+                if attempt == 0 {
+                    drop(stream);
+                    continue;
+                }
+
+                let mut request = Vec::new();
+                let mut buffer = [0_u8; 1024];
+                loop {
+                    let read = stream
+                        .read(&mut buffer)
+                        .await
+                        .expect("request should be readable");
+                    if read == 0 {
+                        break;
+                    }
+                    request.extend_from_slice(&buffer[..read]);
+                    if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                        break;
+                    }
+                }
+
+                let request = String::from_utf8(request).expect("request should be utf-8");
+                assert!(
+                    request.contains(&format!(
+                        "user-agent: {}\r\n",
+                        SUBSCRIPTION_FETCH_USER_AGENTS[0]
+                    )) || request.contains(&format!(
+                        "User-Agent: {}\r\n",
+                        SUBSCRIPTION_FETCH_USER_AGENTS[0]
+                    )),
+                    "second request should use the first compatibility user agent"
+                );
+
+                let body = r#"
+proxies:
+  - name: recovered-after-transport-failure
+    type: socks5
+    server: 5.5.5.5
+"#;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                stream
+                    .write_all(response.as_bytes())
+                    .await
+                    .expect("response should be writable");
+                break;
             }
         });
         let source = SubscriptionSource::Url(format!("http://{addr}/subscription"));
 
-        let err = load_from_source(&client, &source)
+        let result = load_from_source(&client, &source)
             .await
-            .expect_err("transport timeout should fail");
-
-        sleep(Duration::from_millis(100)).await;
+            .expect("compatibility ua should recover after transport failure");
         server.abort();
 
-        assert!(
-            matches!(err, SubscriptionLoadError::SourceRead(message) if message.contains("failed to fetch"))
-        );
-        assert_eq!(accepts.load(Ordering::SeqCst), 1);
+        assert_eq!(result.0.len(), 1);
+        assert_eq!(result.0[0].proxy_name, "recovered-after-transport-failure");
+        assert_eq!(result.1.len(), 1);
+        assert!(result.1[0].contains(SUBSCRIPTION_FETCH_USER_AGENTS[0]));
+        assert_eq!(accepts.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]
