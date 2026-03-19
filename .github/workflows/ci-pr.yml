@@ -83,6 +83,16 @@ jobs:
       - name: Cargo release build
         run: cargo build --release
 
+      - name: Check release workflow scripts
+        run: |
+          python3 -m py_compile \
+            .github/scripts/metadata_gate.py \
+            .github/scripts/release_snapshot.py \
+            .github/scripts/verify_manifest_platforms.py
+
+      - name: Test release snapshot logic
+        run: bash .github/scripts/test-release-snapshot.sh
+
       - name: Upload Storybook artifact
         uses: actions/upload-artifact@v4
         with:

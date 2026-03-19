@@ -1,9 +1,12 @@
+# syntax=docker/dockerfile:1.10
+
 FROM oven/bun:1.3.10 AS web-build
 
-WORKDIR /app
-COPY web ./web
 WORKDIR /app/web
-RUN bun install --frozen-lockfile && bun run build
+COPY web/package.json web/bun.lock ./
+RUN bun install --frozen-lockfile
+COPY web ./
+RUN bun run build
 
 FROM rust:1-bookworm AS builder
 
@@ -17,9 +20,18 @@ RUN printf 'Acquire::Retries \"5\";\nAcquire::http::Timeout \"30\";\nAcquire::ht
 
 WORKDIR /app
 COPY Cargo.toml Cargo.lock build.rs ./
-COPY src ./src
 COPY --from=web-build /app/web/dist ./web/dist
-RUN cargo build --locked --release
+RUN mkdir src && printf 'fn main() {}\n' > src/main.rs
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,target=/app/target,sharing=locked \
+    cargo build --locked --release
+COPY src ./src
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,target=/app/target,sharing=locked \
+    cargo build --locked --release \
+    && install -Dm755 /app/target/release/proxy-broker /tmp/proxy-broker
 
 FROM debian:bookworm-slim AS runtime
 
@@ -31,7 +43,7 @@ RUN printf 'Acquire::Retries \"5\";\nAcquire::http::Timeout \"30\";\nAcquire::ht
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /srv/app
-COPY --from=builder /app/target/release/proxy-broker /usr/local/bin/proxy-broker
+COPY --from=builder /tmp/proxy-broker /usr/local/bin/proxy-broker
 
 LABEL org.opencontainers.image.version="${APP_EFFECTIVE_VERSION}"
 
