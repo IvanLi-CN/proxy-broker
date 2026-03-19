@@ -147,10 +147,12 @@ async fn fetch_url_source(
                     attempt_label, err
                 ))),
             },
-            Err(err) => Err(SubscriptionLoadError::SourceRead(format!(
-                "failed to fetch subscription url `{url}` with {}: {}",
-                attempt_label, err
-            ))),
+            Err(err) => {
+                return Err(SubscriptionLoadError::SourceRead(format!(
+                    "failed to fetch subscription url `{url}` with {}: {}",
+                    attempt_label, err
+                )));
+            }
         };
 
         let raw = match raw {
@@ -293,8 +295,12 @@ mod tests {
         http::{HeaderMap, StatusCode},
         routing::get,
     };
-    use std::sync::Arc;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
     use tokio::net::TcpListener;
+    use tokio::time::{Duration, sleep};
 
     #[derive(Clone)]
     struct TestSubscriptionServerState {
@@ -479,6 +485,41 @@ proxies:
         assert!(
             matches!(err, SubscriptionLoadError::SourceRead(message) if message.contains("returned non-2xx"))
         );
+    }
+
+    #[tokio::test]
+    async fn url_source_does_not_retry_transport_failures_for_each_user_agent() {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_millis(200))
+            .build()
+            .expect("test client should build");
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("test listener should bind");
+        let addr = listener.local_addr().expect("listener addr should exist");
+        let accepts = Arc::new(AtomicUsize::new(0));
+        let accepts_task = accepts.clone();
+        let server = tokio::spawn(async move {
+            while let Ok((_stream, _peer)) = listener.accept().await {
+                accepts_task.fetch_add(1, Ordering::SeqCst);
+                tokio::spawn(async move {
+                    sleep(Duration::from_secs(2)).await;
+                });
+            }
+        });
+        let source = SubscriptionSource::Url(format!("http://{addr}/subscription"));
+
+        let err = load_from_source(&client, &source)
+            .await
+            .expect_err("transport timeout should fail");
+
+        sleep(Duration::from_millis(100)).await;
+        server.abort();
+
+        assert!(
+            matches!(err, SubscriptionLoadError::SourceRead(message) if message.contains("failed to fetch"))
+        );
+        assert_eq!(accepts.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
