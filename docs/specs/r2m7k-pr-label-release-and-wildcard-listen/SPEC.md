@@ -63,6 +63,9 @@ deployments.
 - `proxy-broker` has a reproducible PR-label-driven release path.
 - Mainline release decisions survive burst merges and reruns through immutable
   snapshots plus oldest-pending backfill selection.
+- Stable releases continue to derive their next base version only from prior
+  stable releases, so `channel:rc` snapshots cannot accidentally advance a
+  later stable patch/minor/major release.
 - Container releases publish an externally usable default bind strategy instead
   of a localhost-only deployment trap, with native dual-platform manifest
   publishing instead of a single serial emulated build.

@@ -339,9 +339,13 @@ def stable_versions_from_tags(target_sha: str) -> list[StableVersion]:
     tags = git_output("tag", "--merged", target_sha, "-l", "v*").splitlines()
     versions: list[StableVersion] = []
     for tag in tags:
-        version = StableVersion.from_tag(tag.strip())
-        if version is not None:
-            versions.append(version)
+        tag_name = tag.strip()
+        if not STABLE_TAG_RE.fullmatch(tag_name):
+            continue
+        version = StableVersion.from_tag(tag_name)
+        if version is None:
+            continue
+        versions.append(version)
     return versions
 
 
@@ -351,6 +355,8 @@ def stable_versions_from_snapshots(notes_ref: str, target_sha: str) -> list[Stab
     for commit in commits[1:]:
         snapshot = read_snapshot(notes_ref, commit)
         if not snapshot or not snapshot.get("release_enabled"):
+            continue
+        if snapshot.get("release_channel") != "stable":
             continue
         next_stable = snapshot.get("next_stable_version")
         if not isinstance(next_stable, str) or not next_stable:

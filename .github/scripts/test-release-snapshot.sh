@@ -166,6 +166,63 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-tag-reuse-") as tmp:
         module.load_pr_for_commit = original_loader
         os.chdir(original_cwd)
 
+with tempfile.TemporaryDirectory(prefix="release-snapshot-rc-base-") as tmp:
+    repo = Path(tmp)
+    run("init", cwd=repo)
+    run("config", "user.name", "Test User", cwd=repo)
+    run("config", "user.email", "test@example.com", cwd=repo)
+    run("checkout", "-b", "main", cwd=repo)
+    (repo / "Cargo.toml").write_text('[package]\nname = "demo"\nversion = "0.1.0"\n')
+    (repo / "README.md").write_text("base\n")
+    run("add", "Cargo.toml", "README.md", cwd=repo)
+    run("commit", "-m", "base", cwd=repo)
+    run("tag", "v0.1.0", cwd=repo)
+
+    (repo / "README.md").write_text("rc candidate\n")
+    run("add", "README.md", cwd=repo)
+    run("commit", "-m", "rc candidate", cwd=repo)
+    sha_rc = run("rev-parse", "HEAD", cwd=repo)
+
+    (repo / "README.md").write_text("stable patch\n")
+    run("add", "README.md", cwd=repo)
+    run("commit", "-m", "stable patch", cwd=repo)
+    sha_patch = run("rev-parse", "HEAD", cwd=repo)
+
+    original_cwd = Path.cwd()
+    original_loader = module.load_pr_for_commit
+    try:
+        os.chdir(repo)
+        module.load_pr_for_commit = lambda api_root, repository, token, target_sha, **kwargs: {
+            sha_rc: make_pr(211, "RC candidate", sha_rc, ["type:minor", "channel:rc"]),
+            sha_patch: make_pr(212, "Stable patch", sha_patch, ["type:patch", "channel:stable"]),
+        }[target_sha]
+
+        rc_snapshot = module.build_snapshot(
+            target_sha=sha_rc,
+            repository="IvanLi-CN/proxy-broker",
+            token="token",
+            notes_ref=module.DEFAULT_NOTES_REF,
+            registry="ghcr.io",
+            api_root="https://api.github.com",
+        )
+        assert rc_snapshot["release_tag"].startswith("v0.2.0-rc.")
+        run("notes", f"--ref={module.DEFAULT_NOTES_REF}", "add", "-f", "-m", json.dumps(rc_snapshot), sha_rc, cwd=repo)
+
+        stable_snapshot = module.build_snapshot(
+            target_sha=sha_patch,
+            repository="IvanLi-CN/proxy-broker",
+            token="token",
+            notes_ref=module.DEFAULT_NOTES_REF,
+            registry="ghcr.io",
+            api_root="https://api.github.com",
+        )
+        assert stable_snapshot["base_stable_version"] == "0.1.0"
+        assert stable_snapshot["next_stable_version"] == "0.1.1"
+        assert stable_snapshot["release_tag"] == "v0.1.1"
+    finally:
+        module.load_pr_for_commit = original_loader
+        os.chdir(original_cwd)
+
 with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
     repo = Path(tmp)
     origin = repo / "origin.git"
