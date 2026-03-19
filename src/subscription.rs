@@ -103,12 +103,21 @@ fn parse_subscription_payload(raw: &str) -> Result<Vec<Value>, SubscriptionLoadE
     }
 }
 
+fn payload_has_usable_proxy_entries(proxies: &[Value]) -> bool {
+    proxies.iter().any(|proxy| {
+        to_json_value(proxy)
+            .and_then(|json| extract_proxy_fields(&json))
+            .is_ok()
+    })
+}
+
 async fn fetch_url_source(
     client: &reqwest::Client,
     url: &str,
 ) -> Result<(Vec<Value>, Vec<String>), SubscriptionLoadError> {
     let mut fetch_errors = Vec::new();
     let mut parse_errors = Vec::new();
+    let mut received_success_body = false;
 
     let attempts: Vec<(Option<&str>, String)> =
         std::iter::once((None, "default request profile".to_string()))
@@ -145,7 +154,10 @@ async fn fetch_url_source(
         };
 
         let raw = match raw {
-            Ok(raw) => raw,
+            Ok(raw) => {
+                received_success_body = true;
+                raw
+            }
             Err(SubscriptionLoadError::SourceRead(message)) => {
                 fetch_errors.push(message);
                 continue;
@@ -154,7 +166,7 @@ async fn fetch_url_source(
         };
 
         match parse_subscription_payload(&raw) {
-            Ok(proxies) => {
+            Ok(proxies) if payload_has_usable_proxy_entries(&proxies) => {
                 let mut warnings = Vec::new();
                 if index > 0 {
                     warnings.push(format!(
@@ -164,6 +176,12 @@ async fn fetch_url_source(
                 }
                 return Ok((proxies, warnings));
             }
+            Ok(_) => {
+                parse_errors.push(format!(
+                    "{}: payload parsed but did not contain any usable proxy entries",
+                    attempt_label
+                ));
+            }
             Err(SubscriptionLoadError::InvalidPayload(message)) => {
                 parse_errors.push(format!("{}: {}", attempt_label, message));
             }
@@ -171,27 +189,16 @@ async fn fetch_url_source(
         }
     }
 
-    if !fetch_errors.is_empty() {
-        return Err(SubscriptionLoadError::SourceRead(format!(
-            "failed to fetch a parseable subscription url `{url}` across compatibility attempts: {}{}",
-            fetch_errors.join(" | "),
-            if parse_errors.is_empty() {
-                String::new()
-            } else {
-                format!(" ; parse failures: {}", parse_errors.join(" | "))
-            }
-        )));
-    }
-
-    if !parse_errors.is_empty() {
+    if received_success_body {
         return Err(SubscriptionLoadError::InvalidPayload(format!(
             "subscription payload was not parseable with any compatibility user agent: {}",
             parse_errors.join(" | ")
         )));
     }
 
-    Err(SubscriptionLoadError::InvalidPayload(format!(
-        "subscription url `{url}` returned no parseable payload"
+    Err(SubscriptionLoadError::SourceRead(format!(
+        "failed to fetch subscription url `{url}` with all compatibility attempts: {}",
+        fetch_errors.join(" | ")
     )))
 }
 
@@ -379,6 +386,46 @@ proxies:
     }
 
     #[tokio::test]
+    async fn url_source_retries_when_default_payload_is_yaml_stub() {
+        let client = reqwest::Client::new();
+        let app = Router::new()
+            .route("/subscription", get(test_subscription_handler))
+            .with_state(TestSubscriptionServerState {
+                accepted_user_agent: Some(Arc::<str>::from(SUBSCRIPTION_FETCH_USER_AGENTS[0])),
+                success_payload: Arc::<str>::from(
+                    r#"
+proxies:
+  - name: stub-recovered
+    type: socks5
+    server: 4.4.4.4
+"#,
+                ),
+                fallback_status: None,
+            });
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("test listener should bind");
+        let addr = listener.local_addr().expect("listener addr should exist");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("test server should serve requests");
+        });
+
+        let source = SubscriptionSource::Url(format!("http://{addr}/subscription"));
+        let result = load_from_source(&client, &source)
+            .await
+            .expect("yaml stub should trigger ua fallback");
+
+        server.abort();
+
+        assert_eq!(result.0.len(), 1);
+        assert_eq!(result.0[0].proxy_name, "stub-recovered");
+        assert_eq!(result.1.len(), 1);
+        assert!(result.1[0].contains(SUBSCRIPTION_FETCH_USER_AGENTS[0]));
+    }
+
+    #[tokio::test]
     async fn url_source_keeps_default_request_profile_before_fallbacks() {
         let client = reqwest::Client::new();
         let app = Router::new()
@@ -435,7 +482,7 @@ proxies:
     }
 
     #[tokio::test]
-    async fn url_source_prefers_fetch_error_when_attempts_mix_fetch_and_parse_failures() {
+    async fn url_source_keeps_invalid_payload_when_attempts_mix_fetch_and_parse_failures() {
         let client = reqwest::Client::new();
         let app = Router::new()
             .route("/subscription", get(test_subscription_handler))
@@ -464,12 +511,12 @@ proxies:
 
         let err = load_from_source(&client, &source)
             .await
-            .expect_err("mixed fetch and parse failures should prefer source read");
+            .expect_err("mixed fetch and parse failures should stay invalid payload");
 
         server.abort();
 
         assert!(
-            matches!(err, SubscriptionLoadError::SourceRead(message) if message.contains("parse failures"))
+            matches!(err, SubscriptionLoadError::InvalidPayload(message) if message.contains("default request profile"))
         );
     }
 }
