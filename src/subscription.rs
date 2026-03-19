@@ -110,23 +110,37 @@ async fn fetch_url_source(
     let mut fetch_errors = Vec::new();
     let mut parse_errors = Vec::new();
 
-    for (index, user_agent) in SUBSCRIPTION_FETCH_USER_AGENTS.iter().enumerate() {
-        let raw = match client.get(url).header(USER_AGENT, *user_agent).send().await {
+    let attempts: Vec<(Option<&str>, String)> =
+        std::iter::once((None, "default request profile".to_string()))
+            .chain(
+                SUBSCRIPTION_FETCH_USER_AGENTS
+                    .iter()
+                    .copied()
+                    .map(|user_agent| (Some(user_agent), format!("User-Agent `{}`", user_agent))),
+            )
+            .collect();
+
+    for (index, (user_agent, attempt_label)) in attempts.iter().enumerate() {
+        let request = match user_agent {
+            Some(user_agent) => client.get(url).header(USER_AGENT, *user_agent),
+            None => client.get(url),
+        };
+        let raw = match request.send().await {
             Ok(response) => match response.error_for_status() {
                 Ok(response) => response.text().await.map_err(|err| {
                     SubscriptionLoadError::SourceRead(format!(
-                        "failed to read subscription response body with User-Agent `{}`: {}",
-                        user_agent, err
+                        "failed to read subscription response body with {}: {}",
+                        attempt_label, err
                     ))
                 }),
                 Err(err) => Err(SubscriptionLoadError::SourceRead(format!(
-                    "subscription url `{url}` returned non-2xx with User-Agent `{}`: {}",
-                    user_agent, err
+                    "subscription url `{url}` returned non-2xx with {}: {}",
+                    attempt_label, err
                 ))),
             },
             Err(err) => Err(SubscriptionLoadError::SourceRead(format!(
-                "failed to fetch subscription url `{url}` with User-Agent `{}`: {}",
-                user_agent, err
+                "failed to fetch subscription url `{url}` with {}: {}",
+                attempt_label, err
             ))),
         };
 
@@ -144,17 +158,29 @@ async fn fetch_url_source(
                 let mut warnings = Vec::new();
                 if index > 0 {
                     warnings.push(format!(
-                        "subscription payload required fallback User-Agent `{}`",
-                        user_agent
+                        "subscription payload required fallback {}",
+                        attempt_label
                     ));
                 }
                 return Ok((proxies, warnings));
             }
             Err(SubscriptionLoadError::InvalidPayload(message)) => {
-                parse_errors.push(format!("User-Agent `{}`: {}", user_agent, message));
+                parse_errors.push(format!("{}: {}", attempt_label, message));
             }
             Err(err) => return Err(err),
         }
+    }
+
+    if !fetch_errors.is_empty() {
+        return Err(SubscriptionLoadError::SourceRead(format!(
+            "failed to fetch a parseable subscription url `{url}` across compatibility attempts: {}{}",
+            fetch_errors.join(" | "),
+            if parse_errors.is_empty() {
+                String::new()
+            } else {
+                format!(" ; parse failures: {}", parse_errors.join(" | "))
+            }
+        )));
     }
 
     if !parse_errors.is_empty() {
@@ -164,9 +190,8 @@ async fn fetch_url_source(
         )));
     }
 
-    Err(SubscriptionLoadError::SourceRead(format!(
-        "failed to fetch subscription url `{url}` with all compatibility user agents: {}",
-        fetch_errors.join(" | ")
+    Err(SubscriptionLoadError::InvalidPayload(format!(
+        "subscription url `{url}` returned no parseable payload"
     )))
 }
 
@@ -266,8 +291,9 @@ mod tests {
 
     #[derive(Clone)]
     struct TestSubscriptionServerState {
-        accepted_user_agent: Arc<str>,
+        accepted_user_agent: Option<Arc<str>>,
         success_payload: Arc<str>,
+        fallback_status: Option<StatusCode>,
     }
 
     async fn test_subscription_handler(
@@ -277,8 +303,13 @@ mod tests {
         let user_agent = headers
             .get(reqwest::header::USER_AGENT)
             .and_then(|value| value.to_str().ok());
-        if user_agent == Some(state.accepted_user_agent.as_ref()) {
+        if user_agent == state.accepted_user_agent.as_deref() {
             (StatusCode::OK, state.success_payload.to_string())
+        } else if user_agent.is_some() {
+            (
+                state.fallback_status.unwrap_or(StatusCode::OK),
+                "not-a-clash-subscription".to_string(),
+            )
         } else {
             (StatusCode::OK, "not-a-clash-subscription".to_string())
         }
@@ -293,7 +324,7 @@ mod tests {
             .route("/subscription", get(test_subscription_handler))
             .route("/forbidden", get(test_forbidden_handler))
             .with_state(TestSubscriptionServerState {
-                accepted_user_agent: Arc::<str>::from(SUBSCRIPTION_FETCH_USER_AGENTS[1]),
+                accepted_user_agent: Some(Arc::<str>::from(SUBSCRIPTION_FETCH_USER_AGENTS[1])),
                 success_payload: Arc::<str>::from(
                     r#"
 proxies:
@@ -302,6 +333,7 @@ proxies:
     server: 1.1.1.1
 "#,
                 ),
+                fallback_status: None,
             });
 
         let listener = TcpListener::bind(("127.0.0.1", 0))
@@ -347,6 +379,45 @@ proxies:
     }
 
     #[tokio::test]
+    async fn url_source_keeps_default_request_profile_before_fallbacks() {
+        let client = reqwest::Client::new();
+        let app = Router::new()
+            .route("/subscription", get(test_subscription_handler))
+            .with_state(TestSubscriptionServerState {
+                accepted_user_agent: None,
+                success_payload: Arc::<str>::from(
+                    r#"
+proxies:
+  - name: default-ok
+    type: socks5
+    server: 2.2.2.2
+"#,
+                ),
+                fallback_status: None,
+            });
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("test listener should bind");
+        let addr = listener.local_addr().expect("listener addr should exist");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("test server should serve requests");
+        });
+        let source = SubscriptionSource::Url(format!("http://{addr}/subscription"));
+
+        let result = load_from_source(&client, &source)
+            .await
+            .expect("default request profile should still work");
+
+        server.abort();
+
+        assert_eq!(result.0.len(), 1);
+        assert_eq!(result.0[0].proxy_name, "default-ok");
+        assert!(result.1.is_empty());
+    }
+
+    #[tokio::test]
     async fn url_source_reports_fetch_error_on_non_2xx_response() {
         let client = reqwest::Client::new();
         let (base_url, server) = spawn_test_server().await;
@@ -360,6 +431,45 @@ proxies:
 
         assert!(
             matches!(err, SubscriptionLoadError::SourceRead(message) if message.contains("returned non-2xx"))
+        );
+    }
+
+    #[tokio::test]
+    async fn url_source_prefers_fetch_error_when_attempts_mix_fetch_and_parse_failures() {
+        let client = reqwest::Client::new();
+        let app = Router::new()
+            .route("/subscription", get(test_subscription_handler))
+            .with_state(TestSubscriptionServerState {
+                accepted_user_agent: Some(Arc::<str>::from("unmatched-user-agent")),
+                success_payload: Arc::<str>::from(
+                    r#"
+proxies:
+  - name: unreachable
+    type: socks5
+    server: 3.3.3.3
+"#,
+                ),
+                fallback_status: Some(StatusCode::FORBIDDEN),
+            });
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("test listener should bind");
+        let addr = listener.local_addr().expect("listener addr should exist");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("test server should serve requests");
+        });
+        let source = SubscriptionSource::Url(format!("http://{addr}/subscription"));
+
+        let err = load_from_source(&client, &source)
+            .await
+            .expect_err("mixed fetch and parse failures should prefer source read");
+
+        server.abort();
+
+        assert!(
+            matches!(err, SubscriptionLoadError::SourceRead(message) if message.contains("parse failures"))
         );
     }
 }
