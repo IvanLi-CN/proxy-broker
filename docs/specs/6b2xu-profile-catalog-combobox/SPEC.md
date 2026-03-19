@@ -146,7 +146,27 @@
 
 ## Visual Evidence (PR)
 
-本次如需 PR 证据图，统一放在 `./assets/` 下。
+- source_type: storybook_canvas
+- target_program: mock-only
+- capture_scope: element
+- sensitive_exclusion: N/A
+- submission_gate: pending-owner-approval
+- story_id_or_title: Components/ProfileSwitcher/Populated
+- state: expanded catalog
+- evidence_note: 验证侧栏 active profile 控件已经从自由输入改为可展开、可搜索的 anchored combobox，并能展示已知 profile 列表。
+
+![ProfileSwitcher populated combobox](./assets/profile-switcher-populated-combobox.png)
+
+- source_type: storybook_canvas
+- target_program: mock-only
+- capture_scope: element
+- sensitive_exclusion: N/A
+- submission_gate: pending-owner-approval
+- story_id_or_title: Components/ProfileSwitcher/Populated
+- state: collapsed selector
+- evidence_note: 验证 active profile 控件在默认静态态下以紧凑 selector 呈现，不再暴露自由文本输入框。
+
+![ProfileSwitcher populated collapsed](./assets/profile-switcher-populated-collapsed.png)
 
 ## 资产晋升（Asset promotion）
 
