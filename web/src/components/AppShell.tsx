@@ -10,6 +10,7 @@ import {
 import type { ReactNode } from "react";
 import { NavLink } from "react-router-dom";
 
+import { CurrentUserSummary } from "@/components/CurrentUserSummary";
 import { ProfileSwitcher } from "@/components/ProfileSwitcher";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Badge } from "@/components/ui/badge";
@@ -30,7 +31,7 @@ import {
   SidebarSeparator,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
-import type { AuthMeResponse } from "@/lib/types";
+import type { CurrentUserState } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface AppShellProps {
@@ -43,7 +44,7 @@ interface AppShellProps {
   onCreateProfile: (value: string) => Promise<string>;
   onRetryProfiles?: () => void;
   healthStatus: string;
-  identity?: AuthMeResponse | null;
+  currentUser: CurrentUserState;
   children?: ReactNode;
 }
 
@@ -78,7 +79,7 @@ export function AppShell({
   onCreateProfile,
   onRetryProfiles,
   healthStatus,
-  identity = null,
+  currentUser,
   children,
 }: AppShellProps) {
   const isHealthy = (healthStatus ?? "").toLowerCase() === "ok";
@@ -215,27 +216,7 @@ export function AppShell({
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {identity ? (
-              <>
-                <Badge
-                  variant="outline"
-                  className="rounded-full bg-background/80 px-3 py-1 font-mono text-[11px] uppercase tracking-[0.18em]"
-                >
-                  {identity.principal_type}
-                </Badge>
-                <Badge
-                  variant="outline"
-                  className="rounded-full bg-background/80 px-3 py-1 font-mono text-[11px]"
-                >
-                  {identity.subject}
-                </Badge>
-                {identity.is_admin ? (
-                  <Badge className="rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
-                    admin
-                  </Badge>
-                ) : null}
-              </>
-            ) : null}
+            <CurrentUserSummary currentUser={currentUser} variant="compact" />
             <Badge
               variant="outline"
               className="rounded-full bg-background/80 px-3 py-1 font-mono text-[11px] uppercase tracking-[0.18em]"

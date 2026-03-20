@@ -11,8 +11,8 @@ import { RefreshCard } from "@/features/overview/components/RefreshCard";
 import { SubscriptionFormCard } from "@/features/overview/components/SubscriptionFormCard";
 import type {
   ApiKeySummary,
-  AuthMeResponse,
   CreateApiKeyResponse,
+  CurrentUserState,
   HealthResponse,
   LoadSubscriptionRequest,
   LoadSubscriptionResponse,
@@ -29,7 +29,7 @@ interface OverviewPageProps {
   refreshError?: string | null;
   loadingSubscription: boolean;
   refreshing: boolean;
-  identity?: AuthMeResponse | null;
+  currentUser: CurrentUserState;
   apiKeys?: ApiKeySummary[];
   latestCreatedApiKey?: CreateApiKeyResponse | null;
   apiKeysLoading?: boolean;
@@ -72,7 +72,7 @@ export function OverviewPage({
   refreshError,
   loadingSubscription,
   refreshing,
-  identity = null,
+  currentUser,
   apiKeys = [],
   latestCreatedApiKey = null,
   apiKeysLoading = false,
@@ -213,7 +213,7 @@ export function OverviewPage({
           </Card>
 
           <AccessControlCard
-            identity={identity}
+            currentUser={currentUser}
             apiKeys={apiKeys}
             latestCreatedKey={latestCreatedApiKey}
             apiKeysLoading={apiKeysLoading}

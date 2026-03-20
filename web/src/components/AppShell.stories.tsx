@@ -29,6 +29,17 @@ const meta = {
     profilesCreating: false,
     profilesError: null,
     healthStatus: "ok",
+    currentUser: {
+      status: "resolved",
+      identity: {
+        authenticated: true,
+        principal_type: "human",
+        subject: "admin@example.com",
+        email: "admin@example.com",
+        groups: ["proxy-broker-admins"],
+        is_admin: true,
+      },
+    },
     onProfileIdChange: () => undefined,
     onCreateProfile: async (value: string) => value,
     onRetryProfiles: () => undefined,
@@ -40,4 +51,12 @@ type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {
   args: {},
+};
+
+export const Anonymous: Story = {
+  args: {
+    currentUser: {
+      status: "anonymous",
+    },
+  },
 };

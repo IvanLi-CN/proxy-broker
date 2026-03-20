@@ -110,6 +110,22 @@ export interface AuthMeResponse {
   api_key_id?: string | null;
 }
 
+export type CurrentUserState =
+  | {
+      status: "loading";
+    }
+  | {
+      status: "anonymous";
+    }
+  | {
+      status: "error";
+      message: string;
+    }
+  | {
+      status: "resolved";
+      identity: AuthMeResponse;
+    };
+
 export interface CreateApiKeyRequest {
   name: string;
 }

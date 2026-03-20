@@ -12,7 +12,7 @@ const getErrorMessage = (error: unknown) =>
   error instanceof ApiError ? `${error.code}: ${error.message}` : "Unexpected request error";
 
 export function OverviewRoute() {
-  const { profileId, authMe } = useOutletContext<RootOutletContext>();
+  const { profileId, authMe, currentUser } = useOutletContext<RootOutletContext>();
   const previousProfileId = useRef(profileId);
   const queryClient = useQueryClient();
   const [loadResponseByProfile, setLoadResponseByProfile] = useState<
@@ -110,8 +110,8 @@ export function OverviewRoute() {
       apiKeysError={apiKeysQuery.isError ? getErrorMessage(apiKeysQuery.error) : null}
       apiKeysLoading={apiKeysQuery.isLoading}
       creatingApiKey={createApiKeyMutation.isPending}
+      currentUser={currentUser}
       health={healthQuery.data ?? { status: "checking" }}
-      identity={authMe}
       loadError={loadMutation.isError ? getErrorMessage(loadMutation.error) : null}
       loadResponse={loadResponseByProfile[profileId] ?? null}
       loadingSubscription={loadMutation.isPending}

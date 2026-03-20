@@ -12,13 +12,16 @@ describe("AccessControlCard", () => {
 
     render(
       <AccessControlCard
-        identity={{
-          authenticated: true,
-          principal_type: "human",
-          subject: "admin@example.com",
-          email: "admin@example.com",
-          groups: ["admins"],
-          is_admin: true,
+        currentUser={{
+          status: "resolved",
+          identity: {
+            authenticated: true,
+            principal_type: "human",
+            subject: "admin@example.com",
+            email: "admin@example.com",
+            groups: ["admins"],
+            is_admin: true,
+          },
         }}
         apiKeys={[
           {

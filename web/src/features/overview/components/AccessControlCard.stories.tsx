@@ -8,13 +8,16 @@ const meta = {
   component: AccessControlCard,
   tags: ["autodocs"],
   args: {
-    identity: {
-      authenticated: true,
-      principal_type: "human",
-      subject: "admin@example.com",
-      email: "admin@example.com",
-      groups: ["admins", "ops"],
-      is_admin: true,
+    currentUser: {
+      status: "resolved",
+      identity: {
+        authenticated: true,
+        principal_type: "human",
+        subject: "admin@example.com",
+        email: "admin@example.com",
+        groups: ["admins", "ops"],
+        is_admin: true,
+      },
     },
     apiKeys: [
       {
@@ -68,5 +71,14 @@ export const WithFreshSecret: Story = {
       },
       secret: "pbk_key-2_abcd1234efgh5678",
     },
+  },
+};
+
+export const AnonymousOperator: Story = {
+  args: {
+    currentUser: {
+      status: "anonymous",
+    },
+    apiKeys: [],
   },
 };

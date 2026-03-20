@@ -30,13 +30,16 @@ const meta = {
     refreshError: null,
     loadingSubscription: false,
     refreshing: false,
-    identity: {
-      authenticated: true,
-      principal_type: "human",
-      subject: "admin@example.com",
-      email: "admin@example.com",
-      groups: ["admins", "ops"],
-      is_admin: true,
+    currentUser: {
+      status: "resolved",
+      identity: {
+        authenticated: true,
+        principal_type: "human",
+        subject: "admin@example.com",
+        email: "admin@example.com",
+        groups: ["admins", "ops"],
+        is_admin: true,
+      },
     },
     apiKeys: [
       {
@@ -78,6 +81,18 @@ export const ErrorState: Story = {
 
 export const QuietState: Story = {
   args: {
+    activeSessions: 0,
+    loadResponse: null,
+    refreshResponse: null,
+  },
+};
+
+export const AnonymousState: Story = {
+  args: {
+    currentUser: {
+      status: "anonymous",
+    },
+    apiKeys: [],
     activeSessions: 0,
     loadResponse: null,
     refreshResponse: null,

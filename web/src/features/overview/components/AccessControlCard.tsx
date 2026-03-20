@@ -1,16 +1,17 @@
-import { ShieldCheckIcon, ShieldEllipsisIcon, Trash2Icon } from "lucide-react";
+import { Trash2Icon } from "lucide-react";
 import { useState } from "react";
 
 import { ActionResponsePanel } from "@/components/ActionResponsePanel";
+import { CurrentUserSummary } from "@/components/CurrentUserSummary";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { formatTimestamp } from "@/lib/format";
-import type { ApiKeySummary, AuthMeResponse, CreateApiKeyResponse } from "@/lib/types";
+import type { ApiKeySummary, CreateApiKeyResponse, CurrentUserState } from "@/lib/types";
 
 interface AccessControlCardProps {
-  identity: AuthMeResponse | null;
+  currentUser: CurrentUserState;
   apiKeys: ApiKeySummary[];
   latestCreatedKey?: CreateApiKeyResponse | null;
   apiKeysLoading?: boolean;
@@ -22,7 +23,7 @@ interface AccessControlCardProps {
 }
 
 export function AccessControlCard({
-  identity,
+  currentUser,
   apiKeys,
   latestCreatedKey = null,
   apiKeysLoading = false,
@@ -33,10 +34,13 @@ export function AccessControlCard({
   onRevokeApiKey,
 }: AccessControlCardProps) {
   const [keyName, setKeyName] = useState("");
+  const canManageKeys =
+    currentUser.status === "resolved" &&
+    (currentUser.identity.is_admin || currentUser.identity.principal_type === "development");
 
   const handleCreate = async () => {
     const nextName = keyName.trim();
-    if (!nextName) {
+    if (!nextName || !canManageKeys) {
       return;
     }
     await onCreateApiKey(nextName);
@@ -56,37 +60,7 @@ export function AccessControlCard({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5 pt-6">
-        <div className="rounded-2xl border border-border/70 bg-muted/15 p-4">
-          <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-            {identity?.is_admin ? (
-              <ShieldCheckIcon className="size-4 text-emerald-500" />
-            ) : (
-              <ShieldEllipsisIcon className="size-4 text-amber-500" />
-            )}
-            Current operator
-          </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <Badge variant="outline" className="rounded-full px-3 py-1 font-mono text-[11px]">
-              {identity?.principal_type ?? "unknown"}
-            </Badge>
-            <Badge variant="secondary" className="rounded-full px-3 py-1 font-mono text-[11px]">
-              {identity?.subject ?? "unresolved"}
-            </Badge>
-            {identity?.is_admin ? (
-              <Badge className="rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
-                admin
-              </Badge>
-            ) : null}
-          </div>
-          {identity?.email ? (
-            <p className="mt-3 text-sm text-muted-foreground">Email: {identity.email}</p>
-          ) : null}
-          {identity?.groups.length ? (
-            <p className="mt-2 text-sm text-muted-foreground">
-              Groups: {identity.groups.join(" / ")}
-            </p>
-          ) : null}
-        </div>
+        <CurrentUserSummary currentUser={currentUser} />
 
         {latestCreatedKey ? (
           <div className="space-y-3">
@@ -106,16 +80,22 @@ export function AccessControlCard({
 
         <div className="space-y-3">
           <div className="text-sm font-medium text-foreground">Create a profile key</div>
+          {!canManageKeys ? (
+            <div className="rounded-2xl border border-dashed border-border/70 px-4 py-4 text-sm text-muted-foreground">
+              Machine keys can only be issued by an admin human or the development identity.
+            </div>
+          ) : null}
           <div className="flex gap-3">
             <Input
               aria-label="API key name"
               placeholder="deploy-bot"
               value={keyName}
               onChange={(event) => setKeyName(event.target.value)}
+              disabled={!canManageKeys}
             />
             <Button
               onClick={() => void handleCreate()}
-              disabled={creatingApiKey || !keyName.trim()}
+              disabled={creatingApiKey || !keyName.trim() || !canManageKeys}
             >
               Create key
             </Button>
@@ -173,7 +153,11 @@ export function AccessControlCard({
                       <Button
                         variant="outline"
                         size="sm"
-                        disabled={Boolean(apiKey.revoked_at) || revokingKeyId === apiKey.key_id}
+                        disabled={
+                          !canManageKeys ||
+                          Boolean(apiKey.revoked_at) ||
+                          revokingKeyId === apiKey.key_id
+                        }
                         onClick={() => void onRevokeApiKey(apiKey.key_id)}
                       >
                         <Trash2Icon className="size-4" />
