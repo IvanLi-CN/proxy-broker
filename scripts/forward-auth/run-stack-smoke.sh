@@ -6,10 +6,11 @@ REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 STACK_DIR="$REPO_ROOT/deploy/forward-auth"
 KEEP_RUN=0
 COMPOSE_PROJECT=""
+STACK_VARIANT="${FORWARD_AUTH_STACK_VARIANT:-build}"
 
 usage() {
   cat <<'EOF'
-Usage: run-stack-smoke.sh --compose-project <name> --http-port <port> --https-port <port> [--keep-run]
+Usage: run-stack-smoke.sh --compose-project <name> --http-port <port> --https-port <port> [--variant <build|ghcr>] [--keep-run]
 EOF
 }
 
@@ -25,6 +26,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --https-port)
       export FORWARD_AUTH_HTTPS_PORT="$2"
+      shift 2
+      ;;
+    --variant)
+      STACK_VARIANT="$2"
       shift 2
       ;;
     --keep-run)
@@ -48,6 +53,15 @@ if [ -z "$COMPOSE_PROJECT" ] || [ -z "${FORWARD_AUTH_HTTP_PORT:-}" ] || [ -z "${
   exit 2
 fi
 
+case "$STACK_VARIANT" in
+  build|ghcr)
+    ;;
+  *)
+    echo "unsupported variant: $STACK_VARIANT (expected build|ghcr)" >&2
+    exit 2
+    ;;
+esac
+
 "$REPO_ROOT/scripts/forward-auth/render-stack.sh"
 
 set -a
@@ -57,12 +71,24 @@ set +a
 
 ENV_FILE="$STACK_DIR/generated/stack.env"
 CAPS_OVERRIDE="$STACK_DIR/generated/caps-compat.yaml"
-COMPOSE_FILE="$STACK_DIR/compose.yaml"
-COMPOSE_CMD=(docker compose --env-file "$ENV_FILE" -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" -f "$CAPS_OVERRIDE")
+COMPOSE_FILES=("$STACK_DIR/compose.yaml")
+if [ "$STACK_VARIANT" = "build" ]; then
+  COMPOSE_FILES+=("$STACK_DIR/compose.build.yaml")
+fi
+COMPOSE_CMD=(docker compose --env-file "$ENV_FILE" -p "$COMPOSE_PROJECT")
+for compose_file in "${COMPOSE_FILES[@]}"; do
+  COMPOSE_CMD+=(-f "$compose_file")
+done
+COMPOSE_CMD+=(-f "$CAPS_OVERRIDE")
 
 generate_caps_override() {
   local services
-  services="$(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" config --services)"
+  local config_cmd=(docker compose --env-file "$ENV_FILE")
+  local compose_file
+  for compose_file in "${COMPOSE_FILES[@]}"; do
+    config_cmd+=(-f "$compose_file")
+  done
+  services="$("${config_cmd[@]}" config --services)"
   {
     echo 'services:'
     while IFS= read -r service; do
@@ -116,7 +142,11 @@ trap 'on_exit $?' EXIT
 generate_caps_override
 
 echo "[stack] building and starting compose project $COMPOSE_PROJECT"
-"${COMPOSE_CMD[@]}" up -d --build
+if [ "$STACK_VARIANT" = "build" ]; then
+  "${COMPOSE_CMD[@]}" up -d --build
+else
+  "${COMPOSE_CMD[@]}" up -d
+fi
 "${COMPOSE_CMD[@]}" ps
 
 echo "[stack] running smoke tests"

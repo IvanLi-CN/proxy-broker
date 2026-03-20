@@ -32,11 +32,7 @@ services:
       - forward-auth
 
   proxy-broker:
-    build:
-      context: ../..
-      dockerfile: Dockerfile
-      args:
-        APP_EFFECTIVE_VERSION: ${FORWARD_AUTH_APP_VERSION}
+    image: ghcr.io/ivanli-cn/proxy-broker:latest
     environment:
       PROXY_BROKER_LISTEN_ADDR: 0.0.0.0:8080
       PROXY_BROKER_SESSION_LISTEN_IP: 0.0.0.0

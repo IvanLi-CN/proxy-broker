@@ -92,6 +92,7 @@ The repository includes a reusable Docker Compose stack for:
 Files and scripts:
 
 - `deploy/forward-auth/compose.yaml`
+- `deploy/forward-auth/compose.build.yaml`
 - `deploy/forward-auth/authelia/users_database.yml`
 - `scripts/forward-auth/render-stack.sh`
 - `scripts/forward-auth/run-stack-smoke.sh`
@@ -105,7 +106,14 @@ Shared-testbox validation:
 
 This script syncs the repo to `codex-testbox`, renders the stack, starts the
 compose project with the LXC-safe caps override, runs the smoke checks, and
-cleans up by default.
+cleans up by default. It uses the build override by default so the current
+workspace changes are validated.
+
+Published-image example:
+
+```bash
+docker compose -f deploy/forward-auth/compose.yaml up -d
+```
 
 ## Web console
 

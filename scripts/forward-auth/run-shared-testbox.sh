@@ -5,10 +5,11 @@ TESTBOX="${TESTBOX:-codex-testbox}"
 KEEP_RUN=0
 HTTP_PORT=""
 HTTPS_PORT=""
+STACK_VARIANT="${FORWARD_AUTH_STACK_VARIANT:-build}"
 
 usage() {
   cat <<'EOF'
-Usage: run-shared-testbox.sh [--http-port <port>] [--https-port <port>] [--keep-run]
+Usage: run-shared-testbox.sh [--http-port <port>] [--https-port <port>] [--variant <build|ghcr>] [--keep-run]
 EOF
 }
 
@@ -20,6 +21,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --https-port)
       HTTPS_PORT="$2"
+      shift 2
+      ;;
+    --variant)
+      STACK_VARIANT="$2"
       shift 2
       ;;
     --keep-run)
@@ -37,6 +42,15 @@ while [ "$#" -gt 0 ]; do
       ;;
   esac
 done
+
+case "$STACK_VARIANT" in
+  build|ghcr)
+    ;;
+  *)
+    echo "unsupported variant: $STACK_VARIANT (expected build|ghcr)" >&2
+    exit 2
+    ;;
+esac
 
 if REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"; then
   :
@@ -120,6 +134,7 @@ REMOTE_ARGS=(
   --compose-project "$COMPOSE_PROJECT"
   --http-port "$HTTP_PORT"
   --https-port "$HTTPS_PORT"
+  --variant "$STACK_VARIANT"
 )
 if [ "$KEEP_RUN" -eq 1 ]; then
   REMOTE_ARGS+=(--keep-run)
@@ -129,6 +144,7 @@ remote_cmd="$(printf '%q ' "${REMOTE_ARGS[@]}")"
 ssh -o BatchMode=yes "$TESTBOX" "set -euo pipefail; cd '$REMOTE_RUN'; ${remote_cmd}"
 
 echo "shared-testbox smoke passed"
+echo "variant=$STACK_VARIANT"
 echo "remote_run=$REMOTE_RUN"
 echo "compose_project=$COMPOSE_PROJECT"
 echo "https_port=$HTTPS_PORT"

@@ -103,8 +103,11 @@ In this setup:
 The repository ships a reusable reference stack under `deploy/forward-auth/`:
 
 - `compose.yaml`
+  - production-style example that pulls `ghcr.io/ivanli-cn/proxy-broker:latest`
   - Traefik terminates TLS and applies Forward Auth as an identity-header enricher.
   - `proxy-broker` is configured through `PROXY_BROKER_*` environment variables rather than a compose `command:` list.
+- `compose.build.yaml`
+  - workspace validation override that builds the current checkout instead of pulling GHCR
 - `authelia/users_database.yml`
   - static smoke-only users for admin and non-admin coverage.
 - `generated/`
@@ -128,10 +131,10 @@ The reusable scripts are:
 - `scripts/forward-auth/render-stack.sh`
   - generates TLS material plus Authelia and Traefik config
 - `scripts/forward-auth/run-stack-smoke.sh`
-  - starts the local compose stack and runs the smoke test
+  - starts either the `build` or `ghcr` compose variant and runs the smoke test
 - `scripts/forward-auth/run-shared-testbox.sh`
   - syncs the repository to `codex-testbox`, applies the LXC-safe compose caps
-    override, runs the smoke test, and cleans up by default
+    override, runs the selected variant, and cleans up by default
 
 Shared-testbox example:
 
@@ -139,10 +142,22 @@ Shared-testbox example:
 ./scripts/forward-auth/run-shared-testbox.sh
 ```
 
+Published-image example:
+
+```bash
+docker compose -f deploy/forward-auth/compose.yaml up -d
+```
+
 Keep the environment running for inspection:
 
 ```bash
 ./scripts/forward-auth/run-shared-testbox.sh --keep-run
+```
+
+Validate the published GHCR image instead of the current workspace build:
+
+```bash
+./scripts/forward-auth/run-shared-testbox.sh --variant ghcr
 ```
 
 The Authelia policy for `broker.<domain>` and `broker-basic.<domain>` is rendered in `scripts/forward-auth/render-stack.sh` under `access_control.rules`, and both hosts are set to `bypass`. This is deliberate: Traefik is not allowed to make the access-control decision for `proxy-broker`.

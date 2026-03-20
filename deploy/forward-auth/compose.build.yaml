@@ -1,0 +1,8 @@
+services:
+  proxy-broker:
+    image: ${FORWARD_AUTH_BUILD_IMAGE}
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        APP_EFFECTIVE_VERSION: ${FORWARD_AUTH_APP_VERSION}
