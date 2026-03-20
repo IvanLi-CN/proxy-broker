@@ -249,9 +249,12 @@ async fn main() -> anyhow::Result<()> {
         .with_context(|| format!("failed to bind listen address: {}", args.listen))?;
 
     tracing::info!(listen = %args.listen, "proxy-broker service started");
-    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
-        .await
-        .context("axum server stopped with error")?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .context("axum server stopped with error")?;
 
     Ok(())
 }

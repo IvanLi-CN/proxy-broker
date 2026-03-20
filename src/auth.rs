@@ -180,9 +180,9 @@ enum TrustedProxy {
 
 impl TrustedProxy {
     fn parse(raw: &str) -> Result<Self, BrokerError> {
-        let (ip_raw, prefix_len_raw) = raw.split_once('/').map_or((raw, None), |(ip, prefix)| {
-            (ip, Some(prefix))
-        });
+        let (ip_raw, prefix_len_raw) = raw
+            .split_once('/')
+            .map_or((raw, None), |(ip, prefix)| (ip, Some(prefix)));
         let ip: IpAddr = ip_raw.parse().map_err(|_| {
             BrokerError::InvalidRequest(format!("invalid trusted proxy entry: {raw}"))
         })?;
@@ -207,12 +207,20 @@ impl TrustedProxy {
 
     fn matches(&self, ip: IpAddr) -> bool {
         match (self, ip) {
-            (Self::V4 { network, prefix_len }, IpAddr::V4(ipv4)) => {
-                *network == mask_v4(ipv4, *prefix_len)
-            }
-            (Self::V6 { network, prefix_len }, IpAddr::V6(ipv6)) => {
-                *network == mask_v6(ipv6, *prefix_len)
-            }
+            (
+                Self::V4 {
+                    network,
+                    prefix_len,
+                },
+                IpAddr::V4(ipv4),
+            ) => *network == mask_v4(ipv4, *prefix_len),
+            (
+                Self::V6 {
+                    network,
+                    prefix_len,
+                },
+                IpAddr::V6(ipv6),
+            ) => *network == mask_v6(ipv6, *prefix_len),
             _ => false,
         }
     }
