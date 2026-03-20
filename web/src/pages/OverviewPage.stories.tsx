@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn } from "storybook/test";
 
+import { AppShell } from "@/components/AppShell";
 import {
   healthFixture,
   refreshFixture,
@@ -14,13 +15,30 @@ const meta = {
   component: OverviewPage,
   tags: ["autodocs"],
   parameters: {
+    layout: "fullscreen",
     docs: {
       description: {
         component:
-          "Overview route composition for health, subscription loading, refresh actions, and runway guidance inside the operator control room.",
+          "Full overview route preview inside the real app shell. This is the closest Storybook equivalent of the shipped operator page, including the compact current-user badge in the top bar and the detailed identity panel inside access control.",
       },
     },
   },
+  render: (args) => (
+    <AppShell
+      profileId="default"
+      profiles={["default", "edge-jp", "lab-us"]}
+      profilesLoading={false}
+      profilesCreating={false}
+      profilesError={null}
+      healthStatus={args.health.status}
+      currentUser={args.currentUser}
+      onProfileIdChange={() => undefined}
+      onCreateProfile={async (value: string) => value}
+      onRetryProfiles={() => undefined}
+    >
+      <OverviewPage {...args} />
+    </AppShell>
+  ),
   args: {
     health: healthFixture,
     activeSessions: sessionsFixture.sessions.length,
