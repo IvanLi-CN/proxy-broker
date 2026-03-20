@@ -42,9 +42,13 @@ docker run --rm -p 8080:8080 ghcr.io/ivanli-cn/proxy-broker:latest
 
 The published container image defaults to:
 
-- `--listen 0.0.0.0:8080`
-- `--session-listen-ip 0.0.0.0`
-- `--auth-mode enforce`
+- `PROXY_BROKER_LISTEN_ADDR=0.0.0.0:8080`
+- `PROXY_BROKER_SESSION_LISTEN_IP=0.0.0.0`
+- `PROXY_BROKER_AUTH_MODE=enforce`
+
+The binary now accepts both CLI flags and `PROXY_BROKER_*` environment
+variables for runtime configuration. For containers, prefer environment
+variables over `command:` argument lists.
 
 ## Authentication
 

@@ -43,3 +43,9 @@ These credentials exist only for the reusable smoke stack and are not suitable f
   - builds the stack, runs smoke tests, and optionally keeps the stack running
 - `scripts/forward-auth/run-shared-testbox.sh`
   - syncs the repo to `codex-testbox`, runs the stack there, and cleans up safely by default
+
+## proxy-broker Configuration
+
+The compose stack configures `proxy-broker` entirely through `PROXY_BROKER_*`
+environment variables. It intentionally does not use a compose `command:` list
+for application settings.

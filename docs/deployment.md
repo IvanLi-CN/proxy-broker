@@ -13,6 +13,20 @@ The default mode is `enforce`.
 
 ## Auth Configuration
 
+- `PROXY_BROKER_LISTEN_ADDR`
+  - default: `127.0.0.1:8080`
+- `PROXY_BROKER_SESSION_LISTEN_IP`
+  - default: `127.0.0.1`
+- `PROXY_BROKER_STORE`
+  - default: `sqlite`
+- `PROXY_BROKER_SQLITE_PATH`
+  - default: `.proxy-broker/state.sqlite`
+- `PROXY_BROKER_RUNTIME_DIR`
+  - default: `.proxy-broker/runtime`
+- `PROXY_BROKER_DATA_DIR`
+  - default: `.proxy-broker/data`
+- `PROXY_BROKER_MIHOMO_AUTO_DOWNLOAD`
+  - default: `true`
 - `PROXY_BROKER_AUTH_MODE=enforce|development`
 - `PROXY_BROKER_AUTH_SUBJECT_HEADERS`
   - default: `X-Forwarded-User,X-Auth-Request-User,Remote-User`
@@ -90,6 +104,7 @@ The repository ships a reusable reference stack under `deploy/forward-auth/`:
 
 - `compose.yaml`
   - Traefik terminates TLS and applies Forward Auth as an identity-header enricher.
+  - `proxy-broker` is configured through `PROXY_BROKER_*` environment variables rather than a compose `command:` list.
 - `authelia/users_database.yml`
   - static smoke-only users for admin and non-admin coverage.
 - `generated/`

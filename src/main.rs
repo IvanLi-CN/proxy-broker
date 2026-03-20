@@ -31,17 +31,22 @@ struct Cli {
     )]
     session_listen_ip: IpAddr,
 
-    #[arg(long, default_value = "sqlite")]
+    #[arg(long, env = "PROXY_BROKER_STORE", default_value = "sqlite")]
     store: String,
 
-    #[arg(long, default_value = ".proxy-broker/state.sqlite")]
+    #[arg(
+        long,
+        env = "PROXY_BROKER_SQLITE_PATH",
+        default_value = ".proxy-broker/state.sqlite"
+    )]
     sqlite_path: PathBuf,
 
-    #[arg(long)]
+    #[arg(long, env = "PROXY_BROKER_MIHOMO_BINARY")]
     mihomo_binary: Option<PathBuf>,
 
     #[arg(
         long,
+        env = "PROXY_BROKER_MIHOMO_AUTO_DOWNLOAD",
         action = ArgAction::Set,
         num_args = 0..=1,
         default_missing_value = "true",
@@ -49,34 +54,55 @@ struct Cli {
     )]
     mihomo_auto_download: bool,
 
-    #[arg(long, default_value = ".proxy-broker/runtime")]
+    #[arg(
+        long,
+        env = "PROXY_BROKER_RUNTIME_DIR",
+        default_value = ".proxy-broker/runtime"
+    )]
     runtime_dir: PathBuf,
 
-    #[arg(long, default_value = ".proxy-broker/data")]
+    #[arg(
+        long,
+        env = "PROXY_BROKER_DATA_DIR",
+        default_value = ".proxy-broker/data"
+    )]
     data_dir: PathBuf,
 
-    #[arg(long, default_value_t = proxy_broker::constants::DEFAULT_PROBE_CONCURRENCY)]
+    #[arg(
+        long,
+        env = "PROXY_BROKER_PROBE_CONCURRENCY",
+        default_value_t = proxy_broker::constants::DEFAULT_PROBE_CONCURRENCY
+    )]
     probe_concurrency: usize,
 
     #[arg(
         long,
+        env = "PROXY_BROKER_GEO_ONLINE_CONCURRENCY",
         default_value_t = proxy_broker::constants::DEFAULT_GEO_ONLINE_CONCURRENCY
     )]
     geo_online_concurrency: usize,
 
-    #[arg(long, default_value = proxy_broker::constants::DEFAULT_ONLINE_GEO_BASE)]
+    #[arg(
+        long,
+        env = "PROXY_BROKER_ONLINE_GEO_BASE",
+        default_value = proxy_broker::constants::DEFAULT_ONLINE_GEO_BASE
+    )]
     online_geo_base: String,
 
-    #[arg(long, default_value = proxy_broker::constants::DEFAULT_MMDB_URL)]
+    #[arg(
+        long,
+        env = "PROXY_BROKER_MMDB_URL",
+        default_value = proxy_broker::constants::DEFAULT_MMDB_URL
+    )]
     mmdb_url: String,
 
-    #[arg(long, default_value_t = 15)]
+    #[arg(long, env = "PROXY_BROKER_STARTUP_TIMEOUT_SEC", default_value_t = 15)]
     startup_timeout_sec: u64,
 
-    #[arg(long)]
+    #[arg(long, env = "PROXY_BROKER_MIHOMO_SECRET")]
     mihomo_secret: Option<String>,
 
-    #[arg(long)]
+    #[arg(long, env = "PROXY_BROKER_LOG_JSON")]
     log_json: bool,
 
     #[arg(

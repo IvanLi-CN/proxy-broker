@@ -84,8 +84,29 @@ wait_for_machine_health() {
   return 1
 }
 
+wait_for_auth_route() {
+  local output="$TMP_DIR/auth-ready.html"
+
+  for _ in $(seq 1 90); do
+    if curl "${curl_common[@]}" \
+      --output "$output" \
+      --fail \
+      "https://${FORWARD_AUTH_AUTHELIA_HOST}:${FORWARD_AUTH_HTTPS_PORT}/" \
+      >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+  done
+
+  echo "authelia route did not become ready" >&2
+  return 1
+}
+
 echo "[smoke] waiting for machine host health"
 wait_for_machine_health
+
+echo "[smoke] waiting for authelia route readiness"
+wait_for_auth_route
 
 echo "[smoke] checking unauthenticated human route is rejected by proxy-broker, not by Traefik"
 anonymous_ui="$TMP_DIR/anonymous-ui.json"

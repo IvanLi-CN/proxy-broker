@@ -37,30 +37,19 @@ services:
       dockerfile: Dockerfile
       args:
         APP_EFFECTIVE_VERSION: ${FORWARD_AUTH_APP_VERSION}
-    command:
-      - --listen
-      - 0.0.0.0:8080
-      - --session-listen-ip
-      - 0.0.0.0
-      - --store
-      - sqlite
-      - --sqlite-path
-      - /data/state.sqlite
-      - --runtime-dir
-      - /data/runtime
-      - --data-dir
-      - /data/runtime-data
-      - --mihomo-auto-download=false
-      - --auth-mode
-      - enforce
-      - --auth-subject-headers
-      - Remote-User
-      - --auth-email-headers
-      - Remote-Email
-      - --auth-groups-headers
-      - Remote-Groups
-      - --auth-admin-groups
-      - ${FORWARD_AUTH_ADMIN_GROUP}
+    environment:
+      PROXY_BROKER_LISTEN_ADDR: 0.0.0.0:8080
+      PROXY_BROKER_SESSION_LISTEN_IP: 0.0.0.0
+      PROXY_BROKER_STORE: sqlite
+      PROXY_BROKER_SQLITE_PATH: /data/state.sqlite
+      PROXY_BROKER_RUNTIME_DIR: /data/runtime
+      PROXY_BROKER_DATA_DIR: /data/runtime-data
+      PROXY_BROKER_MIHOMO_AUTO_DOWNLOAD: "false"
+      PROXY_BROKER_AUTH_MODE: enforce
+      PROXY_BROKER_AUTH_SUBJECT_HEADERS: Remote-User
+      PROXY_BROKER_AUTH_EMAIL_HEADERS: Remote-Email
+      PROXY_BROKER_AUTH_GROUPS_HEADERS: Remote-Groups
+      PROXY_BROKER_AUTH_ADMIN_GROUPS: ${FORWARD_AUTH_ADMIN_GROUP}
     volumes:
       - ./generated/proxy-broker:/data
     networks:

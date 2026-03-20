@@ -36,6 +36,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
 FROM debian:bookworm-slim AS runtime
 
 ARG APP_EFFECTIVE_VERSION
+ENV PROXY_BROKER_LISTEN_ADDR=0.0.0.0:8080
+ENV PROXY_BROKER_SESSION_LISTEN_IP=0.0.0.0
 
 RUN printf 'Acquire::Retries \"5\";\nAcquire::http::Timeout \"30\";\nAcquire::https::Timeout \"30\";\n' > /etc/apt/apt.conf.d/80codex-retries \
     && apt-get update \
@@ -48,4 +50,3 @@ COPY --from=builder /tmp/proxy-broker /usr/local/bin/proxy-broker
 LABEL org.opencontainers.image.version="${APP_EFFECTIVE_VERSION}"
 
 ENTRYPOINT ["proxy-broker"]
-CMD ["--listen", "0.0.0.0:8080", "--session-listen-ip", "0.0.0.0"]
