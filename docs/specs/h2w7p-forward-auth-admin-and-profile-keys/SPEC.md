@@ -51,3 +51,13 @@
 - API Key secret 采用 `pbk_<key_id>_<random>` 形状，落库仅保存 `salt + sha256(secret)`，校验使用常量时间比较。
 - Web 管理台新增身份展示与 Profile API Key 管理卡片，支持一次性显示最新签发的 secret。
 - 部署文档明确说明了 Forward Auth 头透传方式、开发模式、管理员白名单配置与机器调用示例。
+
+## Completion Evidence
+
+默认管理员页面中，当前用户状态同时出现在顶部状态条的 compact 视图，以及右侧 `Access control` 卡片中的 detail 视图：
+
+![Overview page with administrator identity](./assets/overviewpage-default.png)
+
+匿名页面中，顶部状态条和 `Access control` 卡片都会明确显示匿名状态，并提示受保护操作会被阻止：
+
+![Overview page with anonymous identity](./assets/overviewpage-anonymous.png)
