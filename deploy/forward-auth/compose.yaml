@@ -1,0 +1,71 @@
+services:
+  traefik:
+    image: traefik:v3.5
+    command:
+      - --providers.file.directory=/etc/traefik/dynamic
+      - --providers.file.watch=true
+      - --entrypoints.web.address=:8080
+      - --entrypoints.websecure.address=:8443
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --log.level=INFO
+    ports:
+      - 127.0.0.1:${FORWARD_AUTH_HTTP_PORT}:8080
+      - 127.0.0.1:${FORWARD_AUTH_HTTPS_PORT}:8443
+    volumes:
+      - ./generated/traefik/dynamic:/etc/traefik/dynamic:ro
+      - ./generated/certs:/etc/traefik/certs:ro
+    networks:
+      - forward-auth
+
+  authelia:
+    image: authelia/authelia:4.39
+    command:
+      - authelia
+      - --config
+      - /config/configuration.yml
+    environment:
+      TZ: UTC
+    volumes:
+      - ./generated/authelia:/config
+    networks:
+      - forward-auth
+
+  proxy-broker:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        APP_EFFECTIVE_VERSION: ${FORWARD_AUTH_APP_VERSION}
+    command:
+      - --listen
+      - 0.0.0.0:8080
+      - --session-listen-ip
+      - 0.0.0.0
+      - --store
+      - sqlite
+      - --sqlite-path
+      - /data/state.sqlite
+      - --runtime-dir
+      - /data/runtime
+      - --data-dir
+      - /data/runtime-data
+      - --mihomo-auto-download=false
+      - --auth-mode
+      - enforce
+      - --auth-subject-headers
+      - Remote-User
+      - --auth-email-headers
+      - Remote-Email
+      - --auth-groups-headers
+      - Remote-Groups
+      - --auth-admin-groups
+      - ${FORWARD_AUTH_ADMIN_GROUP}
+    volumes:
+      - ./generated/proxy-broker:/data
+    networks:
+      - forward-auth
+
+networks:
+  forward-auth:
+    driver: bridge

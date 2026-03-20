@@ -2,6 +2,7 @@
 **/*.rs.bk
 
 .proxy-broker/
+deploy/forward-auth/generated/
 
 .env
 .env.*

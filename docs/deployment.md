@@ -83,6 +83,52 @@ In this setup:
 - `proxy-broker` decides whether that user is an admin.
 - Non-admin humans can call `/api/v1/auth/me`, but cannot access the UI or admin APIs.
 
+## Reference Compose Stack
+
+The repository ships a reusable reference stack under `deploy/forward-auth/`:
+
+- `compose.yaml`
+  - Traefik terminates TLS and applies Forward Auth.
+- `authelia/users_database.yml`
+  - static smoke-only users for admin and non-admin coverage.
+- `generated/`
+  - rendered at runtime by the helper scripts and ignored from git.
+
+The rendered Traefik topology exposes four hosts on a shared test domain:
+
+- `auth.<domain>`
+  - Authelia portal
+- `broker.<domain>`
+  - human-facing route protected by the standard redirect flow
+- `broker-basic.<domain>`
+  - smoke-only route that authenticates the caller with HTTP Basic credentials
+    through the same Authelia `forward-auth` endpoint
+- `machine-broker.<domain>`
+  - machine-facing route with no proxy-side human auth so profile API keys can
+    reach `proxy-broker` directly
+
+The reusable scripts are:
+
+- `scripts/forward-auth/render-stack.sh`
+  - generates TLS material plus Authelia and Traefik config
+- `scripts/forward-auth/run-stack-smoke.sh`
+  - starts the local compose stack and runs the smoke test
+- `scripts/forward-auth/run-shared-testbox.sh`
+  - syncs the repository to `codex-testbox`, applies the LXC-safe compose caps
+    override, runs the smoke test, and cleans up by default
+
+Shared-testbox example:
+
+```bash
+./scripts/forward-auth/run-shared-testbox.sh
+```
+
+Keep the environment running for inspection:
+
+```bash
+./scripts/forward-auth/run-shared-testbox.sh --keep-run
+```
+
 ## Route Matrix
 
 - `/healthz`

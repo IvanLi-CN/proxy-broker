@@ -1,0 +1,13 @@
+users:
+  admin:
+    password: "$argon2id$v=19$m=65536,t=3,p=4$kG5xAs++VOtpmOL87BR2Hg$3LU4eOSz8d73T4gxKzyD1SfBhktL8N5AsKKrzUz+zgI"
+    displayname: "Proxy Broker Admin"
+    email: "admin@forward-auth.test"
+    groups:
+      - proxy-broker-admins
+  viewer:
+    password: "$argon2id$v=19$m=65536,t=3,p=4$hDoXW6ghccvcO2adopi/sw$Sggt17tGNRNnAqzwtV8YWrJOr8Fo5Z74ObJAh4E89XY"
+    displayname: "Proxy Broker Viewer"
+    email: "viewer@forward-auth.test"
+    groups:
+      - proxy-broker-viewers

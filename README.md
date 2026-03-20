@@ -77,6 +77,32 @@ Then call profile business endpoints with either:
 See [docs/deployment.md](docs/deployment.md) for the full route matrix, local
 development mode, and a Traefik Forward Auth example.
 
+## Forward Auth Smoke Stack
+
+The repository includes a reusable Docker Compose stack for:
+
+- Traefik as the TLS edge and Forward Auth middleware host,
+- Authelia as the human identity provider,
+- `proxy-broker` as the protected upstream.
+
+Files and scripts:
+
+- `deploy/forward-auth/compose.yaml`
+- `deploy/forward-auth/authelia/users_database.yml`
+- `scripts/forward-auth/render-stack.sh`
+- `scripts/forward-auth/run-stack-smoke.sh`
+- `scripts/forward-auth/run-shared-testbox.sh`
+
+Shared-testbox validation:
+
+```bash
+./scripts/forward-auth/run-shared-testbox.sh
+```
+
+This script syncs the repo to `codex-testbox`, renders the stack, starts the
+compose project with the LXC-safe caps override, runs the smoke checks, and
+cleans up by default.
+
 ## Web console
 
 Build the frontend before release builds:
