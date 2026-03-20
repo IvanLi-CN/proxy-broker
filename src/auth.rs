@@ -1,7 +1,8 @@
 use std::collections::HashSet;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
 use axum::{
-    extract::{FromRequestParts, Request, State},
+    extract::{ConnectInfo, FromRequestParts, Request, State},
     http::{HeaderMap, HeaderName, StatusCode, header},
     middleware::Next,
     response::Response,
@@ -41,6 +42,7 @@ pub struct AuthConfigOptions {
     pub subject_headers: String,
     pub email_headers: String,
     pub groups_headers: String,
+    pub trusted_proxies: String,
     pub admin_users: String,
     pub admin_groups: String,
     pub dev_user: String,
@@ -54,6 +56,7 @@ pub struct AuthConfig {
     subject_headers: Vec<HeaderName>,
     email_headers: Vec<HeaderName>,
     groups_headers: Vec<HeaderName>,
+    trusted_proxies: Vec<TrustedProxy>,
     admin_users: HashSet<String>,
     admin_groups: HashSet<String>,
     dev_user: String,
@@ -76,6 +79,7 @@ impl AuthConfig {
             subject_headers: parse_header_names(&options.subject_headers, "subject headers")?,
             email_headers: parse_header_names(&options.email_headers, "email headers")?,
             groups_headers: parse_header_names(&options.groups_headers, "groups headers")?,
+            trusted_proxies: parse_trusted_proxies(&options.trusted_proxies)?,
             admin_users: parse_value_set(&options.admin_users),
             admin_groups: parse_value_set(&options.admin_groups),
             dev_user,
@@ -87,13 +91,14 @@ impl AuthConfig {
     pub async fn resolve_principal(
         &self,
         headers: &HeaderMap,
+        peer_addr: Option<IpAddr>,
         state: &AppState,
     ) -> Result<Option<Principal>, BrokerError> {
         if self.mode == AuthMode::Development {
             return Ok(Some(self.development_principal()));
         }
 
-        let human = self.resolve_human(headers);
+        let human = self.resolve_human(headers, peer_addr);
         let api_key_secret = extract_api_key_secret(headers)?;
 
         if human.is_some() && api_key_secret.is_some() {
@@ -129,7 +134,15 @@ impl AuthConfig {
             || groups.iter().any(|group| self.admin_groups.contains(group))
     }
 
-    fn resolve_human(&self, headers: &HeaderMap) -> Option<HumanIdentityCandidate> {
+    fn resolve_human(
+        &self,
+        headers: &HeaderMap,
+        peer_addr: Option<IpAddr>,
+    ) -> Option<HumanIdentityCandidate> {
+        if !self.is_trusted_proxy(peer_addr) {
+            return None;
+        }
+
         let subject = find_header_value(headers, &self.subject_headers)?;
         let email = find_header_value(headers, &self.email_headers);
         let groups = self
@@ -145,6 +158,63 @@ impl AuthConfig {
             email,
             groups,
         })
+    }
+
+    fn is_trusted_proxy(&self, peer_addr: Option<IpAddr>) -> bool {
+        let peer_addr = match peer_addr {
+            Some(peer_addr) => peer_addr,
+            None => return false,
+        };
+
+        self.trusted_proxies
+            .iter()
+            .any(|candidate| candidate.matches(peer_addr))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TrustedProxy {
+    V4 { network: u32, prefix_len: u8 },
+    V6 { network: u128, prefix_len: u8 },
+}
+
+impl TrustedProxy {
+    fn parse(raw: &str) -> Result<Self, BrokerError> {
+        let (ip_raw, prefix_len_raw) = raw.split_once('/').map_or((raw, None), |(ip, prefix)| {
+            (ip, Some(prefix))
+        });
+        let ip: IpAddr = ip_raw.parse().map_err(|_| {
+            BrokerError::InvalidRequest(format!("invalid trusted proxy entry: {raw}"))
+        })?;
+
+        match ip {
+            IpAddr::V4(ipv4) => {
+                let prefix_len = parse_prefix_len(prefix_len_raw, 32, raw)?;
+                Ok(Self::V4 {
+                    network: mask_v4(ipv4, prefix_len),
+                    prefix_len,
+                })
+            }
+            IpAddr::V6(ipv6) => {
+                let prefix_len = parse_prefix_len(prefix_len_raw, 128, raw)?;
+                Ok(Self::V6 {
+                    network: mask_v6(ipv6, prefix_len),
+                    prefix_len,
+                })
+            }
+        }
+    }
+
+    fn matches(&self, ip: IpAddr) -> bool {
+        match (self, ip) {
+            (Self::V4 { network, prefix_len }, IpAddr::V4(ipv4)) => {
+                *network == mask_v4(ipv4, *prefix_len)
+            }
+            (Self::V6 { network, prefix_len }, IpAddr::V6(ipv6)) => {
+                *network == mask_v6(ipv6, *prefix_len)
+            }
+            _ => false,
+        }
     }
 }
 
@@ -300,9 +370,13 @@ pub async fn resolve_request_auth(
     mut request: Request,
     next: Next,
 ) -> Response {
+    let peer_addr = request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|connect_info| connect_info.0.ip());
     let auth = match state
         .auth
-        .resolve_principal(request.headers(), &state)
+        .resolve_principal(request.headers(), peer_addr, &state)
         .await
     {
         Ok(principal) => RequestAuthState {
@@ -418,6 +492,50 @@ fn parse_value_set(raw: &str) -> HashSet<String> {
     split_csv(raw).into_iter().collect()
 }
 
+fn parse_trusted_proxies(raw: &str) -> Result<Vec<TrustedProxy>, BrokerError> {
+    split_csv(raw)
+        .into_iter()
+        .map(|entry| TrustedProxy::parse(&entry))
+        .collect()
+}
+
+fn parse_prefix_len(raw: Option<&str>, max_bits: u8, full_entry: &str) -> Result<u8, BrokerError> {
+    match raw {
+        Some(raw) => {
+            let prefix_len = raw.parse::<u8>().map_err(|_| {
+                BrokerError::InvalidRequest(format!("invalid trusted proxy entry: {full_entry}"))
+            })?;
+            if prefix_len > max_bits {
+                return Err(BrokerError::InvalidRequest(format!(
+                    "invalid trusted proxy entry: {full_entry}"
+                )));
+            }
+            Ok(prefix_len)
+        }
+        None => Ok(max_bits),
+    }
+}
+
+fn mask_v4(ip: Ipv4Addr, prefix_len: u8) -> u32 {
+    let raw = u32::from(ip);
+    let mask = if prefix_len == 0 {
+        0
+    } else {
+        u32::MAX << (32 - prefix_len)
+    };
+    raw & mask
+}
+
+fn mask_v6(ip: Ipv6Addr, prefix_len: u8) -> u128 {
+    let raw = u128::from_be_bytes(ip.octets());
+    let mask = if prefix_len == 0 {
+        0
+    } else {
+        u128::MAX << (128 - prefix_len)
+    };
+    raw & mask
+}
+
 fn non_empty_trimmed(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -437,7 +555,7 @@ fn extract_api_key_secret(headers: &HeaderMap) -> Result<Option<String>, BrokerE
     let authorization_key = headers
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "))
+        .and_then(parse_bearer_secret)
         .and_then(non_empty_trimmed)
         .filter(|value| value.starts_with("pbk_"));
 
@@ -454,6 +572,17 @@ fn extract_api_key_secret(headers: &HeaderMap) -> Result<Option<String>, BrokerE
     }
 }
 
+fn parse_bearer_secret(value: &str) -> Option<&str> {
+    let mut parts = value.trim().splitn(2, char::is_whitespace);
+    let scheme = parts.next()?;
+    let secret = parts.next()?.trim_start();
+    if scheme.eq_ignore_ascii_case("bearer") {
+        Some(secret)
+    } else {
+        None
+    }
+}
+
 pub fn public_path_requires_admin(path: &str) -> bool {
     !(path == "api" || path.starts_with("api/") || path == "healthz")
 }
@@ -465,6 +594,7 @@ pub fn admin_guard(auth: &AuthContext) -> Result<(), BrokerError> {
 #[cfg(test)]
 mod tests {
     use axum::http::{HeaderMap, HeaderValue, header};
+    use std::net::{IpAddr, Ipv4Addr};
 
     use super::{
         AuthConfig, AuthConfigOptions, AuthMode, constant_time_eq, extract_api_key_secret,
@@ -476,6 +606,7 @@ mod tests {
             subject_headers: "X-Forwarded-User".to_string(),
             email_headers: "X-Forwarded-Email".to_string(),
             groups_headers: "X-Forwarded-Groups".to_string(),
+            trusted_proxies: "127.0.0.1/32,::1/128".to_string(),
             admin_users: "admin@example.com".to_string(),
             admin_groups: "admins".to_string(),
             dev_user: "dev@local".to_string(),
@@ -512,6 +643,20 @@ mod tests {
     }
 
     #[test]
+    fn extract_api_key_secret_accepts_lowercase_bearer_scheme() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("bearer pbk_left_secret"),
+        );
+
+        let secret = extract_api_key_secret(&headers)
+            .expect("header should parse")
+            .expect("secret should exist");
+        assert_eq!(secret, "pbk_left_secret");
+    }
+
+    #[test]
     fn human_identity_uses_admin_group_match() {
         let config = sample_config("enforce");
         let mut headers = HeaderMap::new();
@@ -525,9 +670,25 @@ mod tests {
         );
 
         let human = config
-            .resolve_human(&headers)
+            .resolve_human(&headers, Some(IpAddr::V4(Ipv4Addr::LOCALHOST)))
             .expect("human should resolve");
         let principal = human.into_principal(&config);
         assert!(principal.is_admin);
+    }
+
+    #[test]
+    fn untrusted_peer_cannot_supply_forwarded_human_identity() {
+        let config = sample_config("enforce");
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-forwarded-user",
+            HeaderValue::from_static("admin@example.com"),
+        );
+
+        assert!(
+            config
+                .resolve_human(&headers, Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10))))
+                .is_none()
+        );
     }
 }

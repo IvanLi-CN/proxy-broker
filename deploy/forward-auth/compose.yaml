@@ -16,7 +16,8 @@ services:
       - ./generated/traefik/dynamic:/etc/traefik/dynamic:ro
       - ./generated/certs:/etc/traefik/certs:ro
     networks:
-      - forward-auth
+      forward-auth:
+        ipv4_address: ${FORWARD_AUTH_TRAEFIK_IP}
 
   authelia:
     image: authelia/authelia:4.39
@@ -45,6 +46,7 @@ services:
       PROXY_BROKER_AUTH_SUBJECT_HEADERS: Remote-User
       PROXY_BROKER_AUTH_EMAIL_HEADERS: Remote-Email
       PROXY_BROKER_AUTH_GROUPS_HEADERS: Remote-Groups
+      PROXY_BROKER_AUTH_TRUSTED_PROXIES: ${FORWARD_AUTH_TRAEFIK_IP}/32
       PROXY_BROKER_AUTH_ADMIN_GROUPS: ${FORWARD_AUTH_ADMIN_GROUP}
     volumes:
       - ./generated/proxy-broker:/data
@@ -54,3 +56,6 @@ services:
 networks:
   forward-auth:
     driver: bridge
+    ipam:
+      config:
+        - subnet: ${FORWARD_AUTH_SUBNET}

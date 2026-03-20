@@ -57,3 +57,10 @@ These credentials exist only for the reusable smoke stack and are not suitable f
 Both compose variants configure `proxy-broker` entirely through
 `PROXY_BROKER_*` environment variables. They intentionally do not use a compose
 `command:` list for application settings.
+
+The stack passes `PROXY_BROKER_AUTH_TRUSTED_PROXIES=<traefik-ip>/32` to
+`proxy-broker`. `render-stack.sh` allocates a free private `/24` subnet and a
+fixed Traefik IP inside that subnet unless you override
+`FORWARD_AUTH_SUBNET` or `FORWARD_AUTH_TRAEFIK_IP` yourself. That keeps the
+trust boundary explicit without colliding with other Docker networks on a
+shared host.

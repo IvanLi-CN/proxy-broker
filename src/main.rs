@@ -1,4 +1,8 @@
-use std::{net::IpAddr, path::PathBuf, sync::Arc};
+use std::{
+    net::{IpAddr, SocketAddr},
+    path::PathBuf,
+    sync::Arc,
+};
 
 use anyhow::Context;
 use clap::{ArgAction, Parser};
@@ -133,6 +137,13 @@ struct Cli {
     )]
     auth_groups_headers: String,
 
+    #[arg(
+        long,
+        env = "PROXY_BROKER_AUTH_TRUSTED_PROXIES",
+        default_value = proxy_broker::constants::DEFAULT_AUTH_TRUSTED_PROXIES
+    )]
+    auth_trusted_proxies: String,
+
     #[arg(long, env = "PROXY_BROKER_AUTH_ADMIN_USERS", default_value = "")]
     auth_admin_users: String,
 
@@ -221,6 +232,7 @@ async fn main() -> anyhow::Result<()> {
         subject_headers: args.auth_subject_headers,
         email_headers: args.auth_email_headers,
         groups_headers: args.auth_groups_headers,
+        trusted_proxies: args.auth_trusted_proxies,
         admin_users: args.auth_admin_users,
         admin_groups: args.auth_admin_groups,
         dev_user: args.auth_dev_user,
@@ -237,7 +249,7 @@ async fn main() -> anyhow::Result<()> {
         .with_context(|| format!("failed to bind listen address: {}", args.listen))?;
 
     tracing::info!(listen = %args.listen, "proxy-broker service started");
-    axum::serve(listener, app)
+    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
         .await
         .context("axum server stopped with error")?;
 

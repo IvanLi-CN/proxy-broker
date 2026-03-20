@@ -57,6 +57,12 @@ Human callers are identified from configurable Forward Auth response headers:
 - `PROXY_BROKER_AUTH_SUBJECT_HEADERS`
 - `PROXY_BROKER_AUTH_EMAIL_HEADERS`
 - `PROXY_BROKER_AUTH_GROUPS_HEADERS`
+- `PROXY_BROKER_AUTH_TRUSTED_PROXIES`
+
+Forwarded human identity headers are ignored unless the TCP peer IP matches
+`PROXY_BROKER_AUTH_TRUSTED_PROXIES`. The default trusts loopback only, so
+container or reverse-proxy deployments must set this explicitly for the proxy
+hop that injects the headers.
 
 Admin access is decided inside the application:
 
@@ -112,8 +118,17 @@ workspace changes are validated.
 Published-image example:
 
 ```bash
-docker compose -f deploy/forward-auth/compose.yaml up -d
+./scripts/forward-auth/render-stack.sh
+docker compose \
+  --env-file deploy/forward-auth/generated/stack.env \
+  -f deploy/forward-auth/compose.yaml \
+  up -d
 ```
+
+The helper renders a per-run private subnet and a fixed Traefik IP inside that
+subnet, then wires `PROXY_BROKER_AUTH_TRUSTED_PROXIES=<traefik-ip>/32` into the
+compose env file. That keeps the trust boundary explicit without risking subnet
+collisions on a shared Docker host.
 
 ## Web console
 

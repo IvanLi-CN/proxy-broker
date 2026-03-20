@@ -95,11 +95,14 @@ mod tests {
     use async_trait::async_trait;
     use axum::{
         body::{Body, to_bytes},
+        extract::ConnectInfo,
         http::{Method, Request, StatusCode, Uri},
     };
+    use std::{
+        net::{Ipv4Addr, SocketAddr},
+        sync::Arc,
+    };
     use tower::ServiceExt;
-
-    use std::sync::Arc;
 
     #[derive(Default)]
     struct TestRuntime;
@@ -147,6 +150,7 @@ mod tests {
             subject_headers: "X-Forwarded-User".to_string(),
             email_headers: "X-Forwarded-Email".to_string(),
             groups_headers: "X-Forwarded-Groups".to_string(),
+            trusted_proxies: "127.0.0.1/32,::1/128".to_string(),
             admin_users: admin_users.to_string(),
             admin_groups: "admins".to_string(),
             dev_user: "dev@local".to_string(),
@@ -182,6 +186,14 @@ mod tests {
             service,
             auth: Arc::new(auth_config("enforce", "admin@example.com")),
         })
+    }
+
+    fn trusted_request(mut request: Request<Body>) -> Request<Body> {
+        request.extensions_mut().insert(ConnectInfo(SocketAddr::from((
+            Ipv4Addr::LOCALHOST,
+            41234,
+        ))));
+        request
     }
 
     #[tokio::test]
@@ -330,11 +342,13 @@ mod tests {
     async fn non_admin_human_cannot_access_profiles_api() {
         let response = enforce_router()
             .oneshot(
-                Request::builder()
-                    .uri("/api/v1/profiles")
-                    .header("x-forwarded-user", "user@example.com")
-                    .body(Body::empty())
-                    .unwrap(),
+                trusted_request(
+                    Request::builder()
+                        .uri("/api/v1/profiles")
+                        .header("x-forwarded-user", "user@example.com")
+                        .body(Body::empty())
+                        .unwrap(),
+                ),
             )
             .await
             .expect("router should respond");
@@ -349,13 +363,15 @@ mod tests {
         let created_profile = app
             .clone()
             .oneshot(
-                Request::builder()
-                    .method(Method::POST)
-                    .uri("/api/v1/profiles")
-                    .header("content-type", "application/json")
-                    .header("x-forwarded-user", "admin@example.com")
-                    .body(Body::from(r#"{"profile_id":"alpha"}"#))
-                    .unwrap(),
+                trusted_request(
+                    Request::builder()
+                        .method(Method::POST)
+                        .uri("/api/v1/profiles")
+                        .header("content-type", "application/json")
+                        .header("x-forwarded-user", "admin@example.com")
+                        .body(Body::from(r#"{"profile_id":"alpha"}"#))
+                        .unwrap(),
+                ),
             )
             .await
             .expect("create should respond");
@@ -364,13 +380,15 @@ mod tests {
         let created_key = app
             .clone()
             .oneshot(
-                Request::builder()
-                    .method(Method::POST)
-                    .uri("/api/v1/profiles/alpha/api-keys")
-                    .header("content-type", "application/json")
-                    .header("x-forwarded-user", "admin@example.com")
-                    .body(Body::from(r#"{"name":"deploy-bot"}"#))
-                    .unwrap(),
+                trusted_request(
+                    Request::builder()
+                        .method(Method::POST)
+                        .uri("/api/v1/profiles/alpha/api-keys")
+                        .header("content-type", "application/json")
+                        .header("x-forwarded-user", "admin@example.com")
+                        .body(Body::from(r#"{"name":"deploy-bot"}"#))
+                        .unwrap(),
+                ),
             )
             .await
             .expect("key create should respond");

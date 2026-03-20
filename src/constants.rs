@@ -17,6 +17,7 @@ pub const DEFAULT_AUTH_MODE: &str = "enforce";
 pub const DEFAULT_AUTH_SUBJECT_HEADERS: &str = "X-Forwarded-User,X-Auth-Request-User,Remote-User";
 pub const DEFAULT_AUTH_EMAIL_HEADERS: &str = "X-Forwarded-Email,X-Auth-Request-Email";
 pub const DEFAULT_AUTH_GROUPS_HEADERS: &str = "X-Forwarded-Groups,X-Auth-Request-Groups";
+pub const DEFAULT_AUTH_TRUSTED_PROXIES: &str = "127.0.0.1/32,::1/128";
 pub const DEFAULT_AUTH_DEV_USER: &str = "dev@local";
 pub const DEFAULT_AUTH_DEV_EMAIL: &str = "dev@local";
 pub const DEFAULT_AUTH_DEV_GROUPS: &str = "proxy-broker-dev-admin";

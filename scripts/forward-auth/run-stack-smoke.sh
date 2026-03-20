@@ -62,6 +62,8 @@ case "$STACK_VARIANT" in
     ;;
 esac
 
+export FORWARD_AUTH_NETWORK_SEED="${FORWARD_AUTH_NETWORK_SEED:-$COMPOSE_PROJECT}"
+
 "$REPO_ROOT/scripts/forward-auth/render-stack.sh"
 
 set -a

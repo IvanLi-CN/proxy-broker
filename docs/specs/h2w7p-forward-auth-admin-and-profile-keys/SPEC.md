@@ -8,6 +8,7 @@
 
 - 新增运行时鉴权模式 `enforce|development`，默认 `enforce`。
 - 从可配置的 Forward Auth 头解析人类身份，并基于用户名白名单/用户组白名单判定管理员身份。
+- 仅信任来自显式代理白名单 `PROXY_BROKER_AUTH_TRUSTED_PROXIES` 的 Forward Auth 人类身份头，默认仅信任 loopback。
 - 在 `development` 模式下强制注入固定开发用户 principal，并始终视为管理员。
 - 新增 `GET /api/v1/auth/me` 以暴露当前 principal 上下文。
 - 新增 Profile 级 API Key 的存储、一次性签发、撤销、`last_used_at` 更新与后端校验。
@@ -27,6 +28,7 @@
 
 - `PROXY_BROKER_AUTH_MODE=enforce` 时，无凭证访问 `/`、静态资源或受保护 API 返回 `401 authentication_required`。
 - Forward Auth 识别出的人类用户，只有命中 `PROXY_BROKER_AUTH_ADMIN_USERS` 或 `PROXY_BROKER_AUTH_ADMIN_GROUPS` 才能访问管理台与管理接口；非管理员人类除 `/api/v1/auth/me` 外全部返回 `403 admin_required`。
+- 即使请求带有 Forward Auth 身份头，只要来源 peer IP 不在 `PROXY_BROKER_AUTH_TRUSTED_PROXIES` 内，也必须按未认证处理。
 - `PROXY_BROKER_AUTH_MODE=development` 时，即使没有 Forward Auth 头，也会解析为开发用户 principal，且该用户始终为管理员。
 - Profile 级 API Key 仅允许访问绑定 profile 的业务接口；跨 profile 访问返回 `403 profile_access_denied`。
 - API Key 不能访问 `/`、静态资源、`/api/v1/profiles` 与 `/api/v1/profiles/{profile_id}/api-keys*`。
@@ -47,6 +49,7 @@
 ## Outcome
 
 - 后端新增 `AuthConfig`、请求级 principal 解析中间件、开发模式注入逻辑，以及管理员/Profile 访问守卫。
+- 人类身份头只会在请求来源命中 `PROXY_BROKER_AUTH_TRUSTED_PROXIES` 时生效，避免直连调用伪造管理员身份。
 - 路由矩阵固定为：`/healthz` 公开；`/` 与嵌入静态资源仅管理员人类或开发 principal 可访问；`/api/v1/profiles` 与 `/api/v1/profiles/{profile_id}/api-keys*` 仅管理员人类或开发 principal 可访问；`/api/v1/profiles/{profile_id}/subscriptions|refresh|ips|sessions` 允许管理员人类、开发 principal 或匹配 profile 的 API Key 访问。
 - API Key secret 采用 `pbk_<key_id>_<random>` 形状，落库仅保存 `salt + sha256(secret)`，校验使用常量时间比较。
 - Web 管理台新增身份展示与 Profile API Key 管理卡片，支持一次性显示最新签发的 secret。

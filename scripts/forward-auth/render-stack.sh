@@ -20,6 +20,117 @@ GENERATED_DIR="${FORWARD_AUTH_GENERATED_DIR:-$STACK_DIR/generated}"
 : "${FORWARD_AUTH_STORAGE_ENCRYPTION_KEY:=$(openssl rand -hex 32)}"
 : "${FORWARD_AUTH_JWT_SECRET:=$(openssl rand -hex 32)}"
 
+pick_forward_auth_network() {
+  python3 <<'PY'
+import hashlib
+import ipaddress
+import json
+import os
+import subprocess
+import sys
+
+
+def add_network(target, value):
+    if not value or value == "default":
+        return
+    try:
+        target.append(ipaddress.ip_network(value, strict=False))
+    except ValueError:
+        pass
+
+
+used = []
+
+try:
+    network_ids = subprocess.run(
+        ["docker", "network", "ls", "-q"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.split()
+    if network_ids:
+        networks = json.loads(
+            subprocess.run(
+                ["docker", "network", "inspect", *network_ids],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+        )
+        for network in networks:
+            for config in network.get("IPAM", {}).get("Config", []) or []:
+                add_network(used, config.get("Subnet"))
+except Exception:
+    pass
+
+try:
+    routes = json.loads(
+        subprocess.run(
+            ["ip", "-json", "route", "show"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    )
+    for route in routes:
+        add_network(used, route.get("dst"))
+except Exception:
+    pass
+
+candidates = []
+for second_octet in range(20, 32):
+    for third_octet in range(0, 256):
+        candidates.append(ipaddress.ip_network(f"172.{second_octet}.{third_octet}.0/24"))
+for second_octet in range(200, 256):
+    for third_octet in range(0, 256):
+        candidates.append(ipaddress.ip_network(f"10.{second_octet}.{third_octet}.0/24"))
+for second_octet in range(18, 20):
+    for third_octet in range(0, 256):
+        candidates.append(ipaddress.ip_network(f"198.{second_octet}.{third_octet}.0/24"))
+
+candidates = [
+    candidate
+    for candidate in candidates
+    if not any(candidate.overlaps(existing) for existing in used)
+]
+
+if not candidates:
+    print("failed to find a free /24 subnet for forward-auth", file=sys.stderr)
+    raise SystemExit(1)
+
+seed = (
+    os.environ.get("FORWARD_AUTH_NETWORK_SEED")
+    or os.environ.get("COMPOSE_PROJECT")
+    or os.environ.get("FORWARD_AUTH_APP_VERSION")
+    or "forward-auth"
+)
+start_index = int(hashlib.sha256(seed.encode()).hexdigest(), 16) % len(candidates)
+selected = candidates[start_index]
+traefik_ip = selected.network_address + 10
+print(f"{selected.with_prefixlen} {traefik_ip}")
+PY
+}
+
+if [ -z "${FORWARD_AUTH_SUBNET:-}" ]; then
+  picked_network="$(pick_forward_auth_network)"
+  read -r FORWARD_AUTH_SUBNET FORWARD_AUTH_TRAEFIK_IP <<<"$picked_network"
+  if [ -z "$FORWARD_AUTH_SUBNET" ] || [ -z "$FORWARD_AUTH_TRAEFIK_IP" ]; then
+    echo "failed to allocate forward-auth subnet" >&2
+    exit 1
+  fi
+fi
+
+if [ -z "${FORWARD_AUTH_TRAEFIK_IP:-}" ]; then
+  FORWARD_AUTH_TRAEFIK_IP="$(python3 - "${FORWARD_AUTH_SUBNET}" <<'PY'
+import ipaddress
+import sys
+
+network = ipaddress.ip_network(sys.argv[1], strict=False)
+print(str(network.network_address + 10))
+PY
+)"
+fi
+
 mkdir -p \
   "$GENERATED_DIR/authelia" \
   "$GENERATED_DIR/certs" \
@@ -193,6 +304,8 @@ FORWARD_AUTH_HTTPS_PORT=${FORWARD_AUTH_HTTPS_PORT}
 FORWARD_AUTH_ADMIN_GROUP=${FORWARD_AUTH_ADMIN_GROUP}
 FORWARD_AUTH_APP_VERSION=${FORWARD_AUTH_APP_VERSION}
 FORWARD_AUTH_BUILD_IMAGE=${FORWARD_AUTH_BUILD_IMAGE}
+FORWARD_AUTH_SUBNET=${FORWARD_AUTH_SUBNET}
+FORWARD_AUTH_TRAEFIK_IP=${FORWARD_AUTH_TRAEFIK_IP}
 FORWARD_AUTH_GENERATED_DIR=${GENERATED_DIR}
 FORWARD_AUTH_ADMIN_USER=admin
 FORWARD_AUTH_ADMIN_PASSWORD=ProxyBrokerAdmin123!

@@ -34,6 +34,9 @@ The default mode is `enforce`.
   - default: `X-Forwarded-Email,X-Auth-Request-Email`
 - `PROXY_BROKER_AUTH_GROUPS_HEADERS`
   - default: `X-Forwarded-Groups,X-Auth-Request-Groups`
+- `PROXY_BROKER_AUTH_TRUSTED_PROXIES`
+  - default: `127.0.0.1/32,::1/128`
+  - forwarded human identity headers are only accepted from these proxy peer IPs
 - `PROXY_BROKER_AUTH_ADMIN_USERS`
   - comma-separated exact subject matches
 - `PROXY_BROKER_AUTH_ADMIN_GROUPS`
@@ -87,6 +90,7 @@ Example container environment:
 
 ```bash
 PROXY_BROKER_AUTH_MODE=enforce
+PROXY_BROKER_AUTH_TRUSTED_PROXIES=10.0.0.5/32
 PROXY_BROKER_AUTH_ADMIN_USERS=admin@example.com
 PROXY_BROKER_AUTH_ADMIN_GROUPS=proxy-broker-admins
 ```
@@ -94,6 +98,8 @@ PROXY_BROKER_AUTH_ADMIN_GROUPS=proxy-broker-admins
 In this setup:
 
 - Forward Auth identifies the human user.
+- `proxy-broker` only trusts those forwarded identity headers when the request
+  arrives from a peer IP inside `PROXY_BROKER_AUTH_TRUSTED_PROXIES`.
 - `proxy-broker` decides whether that user is an admin.
 - Non-admin humans can call `/api/v1/auth/me`, but cannot access the UI or admin APIs.
 - If the caller has no forwarded identity, `proxy-broker` returns `401 authentication_required`.
@@ -106,6 +112,7 @@ The repository ships a reusable reference stack under `deploy/forward-auth/`:
   - production-style example that pulls `ghcr.io/ivanli-cn/proxy-broker:latest`
   - Traefik terminates TLS and applies Forward Auth as an identity-header enricher.
   - `proxy-broker` is configured through `PROXY_BROKER_*` environment variables rather than a compose `command:` list.
+  - consumes `FORWARD_AUTH_SUBNET` and `FORWARD_AUTH_TRAEFIK_IP` from the rendered env file so `proxy-broker` can trust only the Traefik hop without hard-coding a shared subnet.
 - `compose.build.yaml`
   - workspace validation override that builds the current checkout instead of pulling GHCR
 - `authelia/users_database.yml`
@@ -145,7 +152,11 @@ Shared-testbox example:
 Published-image example:
 
 ```bash
-docker compose -f deploy/forward-auth/compose.yaml up -d
+./scripts/forward-auth/render-stack.sh
+docker compose \
+  --env-file deploy/forward-auth/generated/stack.env \
+  -f deploy/forward-auth/compose.yaml \
+  up -d
 ```
 
 Keep the environment running for inspection:
@@ -161,6 +172,7 @@ Validate the published GHCR image instead of the current workspace build:
 ```
 
 The Authelia policy for `broker.<domain>` and `broker-basic.<domain>` is rendered in `scripts/forward-auth/render-stack.sh` under `access_control.rules`, and both hosts are set to `bypass`. This is deliberate: Traefik is not allowed to make the access-control decision for `proxy-broker`.
+The same render step also allocates a free private `/24` subnet when you do not provide one explicitly, then picks a fixed Traefik IP inside that subnet and passes it through `FORWARD_AUTH_TRAEFIK_IP` and `PROXY_BROKER_AUTH_TRUSTED_PROXIES`.
 
 ## Route Matrix
 
