@@ -1,0 +1,316 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
+STACK_DIR="$REPO_ROOT/deploy/forward-auth"
+GENERATED_DIR="${FORWARD_AUTH_GENERATED_DIR:-$STACK_DIR/generated}"
+
+: "${FORWARD_AUTH_DOMAIN_ROOT:=forward-auth.test}"
+: "${FORWARD_AUTH_AUTHELIA_HOST:=auth.${FORWARD_AUTH_DOMAIN_ROOT}}"
+: "${FORWARD_AUTH_BROKER_HOST:=broker.${FORWARD_AUTH_DOMAIN_ROOT}}"
+: "${FORWARD_AUTH_BROKER_BASIC_HOST:=broker-basic.${FORWARD_AUTH_DOMAIN_ROOT}}"
+: "${FORWARD_AUTH_MACHINE_HOST:=machine-broker.${FORWARD_AUTH_DOMAIN_ROOT}}"
+: "${FORWARD_AUTH_HTTP_PORT:=18080}"
+: "${FORWARD_AUTH_HTTPS_PORT:=18443}"
+: "${FORWARD_AUTH_ADMIN_GROUP:=proxy-broker-admins}"
+: "${FORWARD_AUTH_APP_VERSION:=forward-auth-smoke}"
+: "${FORWARD_AUTH_BUILD_IMAGE:=proxy-broker-forward-auth-smoke:${FORWARD_AUTH_APP_VERSION}}"
+: "${FORWARD_AUTH_SESSION_SECRET:=$(openssl rand -hex 32)}"
+: "${FORWARD_AUTH_STORAGE_ENCRYPTION_KEY:=$(openssl rand -hex 32)}"
+: "${FORWARD_AUTH_JWT_SECRET:=$(openssl rand -hex 32)}"
+
+pick_forward_auth_network() {
+  python3 <<'PY'
+import hashlib
+import ipaddress
+import json
+import os
+import subprocess
+import sys
+
+
+def add_network(target, value):
+    if not value or value == "default":
+        return
+    try:
+        target.append(ipaddress.ip_network(value, strict=False))
+    except ValueError:
+        pass
+
+
+used = []
+
+try:
+    network_ids = subprocess.run(
+        ["docker", "network", "ls", "-q"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.split()
+    if network_ids:
+        networks = json.loads(
+            subprocess.run(
+                ["docker", "network", "inspect", *network_ids],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+        )
+        for network in networks:
+            for config in network.get("IPAM", {}).get("Config", []) or []:
+                add_network(used, config.get("Subnet"))
+except Exception:
+    pass
+
+try:
+    routes = json.loads(
+        subprocess.run(
+            ["ip", "-json", "route", "show"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    )
+    for route in routes:
+        add_network(used, route.get("dst"))
+except Exception:
+    pass
+
+candidates = []
+for second_octet in range(20, 32):
+    for third_octet in range(0, 256):
+        candidates.append(ipaddress.ip_network(f"172.{second_octet}.{third_octet}.0/24"))
+for second_octet in range(200, 256):
+    for third_octet in range(0, 256):
+        candidates.append(ipaddress.ip_network(f"10.{second_octet}.{third_octet}.0/24"))
+for second_octet in range(18, 20):
+    for third_octet in range(0, 256):
+        candidates.append(ipaddress.ip_network(f"198.{second_octet}.{third_octet}.0/24"))
+
+candidates = [
+    candidate
+    for candidate in candidates
+    if not any(candidate.overlaps(existing) for existing in used)
+]
+
+if not candidates:
+    print("failed to find a free /24 subnet for forward-auth", file=sys.stderr)
+    raise SystemExit(1)
+
+seed = (
+    os.environ.get("FORWARD_AUTH_NETWORK_SEED")
+    or os.environ.get("COMPOSE_PROJECT")
+    or os.environ.get("FORWARD_AUTH_APP_VERSION")
+    or "forward-auth"
+)
+start_index = int(hashlib.sha256(seed.encode()).hexdigest(), 16) % len(candidates)
+selected = candidates[start_index]
+traefik_ip = selected.network_address + 10
+print(f"{selected.with_prefixlen} {traefik_ip}")
+PY
+}
+
+if [ -z "${FORWARD_AUTH_SUBNET:-}" ]; then
+  picked_network="$(pick_forward_auth_network)"
+  read -r FORWARD_AUTH_SUBNET FORWARD_AUTH_TRAEFIK_IP <<<"$picked_network"
+  if [ -z "$FORWARD_AUTH_SUBNET" ] || [ -z "$FORWARD_AUTH_TRAEFIK_IP" ]; then
+    echo "failed to allocate forward-auth subnet" >&2
+    exit 1
+  fi
+fi
+
+if [ -z "${FORWARD_AUTH_TRAEFIK_IP:-}" ]; then
+  FORWARD_AUTH_TRAEFIK_IP="$(python3 - "${FORWARD_AUTH_SUBNET}" <<'PY'
+import ipaddress
+import sys
+
+network = ipaddress.ip_network(sys.argv[1], strict=False)
+print(str(network.network_address + 10))
+PY
+)"
+fi
+
+mkdir -p \
+  "$GENERATED_DIR/authelia" \
+  "$GENERATED_DIR/certs" \
+  "$GENERATED_DIR/proxy-broker" \
+  "$GENERATED_DIR/traefik/dynamic"
+
+cp "$STACK_DIR/authelia/users_database.yml" "$GENERATED_DIR/authelia/users_database.yml"
+
+TLS_CONFIG="$GENERATED_DIR/certs/openssl-san.cnf"
+cat > "$TLS_CONFIG" <<EOF
+[req]
+distinguished_name = dn
+x509_extensions = v3_req
+prompt = no
+
+[dn]
+CN = ${FORWARD_AUTH_DOMAIN_ROOT}
+
+[v3_req]
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = ${FORWARD_AUTH_AUTHELIA_HOST}
+DNS.2 = ${FORWARD_AUTH_BROKER_HOST}
+DNS.3 = ${FORWARD_AUTH_BROKER_BASIC_HOST}
+DNS.4 = ${FORWARD_AUTH_MACHINE_HOST}
+EOF
+
+openssl req \
+  -x509 \
+  -nodes \
+  -newkey rsa:2048 \
+  -keyout "$GENERATED_DIR/certs/forward-auth.key" \
+  -out "$GENERATED_DIR/certs/forward-auth.crt" \
+  -days 3 \
+  -config "$TLS_CONFIG" \
+  >/dev/null 2>&1
+
+cat > "$GENERATED_DIR/authelia/configuration.yml" <<EOF
+server:
+  address: 'tcp://:9091'
+  endpoints:
+    authz:
+      forward-auth:
+        implementation: 'ForwardAuth'
+        authn_strategies:
+          - name: 'HeaderAuthorization'
+            schemes:
+              - 'Basic'
+            scheme_basic_cache_lifespan: 0
+          - name: 'CookieSession'
+
+log:
+  level: 'info'
+
+identity_validation:
+  reset_password:
+    jwt_secret: '${FORWARD_AUTH_JWT_SECRET}'
+
+authentication_backend:
+  file:
+    path: '/config/users_database.yml'
+
+access_control:
+  default_policy: 'deny'
+  rules:
+    - domain: '${FORWARD_AUTH_AUTHELIA_HOST}'
+      policy: 'bypass'
+    - domain: '${FORWARD_AUTH_BROKER_HOST}'
+      policy: 'bypass'
+    - domain: '${FORWARD_AUTH_BROKER_BASIC_HOST}'
+      policy: 'bypass'
+
+session:
+  secret: '${FORWARD_AUTH_SESSION_SECRET}'
+  cookies:
+    - domain: '${FORWARD_AUTH_DOMAIN_ROOT}'
+      authelia_url: 'https://${FORWARD_AUTH_AUTHELIA_HOST}:${FORWARD_AUTH_HTTPS_PORT}'
+      default_redirection_url: 'https://${FORWARD_AUTH_BROKER_HOST}:${FORWARD_AUTH_HTTPS_PORT}'
+      name: 'authelia_session'
+      same_site: 'lax'
+      inactivity: '10m'
+      expiration: '1h'
+      remember_me: '1d'
+
+storage:
+  encryption_key: '${FORWARD_AUTH_STORAGE_ENCRYPTION_KEY}'
+  local:
+    path: '/config/db.sqlite3'
+
+notifier:
+  filesystem:
+    filename: '/config/notification.txt'
+EOF
+
+cat > "$GENERATED_DIR/traefik/dynamic/forward-auth.yml" <<EOF
+http:
+  routers:
+    authelia:
+      rule: 'Host(\`${FORWARD_AUTH_AUTHELIA_HOST}\`)'
+      entryPoints:
+        - websecure
+      service: authelia
+      tls: {}
+    proxy-broker:
+      rule: 'Host(\`${FORWARD_AUTH_BROKER_HOST}\`)'
+      entryPoints:
+        - websecure
+      middlewares:
+        - authelia-session
+      service: proxy-broker
+      tls: {}
+    proxy-broker-basic:
+      rule: 'Host(\`${FORWARD_AUTH_BROKER_BASIC_HOST}\`)'
+      entryPoints:
+        - websecure
+      middlewares:
+        - authelia-basic
+      service: proxy-broker
+      tls: {}
+    proxy-broker-machine:
+      rule: 'Host(\`${FORWARD_AUTH_MACHINE_HOST}\`)'
+      entryPoints:
+        - websecure
+      service: proxy-broker
+      tls: {}
+
+  middlewares:
+    authelia-session:
+      forwardAuth:
+        address: 'http://authelia:9091/api/authz/forward-auth'
+        trustForwardHeader: true
+        authResponseHeaders:
+          - 'Remote-User'
+          - 'Remote-Groups'
+          - 'Remote-Email'
+          - 'Remote-Name'
+    authelia-basic:
+      forwardAuth:
+        address: 'http://authelia:9091/api/authz/forward-auth'
+        trustForwardHeader: true
+        authResponseHeaders:
+          - 'Remote-User'
+          - 'Remote-Groups'
+          - 'Remote-Email'
+          - 'Remote-Name'
+  services:
+    authelia:
+      loadBalancer:
+        servers:
+          - url: 'http://authelia:9091'
+    proxy-broker:
+      loadBalancer:
+        servers:
+          - url: 'http://proxy-broker:8080'
+
+tls:
+  certificates:
+    - certFile: '/etc/traefik/certs/forward-auth.crt'
+      keyFile: '/etc/traefik/certs/forward-auth.key'
+EOF
+
+cat > "$GENERATED_DIR/stack.env" <<EOF
+FORWARD_AUTH_DOMAIN_ROOT=${FORWARD_AUTH_DOMAIN_ROOT}
+FORWARD_AUTH_AUTHELIA_HOST=${FORWARD_AUTH_AUTHELIA_HOST}
+FORWARD_AUTH_BROKER_HOST=${FORWARD_AUTH_BROKER_HOST}
+FORWARD_AUTH_BROKER_BASIC_HOST=${FORWARD_AUTH_BROKER_BASIC_HOST}
+FORWARD_AUTH_MACHINE_HOST=${FORWARD_AUTH_MACHINE_HOST}
+FORWARD_AUTH_HTTP_PORT=${FORWARD_AUTH_HTTP_PORT}
+FORWARD_AUTH_HTTPS_PORT=${FORWARD_AUTH_HTTPS_PORT}
+FORWARD_AUTH_ADMIN_GROUP=${FORWARD_AUTH_ADMIN_GROUP}
+FORWARD_AUTH_APP_VERSION=${FORWARD_AUTH_APP_VERSION}
+FORWARD_AUTH_BUILD_IMAGE=${FORWARD_AUTH_BUILD_IMAGE}
+FORWARD_AUTH_SUBNET=${FORWARD_AUTH_SUBNET}
+FORWARD_AUTH_TRAEFIK_IP=${FORWARD_AUTH_TRAEFIK_IP}
+FORWARD_AUTH_GENERATED_DIR=${GENERATED_DIR}
+FORWARD_AUTH_ADMIN_USER=admin
+FORWARD_AUTH_ADMIN_PASSWORD=ProxyBrokerAdmin123!
+FORWARD_AUTH_VIEWER_USER=viewer
+FORWARD_AUTH_VIEWER_PASSWORD=ProxyBrokerViewer123!
+EOF
+
+printf 'Rendered stack config into %s\n' "$GENERATED_DIR"

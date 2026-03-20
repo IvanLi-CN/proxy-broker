@@ -15,6 +15,7 @@ use serde::Deserialize;
 use tokio::sync::Mutex as TokioMutex;
 
 use crate::{
+    auth::{Principal, constant_time_eq, hash_secret, issue_api_key, parse_api_key_secret},
     config_render::{dedicated_ip_proxy_name, render_payload},
     constants::{
         DEFAULT_GEO_ONLINE_CONCURRENCY, DEFAULT_GEO_TTL_SEC, DEFAULT_MMDB_URL,
@@ -23,10 +24,11 @@ use crate::{
     },
     error::{BrokerError, BrokerResult},
     models::{
-        CreateProfileResponse, ExtractIpItem, ExtractIpRequest, ExtractIpResponse, IpRecord,
-        ListProfilesResponse, ListSessionsResponse, LoadSubscriptionResponse, OpenBatchRequest,
-        OpenBatchResponse, OpenSessionRequest, OpenSessionResponse, ProbeRecord, ProxyNode,
-        RefreshRequest, RefreshResponse, SessionRecord, now_epoch_sec,
+        CreateApiKeyRequest, CreateApiKeyResponse, CreateProfileResponse, ExtractIpItem,
+        ExtractIpRequest, ExtractIpResponse, IpRecord, ListApiKeysResponse, ListProfilesResponse,
+        ListSessionsResponse, LoadSubscriptionResponse, OpenBatchRequest, OpenBatchResponse,
+        OpenSessionRequest, OpenSessionResponse, ProbeRecord, ProxyNode, RefreshRequest,
+        RefreshResponse, SessionRecord, now_epoch_sec,
     },
     runtime::MihomoRuntime,
     store::BrokerStore,
@@ -104,6 +106,15 @@ impl BrokerService {
     async fn lock_profile(&self, profile_id: &str) -> tokio::sync::OwnedMutexGuard<()> {
         let lock = self.profile_locks[self.profile_lock_index(profile_id)].clone();
         lock.lock_owned().await
+    }
+
+    async fn profile_exists(&self, profile_id: &str) -> BrokerResult<bool> {
+        let profiles = self
+            .store
+            .list_profiles()
+            .await
+            .map_err(BrokerError::from)?;
+        Ok(profiles.into_iter().any(|item| item == profile_id))
     }
 
     async fn cleanup_profile_runtime_if_idle(&self, profile_id: &str, sessions: &[SessionRecord]) {
@@ -1231,6 +1242,91 @@ impl BrokerService {
         Ok(CreateProfileResponse {
             profile_id: normalized.to_string(),
         })
+    }
+
+    pub async fn list_api_keys(&self, profile_id: &str) -> BrokerResult<ListApiKeysResponse> {
+        if !self.profile_exists(profile_id).await? {
+            return Err(BrokerError::ProfileNotFound);
+        }
+
+        let api_keys = self
+            .store
+            .list_api_keys(profile_id)
+            .await
+            .map_err(BrokerError::from)?
+            .into_iter()
+            .map(|record| record.as_summary())
+            .collect();
+
+        Ok(ListApiKeysResponse { api_keys })
+    }
+
+    pub async fn create_api_key(
+        &self,
+        profile_id: &str,
+        request: &CreateApiKeyRequest,
+        created_by_subject: &str,
+    ) -> BrokerResult<CreateApiKeyResponse> {
+        if !self.profile_exists(profile_id).await? {
+            return Err(BrokerError::ProfileNotFound);
+        }
+
+        let name = request.name.trim();
+        if name.is_empty() {
+            return Err(BrokerError::InvalidRequest(
+                "api key name must not be empty".to_string(),
+            ));
+        }
+
+        let issued = issue_api_key(profile_id, name, created_by_subject);
+        self.store
+            .insert_api_key(&issued.record)
+            .await
+            .map_err(BrokerError::from)?;
+        Ok(issued.into_response())
+    }
+
+    pub async fn revoke_api_key(&self, profile_id: &str, key_id: &str) -> BrokerResult<()> {
+        if !self.profile_exists(profile_id).await? {
+            return Err(BrokerError::ProfileNotFound);
+        }
+
+        let revoked = self
+            .store
+            .revoke_api_key(profile_id, key_id, now_epoch_sec())
+            .await
+            .map_err(BrokerError::from)?;
+        if revoked {
+            Ok(())
+        } else {
+            Err(BrokerError::ApiKeyNotFound)
+        }
+    }
+
+    pub async fn authenticate_api_key(&self, secret: &str) -> BrokerResult<Principal> {
+        let (key_id, normalized_secret) = parse_api_key_secret(secret)?;
+        let api_key = self
+            .store
+            .get_api_key(key_id)
+            .await
+            .map_err(BrokerError::from)?
+            .ok_or(BrokerError::ApiKeyInvalid)?;
+
+        if api_key.revoked_at.is_some() {
+            return Err(BrokerError::ApiKeyRevoked);
+        }
+
+        let computed_hash = hash_secret(&api_key.secret_salt, normalized_secret);
+        if !constant_time_eq(&computed_hash, &api_key.secret_hash) {
+            return Err(BrokerError::ApiKeyInvalid);
+        }
+
+        self.store
+            .touch_api_key_last_used(&api_key.key_id, now_epoch_sec())
+            .await
+            .map_err(BrokerError::from)?;
+
+        Ok(Principal::api_key(api_key.profile_id, api_key.key_id))
     }
 
     pub async fn list_sessions(&self, profile_id: &str) -> BrokerResult<ListSessionsResponse> {

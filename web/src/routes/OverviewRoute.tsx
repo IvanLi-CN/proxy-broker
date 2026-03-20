@@ -1,10 +1,10 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { toast } from "sonner";
 
 import { ApiError, api } from "@/lib/api";
-import type { LoadSubscriptionResponse, RefreshResponse } from "@/lib/types";
+import type { CreateApiKeyResponse, LoadSubscriptionResponse, RefreshResponse } from "@/lib/types";
 import { OverviewPage } from "@/pages/OverviewPage";
 import type { RootOutletContext } from "@/routes/RootRoute";
 
@@ -12,13 +12,17 @@ const getErrorMessage = (error: unknown) =>
   error instanceof ApiError ? `${error.code}: ${error.message}` : "Unexpected request error";
 
 export function OverviewRoute() {
-  const { profileId } = useOutletContext<RootOutletContext>();
+  const { profileId, authMe, currentUser } = useOutletContext<RootOutletContext>();
   const previousProfileId = useRef(profileId);
+  const queryClient = useQueryClient();
   const [loadResponseByProfile, setLoadResponseByProfile] = useState<
     Record<string, LoadSubscriptionResponse | null>
   >({});
   const [refreshResponseByProfile, setRefreshResponseByProfile] = useState<
     Record<string, RefreshResponse | null>
+  >({});
+  const [latestApiKeyByProfile, setLatestApiKeyByProfile] = useState<
+    Record<string, CreateApiKeyResponse | null>
   >({});
   const healthQuery = useQuery({
     queryKey: ["health"],
@@ -29,6 +33,11 @@ export function OverviewRoute() {
     queryKey: ["sessions", profileId],
     queryFn: () => api.listSessions(profileId),
     refetchInterval: 5_000,
+  });
+  const apiKeysQuery = useQuery({
+    queryKey: ["api-keys", profileId],
+    queryFn: () => api.listApiKeys(profileId),
+    enabled: Boolean(authMe?.is_admin),
   });
 
   const loadMutation = useMutation({
@@ -61,6 +70,27 @@ export function OverviewRoute() {
     onError: (error) => toast.error(getErrorMessage(error)),
   });
 
+  const createApiKeyMutation = useMutation({
+    mutationFn: ({ profileId, name }: { profileId: string; name: string }) =>
+      api.createApiKey(profileId, { name }),
+    onSuccess: async (data, variables) => {
+      setLatestApiKeyByProfile((current) => ({ ...current, [variables.profileId]: data }));
+      toast.success(`Issued machine key ${data.api_key.name}`);
+      await queryClient.invalidateQueries({ queryKey: ["api-keys", variables.profileId] });
+    },
+    onError: (error) => toast.error(getErrorMessage(error)),
+  });
+
+  const revokeApiKeyMutation = useMutation({
+    mutationFn: ({ profileId, keyId }: { profileId: string; keyId: string }) =>
+      api.revokeApiKey(profileId, keyId),
+    onSuccess: async (_, variables) => {
+      toast.success("Revoked machine key");
+      await queryClient.invalidateQueries({ queryKey: ["api-keys", variables.profileId] });
+    },
+    onError: (error) => toast.error(getErrorMessage(error)),
+  });
+
   const { reset: resetLoadMutation } = loadMutation;
   const { reset: resetRefreshMutation } = refreshMutation;
 
@@ -76,19 +106,34 @@ export function OverviewRoute() {
   return (
     <OverviewPage
       activeSessions={sessionsQuery.data?.sessions.length ?? 0}
+      apiKeys={apiKeysQuery.data?.api_keys ?? []}
+      apiKeysError={apiKeysQuery.isError ? getErrorMessage(apiKeysQuery.error) : null}
+      apiKeysLoading={apiKeysQuery.isLoading}
+      creatingApiKey={createApiKeyMutation.isPending}
+      currentUser={currentUser}
       health={healthQuery.data ?? { status: "checking" }}
       loadError={loadMutation.isError ? getErrorMessage(loadMutation.error) : null}
       loadResponse={loadResponseByProfile[profileId] ?? null}
       loadingSubscription={loadMutation.isPending}
+      latestCreatedApiKey={latestApiKeyByProfile[profileId] ?? null}
+      onCreateApiKey={async (name) => {
+        await createApiKeyMutation.mutateAsync({ profileId, name });
+      }}
       onLoadSubscription={async (payload) => {
         await loadMutation.mutateAsync({ profileId, payload });
       }}
       onRefresh={async (payload) => {
         await refreshMutation.mutateAsync({ profileId, payload });
       }}
+      onRevokeApiKey={async (keyId) => {
+        await revokeApiKeyMutation.mutateAsync({ profileId, keyId });
+      }}
       refreshError={refreshMutation.isError ? getErrorMessage(refreshMutation.error) : null}
       refreshResponse={refreshResponseByProfile[profileId] ?? null}
       refreshing={refreshMutation.isPending}
+      revokingApiKeyId={
+        revokeApiKeyMutation.isPending ? (revokeApiKeyMutation.variables?.keyId ?? null) : null
+      }
     />
   );
 }

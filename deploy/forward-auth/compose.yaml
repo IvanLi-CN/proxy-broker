@@ -1,0 +1,61 @@
+services:
+  traefik:
+    image: traefik:v3.6
+    command:
+      - --providers.file.directory=/etc/traefik/dynamic
+      - --providers.file.watch=true
+      - --entrypoints.web.address=:8080
+      - --entrypoints.websecure.address=:8443
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --log.level=INFO
+    ports:
+      - 127.0.0.1:${FORWARD_AUTH_HTTP_PORT}:8080
+      - 127.0.0.1:${FORWARD_AUTH_HTTPS_PORT}:8443
+    volumes:
+      - ./generated/traefik/dynamic:/etc/traefik/dynamic:ro
+      - ./generated/certs:/etc/traefik/certs:ro
+    networks:
+      forward-auth:
+        ipv4_address: ${FORWARD_AUTH_TRAEFIK_IP}
+
+  authelia:
+    image: authelia/authelia:4.39
+    command:
+      - authelia
+      - --config
+      - /config/configuration.yml
+    environment:
+      TZ: UTC
+    volumes:
+      - ./generated/authelia:/config
+    networks:
+      - forward-auth
+
+  proxy-broker:
+    image: ghcr.io/ivanli-cn/proxy-broker:latest
+    environment:
+      PROXY_BROKER_LISTEN_ADDR: 0.0.0.0:8080
+      PROXY_BROKER_SESSION_LISTEN_IP: 0.0.0.0
+      PROXY_BROKER_STORE: sqlite
+      PROXY_BROKER_SQLITE_PATH: /data/state.sqlite
+      PROXY_BROKER_RUNTIME_DIR: /data/runtime
+      PROXY_BROKER_DATA_DIR: /data/runtime-data
+      PROXY_BROKER_MIHOMO_AUTO_DOWNLOAD: "false"
+      PROXY_BROKER_AUTH_MODE: enforce
+      PROXY_BROKER_AUTH_SUBJECT_HEADERS: Remote-User
+      PROXY_BROKER_AUTH_EMAIL_HEADERS: Remote-Email
+      PROXY_BROKER_AUTH_GROUPS_HEADERS: Remote-Groups
+      PROXY_BROKER_AUTH_TRUSTED_PROXIES: ${FORWARD_AUTH_TRAEFIK_IP}/32
+      PROXY_BROKER_AUTH_ADMIN_GROUPS: ${FORWARD_AUTH_ADMIN_GROUP}
+    volumes:
+      - ./generated/proxy-broker:/data
+    networks:
+      - forward-auth
+
+networks:
+  forward-auth:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${FORWARD_AUTH_SUBNET}

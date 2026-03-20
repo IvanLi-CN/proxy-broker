@@ -73,6 +73,16 @@ describe("RootRoute", () => {
         data: { status: "healthy" },
       })
       .mockReturnValueOnce({
+        data: {
+          authenticated: true,
+          principal_type: "human",
+          subject: "admin@example.com",
+          email: "admin@example.com",
+          groups: ["admins"],
+          is_admin: true,
+        },
+      })
+      .mockReturnValueOnce({
         data: { profiles: ["default", "edge-jp"] },
         error: new ApiError(500, {
           code: "http_500",
@@ -104,6 +114,16 @@ describe("RootRoute", () => {
         data: { status: "healthy" },
       })
       .mockReturnValueOnce({
+        data: {
+          authenticated: true,
+          principal_type: "human",
+          subject: "admin@example.com",
+          email: "admin@example.com",
+          groups: ["admins"],
+          is_admin: true,
+        },
+      })
+      .mockReturnValueOnce({
         data: { profiles: ["default", "edge-jp"] },
         isError: false,
         isLoading: false,
@@ -123,5 +143,33 @@ describe("RootRoute", () => {
       "Profile edge-jp already exists. Refreshing catalog.",
     );
     expect(mockToast.error).toHaveBeenCalledWith("profile_exists: Profile already exists");
+  });
+
+  it("maps auth 401 into an anonymous current-user state", () => {
+    mockUseQuery
+      .mockReturnValueOnce({
+        data: { status: "healthy" },
+      })
+      .mockReturnValueOnce({
+        data: undefined,
+        error: new ApiError(401, {
+          code: "authentication_required",
+          message: "authentication required",
+        }),
+        isError: true,
+        isLoading: false,
+      })
+      .mockReturnValueOnce({
+        data: { profiles: ["default"] },
+        isError: false,
+        isLoading: false,
+        refetch: vi.fn(),
+      });
+
+    render(<RootRoute />);
+
+    expect(latestAppShellProps?.currentUser).toEqual({
+      status: "anonymous",
+    });
   });
 });

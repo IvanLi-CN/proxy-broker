@@ -7,7 +7,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 
 use crate::{
-    models::{IpRecord, ProbeRecord, ProfileSnapshot, ProxyNode, SessionRecord},
+    models::{ApiKeyRecord, IpRecord, ProbeRecord, ProfileSnapshot, ProxyNode, SessionRecord},
     store::BrokerStore,
 };
 
@@ -275,6 +275,68 @@ impl BrokerStore for MemoryStore {
         })
     }
 
+    async fn insert_api_key(&self, api_key: &ApiKeyRecord) -> anyhow::Result<()> {
+        self.with_profile_mut(&api_key.profile_id, |profile| {
+            profile
+                .api_keys
+                .insert(api_key.key_id.clone(), api_key.clone());
+        })?;
+        Ok(())
+    }
+
+    async fn get_api_key(&self, key_id: &str) -> anyhow::Result<Option<ApiKeyRecord>> {
+        let guard = self
+            .inner
+            .read()
+            .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
+        Ok(guard
+            .values()
+            .find_map(|profile| profile.api_keys.get(key_id).cloned()))
+    }
+
+    async fn list_api_keys(&self, profile_id: &str) -> anyhow::Result<Vec<ApiKeyRecord>> {
+        self.with_profile(profile_id, |profile| {
+            let mut api_keys = profile.api_keys.values().cloned().collect::<Vec<_>>();
+            api_keys.sort_by(|left, right| {
+                right
+                    .created_at
+                    .cmp(&left.created_at)
+                    .then_with(|| left.key_id.cmp(&right.key_id))
+            });
+            api_keys
+        })
+    }
+
+    async fn revoke_api_key(
+        &self,
+        profile_id: &str,
+        key_id: &str,
+        revoked_at: i64,
+    ) -> anyhow::Result<bool> {
+        self.with_profile_mut(profile_id, |profile| {
+            if let Some(record) = profile.api_keys.get_mut(key_id) {
+                record.revoked_at = Some(revoked_at);
+                true
+            } else {
+                false
+            }
+        })
+    }
+
+    async fn touch_api_key_last_used(&self, key_id: &str, last_used_at: i64) -> anyhow::Result<()> {
+        let mut guard = self
+            .inner
+            .write()
+            .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
+        for profile in guard.values_mut() {
+            if let Some(record) = profile.api_keys.get_mut(key_id) {
+                record.last_used_at = Some(last_used_at);
+                break;
+            }
+        }
+        Ok(())
+    }
+
     async fn touch_ip_usage(
         &self,
         profile_id: &str,
@@ -317,7 +379,7 @@ impl BrokerStore for MemoryStore {
 #[cfg(test)]
 mod tests {
     use super::MemoryStore;
-    use crate::{models::SessionRecord, store::BrokerStore};
+    use crate::{auth::issue_api_key, models::SessionRecord, store::BrokerStore};
 
     #[tokio::test]
     async fn create_profile_persists_empty_profiles_in_list() {
@@ -378,5 +440,47 @@ mod tests {
             .map(|item| item.session_id)
             .collect::<Vec<_>>();
         assert_eq!(ordered_ids, vec!["a", "c", "b"]);
+    }
+
+    #[tokio::test]
+    async fn api_keys_can_be_inserted_listed_and_revoked() {
+        let store = MemoryStore::new();
+        let issued = issue_api_key("alpha", "deploy-bot", "admin@example.com");
+
+        store
+            .insert_api_key(&issued.record)
+            .await
+            .expect("insert should succeed");
+        store
+            .touch_api_key_last_used(&issued.record.key_id, 42)
+            .await
+            .expect("touch should succeed");
+
+        let fetched = store
+            .get_api_key(&issued.record.key_id)
+            .await
+            .expect("get should succeed")
+            .expect("api key should exist");
+        assert_eq!(fetched.last_used_at, Some(42));
+
+        let listed = store
+            .list_api_keys("alpha")
+            .await
+            .expect("list should succeed");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].name, "deploy-bot");
+
+        let revoked = store
+            .revoke_api_key("alpha", &issued.record.key_id, 88)
+            .await
+            .expect("revoke should succeed");
+        assert!(revoked);
+
+        let revoked_record = store
+            .get_api_key(&issued.record.key_id)
+            .await
+            .expect("get should succeed")
+            .expect("api key should still exist");
+        assert_eq!(revoked_record.revoked_at, Some(88));
     }
 }

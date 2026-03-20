@@ -3,7 +3,7 @@ mod sqlite;
 
 use async_trait::async_trait;
 
-use crate::models::{IpRecord, ProbeRecord, ProxyNode, SessionRecord};
+use crate::models::{ApiKeyRecord, IpRecord, ProbeRecord, ProxyNode, SessionRecord};
 
 pub use memory::MemoryStore;
 pub use sqlite::SqliteStore;
@@ -64,6 +64,17 @@ pub trait BrokerStore: Send + Sync {
     ) -> anyhow::Result<()>;
     async fn delete_session(&self, profile_id: &str, session_id: &str) -> anyhow::Result<()>;
     async fn list_sessions(&self, profile_id: &str) -> anyhow::Result<Vec<SessionRecord>>;
+
+    async fn insert_api_key(&self, api_key: &ApiKeyRecord) -> anyhow::Result<()>;
+    async fn get_api_key(&self, key_id: &str) -> anyhow::Result<Option<ApiKeyRecord>>;
+    async fn list_api_keys(&self, profile_id: &str) -> anyhow::Result<Vec<ApiKeyRecord>>;
+    async fn revoke_api_key(
+        &self,
+        profile_id: &str,
+        key_id: &str,
+        revoked_at: i64,
+    ) -> anyhow::Result<bool>;
+    async fn touch_api_key_last_used(&self, key_id: &str, last_used_at: i64) -> anyhow::Result<()>;
 
     async fn touch_ip_usage(
         &self,

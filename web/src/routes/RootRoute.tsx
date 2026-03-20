@@ -5,9 +5,13 @@ import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { useProfilePreference } from "@/hooks/use-profile-preference";
 import { ApiError, api } from "@/lib/api";
+import { resolveCurrentUserState } from "@/lib/current-user";
+import type { AuthMeResponse, CurrentUserState } from "@/lib/types";
 
 export interface RootOutletContext {
   profileId: string;
+  authMe: AuthMeResponse | null;
+  currentUser: CurrentUserState;
 }
 
 const getErrorMessage = (error: unknown) =>
@@ -21,6 +25,11 @@ export function RootRoute() {
     queryFn: api.getHealth,
     refetchInterval: 10_000,
   });
+  const authMeQuery = useQuery({
+    queryKey: ["auth-me"],
+    queryFn: api.getAuthMe,
+    refetchInterval: 30_000,
+  });
   const profilesQuery = useQuery({
     queryKey: ["profiles"],
     queryFn: api.listProfiles,
@@ -31,6 +40,11 @@ export function RootRoute() {
   const profiles = Array.from(
     new Set([...(profilesQuery.data?.profiles ?? []), profileId].filter(Boolean)),
   ).sort((left, right) => left.localeCompare(right));
+  const currentUser = resolveCurrentUserState({
+    identity: authMeQuery.data ?? null,
+    isLoading: authMeQuery.isLoading && !authMeQuery.data,
+    error: authMeQuery.error ?? null,
+  });
 
   const handleCreateProfile = async (nextProfileId: string) => {
     try {
@@ -52,6 +66,7 @@ export function RootRoute() {
 
   return (
     <AppShell
+      currentUser={currentUser}
       healthStatus={healthQuery.data?.status ?? "checking"}
       onCreateProfile={handleCreateProfile}
       onProfileIdChange={setProfileId}
@@ -66,7 +81,11 @@ export function RootRoute() {
       profilesLoading={profilesQuery.isLoading}
       profileId={profileId}
     >
-      <Outlet context={{ profileId } satisfies RootOutletContext} />
+      <Outlet
+        context={
+          { profileId, authMe: authMeQuery.data ?? null, currentUser } satisfies RootOutletContext
+        }
+      />
     </AppShell>
   );
 }

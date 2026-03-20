@@ -1,10 +1,14 @@
 import type {
+  AuthMeResponse,
+  CreateApiKeyRequest,
+  CreateApiKeyResponse,
   CreateProfileRequest,
   CreateProfileResponse,
   ErrorResponse,
   ExtractIpRequest,
   ExtractIpResponse,
   HealthResponse,
+  ListApiKeysResponse,
   ListProfilesResponse,
   ListSessionsResponse,
   LoadSubscriptionRequest,
@@ -67,6 +71,7 @@ export { ApiError };
 
 export const api = {
   getHealth: () => request<HealthResponse>("/healthz"),
+  getAuthMe: () => request<AuthMeResponse>("/api/v1/auth/me"),
   listProfiles: () => request<ListProfilesResponse>("/api/v1/profiles"),
   createProfile: (payload: CreateProfileRequest) =>
     request<CreateProfileResponse>("/api/v1/profiles", {
@@ -99,6 +104,17 @@ export const api = {
     request<OpenBatchResponse>(profilePath(profileId, "/sessions/open-batch"), {
       method: "POST",
       body: JSON.stringify(payload),
+    }),
+  listApiKeys: (profileId: string) =>
+    request<ListApiKeysResponse>(profilePath(profileId, "/api-keys")),
+  createApiKey: (profileId: string, payload: CreateApiKeyRequest) =>
+    request<CreateApiKeyResponse>(profilePath(profileId, "/api-keys"), {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  revokeApiKey: (profileId: string, keyId: string) =>
+    request<void>(profilePath(profileId, `/api-keys/${encodeURIComponent(keyId)}`), {
+      method: "DELETE",
     }),
   closeSession: (profileId: string, sessionId: string) =>
     request<void>(profilePath(profileId, `/sessions/${encodeURIComponent(sessionId)}`), {

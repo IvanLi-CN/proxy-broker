@@ -125,6 +125,60 @@ pub struct HealthResponse {
     pub status: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthPrincipalType {
+    Human,
+    ApiKey,
+    Development,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthMeResponse {
+    pub authenticated: bool,
+    pub principal_type: AuthPrincipalType,
+    pub subject: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(default)]
+    pub groups: Vec<String>,
+    pub is_admin: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateApiKeyRequest {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApiKeySummary {
+    pub key_id: String,
+    pub profile_id: String,
+    pub name: String,
+    pub prefix: String,
+    pub created_by: String,
+    pub created_at: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListApiKeysResponse {
+    pub api_keys: Vec<ApiKeySummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateApiKeyResponse {
+    pub api_key: ApiKeySummary,
+    pub secret: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ErrorResponse {
     pub code: String,
@@ -175,12 +229,42 @@ pub struct SessionRecord {
     pub created_at: i64,
 }
 
+#[derive(Debug, Clone)]
+pub struct ApiKeyRecord {
+    pub key_id: String,
+    pub profile_id: String,
+    pub name: String,
+    pub secret_prefix: String,
+    pub secret_salt: String,
+    pub secret_hash: String,
+    pub created_by_subject: String,
+    pub created_at: i64,
+    pub last_used_at: Option<i64>,
+    pub revoked_at: Option<i64>,
+}
+
+impl ApiKeyRecord {
+    pub fn as_summary(&self) -> ApiKeySummary {
+        ApiKeySummary {
+            key_id: self.key_id.clone(),
+            profile_id: self.profile_id.clone(),
+            name: self.name.clone(),
+            prefix: self.secret_prefix.clone(),
+            created_by: self.created_by_subject.clone(),
+            created_at: self.created_at,
+            last_used_at: self.last_used_at,
+            revoked_at: self.revoked_at,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ProfileSnapshot {
     pub nodes: Vec<ProxyNode>,
     pub ip_records: HashMap<String, IpRecord>,
     pub probe_records: Vec<ProbeRecord>,
     pub sessions: HashMap<String, SessionRecord>,
+    pub api_keys: HashMap<String, ApiKeyRecord>,
 }
 
 pub fn now_epoch_sec() -> i64 {

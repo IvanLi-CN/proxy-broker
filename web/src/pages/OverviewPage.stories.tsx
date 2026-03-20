@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn } from "storybook/test";
 
+import { AppShell } from "@/components/AppShell";
 import {
   healthFixture,
   refreshFixture,
@@ -14,13 +15,30 @@ const meta = {
   component: OverviewPage,
   tags: ["autodocs"],
   parameters: {
+    layout: "fullscreen",
     docs: {
       description: {
         component:
-          "Overview route composition for health, subscription loading, refresh actions, and runway guidance inside the operator control room.",
+          "Full overview route preview inside the real app shell. This is the closest Storybook equivalent of the shipped operator page, including the compact current-user badge in the top bar and the detailed identity panel inside access control.",
       },
     },
   },
+  render: (args) => (
+    <AppShell
+      profileId="default"
+      profiles={["default", "edge-jp", "lab-us"]}
+      profilesLoading={false}
+      profilesCreating={false}
+      profilesError={null}
+      healthStatus={args.health.status}
+      currentUser={args.currentUser}
+      onProfileIdChange={() => undefined}
+      onCreateProfile={async (value: string) => value}
+      onRetryProfiles={() => undefined}
+    >
+      <OverviewPage {...args} />
+    </AppShell>
+  ),
   args: {
     health: healthFixture,
     activeSessions: sessionsFixture.sessions.length,
@@ -30,8 +48,38 @@ const meta = {
     refreshError: null,
     loadingSubscription: false,
     refreshing: false,
+    currentUser: {
+      status: "resolved",
+      identity: {
+        authenticated: true,
+        principal_type: "human",
+        subject: "admin@example.com",
+        email: "admin@example.com",
+        groups: ["admins", "ops"],
+        is_admin: true,
+      },
+    },
+    apiKeys: [
+      {
+        key_id: "key-1",
+        profile_id: "default",
+        name: "deploy-bot",
+        prefix: "pbk_key-1_123456789",
+        created_by: "admin@example.com",
+        created_at: 1_742_447_800,
+        last_used_at: 1_742_448_400,
+        revoked_at: null,
+      },
+    ],
+    latestCreatedApiKey: null,
+    apiKeysLoading: false,
+    apiKeysError: null,
+    creatingApiKey: false,
+    revokingApiKeyId: null,
     onLoadSubscription: fn(),
     onRefresh: fn(),
+    onCreateApiKey: fn(),
+    onRevokeApiKey: fn(),
   },
 } satisfies Meta<typeof OverviewPage>;
 
@@ -51,6 +99,18 @@ export const ErrorState: Story = {
 
 export const QuietState: Story = {
   args: {
+    activeSessions: 0,
+    loadResponse: null,
+    refreshResponse: null,
+  },
+};
+
+export const AnonymousState: Story = {
+  args: {
+    currentUser: {
+      status: "anonymous",
+    },
+    apiKeys: [],
     activeSessions: 0,
     loadResponse: null,
     refreshResponse: null,
