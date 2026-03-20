@@ -87,15 +87,14 @@ wait_for_machine_health() {
 echo "[smoke] waiting for machine host health"
 wait_for_machine_health
 
-echo "[smoke] checking unauthenticated human route redirects to Authelia"
-redirect_headers="$TMP_DIR/redirect.headers"
-curl "${curl_common[@]}" \
-  --head \
-  --dump-header "$redirect_headers" \
-  --output /dev/null \
-  "https://${FORWARD_AUTH_BROKER_HOST}:${FORWARD_AUTH_HTTPS_PORT}/"
-grep -Eq '^HTTP/[0-9.]+ 30[1278]' "$redirect_headers"
-grep -qi "location: https://${FORWARD_AUTH_AUTHELIA_HOST}:${FORWARD_AUTH_HTTPS_PORT}" "$redirect_headers"
+echo "[smoke] checking unauthenticated human route is rejected by proxy-broker, not by Traefik"
+anonymous_ui="$TMP_DIR/anonymous-ui.json"
+status="$(request_json \
+  GET \
+  "https://${FORWARD_AUTH_BROKER_HOST}:${FORWARD_AUTH_HTTPS_PORT}/" \
+  "$anonymous_ui")"
+[ "$status" = "401" ]
+assert_json_field "$anonymous_ui" "code" "authentication_required"
 
 echo "[smoke] admin can resolve identity and open UI through Authelia basic route"
 admin_me="$TMP_DIR/admin-me.json"

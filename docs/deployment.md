@@ -52,7 +52,7 @@ In this mode:
 
 ## Traefik Forward Auth
 
-When you deploy behind Traefik, configure Forward Auth to populate the identity headers that `proxy-broker` expects. The service only needs the response headers from the auth service to reach the upstream request.
+When you deploy behind Traefik, configure Forward Auth to populate the identity headers that `proxy-broker` expects. The intent is identity enrichment only: Traefik should forward any headers the auth service can derive, while `proxy-broker` remains the component that returns the final `401` or `403`.
 
 Example dynamic configuration:
 
@@ -82,13 +82,14 @@ In this setup:
 - Forward Auth identifies the human user.
 - `proxy-broker` decides whether that user is an admin.
 - Non-admin humans can call `/api/v1/auth/me`, but cannot access the UI or admin APIs.
+- If the caller has no forwarded identity, `proxy-broker` returns `401 authentication_required`.
 
 ## Reference Compose Stack
 
 The repository ships a reusable reference stack under `deploy/forward-auth/`:
 
 - `compose.yaml`
-  - Traefik terminates TLS and applies Forward Auth.
+  - Traefik terminates TLS and applies Forward Auth as an identity-header enricher.
 - `authelia/users_database.yml`
   - static smoke-only users for admin and non-admin coverage.
 - `generated/`
@@ -99,10 +100,10 @@ The rendered Traefik topology exposes four hosts on a shared test domain:
 - `auth.<domain>`
   - Authelia portal
 - `broker.<domain>`
-  - human-facing route protected by the standard redirect flow
+  - human-facing route where Traefik forwards any session-derived identity headers
 - `broker-basic.<domain>`
-  - smoke-only route that authenticates the caller with HTTP Basic credentials
-    through the same Authelia `forward-auth` endpoint
+  - smoke-only route where Traefik forwards any HTTP Basic-derived identity
+    headers through the same Authelia `forward-auth` endpoint
 - `machine-broker.<domain>`
   - machine-facing route with no proxy-side human auth so profile API keys can
     reach `proxy-broker` directly
@@ -128,6 +129,8 @@ Keep the environment running for inspection:
 ```bash
 ./scripts/forward-auth/run-shared-testbox.sh --keep-run
 ```
+
+The Authelia policy for `broker.<domain>` and `broker-basic.<domain>` is rendered in `scripts/forward-auth/render-stack.sh` under `access_control.rules`, and both hosts are set to `bypass`. This is deliberate: Traefik is not allowed to make the access-control decision for `proxy-broker`.
 
 ## Route Matrix
 

@@ -88,9 +88,9 @@ access_control:
     - domain: '${FORWARD_AUTH_AUTHELIA_HOST}'
       policy: 'bypass'
     - domain: '${FORWARD_AUTH_BROKER_HOST}'
-      policy: 'one_factor'
+      policy: 'bypass'
     - domain: '${FORWARD_AUTH_BROKER_BASIC_HOST}'
-      policy: 'one_factor'
+      policy: 'bypass'
 
 session:
   secret: '${FORWARD_AUTH_SESSION_SECRET}'
