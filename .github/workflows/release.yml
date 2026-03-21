@@ -185,6 +185,9 @@ jobs:
             python3 .github/scripts/release_snapshot.py select-target \
               --notes-ref "${RELEASE_SNAPSHOT_NOTES_REF}" \
               --requested-sha "${REQUESTED_SHA}" \
+              --github-repository "${{ github.repository }}" \
+              --github-token "${{ github.token }}" \
+              --api-root "${{ github.api_url }}" \
               --github-output "$GITHUB_OUTPUT"
           else
             python3 .github/scripts/release_snapshot.py next-pending \

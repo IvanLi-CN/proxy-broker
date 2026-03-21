@@ -119,6 +119,9 @@ def parse_args() -> argparse.Namespace:
     )
     select_target.add_argument("--notes-ref", default=DEFAULT_NOTES_REF)
     select_target.add_argument("--requested-sha", required=True)
+    select_target.add_argument("--github-repository", default="")
+    select_target.add_argument("--github-token", default="")
+    select_target.add_argument("--api-root", default=os.environ.get("GITHUB_API_URL", "https://api.github.com"))
     select_target.add_argument("--github-output", default=os.environ.get("GITHUB_OUTPUT", ""))
 
     mark_released = subparsers.add_parser("mark-released", help="Mark a stored snapshot as released.")
@@ -289,6 +292,29 @@ def load_pr_for_commit(
     if not isinstance(pr, dict):
         raise SnapshotError("GitHub API returned a malformed pull request payload")
     return pr
+
+
+def github_release_exists(api_root: str, repository: str, token: str, tag_name: str) -> bool:
+    owner, repo = repository.split("/", 1)
+    path = f"/repos/{owner}/{repo}/releases/tags/{parse.quote(tag_name, safe='')}"
+    url = f"{api_root.rstrip('/')}{path}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json, application/vnd.github.groot-preview+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "proxy-broker-release-snapshot",
+    }
+    req = request.Request(url, headers=headers)
+    try:
+        with request.urlopen(req):
+            return True
+    except error.HTTPError as exc:
+        if exc.code == 404:
+            return False
+        body = exc.read().decode("utf-8", errors="replace")
+        raise SnapshotError(f"GitHub API error on {path}: {exc.code} {body}") from exc
+    except error.URLError as exc:
+        raise SnapshotError(f"GitHub API request failed on {path}: {exc}") from exc
 
 
 def current_pr_labels(pr: dict[str, Any]) -> list[str]:
@@ -741,7 +767,22 @@ def select_dispatch_target(args: argparse.Namespace) -> int:
         export_key_values({"target_sha": target_sha, "assets_only": False}, args.github_output)
         return 0
 
-    if snapshot.get("status") == "released" and existing_release_tags(requested_sha):
+    pointed_tags = existing_release_tags(requested_sha)
+    has_existing_release = False
+    if (
+        pointed_tags
+        and snapshot.get("snapshot_source") == "manual-backfill"
+        and args.github_repository
+        and args.github_token
+    ):
+        has_existing_release = github_release_exists(
+            args.api_root,
+            args.github_repository,
+            args.github_token,
+            snapshot.get("release_tag", ""),
+        )
+
+    if pointed_tags and (snapshot.get("status") == "released" or has_existing_release):
         export_key_values({"target_sha": requested_sha, "assets_only": True}, args.github_output)
         return 0
 

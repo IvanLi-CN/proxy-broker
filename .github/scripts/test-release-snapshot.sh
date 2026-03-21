@@ -255,17 +255,26 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
     run("add", "README.md", cwd=work)
     run("commit", "-m", "docs only", cwd=work)
     sha3 = run("rev-parse", "HEAD", cwd=work)
+
+    (work / "README.md").write_text("legacy release\n")
+    run("add", "README.md", cwd=work)
+    run("commit", "-m", "legacy release", cwd=work)
+    sha4 = run("rev-parse", "HEAD", cwd=work)
+    run("tag", "v0.1.3", sha4, cwd=work)
     run("push", "origin", "main", "--tags", cwd=work)
 
     original_cwd = Path.cwd()
     original_load_pr = module.load_pr_for_commit
+    original_release_exists = module.github_release_exists
     try:
         os.chdir(work)
         module.load_pr_for_commit = lambda api_root, repository, token, target_sha, **kwargs: {
             sha1: make_pr(301, "First patch", sha1, ["type:patch", "channel:stable"]),
             sha2: make_pr(302, "Second patch", sha2, ["type:patch", "channel:stable"]),
             sha3: make_pr(303, "Docs only", sha3, ["type:docs", "channel:stable"]),
+            sha4: make_pr(304, "Legacy release", sha4, ["type:patch", "channel:stable"]),
         }.get(target_sha)
+        module.github_release_exists = lambda api_root, repository, token, tag_name: tag_name == "v0.1.3"
 
         exit_code = module.ensure_snapshot(
             argparse.Namespace(
@@ -290,6 +299,9 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
             argparse.Namespace(
                 notes_ref=module.DEFAULT_NOTES_REF,
                 requested_sha=sha2,
+                github_repository="IvanLi-CN/proxy-broker",
+                github_token="token",
+                api_root="https://api.github.com",
                 github_output=str(output),
             )
         )
@@ -300,6 +312,9 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
             argparse.Namespace(
                 notes_ref=module.DEFAULT_NOTES_REF,
                 requested_sha=sha3,
+                github_repository="IvanLi-CN/proxy-broker",
+                github_token="token",
+                api_root="https://api.github.com",
                 github_output=str(output),
             )
         )
@@ -319,6 +334,35 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
         pending = module.pending_release_targets(module.DEFAULT_NOTES_REF, sha3)
         assert pending == [sha2]
 
+        exit_code = module.ensure_snapshot(
+            argparse.Namespace(
+                target_sha=sha4,
+                github_repository="IvanLi-CN/proxy-broker",
+                github_token="token",
+                notes_ref=module.DEFAULT_NOTES_REF,
+                registry="ghcr.io",
+                api_root="https://api.github.com",
+                output=str(work / "legacy-snapshot.json"),
+                max_attempts=1,
+                target_only=True,
+            )
+        )
+        assert exit_code == 0
+        assert module.read_snapshot(module.DEFAULT_NOTES_REF, sha4)["snapshot_source"] == "manual-backfill"
+        output = work / "select-target-legacy-backfill.out"
+        exit_code = module.select_dispatch_target(
+            argparse.Namespace(
+                notes_ref=module.DEFAULT_NOTES_REF,
+                requested_sha=sha4,
+                github_repository="IvanLi-CN/proxy-broker",
+                github_token="token",
+                api_root="https://api.github.com",
+                github_output=str(output),
+            )
+        )
+        assert exit_code == 0
+        assert output.read_text() == f"target_sha={sha4}\nassets_only=true\n"
+
         exit_code = module.mark_released(
             argparse.Namespace(
                 target_sha=sha2,
@@ -334,6 +378,9 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
             argparse.Namespace(
                 notes_ref=module.DEFAULT_NOTES_REF,
                 requested_sha=sha2,
+                github_repository="IvanLi-CN/proxy-broker",
+                github_token="token",
+                api_root="https://api.github.com",
                 github_output=str(output),
             )
         )
@@ -341,5 +388,6 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
         assert output.read_text() == f"target_sha={sha2}\nassets_only=true\n"
     finally:
         module.load_pr_for_commit = original_load_pr
+        module.github_release_exists = original_release_exists
         os.chdir(original_cwd)
 PY
