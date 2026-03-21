@@ -744,6 +744,8 @@ def select_dispatch_target(args: argparse.Namespace) -> int:
         export_key_values({"target_sha": target_sha, "assets_only": False}, args.github_output)
         return 0
 
+    # release.yml only pushes the git release tag after GHCR manifests are created and verified,
+    # so tag-bearing reruns can safely stay on the GitHub Release asset recovery path.
     if existing_release_tags(requested_sha):
         export_key_values({"target_sha": requested_sha, "assets_only": True}, args.github_output)
         return 0
