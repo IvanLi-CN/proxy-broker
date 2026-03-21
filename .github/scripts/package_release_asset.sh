@@ -80,6 +80,34 @@ for cmd in bun cargo tar install; do
   fi
 done
 
+detect_host_target() {
+  local host_os
+  local host_cpu
+
+  host_os="$(uname -s)"
+  host_cpu="$(uname -m)"
+
+  case "${host_os}" in
+    Linux) host_os="linux" ;;
+    Darwin) host_os="darwin" ;;
+    *)
+      echo "unsupported host platform: ${host_os}" >&2
+      exit 1
+      ;;
+  esac
+
+  case "${host_cpu}" in
+    x86_64) host_cpu="amd64" ;;
+    arm64|aarch64) host_cpu="arm64" ;;
+    *)
+      echo "unsupported host architecture: ${host_cpu}" >&2
+      exit 1
+      ;;
+  esac
+
+  printf '%s %s\n' "${host_os}" "${host_cpu}"
+}
+
 hash_file() {
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum "$1" | awk '{print $1}'
@@ -98,6 +126,12 @@ hash_file() {
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 binary_name="proxy-broker"
 asset_stem="${binary_name}-${release_asset_tag}-${platform}-${arch}"
+read -r host_platform host_arch <<<"$(detect_host_target)"
+
+if [[ "${platform}" != "${host_platform}" || "${arch}" != "${host_arch}" ]]; then
+  echo "requested ${platform}/${arch} but host runner is ${host_platform}/${host_arch}" >&2
+  exit 1
+fi
 
 mkdir -p "${output_dir}"
 output_dir="$(cd "${output_dir}" && pwd)"
