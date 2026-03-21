@@ -741,7 +741,8 @@ def select_dispatch_target(args: argparse.Namespace) -> int:
     if not snapshot.get("release_enabled"):
         pending = pending_release_targets(args.notes_ref, requested_sha)
         target_sha = pending[0] if pending else ""
-        export_key_values({"target_sha": target_sha, "assets_only": False}, args.github_output)
+        assets_only = bool(target_sha and existing_release_tags(target_sha))
+        export_key_values({"target_sha": target_sha, "assets_only": assets_only}, args.github_output)
         return 0
 
     # release.yml only pushes the git release tag after GHCR manifests are created and verified,
@@ -752,7 +753,8 @@ def select_dispatch_target(args: argparse.Namespace) -> int:
 
     pending = pending_release_targets(args.notes_ref, requested_sha)
     target_sha = pending[0] if pending else requested_sha
-    export_key_values({"target_sha": target_sha, "assets_only": False}, args.github_output)
+    assets_only = bool(target_sha and existing_release_tags(target_sha))
+    export_key_values({"target_sha": target_sha, "assets_only": assets_only}, args.github_output)
     return 0
 
 

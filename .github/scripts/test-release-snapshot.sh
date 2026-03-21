@@ -333,6 +333,7 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
         )
         assert exit_code == 0
         assert output.read_text() == f"target_sha={sha2}\nassets_only=true\n"
+        run("tag", "v0.1.1", sha1, cwd=work)
         output = work / "select-target-skipped.out"
         exit_code = module.select_dispatch_target(
             argparse.Namespace(
@@ -342,7 +343,7 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
             )
         )
         assert exit_code == 0
-        assert output.read_text() == f"target_sha={sha1}\nassets_only=false\n"
+        assert output.read_text() == f"target_sha={sha1}\nassets_only=true\n"
 
         exit_code = module.mark_released(
             argparse.Namespace(
