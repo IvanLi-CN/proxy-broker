@@ -284,6 +284,7 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
         assert module.read_snapshot(module.DEFAULT_NOTES_REF, sha1)["next_stable_version"] == "0.1.1"
         assert module.read_snapshot(module.DEFAULT_NOTES_REF, sha2)["next_stable_version"] == "0.1.2"
         assert module.read_snapshot(module.DEFAULT_NOTES_REF, sha3)["status"] == "skipped"
+        run("tag", "v0.1.2", sha2, cwd=work)
         output = work / "select-target-pending.out"
         exit_code = module.select_dispatch_target(
             argparse.Namespace(
@@ -328,7 +329,6 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
         )
         assert exit_code == 0
         assert module.read_snapshot(module.DEFAULT_NOTES_REF, sha2)["status"] == "released"
-        run("tag", "v0.1.2", sha2, cwd=work)
         output = work / "select-target-released.out"
         exit_code = module.select_dispatch_target(
             argparse.Namespace(

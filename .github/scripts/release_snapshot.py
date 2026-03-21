@@ -741,7 +741,7 @@ def select_dispatch_target(args: argparse.Namespace) -> int:
         export_key_values({"target_sha": target_sha, "assets_only": False}, args.github_output)
         return 0
 
-    if existing_release_tags(requested_sha):
+    if snapshot.get("status") == "released" and existing_release_tags(requested_sha):
         export_key_values({"target_sha": requested_sha, "assets_only": True}, args.github_output)
         return 0
 
