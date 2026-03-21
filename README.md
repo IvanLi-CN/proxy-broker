@@ -174,6 +174,30 @@ cd web
 bun run storybook
 ```
 
+## GitHub release assets
+
+The post-merge `Release` workflow publishes native GitHub Release assets in
+addition to GHCR image tags:
+
+- `proxy-broker-<tag>-linux-amd64.tar.gz`
+- `proxy-broker-<tag>-linux-arm64.tar.gz`
+- `proxy-broker-<tag>-darwin-amd64.tar.gz`
+- `proxy-broker-<tag>-darwin-arm64.tar.gz`
+- `proxy-broker-<tag>-sha256.txt`
+
+Each tarball expands into a single top-level directory that matches the release
+tagged asset stem. The contained `proxy-broker` executable is compiled with the
+same effective version string as the container image for that release, so
+`proxy-broker --version` stays consistent across distribution channels.
+
+If an existing GitHub Release is missing those assets, rerun
+`.github/workflows/release.yml` with `workflow_dispatch` and pass the merged
+`main` commit SHA for that release. Historical commits that already have a
+release tag are backfilled in place without rebuilding or republishing GHCR
+images or draining the pending release queue, while unreleased dispatches still
+respect the oldest pending snapshot on the mainline path. For `v0.4.0`, use
+`7c60216b58dbdf5dd0eacac411876849299a1ffc`.
+
 ## Health check
 
 ```bash

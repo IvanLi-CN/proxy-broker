@@ -80,8 +80,18 @@ jobs:
       - name: Cargo test
         run: cargo test --all-features
 
-      - name: Cargo release build
-        run: cargo build --release
+      - name: Release packaging smoke
+        env:
+          APP_EFFECTIVE_VERSION: v0.0.0-ci
+        run: |
+          set -euo pipefail
+          out_dir="$RUNNER_TEMP/release-smoke"
+          .github/scripts/package_release_asset.sh \
+            --platform linux \
+            --arch amd64 \
+            --output-dir "$out_dir"
+          test -f "$out_dir/proxy-broker-v0.0.0-ci-linux-amd64.tar.gz"
+          test -f "$out_dir/proxy-broker-v0.0.0-ci-linux-amd64.sha256"
 
       - name: Check release workflow scripts
         run: |
@@ -89,6 +99,7 @@ jobs:
             .github/scripts/metadata_gate.py \
             .github/scripts/release_snapshot.py \
             .github/scripts/verify_manifest_platforms.py
+          bash -n .github/scripts/package_release_asset.sh
 
       - name: Test release snapshot logic
         run: bash .github/scripts/test-release-snapshot.sh

@@ -88,6 +88,12 @@ def parse_args() -> argparse.Namespace:
     ensure.add_argument("--output", required=True)
     ensure.add_argument("--max-attempts", type=int, default=6)
     ensure.add_argument(
+        "--snapshot-source",
+        choices=sorted(ALLOWED_SNAPSHOT_SOURCES),
+        default="ci-main",
+        help="Record newly materialized snapshots with the given source.",
+    )
+    ensure.add_argument(
         "--target-only",
         action="store_true",
         help="Only materialize the requested target commit instead of filling every missing first-parent snapshot on the path.",
@@ -112,6 +118,14 @@ def parse_args() -> argparse.Namespace:
     next_pending.add_argument("--main-ref", required=True)
     next_pending.add_argument("--upper-bound", default="")
     next_pending.add_argument("--github-output", default=os.environ.get("GITHUB_OUTPUT", ""))
+
+    select_target = subparsers.add_parser(
+        "select-target",
+        help="Select the workflow target for a manual dispatch.",
+    )
+    select_target.add_argument("--notes-ref", default=DEFAULT_NOTES_REF)
+    select_target.add_argument("--requested-sha", required=True)
+    select_target.add_argument("--github-output", default=os.environ.get("GITHUB_OUTPUT", ""))
 
     mark_released = subparsers.add_parser("mark-released", help="Mark a stored snapshot as released.")
     mark_released.add_argument("--target-sha", required=True)
@@ -566,26 +580,23 @@ def commits_to_materialize(notes_ref: str, target_sha: str, *, target_only: bool
         return [target_sha]
 
     commits = first_parent_commits(target_sha)
+    if not commits:
+        return [target_sha]
+
     tagged_commits = tagged_release_commits(target_sha)
     anchor_index = -1
     for index, commit in enumerate(commits):
         if commit in tagged_commits:
             anchor_index = index
 
-    earliest_snapshot_after_anchor = -1
-    for index in range(anchor_index + 1, len(commits)):
-        if read_snapshot(notes_ref, commits[index]) is not None:
-            earliest_snapshot_after_anchor = index
-            break
-
-    if earliest_snapshot_after_anchor >= 0:
-        return commits[earliest_snapshot_after_anchor + 1 :]
-    if anchor_index >= 0:
-        return commits[anchor_index + 1 :]
-
+    latest_snapshot_index = -1
     for index, commit in enumerate(commits):
         if read_snapshot(notes_ref, commit) is not None:
-            return commits[index + 1 :]
+            latest_snapshot_index = index
+
+    start_index = max(anchor_index, latest_snapshot_index)
+    if start_index + 1 < len(commits):
+        return commits[start_index + 1 :]
     return [target_sha]
 
 
@@ -673,7 +684,7 @@ def ensure_snapshot(args: argparse.Namespace) -> int:
                     registry=args.registry,
                     api_root=args.api_root,
                     pr=pr,
-                    snapshot_source="manual-backfill" if args.target_only else "ci-main",
+                    snapshot_source=args.snapshot_source,
                 )
                 write_json(temp_note, snapshot)
                 git("notes", f"--ref={args.notes_ref}", "add", "-f", "-F", str(temp_note), commit)
@@ -720,6 +731,33 @@ def export_next_pending(args: argparse.Namespace) -> int:
     return 0
 
 
+def select_dispatch_target(args: argparse.Namespace) -> int:
+    requested_sha = normalize_sha(args.requested_sha)
+    fetch_notes_ref(args.notes_ref)
+    snapshot = read_snapshot(args.notes_ref, requested_sha)
+    if snapshot is None:
+        raise SnapshotError(f"Missing immutable release snapshot for {requested_sha}")
+
+    if not snapshot.get("release_enabled"):
+        pending = pending_release_targets(args.notes_ref, requested_sha)
+        target_sha = pending[0] if pending else ""
+        assets_only = bool(target_sha and existing_release_tags(target_sha))
+        export_key_values({"target_sha": target_sha, "assets_only": assets_only}, args.github_output)
+        return 0
+
+    # release.yml only pushes the git release tag after GHCR manifests are created and verified,
+    # so tag-bearing reruns can safely stay on the GitHub Release asset recovery path.
+    if existing_release_tags(requested_sha):
+        export_key_values({"target_sha": requested_sha, "assets_only": True}, args.github_output)
+        return 0
+
+    pending = pending_release_targets(args.notes_ref, requested_sha)
+    target_sha = pending[0] if pending else requested_sha
+    assets_only = bool(target_sha and existing_release_tags(target_sha))
+    export_key_values({"target_sha": target_sha, "assets_only": assets_only}, args.github_output)
+    return 0
+
+
 def mark_released(args: argparse.Namespace) -> int:
     target_sha = normalize_sha(args.target_sha)
     for attempt in range(1, args.max_attempts + 1):
@@ -762,6 +800,8 @@ def main() -> int:
             return export_existing_snapshot(args)
         if args.command == "next-pending":
             return export_next_pending(args)
+        if args.command == "select-target":
+            return select_dispatch_target(args)
         if args.command == "mark-released":
             return mark_released(args)
         raise SnapshotError(f"Unsupported command: {args.command}")

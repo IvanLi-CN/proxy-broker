@@ -250,6 +250,17 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
     run("add", "README.md", cwd=work)
     run("commit", "-m", "second patch", cwd=work)
     sha2 = run("rev-parse", "HEAD", cwd=work)
+
+    (work / "README.md").write_text("docs only\n")
+    run("add", "README.md", cwd=work)
+    run("commit", "-m", "docs only", cwd=work)
+    sha3 = run("rev-parse", "HEAD", cwd=work)
+
+    (work / "README.md").write_text("legacy release\n")
+    run("add", "README.md", cwd=work)
+    run("commit", "-m", "legacy release", cwd=work)
+    sha4 = run("rev-parse", "HEAD", cwd=work)
+    run("tag", "v0.1.3", sha4, cwd=work)
     run("push", "origin", "main", "--tags", cwd=work)
 
     original_cwd = Path.cwd()
@@ -259,11 +270,13 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
         module.load_pr_for_commit = lambda api_root, repository, token, target_sha, **kwargs: {
             sha1: make_pr(301, "First patch", sha1, ["type:patch", "channel:stable"]),
             sha2: make_pr(302, "Second patch", sha2, ["type:patch", "channel:stable"]),
+            sha3: make_pr(303, "Docs only", sha3, ["type:docs", "channel:stable"]),
+            sha4: make_pr(304, "Legacy release", sha4, ["type:patch", "channel:stable"]),
         }.get(target_sha)
 
         exit_code = module.ensure_snapshot(
             argparse.Namespace(
-                target_sha=sha2,
+                target_sha=sha3,
                 github_repository="IvanLi-CN/proxy-broker",
                 github_token="token",
                 notes_ref=module.DEFAULT_NOTES_REF,
@@ -271,12 +284,66 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
                 api_root="https://api.github.com",
                 output=str(work / "snapshot.json"),
                 max_attempts=1,
+                snapshot_source="ci-main",
                 target_only=False,
             )
         )
         assert exit_code == 0
         assert module.read_snapshot(module.DEFAULT_NOTES_REF, sha1)["next_stable_version"] == "0.1.1"
         assert module.read_snapshot(module.DEFAULT_NOTES_REF, sha2)["next_stable_version"] == "0.1.2"
+        assert module.read_snapshot(module.DEFAULT_NOTES_REF, sha3)["status"] == "skipped"
+
+        manual_notes_ref = "refs/notes/manual-dispatch-order"
+        exit_code = module.ensure_snapshot(
+            argparse.Namespace(
+                target_sha=sha2,
+                github_repository="IvanLi-CN/proxy-broker",
+                github_token="token",
+                notes_ref=manual_notes_ref,
+                registry="ghcr.io",
+                api_root="https://api.github.com",
+                output=str(work / "manual-snapshot.json"),
+                max_attempts=1,
+                snapshot_source="manual-backfill",
+                target_only=False,
+            )
+        )
+        assert exit_code == 0
+        assert module.read_snapshot(manual_notes_ref, sha1)["snapshot_source"] == "manual-backfill"
+        assert module.read_snapshot(manual_notes_ref, sha2)["snapshot_source"] == "manual-backfill"
+        output = work / "select-target-manual-pending.out"
+        exit_code = module.select_dispatch_target(
+            argparse.Namespace(
+                notes_ref=manual_notes_ref,
+                requested_sha=sha2,
+                github_output=str(output),
+            )
+        )
+        assert exit_code == 0
+        assert output.read_text() == f"target_sha={sha1}\nassets_only=false\n"
+
+        run("tag", "v0.1.2", sha2, cwd=work)
+        output = work / "select-target-pending.out"
+        exit_code = module.select_dispatch_target(
+            argparse.Namespace(
+                notes_ref=module.DEFAULT_NOTES_REF,
+                requested_sha=sha2,
+                github_output=str(output),
+            )
+        )
+        assert exit_code == 0
+        assert output.read_text() == f"target_sha={sha2}\nassets_only=true\n"
+        run("tag", "v0.1.1", sha1, cwd=work)
+        output = work / "select-target-skipped.out"
+        exit_code = module.select_dispatch_target(
+            argparse.Namespace(
+                notes_ref=module.DEFAULT_NOTES_REF,
+                requested_sha=sha3,
+                github_output=str(output),
+            )
+        )
+        assert exit_code == 0
+        assert output.read_text() == f"target_sha={sha1}\nassets_only=true\n"
 
         exit_code = module.mark_released(
             argparse.Namespace(
@@ -288,8 +355,67 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
         )
         assert exit_code == 0
         assert module.read_snapshot(module.DEFAULT_NOTES_REF, sha1)["status"] == "released"
-        pending = module.pending_release_targets(module.DEFAULT_NOTES_REF, sha2)
+        pending = module.pending_release_targets(module.DEFAULT_NOTES_REF, sha3)
         assert pending == [sha2]
+
+        exit_code = module.ensure_snapshot(
+            argparse.Namespace(
+                target_sha=sha4,
+                github_repository="IvanLi-CN/proxy-broker",
+                github_token="token",
+                notes_ref=module.DEFAULT_NOTES_REF,
+                registry="ghcr.io",
+                api_root="https://api.github.com",
+                output=str(work / "legacy-snapshot.json"),
+                max_attempts=1,
+                snapshot_source="manual-backfill",
+                target_only=True,
+            )
+        )
+        assert exit_code == 0
+        assert module.read_snapshot(module.DEFAULT_NOTES_REF, sha4)["snapshot_source"] == "manual-backfill"
+        output = work / "select-target-legacy-backfill.out"
+        exit_code = module.select_dispatch_target(
+            argparse.Namespace(
+                notes_ref=module.DEFAULT_NOTES_REF,
+                requested_sha=sha4,
+                github_output=str(output),
+            )
+        )
+        assert exit_code == 0
+        assert output.read_text() == f"target_sha={sha4}\nassets_only=true\n"
+
+        output = work / "select-target-partial-release.out"
+        exit_code = module.select_dispatch_target(
+            argparse.Namespace(
+                notes_ref=module.DEFAULT_NOTES_REF,
+                requested_sha=sha2,
+                github_output=str(output),
+            )
+        )
+        assert exit_code == 0
+        assert output.read_text() == f"target_sha={sha2}\nassets_only=true\n"
+
+        exit_code = module.mark_released(
+            argparse.Namespace(
+                target_sha=sha2,
+                notes_ref=module.DEFAULT_NOTES_REF,
+                published_tags="ghcr.io/ivanli-cn/proxy-broker:v0.1.2,ghcr.io/ivanli-cn/proxy-broker:latest",
+                max_attempts=1,
+            )
+        )
+        assert exit_code == 0
+        assert module.read_snapshot(module.DEFAULT_NOTES_REF, sha2)["status"] == "released"
+        output = work / "select-target-released.out"
+        exit_code = module.select_dispatch_target(
+            argparse.Namespace(
+                notes_ref=module.DEFAULT_NOTES_REF,
+                requested_sha=sha2,
+                github_output=str(output),
+            )
+        )
+        assert exit_code == 0
+        assert output.read_text() == f"target_sha={sha2}\nassets_only=true\n"
     finally:
         module.load_pr_for_commit = original_load_pr
         os.chdir(original_cwd)
