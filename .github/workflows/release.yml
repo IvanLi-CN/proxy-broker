@@ -220,7 +220,7 @@ jobs:
             echo "continue_queue=false" >> "$GITHUB_OUTPUT"
           elif [ "${{ steps.release-target.outputs.assets_only }}" = "true" ]; then
             echo "publish_container=false" >> "$GITHUB_OUTPUT"
-            echo "continue_queue=false" >> "$GITHUB_OUTPUT"
+            echo "continue_queue=true" >> "$GITHUB_OUTPUT"
           else
             echo "publish_container=true" >> "$GITHUB_OUTPUT"
             echo "continue_queue=true" >> "$GITHUB_OUTPUT"
