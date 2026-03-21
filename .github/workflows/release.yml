@@ -452,7 +452,7 @@ jobs:
 
   binary-darwin-amd64:
     name: Build darwin amd64 release binary
-    runs-on: macos-13
+    runs-on: macos-15-intel
     timeout-minutes: 60
     needs: [release-meta]
     if: ${{ needs.release-meta.outputs.release_enabled == 'true' }}
