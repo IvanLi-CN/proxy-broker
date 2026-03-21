@@ -268,13 +268,14 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
     original_release_exists = module.github_release_exists
     try:
         os.chdir(work)
+        release_tags_with_objects: set[str] = {"v0.1.3"}
         module.load_pr_for_commit = lambda api_root, repository, token, target_sha, **kwargs: {
             sha1: make_pr(301, "First patch", sha1, ["type:patch", "channel:stable"]),
             sha2: make_pr(302, "Second patch", sha2, ["type:patch", "channel:stable"]),
             sha3: make_pr(303, "Docs only", sha3, ["type:docs", "channel:stable"]),
             sha4: make_pr(304, "Legacy release", sha4, ["type:patch", "channel:stable"]),
         }.get(target_sha)
-        module.github_release_exists = lambda api_root, repository, token, tag_name: tag_name == "v0.1.3"
+        module.github_release_exists = lambda api_root, repository, token, tag_name: tag_name in release_tags_with_objects
 
         exit_code = module.ensure_snapshot(
             argparse.Namespace(
@@ -362,6 +363,21 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
         )
         assert exit_code == 0
         assert output.read_text() == f"target_sha={sha4}\nassets_only=true\n"
+
+        release_tags_with_objects.add("v0.1.2")
+        output = work / "select-target-partial-release.out"
+        exit_code = module.select_dispatch_target(
+            argparse.Namespace(
+                notes_ref=module.DEFAULT_NOTES_REF,
+                requested_sha=sha2,
+                github_repository="IvanLi-CN/proxy-broker",
+                github_token="token",
+                api_root="https://api.github.com",
+                github_output=str(output),
+            )
+        )
+        assert exit_code == 0
+        assert output.read_text() == f"target_sha={sha2}\nassets_only=true\n"
 
         exit_code = module.mark_released(
             argparse.Namespace(

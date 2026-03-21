@@ -769,12 +769,7 @@ def select_dispatch_target(args: argparse.Namespace) -> int:
 
     pointed_tags = existing_release_tags(requested_sha)
     has_existing_release = False
-    if (
-        pointed_tags
-        and snapshot.get("snapshot_source") == "manual-backfill"
-        and args.github_repository
-        and args.github_token
-    ):
+    if pointed_tags and args.github_repository and args.github_token:
         has_existing_release = github_release_exists(
             args.api_root,
             args.github_repository,
