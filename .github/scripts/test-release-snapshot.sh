@@ -286,7 +286,7 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
             )
         )
         assert exit_code == 0
-        assert output.read_text() == f"target_sha={sha2}\n"
+        assert output.read_text() == f"target_sha={sha1}\nassets_only=false\n"
 
         exit_code = module.mark_released(
             argparse.Namespace(
@@ -311,6 +311,7 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
         )
         assert exit_code == 0
         assert module.read_snapshot(module.DEFAULT_NOTES_REF, sha2)["status"] == "released"
+        run("tag", "v0.1.2", sha2, cwd=work)
         output = work / "select-target-released.out"
         exit_code = module.select_dispatch_target(
             argparse.Namespace(
@@ -320,7 +321,7 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
             )
         )
         assert exit_code == 0
-        assert output.read_text() == f"target_sha={sha2}\n"
+        assert output.read_text() == f"target_sha={sha2}\nassets_only=true\n"
     finally:
         module.load_pr_for_commit = original_load_pr
         os.chdir(original_cwd)

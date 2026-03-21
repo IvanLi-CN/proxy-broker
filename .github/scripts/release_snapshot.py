@@ -735,7 +735,17 @@ def select_dispatch_target(args: argparse.Namespace) -> int:
     if snapshot is None:
         raise SnapshotError(f"Missing immutable release snapshot for {requested_sha}")
 
-    export_key_values({"target_sha": requested_sha}, args.github_output)
+    if not snapshot.get("release_enabled"):
+        export_key_values({"target_sha": "", "assets_only": False}, args.github_output)
+        return 0
+
+    if existing_release_tags(requested_sha):
+        export_key_values({"target_sha": requested_sha, "assets_only": True}, args.github_output)
+        return 0
+
+    pending = pending_release_targets(args.notes_ref, requested_sha)
+    target_sha = pending[0] if pending else requested_sha
+    export_key_values({"target_sha": target_sha, "assets_only": False}, args.github_output)
     return 0
 
 

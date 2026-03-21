@@ -47,6 +47,10 @@ jobs:
     outputs:
       target_sha: ${{ steps.release-target.outputs.target_sha }}
       release_enabled: ${{ steps.snapshot.outputs.release_enabled }}
+      snapshot_status: ${{ steps.snapshot.outputs.status }}
+      assets_only: ${{ steps.release-target.outputs.assets_only }}
+      publish_container: ${{ steps.publication-mode.outputs.publish_container }}
+      continue_queue: ${{ steps.publication-mode.outputs.continue_queue }}
       release_bump: ${{ steps.snapshot.outputs.release_bump }}
       release_channel: ${{ steps.snapshot.outputs.release_channel }}
       pr_number: ${{ steps.snapshot.outputs.pr_number }}
@@ -206,12 +210,28 @@ jobs:
             --resolve-publication-tags \
             --github-output "$GITHUB_OUTPUT"
 
+      - name: Resolve publication mode
+        id: publication-mode
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.snapshot.outputs.release_enabled }}" != "true" ] || [ -z "${{ steps.release-target.outputs.target_sha }}" ]; then
+            echo "publish_container=false" >> "$GITHUB_OUTPUT"
+            echo "continue_queue=false" >> "$GITHUB_OUTPUT"
+          elif [ "${{ steps.release-target.outputs.assets_only }}" = "true" ]; then
+            echo "publish_container=false" >> "$GITHUB_OUTPUT"
+            echo "continue_queue=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish_container=true" >> "$GITHUB_OUTPUT"
+            echo "continue_queue=true" >> "$GITHUB_OUTPUT"
+          fi
+
   docker-amd64:
     name: Build amd64 image digest
     runs-on: ubuntu-latest
     timeout-minutes: 45
     needs: [release-meta]
-    if: ${{ needs.release-meta.outputs.release_enabled == 'true' }}
+    if: ${{ needs.release-meta.outputs.release_enabled == 'true' && needs.release-meta.outputs.publish_container == 'true' }}
     permissions:
       contents: read
       packages: write
@@ -264,7 +284,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
     needs: [release-meta]
-    if: ${{ needs.release-meta.outputs.release_enabled == 'true' }}
+    if: ${{ needs.release-meta.outputs.release_enabled == 'true' && needs.release-meta.outputs.publish_container == 'true' }}
     permissions:
       contents: read
       packages: write
@@ -525,7 +545,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     needs: [release-meta, docker-amd64, docker-arm64, binary-linux-amd64, binary-linux-arm64, binary-darwin-amd64, binary-darwin-arm64]
-    if: ${{ needs.release-meta.outputs.release_enabled == 'true' }}
+    if: >-
+      ${{
+        always() &&
+        needs.release-meta.outputs.release_enabled == 'true' &&
+        needs.binary-linux-amd64.result == 'success' &&
+        needs.binary-linux-arm64.result == 'success' &&
+        needs.binary-darwin-amd64.result == 'success' &&
+        needs.binary-darwin-arm64.result == 'success' &&
+        (
+          needs.release-meta.outputs.publish_container != 'true' ||
+          (needs.docker-amd64.result == 'success' && needs.docker-arm64.result == 'success')
+        )
+      }}
     permissions:
       actions: write
       contents: write
@@ -538,12 +570,14 @@ jobs:
           fetch-depth: 0
 
       - name: Download amd64 digest artifact
+        if: needs.release-meta.outputs.publish_container == 'true'
         uses: actions/download-artifact@v4
         with:
           name: release-digest-amd64
           path: ${{ runner.temp }}/digests/amd64
 
       - name: Download arm64 digest artifact
+        if: needs.release-meta.outputs.publish_container == 'true'
         uses: actions/download-artifact@v4
         with:
           name: release-digest-arm64
@@ -574,9 +608,11 @@ jobs:
           path: ${{ runner.temp }}/release-binaries/darwin-arm64
 
       - name: Set up Docker Buildx
+        if: needs.release-meta.outputs.publish_container == 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
+        if: needs.release-meta.outputs.publish_container == 'true'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -584,6 +620,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create release manifest tags
+        if: needs.release-meta.outputs.publish_container == 'true'
         shell: bash
         env:
           IMAGE_NAME_LOWER: ${{ needs.release-meta.outputs.image_name_lower }}
@@ -618,6 +655,7 @@ jobs:
           done
 
       - name: Verify pushed manifest platforms
+        if: needs.release-meta.outputs.publish_container == 'true'
         shell: bash
         env:
           REQUIRED_PLATFORMS: ${{ env.PLATFORMS }}
@@ -650,6 +688,7 @@ jobs:
           done
 
       - name: Create and push git tag
+        if: needs.release-meta.outputs.publish_container == 'true'
         shell: bash
         env:
           APP_EFFECTIVE_VERSION: ${{ needs.release-meta.outputs.app_effective_version }}
@@ -841,6 +880,7 @@ jobs:
             --published-tags "${PUBLISHED_TAGS}"
 
       - name: Resolve next pending release target
+        if: needs.release-meta.outputs.continue_queue == 'true'
         id: next-pending
         shell: bash
         run: |
@@ -854,7 +894,7 @@ jobs:
             --github-output "$GITHUB_OUTPUT"
 
       - name: Continue release queue
-        if: steps.next-pending.outputs.target_sha != ''
+        if: needs.release-meta.outputs.continue_queue == 'true' && steps.next-pending.outputs.target_sha != ''
         uses: actions/github-script@v7
         env:
           NEXT_TARGET_SHA: ${{ steps.next-pending.outputs.target_sha }}
