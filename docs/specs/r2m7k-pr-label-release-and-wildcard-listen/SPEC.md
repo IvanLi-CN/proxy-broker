@@ -50,6 +50,9 @@ deployments.
 - The GitHub Release also carries exactly four native binary tarballs and one
   aggregated `proxy-broker-<tag>-sha256.txt` asset, and rerunning the same tag
   replaces same-name hosted assets instead of failing with upload conflicts.
+- Native tarball filenames keep the release tag form (`vX.Y.Z...`), while the
+  embedded binary version stays aligned with the release effective version used
+  by the container image (`X.Y.Z...` / `X.Y.Z-rc...`).
 - Multi-platform release publishing runs `linux/amd64` and `linux/arm64`
   natively, verifies the merged manifest, and keeps `latest` reserved for the
   newest stable snapshot.
@@ -93,3 +96,4 @@ deployments.
 
 - 2026-03-18: 初始规格，冻结 label-driven release、GHCR 发布和 wildcard bind 范围。
 - 2026-03-21: 补充 GitHub Release 原生二进制资产、SHA256 清单与 `workflow_dispatch(commit_sha)` 回填契约。
+- 2026-03-21: 明确原生资产文件名使用 release tag，但二进制内嵌版本必须与容器镜像保持一致。

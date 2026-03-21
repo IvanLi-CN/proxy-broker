@@ -333,7 +333,8 @@ jobs:
 
       - name: Package linux amd64 release asset
         env:
-          APP_EFFECTIVE_VERSION: ${{ needs.release-meta.outputs.release_tag }}
+          APP_EFFECTIVE_VERSION: ${{ needs.release-meta.outputs.app_effective_version }}
+          RELEASE_ASSET_TAG: ${{ needs.release-meta.outputs.release_tag }}
         run: |
           set -euo pipefail
           out_dir="$RUNNER_TEMP/release-binary-linux-amd64"
@@ -384,7 +385,8 @@ jobs:
 
       - name: Package linux arm64 release asset
         env:
-          APP_EFFECTIVE_VERSION: ${{ needs.release-meta.outputs.release_tag }}
+          APP_EFFECTIVE_VERSION: ${{ needs.release-meta.outputs.app_effective_version }}
+          RELEASE_ASSET_TAG: ${{ needs.release-meta.outputs.release_tag }}
         run: |
           set -euo pipefail
           out_dir="$RUNNER_TEMP/release-binary-linux-arm64"
@@ -435,7 +437,8 @@ jobs:
 
       - name: Package darwin amd64 release asset
         env:
-          APP_EFFECTIVE_VERSION: ${{ needs.release-meta.outputs.release_tag }}
+          APP_EFFECTIVE_VERSION: ${{ needs.release-meta.outputs.app_effective_version }}
+          RELEASE_ASSET_TAG: ${{ needs.release-meta.outputs.release_tag }}
         run: |
           set -euo pipefail
           out_dir="$RUNNER_TEMP/release-binary-darwin-amd64"
@@ -486,7 +489,8 @@ jobs:
 
       - name: Package darwin arm64 release asset
         env:
-          APP_EFFECTIVE_VERSION: ${{ needs.release-meta.outputs.release_tag }}
+          APP_EFFECTIVE_VERSION: ${{ needs.release-meta.outputs.app_effective_version }}
+          RELEASE_ASSET_TAG: ${{ needs.release-meta.outputs.release_tag }}
         run: |
           set -euo pipefail
           out_dir="$RUNNER_TEMP/release-binary-darwin-arm64"

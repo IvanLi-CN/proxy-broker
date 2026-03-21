@@ -10,6 +10,8 @@ Release tarball plus per-asset SHA256 metadata.
 
 Required environment:
   APP_EFFECTIVE_VERSION   Version/tag string to embed into the binary and asset name
+Optional environment:
+  RELEASE_ASSET_TAG       Override the version segment used in the tarball name
 EOF
 }
 
@@ -53,6 +55,8 @@ if [[ -z "${APP_EFFECTIVE_VERSION:-}" ]]; then
   exit 1
 fi
 
+release_asset_tag="${RELEASE_ASSET_TAG:-${APP_EFFECTIVE_VERSION}}"
+
 case "${platform}" in
   linux|darwin) ;;
   *)
@@ -93,7 +97,7 @@ hash_file() {
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 binary_name="proxy-broker"
-asset_stem="${binary_name}-${APP_EFFECTIVE_VERSION}-${platform}-${arch}"
+asset_stem="${binary_name}-${release_asset_tag}-${platform}-${arch}"
 
 mkdir -p "${output_dir}"
 output_dir="$(cd "${output_dir}" && pwd)"

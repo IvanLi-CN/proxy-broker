@@ -185,9 +185,10 @@ addition to GHCR image tags:
 - `proxy-broker-<tag>-darwin-arm64.tar.gz`
 - `proxy-broker-<tag>-sha256.txt`
 
-Each tarball expands into a single top-level directory that matches the asset
-stem and contains one `proxy-broker` executable built with
-`APP_EFFECTIVE_VERSION=<tag>`.
+Each tarball expands into a single top-level directory that matches the release
+tagged asset stem. The contained `proxy-broker` executable is compiled with the
+same effective version string as the container image for that release, so
+`proxy-broker --version` stays consistent across distribution channels.
 
 If an existing GitHub Release is missing those assets, rerun
 `.github/workflows/release.yml` with `workflow_dispatch` and pass the merged
