@@ -194,8 +194,8 @@ If an existing GitHub Release is missing those assets, rerun
 `.github/workflows/release.yml` with `workflow_dispatch` and pass the merged
 `main` commit SHA for that release. Historical commits that already have a
 release tag are backfilled in place without rebuilding or republishing GHCR
-images, while unreleased dispatches still respect the oldest pending snapshot on
-the mainline path. For `v0.4.0`, use
+images or draining the pending release queue, while unreleased dispatches still
+respect the oldest pending snapshot on the mainline path. For `v0.4.0`, use
 `7c60216b58dbdf5dd0eacac411876849299a1ffc`.
 
 ## Health check

@@ -59,7 +59,8 @@ deployments.
 - A manual `workflow_dispatch(commit_sha)` backfill can attach missing native
   assets to an existing release without minting a new tag or release record,
   even when that commit's snapshot is already marked `released`, and that
-  assets-only path must not republish container tags.
+  assets-only path must not republish container tags or drain the pending
+  release queue.
 - The Rust service can bind session listeners to a configured IP, and the
   published container defaults to `0.0.0.0` for both HTTP and session listeners.
 - Local and containerized validation demonstrate that wildcard binds do not
@@ -83,7 +84,8 @@ deployments.
 - Mainline release decisions survive burst merges and reruns through immutable
   snapshots, oldest-pending automatic queue selection, and exact historical
   release backfills for `workflow_dispatch(commit_sha)` when the requested
-  commit already carries the release tag.
+  commit already carries the release tag, without implicitly publishing newer
+  queued snapshots.
 - Stable releases continue to derive their next base version only from prior
   stable releases, so `channel:rc` snapshots cannot accidentally advance a
   later stable patch/minor/major release.
