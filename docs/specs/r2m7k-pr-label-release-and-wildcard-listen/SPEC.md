@@ -80,7 +80,8 @@ deployments.
 
 - `proxy-broker` has a reproducible PR-label-driven release path.
 - Mainline release decisions survive burst merges and reruns through immutable
-  snapshots plus oldest-pending backfill selection.
+  snapshots, oldest-pending automatic queue selection, and exact
+  `workflow_dispatch(commit_sha)` backfill targeting.
 - Stable releases continue to derive their next base version only from prior
   stable releases, so `channel:rc` snapshots cannot accidentally advance a
   later stable patch/minor/major release.

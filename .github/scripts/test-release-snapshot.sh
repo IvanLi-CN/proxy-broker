@@ -277,6 +277,16 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
         assert exit_code == 0
         assert module.read_snapshot(module.DEFAULT_NOTES_REF, sha1)["next_stable_version"] == "0.1.1"
         assert module.read_snapshot(module.DEFAULT_NOTES_REF, sha2)["next_stable_version"] == "0.1.2"
+        output = work / "select-target-pending.out"
+        exit_code = module.select_dispatch_target(
+            argparse.Namespace(
+                notes_ref=module.DEFAULT_NOTES_REF,
+                requested_sha=sha2,
+                github_output=str(output),
+            )
+        )
+        assert exit_code == 0
+        assert output.read_text() == f"target_sha={sha2}\n"
 
         exit_code = module.mark_released(
             argparse.Namespace(
@@ -301,7 +311,7 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
         )
         assert exit_code == 0
         assert module.read_snapshot(module.DEFAULT_NOTES_REF, sha2)["status"] == "released"
-        output = work / "select-target.out"
+        output = work / "select-target-released.out"
         exit_code = module.select_dispatch_target(
             argparse.Namespace(
                 notes_ref=module.DEFAULT_NOTES_REF,

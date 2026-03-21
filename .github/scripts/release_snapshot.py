@@ -731,11 +731,6 @@ def export_next_pending(args: argparse.Namespace) -> int:
 def select_dispatch_target(args: argparse.Namespace) -> int:
     requested_sha = normalize_sha(args.requested_sha)
     fetch_notes_ref(args.notes_ref)
-    pending = pending_release_targets(args.notes_ref, requested_sha)
-    if pending:
-        export_key_values({"target_sha": pending[0]}, args.github_output)
-        return 0
-
     snapshot = read_snapshot(args.notes_ref, requested_sha)
     if snapshot is None:
         raise SnapshotError(f"Missing immutable release snapshot for {requested_sha}")
