@@ -169,7 +169,7 @@ jobs:
             --github-token "${GITHUB_TOKEN}" \
             --notes-ref "${RELEASE_SNAPSHOT_NOTES_REF}" \
             --registry "${REGISTRY}" \
-            --target-only \
+            --snapshot-source manual-backfill \
             --output "$RUNNER_TEMP/release-snapshot.json"
 
       - name: Select release target
@@ -185,9 +185,6 @@ jobs:
             python3 .github/scripts/release_snapshot.py select-target \
               --notes-ref "${RELEASE_SNAPSHOT_NOTES_REF}" \
               --requested-sha "${REQUESTED_SHA}" \
-              --github-repository "${{ github.repository }}" \
-              --github-token "${{ github.token }}" \
-              --api-root "${{ github.api_url }}" \
               --github-output "$GITHUB_OUTPUT"
           else
             python3 .github/scripts/release_snapshot.py next-pending \

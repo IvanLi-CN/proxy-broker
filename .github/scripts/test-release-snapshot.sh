@@ -265,17 +265,14 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
 
     original_cwd = Path.cwd()
     original_load_pr = module.load_pr_for_commit
-    original_release_exists = module.github_release_exists
     try:
         os.chdir(work)
-        release_tags_with_objects: set[str] = {"v0.1.3"}
         module.load_pr_for_commit = lambda api_root, repository, token, target_sha, **kwargs: {
             sha1: make_pr(301, "First patch", sha1, ["type:patch", "channel:stable"]),
             sha2: make_pr(302, "Second patch", sha2, ["type:patch", "channel:stable"]),
             sha3: make_pr(303, "Docs only", sha3, ["type:docs", "channel:stable"]),
             sha4: make_pr(304, "Legacy release", sha4, ["type:patch", "channel:stable"]),
         }.get(target_sha)
-        module.github_release_exists = lambda api_root, repository, token, tag_name: tag_name in release_tags_with_objects
 
         exit_code = module.ensure_snapshot(
             argparse.Namespace(
@@ -287,6 +284,7 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
                 api_root="https://api.github.com",
                 output=str(work / "snapshot.json"),
                 max_attempts=1,
+                snapshot_source="ci-main",
                 target_only=False,
             )
         )
@@ -294,28 +292,52 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
         assert module.read_snapshot(module.DEFAULT_NOTES_REF, sha1)["next_stable_version"] == "0.1.1"
         assert module.read_snapshot(module.DEFAULT_NOTES_REF, sha2)["next_stable_version"] == "0.1.2"
         assert module.read_snapshot(module.DEFAULT_NOTES_REF, sha3)["status"] == "skipped"
+
+        manual_notes_ref = "refs/notes/manual-dispatch-order"
+        exit_code = module.ensure_snapshot(
+            argparse.Namespace(
+                target_sha=sha2,
+                github_repository="IvanLi-CN/proxy-broker",
+                github_token="token",
+                notes_ref=manual_notes_ref,
+                registry="ghcr.io",
+                api_root="https://api.github.com",
+                output=str(work / "manual-snapshot.json"),
+                max_attempts=1,
+                snapshot_source="manual-backfill",
+                target_only=False,
+            )
+        )
+        assert exit_code == 0
+        assert module.read_snapshot(manual_notes_ref, sha1)["snapshot_source"] == "manual-backfill"
+        assert module.read_snapshot(manual_notes_ref, sha2)["snapshot_source"] == "manual-backfill"
+        output = work / "select-target-manual-pending.out"
+        exit_code = module.select_dispatch_target(
+            argparse.Namespace(
+                notes_ref=manual_notes_ref,
+                requested_sha=sha2,
+                github_output=str(output),
+            )
+        )
+        assert exit_code == 0
+        assert output.read_text() == f"target_sha={sha1}\nassets_only=false\n"
+
         run("tag", "v0.1.2", sha2, cwd=work)
         output = work / "select-target-pending.out"
         exit_code = module.select_dispatch_target(
             argparse.Namespace(
                 notes_ref=module.DEFAULT_NOTES_REF,
                 requested_sha=sha2,
-                github_repository="IvanLi-CN/proxy-broker",
-                github_token="token",
-                api_root="https://api.github.com",
                 github_output=str(output),
             )
         )
         assert exit_code == 0
-        assert output.read_text() == f"target_sha={sha1}\nassets_only=false\n"
+        assert output.read_text() == f"target_sha={sha2}\nassets_only=true\n"
         output = work / "select-target-skipped.out"
         exit_code = module.select_dispatch_target(
             argparse.Namespace(
                 notes_ref=module.DEFAULT_NOTES_REF,
                 requested_sha=sha3,
-                github_repository="IvanLi-CN/proxy-broker",
-                github_token="token",
-                api_root="https://api.github.com",
                 github_output=str(output),
             )
         )
@@ -345,6 +367,7 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
                 api_root="https://api.github.com",
                 output=str(work / "legacy-snapshot.json"),
                 max_attempts=1,
+                snapshot_source="manual-backfill",
                 target_only=True,
             )
         )
@@ -355,24 +378,17 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
             argparse.Namespace(
                 notes_ref=module.DEFAULT_NOTES_REF,
                 requested_sha=sha4,
-                github_repository="IvanLi-CN/proxy-broker",
-                github_token="token",
-                api_root="https://api.github.com",
                 github_output=str(output),
             )
         )
         assert exit_code == 0
         assert output.read_text() == f"target_sha={sha4}\nassets_only=true\n"
 
-        release_tags_with_objects.add("v0.1.2")
         output = work / "select-target-partial-release.out"
         exit_code = module.select_dispatch_target(
             argparse.Namespace(
                 notes_ref=module.DEFAULT_NOTES_REF,
                 requested_sha=sha2,
-                github_repository="IvanLi-CN/proxy-broker",
-                github_token="token",
-                api_root="https://api.github.com",
                 github_output=str(output),
             )
         )
@@ -394,9 +410,6 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
             argparse.Namespace(
                 notes_ref=module.DEFAULT_NOTES_REF,
                 requested_sha=sha2,
-                github_repository="IvanLi-CN/proxy-broker",
-                github_token="token",
-                api_root="https://api.github.com",
                 github_output=str(output),
             )
         )
@@ -404,6 +417,5 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
         assert output.read_text() == f"target_sha={sha2}\nassets_only=true\n"
     finally:
         module.load_pr_for_commit = original_load_pr
-        module.github_release_exists = original_release_exists
         os.chdir(original_cwd)
 PY
