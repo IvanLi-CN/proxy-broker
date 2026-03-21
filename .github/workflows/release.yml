@@ -45,7 +45,7 @@ jobs:
       issues: read
       pull-requests: read
     outputs:
-      target_sha: ${{ steps.pending-target.outputs.target_sha }}
+      target_sha: ${{ steps.release-target.outputs.target_sha }}
       release_enabled: ${{ steps.snapshot.outputs.release_enabled }}
       release_bump: ${{ steps.snapshot.outputs.release_bump }}
       release_channel: ${{ steps.snapshot.outputs.release_channel }}
@@ -163,8 +163,8 @@ jobs:
             --target-only \
             --output "$RUNNER_TEMP/release-snapshot.json"
 
-      - name: Select pending release target
-        id: pending-target
+      - name: Select release target
+        id: release-target
         shell: bash
         env:
           REQUESTED_SHA: ${{ steps.requested-target.outputs.target_sha }}
@@ -172,18 +172,25 @@ jobs:
           set -euo pipefail
           git fetch --no-tags origin main
           git fetch --no-tags origin "+${RELEASE_SNAPSHOT_NOTES_REF}:${RELEASE_SNAPSHOT_NOTES_REF}" || true
-          python3 .github/scripts/release_snapshot.py next-pending \
-            --notes-ref "${RELEASE_SNAPSHOT_NOTES_REF}" \
-            --main-ref "origin/main" \
-            --upper-bound "${REQUESTED_SHA}" \
-            --github-output "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            python3 .github/scripts/release_snapshot.py select-target \
+              --notes-ref "${RELEASE_SNAPSHOT_NOTES_REF}" \
+              --requested-sha "${REQUESTED_SHA}" \
+              --github-output "$GITHUB_OUTPUT"
+          else
+            python3 .github/scripts/release_snapshot.py next-pending \
+              --notes-ref "${RELEASE_SNAPSHOT_NOTES_REF}" \
+              --main-ref "origin/main" \
+              --upper-bound "${REQUESTED_SHA}" \
+              --github-output "$GITHUB_OUTPUT"
+          fi
 
       - name: Load immutable release snapshot
-        if: steps.pending-target.outputs.target_sha != ''
+        if: steps.release-target.outputs.target_sha != ''
         id: snapshot
         shell: bash
         env:
-          TARGET_SHA: ${{ steps.pending-target.outputs.target_sha }}
+          TARGET_SHA: ${{ steps.release-target.outputs.target_sha }}
         run: |
           set -euo pipefail
           git fetch --no-tags origin "+${RELEASE_SNAPSHOT_NOTES_REF}:${RELEASE_SNAPSHOT_NOTES_REF}" || true

@@ -113,6 +113,14 @@ def parse_args() -> argparse.Namespace:
     next_pending.add_argument("--upper-bound", default="")
     next_pending.add_argument("--github-output", default=os.environ.get("GITHUB_OUTPUT", ""))
 
+    select_target = subparsers.add_parser(
+        "select-target",
+        help="Select the workflow target for a manual dispatch.",
+    )
+    select_target.add_argument("--notes-ref", default=DEFAULT_NOTES_REF)
+    select_target.add_argument("--requested-sha", required=True)
+    select_target.add_argument("--github-output", default=os.environ.get("GITHUB_OUTPUT", ""))
+
     mark_released = subparsers.add_parser("mark-released", help="Mark a stored snapshot as released.")
     mark_released.add_argument("--target-sha", required=True)
     mark_released.add_argument("--notes-ref", default=DEFAULT_NOTES_REF)
@@ -720,6 +728,22 @@ def export_next_pending(args: argparse.Namespace) -> int:
     return 0
 
 
+def select_dispatch_target(args: argparse.Namespace) -> int:
+    requested_sha = normalize_sha(args.requested_sha)
+    fetch_notes_ref(args.notes_ref)
+    pending = pending_release_targets(args.notes_ref, requested_sha)
+    if pending:
+        export_key_values({"target_sha": pending[0]}, args.github_output)
+        return 0
+
+    snapshot = read_snapshot(args.notes_ref, requested_sha)
+    if snapshot is None:
+        raise SnapshotError(f"Missing immutable release snapshot for {requested_sha}")
+
+    export_key_values({"target_sha": requested_sha}, args.github_output)
+    return 0
+
+
 def mark_released(args: argparse.Namespace) -> int:
     target_sha = normalize_sha(args.target_sha)
     for attempt in range(1, args.max_attempts + 1):
@@ -762,6 +786,8 @@ def main() -> int:
             return export_existing_snapshot(args)
         if args.command == "next-pending":
             return export_next_pending(args)
+        if args.command == "select-target":
+            return select_dispatch_target(args)
         if args.command == "mark-released":
             return mark_released(args)
         raise SnapshotError(f"Unsupported command: {args.command}")

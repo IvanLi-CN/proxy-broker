@@ -57,7 +57,8 @@ deployments.
   natively, verifies the merged manifest, and keeps `latest` reserved for the
   newest stable snapshot.
 - A manual `workflow_dispatch(commit_sha)` backfill can attach missing native
-  assets to an existing release without minting a new tag or release record.
+  assets to an existing release without minting a new tag or release record,
+  even when that commit's snapshot is already marked `released`.
 - The Rust service can bind session listeners to a configured IP, and the
   published container defaults to `0.0.0.0` for both HTTP and session listeners.
 - Local and containerized validation demonstrate that wildcard binds do not

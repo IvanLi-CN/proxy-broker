@@ -290,6 +290,27 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
         assert module.read_snapshot(module.DEFAULT_NOTES_REF, sha1)["status"] == "released"
         pending = module.pending_release_targets(module.DEFAULT_NOTES_REF, sha2)
         assert pending == [sha2]
+
+        exit_code = module.mark_released(
+            argparse.Namespace(
+                target_sha=sha2,
+                notes_ref=module.DEFAULT_NOTES_REF,
+                published_tags="ghcr.io/ivanli-cn/proxy-broker:v0.1.2,ghcr.io/ivanli-cn/proxy-broker:latest",
+                max_attempts=1,
+            )
+        )
+        assert exit_code == 0
+        assert module.read_snapshot(module.DEFAULT_NOTES_REF, sha2)["status"] == "released"
+        output = work / "select-target.out"
+        exit_code = module.select_dispatch_target(
+            argparse.Namespace(
+                notes_ref=module.DEFAULT_NOTES_REF,
+                requested_sha=sha2,
+                github_output=str(output),
+            )
+        )
+        assert exit_code == 0
+        assert output.read_text() == f"target_sha={sha2}\n"
     finally:
         module.load_pr_for_commit = original_load_pr
         os.chdir(original_cwd)
