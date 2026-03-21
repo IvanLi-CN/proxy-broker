@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-usage: package_release_asset.sh --platform <linux|darwin> --arch <amd64|arm64> --output-dir <path>
+usage: package_release_asset.sh --platform <linux|darwin> --arch <amd64|arm64> --output-dir <path> [--repo-root <path>]
 
 Build the embedded web UI, compile the release binary, and package a GitHub
 Release tarball plus per-asset SHA256 metadata.
@@ -18,6 +18,7 @@ EOF
 platform=""
 arch=""
 output_dir=""
+repo_root=""
 
 while (($# > 0)); do
   case "$1" in
@@ -31,6 +32,10 @@ while (($# > 0)); do
       ;;
     --output-dir)
       output_dir="${2:-}"
+      shift 2
+      ;;
+    --repo-root)
+      repo_root="${2:-}"
       shift 2
       ;;
     -h|--help)
@@ -123,7 +128,17 @@ hash_file() {
   exit 1
 }
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+if [[ -n "${repo_root}" ]]; then
+  repo_root="$(cd "${repo_root}" && pwd)"
+else
+  repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+fi
+
+if [[ ! -f "${repo_root}/Cargo.toml" || ! -d "${repo_root}/web" ]]; then
+  echo "repo root does not look like proxy-broker: ${repo_root}" >&2
+  exit 1
+fi
+
 binary_name="proxy-broker"
 asset_stem="${binary_name}-${release_asset_tag}-${platform}-${arch}"
 read -r host_platform host_arch <<<"$(detect_host_target)"

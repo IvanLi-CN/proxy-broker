@@ -344,10 +344,14 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Checkout
+      - name: Checkout workflow files
+        uses: actions/checkout@v4
+
+      - name: Checkout release source
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.release-meta.outputs.target_sha }}
+          path: target-src
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
@@ -361,10 +365,12 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: target-src -> target
 
       - name: Install web dependencies
         run: bun install --frozen-lockfile
-        working-directory: web
+        working-directory: target-src/web
 
       - name: Package linux amd64 release asset
         env:
@@ -376,6 +382,7 @@ jobs:
           .github/scripts/package_release_asset.sh \
             --platform linux \
             --arch amd64 \
+            --repo-root "$GITHUB_WORKSPACE/target-src" \
             --output-dir "$out_dir"
 
       - name: Upload linux amd64 release artifact
@@ -396,10 +403,14 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Checkout
+      - name: Checkout workflow files
+        uses: actions/checkout@v4
+
+      - name: Checkout release source
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.release-meta.outputs.target_sha }}
+          path: target-src
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
@@ -413,10 +424,12 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: target-src -> target
 
       - name: Install web dependencies
         run: bun install --frozen-lockfile
-        working-directory: web
+        working-directory: target-src/web
 
       - name: Package linux arm64 release asset
         env:
@@ -428,6 +441,7 @@ jobs:
           .github/scripts/package_release_asset.sh \
             --platform linux \
             --arch arm64 \
+            --repo-root "$GITHUB_WORKSPACE/target-src" \
             --output-dir "$out_dir"
 
       - name: Upload linux arm64 release artifact
@@ -448,10 +462,14 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Checkout
+      - name: Checkout workflow files
+        uses: actions/checkout@v4
+
+      - name: Checkout release source
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.release-meta.outputs.target_sha }}
+          path: target-src
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
@@ -465,10 +483,12 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: target-src -> target
 
       - name: Install web dependencies
         run: bun install --frozen-lockfile
-        working-directory: web
+        working-directory: target-src/web
 
       - name: Package darwin amd64 release asset
         env:
@@ -480,6 +500,7 @@ jobs:
           .github/scripts/package_release_asset.sh \
             --platform darwin \
             --arch amd64 \
+            --repo-root "$GITHUB_WORKSPACE/target-src" \
             --output-dir "$out_dir"
 
       - name: Upload darwin amd64 release artifact
@@ -500,10 +521,14 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Checkout
+      - name: Checkout workflow files
+        uses: actions/checkout@v4
+
+      - name: Checkout release source
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.release-meta.outputs.target_sha }}
+          path: target-src
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
@@ -517,10 +542,12 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: target-src -> target
 
       - name: Install web dependencies
         run: bun install --frozen-lockfile
-        working-directory: web
+        working-directory: target-src/web
 
       - name: Package darwin arm64 release asset
         env:
@@ -532,6 +559,7 @@ jobs:
           .github/scripts/package_release_asset.sh \
             --platform darwin \
             --arch arm64 \
+            --repo-root "$GITHUB_WORKSPACE/target-src" \
             --output-dir "$out_dir"
 
       - name: Upload darwin arm64 release artifact
