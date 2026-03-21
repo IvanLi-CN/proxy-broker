@@ -585,7 +585,7 @@ def commits_to_materialize(notes_ref: str, target_sha: str, *, target_only: bool
 
     tagged_commits = tagged_release_commits(target_sha)
     anchor_index = -1
-    for index, commit in enumerate(commits[:-1]):
+    for index, commit in enumerate(commits):
         if commit in tagged_commits:
             anchor_index = index
 
