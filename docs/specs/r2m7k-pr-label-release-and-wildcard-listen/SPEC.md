@@ -1,4 +1,10 @@
-# PR Label Release And Wildcard Listen
+# PR Label Release And Wildcard Listen（#r2m7k）
+
+## 状态
+
+- Status: 已完成
+- Created: 2026-03-18
+- Last: 2026-03-21
 
 ## Goal
 
@@ -14,6 +20,9 @@ deployments.
 - Publish versioned GitHub Releases plus GHCR container images from merged PR
   labels (`type:*` + `channel:*`), with immutable release snapshots frozen on
   `main`.
+- Publish native GitHub Release tarballs for `linux/amd64`, `linux/arm64`,
+  `darwin/amd64`, and `darwin/arm64`, plus a shared SHA256 manifest, while
+  reusing the existing release object/tag on reruns or backfills.
 - Add a configurable session listener bind IP so operators can choose
   `127.0.0.1` for local runs or `0.0.0.0` for wildcard deployments.
 - Ensure container builds can inject the effective release version into the Rust
@@ -38,9 +47,14 @@ deployments.
 - Release publishing creates an idempotent Git tag, a GitHub Release, and GHCR
   image tags that follow the PR label policy, reusing an existing tag when the
   same commit is retried.
+- The GitHub Release also carries exactly four native binary tarballs and one
+  aggregated `proxy-broker-<tag>-sha256.txt` asset, and rerunning the same tag
+  replaces same-name hosted assets instead of failing with upload conflicts.
 - Multi-platform release publishing runs `linux/amd64` and `linux/arm64`
   natively, verifies the merged manifest, and keeps `latest` reserved for the
   newest stable snapshot.
+- A manual `workflow_dispatch(commit_sha)` backfill can attach missing native
+  assets to an existing release without minting a new tag or release record.
 - The Rust service can bind session listeners to a configured IP, and the
   published container defaults to `0.0.0.0` for both HTTP and session listeners.
 - Local and containerized validation demonstrate that wildcard binds do not
@@ -49,10 +63,10 @@ deployments.
 ## Verification
 
 - `cargo test --all-features`
-- `cargo build --release`
 - `cd web && bun run check`
 - `cd web && bun run test`
 - `cd web && bun run build`
+- `APP_EFFECTIVE_VERSION=v0.0.0-ci .github/scripts/package_release_asset.sh --platform linux --arch amd64 --output-dir <tmp>`
 - `bash .github/scripts/test-release-snapshot.sh`
 - Shared testbox smoke: verify wildcard binds with both the native Linux
   release binary and a containerized runtime, load a sample subscription, open
@@ -66,8 +80,16 @@ deployments.
 - Stable releases continue to derive their next base version only from prior
   stable releases, so `channel:rc` snapshots cannot accidentally advance a
   later stable patch/minor/major release.
+- GitHub Releases expose native Linux/macOS binaries and a checksum manifest,
+  and historical releases can be backfilled by rerunning the existing release
+  workflow against the original `main` commit SHA.
 - Container releases publish an externally usable default bind strategy instead
   of a localhost-only deployment trap, with native dual-platform manifest
   publishing instead of a single serial emulated build.
 - Local CLI workflows still retain explicit localhost binds when operators want
   private-only sessions.
+
+## 变更记录（Change log）
+
+- 2026-03-18: 初始规格，冻结 label-driven release、GHCR 发布和 wildcard bind 范围。
+- 2026-03-21: 补充 GitHub Release 原生二进制资产、SHA256 清单与 `workflow_dispatch(commit_sha)` 回填契约。

@@ -300,11 +300,215 @@ jobs:
           path: ${{ runner.temp }}/digests/arm64.digest
           if-no-files-found: error
 
+  binary-linux-amd64:
+    name: Build linux amd64 release binary
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: [release-meta]
+    if: ${{ needs.release-meta.outputs.release_enabled == 'true' }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-meta.outputs.target_sha }}
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.10
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: 1.91.0
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install web dependencies
+        run: bun install --frozen-lockfile
+        working-directory: web
+
+      - name: Package linux amd64 release asset
+        env:
+          APP_EFFECTIVE_VERSION: ${{ needs.release-meta.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          out_dir="$RUNNER_TEMP/release-binary-linux-amd64"
+          .github/scripts/package_release_asset.sh \
+            --platform linux \
+            --arch amd64 \
+            --output-dir "$out_dir"
+
+      - name: Upload linux amd64 release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-binary-linux-amd64
+          path: |
+            ${{ runner.temp }}/release-binary-linux-amd64/*.tar.gz
+            ${{ runner.temp }}/release-binary-linux-amd64/*.sha256
+          if-no-files-found: error
+
+  binary-linux-arm64:
+    name: Build linux arm64 release binary
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    needs: [release-meta]
+    if: ${{ needs.release-meta.outputs.release_enabled == 'true' }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-meta.outputs.target_sha }}
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.10
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: 1.91.0
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install web dependencies
+        run: bun install --frozen-lockfile
+        working-directory: web
+
+      - name: Package linux arm64 release asset
+        env:
+          APP_EFFECTIVE_VERSION: ${{ needs.release-meta.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          out_dir="$RUNNER_TEMP/release-binary-linux-arm64"
+          .github/scripts/package_release_asset.sh \
+            --platform linux \
+            --arch arm64 \
+            --output-dir "$out_dir"
+
+      - name: Upload linux arm64 release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-binary-linux-arm64
+          path: |
+            ${{ runner.temp }}/release-binary-linux-arm64/*.tar.gz
+            ${{ runner.temp }}/release-binary-linux-arm64/*.sha256
+          if-no-files-found: error
+
+  binary-darwin-amd64:
+    name: Build darwin amd64 release binary
+    runs-on: macos-13
+    timeout-minutes: 60
+    needs: [release-meta]
+    if: ${{ needs.release-meta.outputs.release_enabled == 'true' }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-meta.outputs.target_sha }}
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.10
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: 1.91.0
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install web dependencies
+        run: bun install --frozen-lockfile
+        working-directory: web
+
+      - name: Package darwin amd64 release asset
+        env:
+          APP_EFFECTIVE_VERSION: ${{ needs.release-meta.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          out_dir="$RUNNER_TEMP/release-binary-darwin-amd64"
+          .github/scripts/package_release_asset.sh \
+            --platform darwin \
+            --arch amd64 \
+            --output-dir "$out_dir"
+
+      - name: Upload darwin amd64 release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-binary-darwin-amd64
+          path: |
+            ${{ runner.temp }}/release-binary-darwin-amd64/*.tar.gz
+            ${{ runner.temp }}/release-binary-darwin-amd64/*.sha256
+          if-no-files-found: error
+
+  binary-darwin-arm64:
+    name: Build darwin arm64 release binary
+    runs-on: macos-14
+    timeout-minutes: 60
+    needs: [release-meta]
+    if: ${{ needs.release-meta.outputs.release_enabled == 'true' }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-meta.outputs.target_sha }}
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.10
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: 1.91.0
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install web dependencies
+        run: bun install --frozen-lockfile
+        working-directory: web
+
+      - name: Package darwin arm64 release asset
+        env:
+          APP_EFFECTIVE_VERSION: ${{ needs.release-meta.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          out_dir="$RUNNER_TEMP/release-binary-darwin-arm64"
+          .github/scripts/package_release_asset.sh \
+            --platform darwin \
+            --arch arm64 \
+            --output-dir "$out_dir"
+
+      - name: Upload darwin arm64 release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-binary-darwin-arm64
+          path: |
+            ${{ runner.temp }}/release-binary-darwin-arm64/*.tar.gz
+            ${{ runner.temp }}/release-binary-darwin-arm64/*.sha256
+          if-no-files-found: error
+
   merge-manifest:
     name: Merge manifest and publish release
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    needs: [release-meta, docker-amd64, docker-arm64]
+    needs: [release-meta, docker-amd64, docker-arm64, binary-linux-amd64, binary-linux-arm64, binary-darwin-amd64, binary-darwin-arm64]
     if: ${{ needs.release-meta.outputs.release_enabled == 'true' }}
     permissions:
       actions: write
@@ -328,6 +532,30 @@ jobs:
         with:
           name: release-digest-arm64
           path: ${{ runner.temp }}/digests/arm64
+
+      - name: Download linux amd64 release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release-binary-linux-amd64
+          path: ${{ runner.temp }}/release-binaries/linux-amd64
+
+      - name: Download linux arm64 release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release-binary-linux-arm64
+          path: ${{ runner.temp }}/release-binaries/linux-arm64
+
+      - name: Download darwin amd64 release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release-binary-darwin-amd64
+          path: ${{ runner.temp }}/release-binaries/darwin-amd64
+
+      - name: Download darwin arm64 release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release-binary-darwin-arm64
+          path: ${{ runner.temp }}/release-binaries/darwin-arm64
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -433,7 +661,8 @@ jobs:
 
           git push origin "${tag}"
 
-      - name: Create GitHub Release
+      - name: Ensure GitHub Release
+        id: ensure-release
         uses: actions/github-script@v7
         env:
           TARGET_SHA: ${{ needs.release-meta.outputs.target_sha }}
@@ -451,27 +680,137 @@ jobs:
               return
             }
 
+            let release
             try {
-              await github.rest.repos.getReleaseByTag({ owner, repo, tag })
-              core.notice(`GitHub Release already exists for tag ${tag}, skipping.`)
-              return
+              const existing = await github.rest.repos.getReleaseByTag({ owner, repo, tag })
+              release = existing.data
+              core.notice(`GitHub Release already exists for tag ${tag}, reusing ${release.id}.`)
             } catch (error) {
               if (error.status !== 404) {
                 throw error
               }
+
+              const created = await github.rest.repos.createRelease({
+                owner,
+                repo,
+                tag_name: tag,
+                name: tag,
+                target_commitish: targetSha,
+                prerelease,
+                generate_release_notes: true,
+              })
+              release = created.data
+              core.notice(`Created GitHub Release for tag ${tag}.`)
             }
 
-            await github.rest.repos.createRelease({
+            core.setOutput('release_id', String(release.id))
+
+      - name: Assemble binary release assets
+        id: assemble-assets
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.release-meta.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          assets_root="$RUNNER_TEMP/release-binaries"
+          asset_dir="$RUNNER_TEMP/release-assets"
+          manifest_path="$asset_dir/proxy-broker-${RELEASE_TAG}-sha256.txt"
+
+          mkdir -p "$asset_dir"
+
+          mapfile -t tarballs < <(find "$assets_root" -type f -name '*.tar.gz' | sort)
+          mapfile -t checksums < <(find "$assets_root" -type f -name '*.sha256' | sort)
+
+          if [[ "${#tarballs[@]}" -ne 4 ]]; then
+            echo "expected 4 release tarballs, found ${#tarballs[@]}" >&2
+            exit 1
+          fi
+
+          if [[ "${#checksums[@]}" -ne 4 ]]; then
+            echo "expected 4 checksum fragments, found ${#checksums[@]}" >&2
+            exit 1
+          fi
+
+          for tarball in "${tarballs[@]}"; do
+            cp "${tarball}" "$asset_dir/"
+          done
+
+          cat "${checksums[@]}" | sort > "$manifest_path"
+
+          echo "asset_dir=$asset_dir" >> "$GITHUB_OUTPUT"
+          echo "manifest_path=$manifest_path" >> "$GITHUB_OUTPUT"
+
+      - name: Upload binary release assets
+        uses: actions/github-script@v7
+        env:
+          RELEASE_ID: ${{ steps.ensure-release.outputs.release_id }}
+          ASSET_DIR: ${{ steps.assemble-assets.outputs.asset_dir }}
+        with:
+          script: |
+            const fs = require('fs')
+            const path = require('path')
+            const { owner, repo } = context.repo
+            const releaseId = Number(process.env.RELEASE_ID)
+            const assetDir = process.env.ASSET_DIR
+
+            if (!releaseId) {
+              core.setFailed('Missing RELEASE_ID')
+              return
+            }
+
+            if (!assetDir) {
+              core.setFailed('Missing ASSET_DIR')
+              return
+            }
+
+            const assetNames = fs
+              .readdirSync(assetDir)
+              .filter(name => name.endsWith('.tar.gz') || name.endsWith('.txt'))
+              .sort()
+
+            if (assetNames.length !== 5) {
+              core.setFailed(`Expected 5 release assets, found ${assetNames.length}`)
+              return
+            }
+
+            const existingAssets = await github.paginate(github.rest.repos.listReleaseAssets, {
               owner,
               repo,
-              tag_name: tag,
-              name: tag,
-              target_commitish: targetSha,
-              prerelease,
-              generate_release_notes: true,
+              release_id: releaseId,
+              per_page: 100,
             })
 
-            core.notice(`Created GitHub Release for tag ${tag}`)
+            for (const assetName of assetNames) {
+              const existing = existingAssets.find(asset => asset.name === assetName)
+              if (existing) {
+                await github.rest.repos.deleteReleaseAsset({
+                  owner,
+                  repo,
+                  asset_id: existing.id,
+                })
+                core.notice(`Deleted existing release asset ${assetName}`)
+              }
+
+              const assetPath = path.join(assetDir, assetName)
+              const data = fs.readFileSync(assetPath)
+              const contentType = assetName.endsWith('.txt')
+                ? 'text/plain; charset=utf-8'
+                : 'application/gzip'
+
+              await github.rest.repos.uploadReleaseAsset({
+                owner,
+                repo,
+                release_id: releaseId,
+                name: assetName,
+                data,
+                headers: {
+                  'content-type': contentType,
+                  'content-length': data.length,
+                },
+              })
+
+              core.notice(`Uploaded release asset ${assetName}`)
+            }
 
       - name: Mark snapshot as released
         shell: bash

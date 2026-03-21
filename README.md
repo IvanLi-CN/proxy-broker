@@ -174,6 +174,26 @@ cd web
 bun run storybook
 ```
 
+## GitHub release assets
+
+The post-merge `Release` workflow publishes native GitHub Release assets in
+addition to GHCR image tags:
+
+- `proxy-broker-<tag>-linux-amd64.tar.gz`
+- `proxy-broker-<tag>-linux-arm64.tar.gz`
+- `proxy-broker-<tag>-darwin-amd64.tar.gz`
+- `proxy-broker-<tag>-darwin-arm64.tar.gz`
+- `proxy-broker-<tag>-sha256.txt`
+
+Each tarball expands into a single top-level directory that matches the asset
+stem and contains one `proxy-broker` executable built with
+`APP_EFFECTIVE_VERSION=<tag>`.
+
+If an existing GitHub Release is missing those assets, rerun
+`.github/workflows/release.yml` with `workflow_dispatch` and pass the merged
+`main` commit SHA for that release. For `v0.4.0`, use
+`7c60216b58dbdf5dd0eacac411876849299a1ffc`.
+
 ## Health check
 
 ```bash
