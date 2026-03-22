@@ -1006,7 +1006,7 @@ impl BrokerService {
                     Some(serde_json::json!({ "targeted_ips": ips.len() })),
                 )
                 .await?;
-            } else if !self.has_pending_or_running_tasks(profile_id).await? {
+            } else {
                 self.enqueue_task_run(
                     profile_id,
                     TaskRunKind::MetadataRefreshIncremental,
@@ -3791,6 +3791,60 @@ proxies:
             .expect("task detail should succeed");
         assert_eq!(detail.events.len(), 1);
         assert_eq!(detail.events[0].stage, TaskRunStage::Queued);
+    }
+
+    #[tokio::test]
+    async fn load_subscription_queues_post_load_task_even_with_pending_full_refresh() {
+        let profile_id = "p-tasks-with-full-refresh";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
+        let source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: new
+    type: socks5
+    server: 6.6.6.6
+"#,
+        )
+        .await;
+
+        service
+            .enqueue_task_run(
+                profile_id,
+                TaskRunKind::MetadataRefreshFull,
+                TaskRunTrigger::Schedule,
+                TaskRunScope::All,
+            )
+            .await
+            .expect("full refresh queue should succeed");
+
+        service
+            .load_subscription(profile_id, &SubscriptionSource::File(source_path.clone()))
+            .await
+            .expect("load should succeed");
+
+        let _ = tokio::fs::remove_file(&source_path).await;
+
+        let tasks = service
+            .list_tasks(&TaskListQuery {
+                profile_id: Some(profile_id.to_string()),
+                ..TaskListQuery::default()
+            })
+            .await
+            .expect("task list should succeed");
+        assert_eq!(tasks.runs.len(), 2);
+        assert!(
+            tasks
+                .runs
+                .iter()
+                .any(|run| run.kind == TaskRunKind::MetadataRefreshFull)
+        );
+        assert!(tasks.runs.iter().any(|run| {
+            run.kind == TaskRunKind::MetadataRefreshIncremental
+                && run.trigger == TaskRunTrigger::PostLoad
+                && run.status == TaskRunStatus::Queued
+        }));
     }
 
     #[tokio::test]

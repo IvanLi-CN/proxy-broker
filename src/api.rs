@@ -19,7 +19,7 @@ use crate::{
         RefreshRequest, TaskListQuery, TaskRunDetail, TaskRunSummary, TaskStreamEnvelope,
     },
     service::BrokerService,
-    tasks::{TaskBusEvent, matches_task_query},
+    tasks::TaskBusEvent,
     web_ui::spa_fallback,
 };
 
@@ -140,11 +140,7 @@ async fn stream_tasks(
     let snapshot = state.service.list_tasks(&query).await?;
     let service = state.service.clone();
     let stream_query = query.clone();
-    let initial_visible_run_ids = snapshot
-        .runs
-        .iter()
-        .map(|run| run.run_id.clone())
-        .collect::<HashSet<_>>();
+    let initial_visible_run_ids = snapshot_visible_run_ids(&snapshot.runs);
 
     let stream = async_stream::stream! {
         yield Ok(sse_event("snapshot", serde_json::to_value(snapshot.clone())));
@@ -163,39 +159,32 @@ async fn stream_tasks(
                 message = receiver.recv() => {
                     match message {
                         Ok(TaskBusEvent::RunUpsert(run)) => {
-                            if should_stream_run_upsert(&mut visible_run_ids, &stream_query, &run) {
-                                yield Ok(sse_event("run-upsert", serde_json::to_value(run.clone())));
-                                match service.list_tasks(&stream_query).await {
-                                    Ok(response) => {
-                                        yield Ok(sse_event("summary", serde_json::to_value(response.summary)));
+                            match service.list_tasks(&stream_query).await {
+                                Ok(response) => {
+                                    visible_run_ids = snapshot_visible_run_ids(&response.runs);
+                                    let emit_run_upsert = should_stream_run_upsert(&visible_run_ids, &run);
+                                    yield Ok(sse_event("snapshot", serde_json::to_value(response)));
+                                    if emit_run_upsert {
+                                        yield Ok(sse_event("run-upsert", serde_json::to_value(run.clone())));
                                     }
-                                    Err(err) => {
-                                        tracing::warn!(error = %err, "task sse failed to refresh summary");
-                                        break;
-                                    }
+                                }
+                                Err(err) => {
+                                    tracing::warn!(error = %err, "task sse failed to rebuild snapshot after run upsert");
+                                    break;
                                 }
                             }
                         }
                         Ok(TaskBusEvent::RunEvent(event)) => {
-                            match service.get_task_run_summary(&event.run_id).await {
-                                Ok(Some(run)) => {
-                                    if !matches_task_query(&run, &stream_query) {
-                                        continue;
-                                    }
-                                }
-                                Ok(None) => continue,
-                                Err(err) => {
-                                    tracing::warn!(error = %err, "task sse failed to resolve event run");
-                                    break;
-                                }
+                            if !should_stream_run_event(&visible_run_ids, &event.run_id) {
+                                continue;
                             }
                             yield Ok(sse_event("run-event", serde_json::to_value(event.as_public())));
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
                             match service.list_tasks(&stream_query).await {
                                 Ok(response) => {
-                                    yield Ok(sse_event("snapshot", serde_json::to_value(response.clone())));
-                                    yield Ok(sse_event("summary", serde_json::to_value(response.summary)));
+                                    visible_run_ids = snapshot_visible_run_ids(&response.runs);
+                                    yield Ok(sse_event("snapshot", serde_json::to_value(response)));
                                 }
                                 Err(err) => {
                                     tracing::warn!(error = %err, "task sse failed to rebuild snapshot after lag");
@@ -286,21 +275,16 @@ fn sse_event(event_type: &str, data: Result<serde_json::Value, serde_json::Error
         }))
 }
 
-fn should_stream_run_upsert(
-    visible_run_ids: &mut HashSet<String>,
-    query: &TaskListQuery,
-    run: &TaskRunSummary,
-) -> bool {
-    let matches_query = matches_task_query(run, query);
-    let was_visible = visible_run_ids.contains(&run.run_id);
+fn should_stream_run_upsert(visible_run_ids: &HashSet<String>, run: &TaskRunSummary) -> bool {
+    visible_run_ids.contains(&run.run_id)
+}
 
-    if matches_query {
-        visible_run_ids.insert(run.run_id.clone());
-    } else {
-        visible_run_ids.remove(&run.run_id);
-    }
+fn should_stream_run_event(visible_run_ids: &HashSet<String>, run_id: &str) -> bool {
+    visible_run_ids.contains(run_id)
+}
 
-    matches_query || was_visible
+fn snapshot_visible_run_ids(runs: &[TaskRunSummary]) -> HashSet<String> {
+    runs.iter().map(|run| run.run_id.clone()).collect()
 }
 
 async fn extract_ips(
@@ -409,7 +393,10 @@ mod tests {
     use axum::{body::Body, extract::ConnectInfo, http::Request};
     use tower::ServiceExt;
 
-    use super::{AppState, build_router, decode_refresh_request, should_stream_run_upsert};
+    use super::{
+        AppState, build_router, decode_refresh_request, should_stream_run_event,
+        should_stream_run_upsert, snapshot_visible_run_ids,
+    };
     use crate::{
         auth::{AuthConfig, AuthConfigOptions},
         models::{
@@ -593,12 +580,7 @@ mod tests {
     }
 
     #[test]
-    fn run_upsert_streaming_does_not_drop_runs_that_leave_filter() {
-        let query = crate::models::TaskListQuery {
-            status: Some(TaskRunStatus::Running),
-            running_only: true,
-            ..crate::models::TaskListQuery::default()
-        };
+    fn run_upsert_streaming_updates_currently_visible_rows() {
         let run = TaskRunSummary {
             run_id: "run-1".to_string(),
             profile_id: "default".to_string(),
@@ -616,20 +598,14 @@ mod tests {
             error_message: None,
         };
 
-        let mut visible_run_ids = HashSet::from([run.run_id.clone()]);
+        let visible_run_ids = HashSet::from([run.run_id.clone()]);
 
-        assert!(should_stream_run_upsert(&mut visible_run_ids, &query, &run));
-        assert!(visible_run_ids.is_empty());
+        assert!(should_stream_run_upsert(&visible_run_ids, &run));
+        assert!(should_stream_run_event(&visible_run_ids, &run.run_id));
     }
 
     #[test]
     fn run_upsert_streaming_keeps_off_scope_runs_out_of_filtered_feed() {
-        let query = crate::models::TaskListQuery {
-            profile_id: Some("default".to_string()),
-            status: Some(TaskRunStatus::Running),
-            running_only: true,
-            ..crate::models::TaskListQuery::default()
-        };
         let run = TaskRunSummary {
             run_id: "run-2".to_string(),
             profile_id: "other".to_string(),
@@ -647,13 +623,53 @@ mod tests {
             error_message: None,
         };
 
-        let mut visible_run_ids = HashSet::new();
+        let visible_run_ids = HashSet::new();
 
-        assert!(!should_stream_run_upsert(
-            &mut visible_run_ids,
-            &query,
-            &run
-        ));
-        assert!(visible_run_ids.is_empty());
+        assert!(!should_stream_run_upsert(&visible_run_ids, &run));
+        assert!(!should_stream_run_event(&visible_run_ids, &run.run_id));
+    }
+
+    #[test]
+    fn snapshot_visible_run_ids_tracks_rebuilt_snapshot_rows() {
+        let runs = vec![
+            TaskRunSummary {
+                run_id: "run-1".to_string(),
+                profile_id: "default".to_string(),
+                kind: TaskRunKind::SubscriptionSync,
+                trigger: TaskRunTrigger::Schedule,
+                status: TaskRunStatus::Running,
+                stage: TaskRunStage::Probing,
+                progress_current: Some(1),
+                progress_total: Some(2),
+                created_at: 1,
+                started_at: Some(1),
+                finished_at: None,
+                summary_json: None,
+                error_code: None,
+                error_message: None,
+            },
+            TaskRunSummary {
+                run_id: "run-2".to_string(),
+                profile_id: "default".to_string(),
+                kind: TaskRunKind::MetadataRefreshFull,
+                trigger: TaskRunTrigger::Schedule,
+                status: TaskRunStatus::Queued,
+                stage: TaskRunStage::Queued,
+                progress_current: Some(0),
+                progress_total: None,
+                created_at: 2,
+                started_at: None,
+                finished_at: None,
+                summary_json: None,
+                error_code: None,
+                error_message: None,
+            },
+        ];
+
+        let visible_run_ids = snapshot_visible_run_ids(&runs);
+
+        assert_eq!(visible_run_ids.len(), 2);
+        assert!(visible_run_ids.contains("run-1"));
+        assert!(visible_run_ids.contains("run-2"));
     }
 }
