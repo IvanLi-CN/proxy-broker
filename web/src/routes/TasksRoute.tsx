@@ -29,7 +29,6 @@ export function TasksRoute() {
       status,
       trigger,
       running_only: runningOnly,
-      limit: 40,
     }),
     [kind, profileId, runningOnly, scope, status, trigger],
   );

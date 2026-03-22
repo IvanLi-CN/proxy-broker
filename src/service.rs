@@ -502,13 +502,7 @@ impl BrokerService {
             })?;
         let outcome = self
             .load_subscription_internal(&run.profile_id, &config.source)
-            .await;
-
-        let completed_at = now_epoch_sec();
-        self.mark_sync_finished(&run.profile_id, completed_at)
             .await?;
-
-        let outcome = outcome?;
         let targeted_ips = outcome.new_ips.len() as u64;
         run.progress_total = Some(targeted_ips);
         self.update_task_run_and_emit(run).await?;
@@ -530,6 +524,8 @@ impl BrokerService {
         .await?;
 
         if outcome.new_ips.is_empty() {
+            self.mark_sync_finished(&run.profile_id, now_epoch_sec())
+                .await?;
             self.complete_task_run(
                 run,
                 TaskRunStatus::Succeeded,
@@ -558,6 +554,8 @@ impl BrokerService {
                     && queued_run.kind == TaskRunKind::MetadataRefreshFull
             })
         {
+            self.mark_sync_finished(&run.profile_id, now_epoch_sec())
+                .await?;
             self.complete_task_run(
                 run,
                 TaskRunStatus::Succeeded,
@@ -588,6 +586,8 @@ impl BrokerService {
             )
             .await?;
 
+        self.mark_sync_finished(&run.profile_id, now_epoch_sec())
+            .await?;
         self.complete_task_run(
             run,
             TaskRunStatus::Succeeded,
@@ -661,10 +661,9 @@ impl BrokerService {
         let refresh = self
             .refresh_metadata_internal(&run.profile_id, true, None, Some(&run.run_id))
             .await;
-        let completed_at = now_epoch_sec();
-        self.mark_full_refresh_finished(&run.profile_id, completed_at)
-            .await?;
         let refresh = refresh?;
+        self.mark_full_refresh_finished(&run.profile_id, now_epoch_sec())
+            .await?;
 
         let targeted_ips = self
             .store
@@ -3996,6 +3995,138 @@ proxies:
             run.kind == TaskRunKind::MetadataRefreshIncremental
                 && run.trigger == TaskRunTrigger::PostLoad
         }));
+    }
+
+    #[tokio::test]
+    async fn failed_full_refresh_keeps_existing_due_at_for_retry() {
+        let profile_id = "p-tasks-full-refresh-retry";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::with_failures(true, false));
+        let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
+        let source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: first
+    type: socks5
+    server: 4.4.4.4
+"#,
+        )
+        .await;
+        let now = now_epoch_sec();
+
+        service
+            .load_subscription(profile_id, &SubscriptionSource::File(source_path.clone()))
+            .await
+            .expect("load should succeed");
+
+        let mut config = store
+            .get_profile_sync_config(profile_id)
+            .await
+            .expect("sync config query should succeed")
+            .expect("sync config should exist");
+        config.last_full_refresh_due_at = Some(now - 1);
+        store
+            .upsert_profile_sync_config(&config)
+            .await
+            .expect("sync config update should succeed");
+
+        let mut run = service
+            .enqueue_task_run(
+                profile_id,
+                TaskRunKind::MetadataRefreshFull,
+                TaskRunTrigger::Schedule,
+                TaskRunScope::All,
+            )
+            .await
+            .expect("full refresh queue should succeed");
+
+        let err = service
+            .execute_full_refresh_task(&mut run)
+            .await
+            .expect_err("full refresh should fail");
+        assert!(matches!(err, BrokerError::MihomoUnavailable(_)));
+
+        let _ = tokio::fs::remove_file(&source_path).await;
+
+        let config = store
+            .get_profile_sync_config(profile_id)
+            .await
+            .expect("sync config query should succeed")
+            .expect("sync config should persist");
+        assert_eq!(config.last_full_refresh_due_at, Some(now - 1));
+    }
+
+    #[tokio::test]
+    async fn failed_subscription_sync_keeps_existing_due_at_for_retry() {
+        let profile_id = "p-tasks-sync-retry";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::with_failures(true, false));
+        let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
+        let source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: first
+    type: socks5
+    server: 4.4.4.4
+"#,
+        )
+        .await;
+        let now = now_epoch_sec();
+
+        service
+            .load_subscription(profile_id, &SubscriptionSource::File(source_path.clone()))
+            .await
+            .expect("initial load should succeed");
+        tokio::fs::write(
+            &source_path,
+            r#"
+proxies:
+  - name: first
+    type: socks5
+    server: 4.4.4.4
+  - name: second
+    type: socks5
+    server: 5.5.5.5
+"#,
+        )
+        .await
+        .expect("subscription rewrite should succeed");
+
+        let mut config = store
+            .get_profile_sync_config(profile_id)
+            .await
+            .expect("sync config query should succeed")
+            .expect("sync config should exist");
+        config.last_sync_due_at = Some(now - 1);
+        store
+            .upsert_profile_sync_config(&config)
+            .await
+            .expect("sync config update should succeed");
+
+        let mut run = service
+            .enqueue_task_run(
+                profile_id,
+                TaskRunKind::SubscriptionSync,
+                TaskRunTrigger::Schedule,
+                TaskRunScope::All,
+            )
+            .await
+            .expect("subscription sync queue should succeed");
+
+        let err = service
+            .execute_subscription_sync_task(&mut run)
+            .await
+            .expect_err("subscription sync should fail");
+        assert!(matches!(err, BrokerError::MihomoUnavailable(_)));
+
+        let _ = tokio::fs::remove_file(&source_path).await;
+
+        let config = store
+            .get_profile_sync_config(profile_id)
+            .await
+            .expect("sync config query should succeed")
+            .expect("sync config should persist");
+        assert_eq!(config.last_sync_due_at, Some(now - 1));
     }
 
     #[tokio::test]
