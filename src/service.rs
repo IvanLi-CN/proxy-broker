@@ -883,8 +883,12 @@ impl BrokerService {
         config.enabled = true;
         config.sync_every_sec = DEFAULT_AUTO_SYNC_EVERY_SEC;
         config.full_refresh_every_sec = DEFAULT_AUTO_FULL_REFRESH_EVERY_SEC;
-        config.last_sync_due_at = Some(now + DEFAULT_AUTO_SYNC_EVERY_SEC as i64);
-        config.last_full_refresh_due_at = Some(now + DEFAULT_AUTO_FULL_REFRESH_EVERY_SEC as i64);
+        config
+            .last_sync_due_at
+            .get_or_insert(now + DEFAULT_AUTO_SYNC_EVERY_SEC as i64);
+        config
+            .last_full_refresh_due_at
+            .get_or_insert(now + DEFAULT_AUTO_FULL_REFRESH_EVERY_SEC as i64);
         config.updated_at = now;
         self.store
             .upsert_profile_sync_config(&config)
@@ -3845,6 +3849,59 @@ proxies:
                 && run.trigger == TaskRunTrigger::PostLoad
                 && run.status == TaskRunStatus::Queued
         }));
+    }
+
+    #[tokio::test]
+    async fn load_subscription_preserves_existing_auto_refresh_due_times() {
+        let profile_id = "p-tasks-preserve-due-at";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
+        let source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: new
+    type: socks5
+    server: 7.7.7.7
+"#,
+        )
+        .await;
+        let now = now_epoch_sec();
+        let expected_sync_due_at = now + 123;
+        let expected_full_due_at = now + 456;
+
+        store
+            .upsert_profile_sync_config(&ProfileSyncConfig {
+                profile_id: profile_id.to_string(),
+                source: SubscriptionSource::Url("https://example.com/subscription".to_string()),
+                enabled: true,
+                sync_every_sec: DEFAULT_AUTO_SYNC_EVERY_SEC,
+                full_refresh_every_sec: DEFAULT_AUTO_FULL_REFRESH_EVERY_SEC,
+                last_sync_due_at: Some(expected_sync_due_at),
+                last_sync_started_at: None,
+                last_sync_finished_at: None,
+                last_full_refresh_due_at: Some(expected_full_due_at),
+                last_full_refresh_started_at: None,
+                last_full_refresh_finished_at: None,
+                updated_at: now,
+            })
+            .await
+            .expect("sync config seed should succeed");
+
+        service
+            .load_subscription(profile_id, &SubscriptionSource::File(source_path.clone()))
+            .await
+            .expect("load should succeed");
+
+        let _ = tokio::fs::remove_file(&source_path).await;
+
+        let config = store
+            .get_profile_sync_config(profile_id)
+            .await
+            .expect("sync config query should succeed")
+            .expect("sync config should persist");
+        assert_eq!(config.last_sync_due_at, Some(expected_sync_due_at));
+        assert_eq!(config.last_full_refresh_due_at, Some(expected_full_due_at));
     }
 
     #[tokio::test]

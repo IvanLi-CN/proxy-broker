@@ -11,7 +11,7 @@ const getErrorMessage = (error: unknown) =>
   error instanceof ApiError ? `${error.code}: ${error.message}` : "Unexpected request error";
 
 export function TasksRoute() {
-  const { profileId, authMe } = useOutletContext<RootOutletContext>();
+  const { profileId, authMe, currentUser } = useOutletContext<RootOutletContext>();
   const [scope, setScope] = useState<"current" | "all">("current");
   const [kind, setKind] = useState<TaskRunKind | undefined>(undefined);
   const [status, setStatus] = useState<TaskRunStatus | undefined>(undefined);
@@ -19,7 +19,7 @@ export function TasksRoute() {
   const [runningOnly, setRunningOnly] = useState(false);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const canAccess = Boolean(authMe?.is_admin);
-  const accessDenied = authMe ? !authMe.is_admin : false;
+  const accessDenied = currentUser.status !== "loading" && !canAccess;
 
   const taskQuery = useMemo(
     () => ({
