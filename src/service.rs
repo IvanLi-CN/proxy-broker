@@ -40,7 +40,7 @@ use crate::{
     runtime::MihomoRuntime,
     store::BrokerStore,
     subscription,
-    tasks::{TaskBusEvent, build_task_summary, to_detail},
+    tasks::{TaskBusEvent, build_task_list_response, to_detail},
 };
 
 const DEFAULT_AUTO_SYNC_EVERY_SEC: u64 = 600;
@@ -2148,6 +2148,14 @@ impl BrokerService {
     }
 
     pub async fn list_tasks(&self, query: &TaskListQuery) -> BrokerResult<TaskListResponse> {
+        let all_summaries = self.list_task_run_summaries(query).await?;
+        Ok(build_task_list_response(query, all_summaries))
+    }
+
+    pub async fn list_task_run_summaries(
+        &self,
+        query: &TaskListQuery,
+    ) -> BrokerResult<Vec<TaskRunSummary>> {
         let mut full_query = query.clone();
         full_query.limit = None;
         full_query.cursor = None;
@@ -2157,42 +2165,10 @@ impl BrokerService {
             .list_task_runs(&full_query)
             .await
             .map_err(BrokerError::from)?;
-        let all_summaries = all_runs
+        Ok(all_runs
             .into_iter()
             .map(|run| run.as_summary())
-            .collect::<Vec<_>>();
-        let summary = build_task_summary(&all_summaries);
-
-        let start_index = query
-            .cursor
-            .as_ref()
-            .and_then(|cursor| {
-                all_summaries
-                    .iter()
-                    .position(|run| &run.run_id == cursor)
-                    .map(|index| index + 1)
-            })
-            .unwrap_or(0);
-        let limit = query
-            .limit
-            .unwrap_or(all_summaries.len().saturating_sub(start_index));
-        let runs = all_summaries
-            .iter()
-            .skip(start_index)
-            .take(limit)
-            .cloned()
-            .collect::<Vec<_>>();
-        let next_cursor = if start_index + runs.len() < all_summaries.len() {
-            runs.last().map(|run| run.run_id.clone())
-        } else {
-            None
-        };
-
-        Ok(TaskListResponse {
-            summary,
-            runs,
-            next_cursor,
-        })
+            .collect::<Vec<_>>())
     }
 
     pub async fn get_task_run_detail(&self, run_id: &str) -> BrokerResult<TaskRunDetail> {

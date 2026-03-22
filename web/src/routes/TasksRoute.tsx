@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { useTaskEvents } from "@/hooks/use-task-events";
 import { ApiError, api } from "@/lib/api";
@@ -18,6 +18,7 @@ export function TasksRoute() {
   const [trigger, setTrigger] = useState<TaskRunTrigger | undefined>(undefined);
   const [runningOnly, setRunningOnly] = useState(false);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const hasMountedTaskQuery = useRef(false);
   const canAccess = Boolean(authMe?.is_admin);
   const accessDenied = currentUser.status !== "loading" && !canAccess;
 
@@ -60,10 +61,12 @@ export function TasksRoute() {
   }, [selectedRunId, tasksQuery.data?.runs]);
 
   useEffect(() => {
-    if (scope === "current") {
-      setSelectedRunId(null);
+    if (!hasMountedTaskQuery.current) {
+      hasMountedTaskQuery.current = true;
+      return;
     }
-  }, [scope]);
+    setSelectedRunId(null);
+  }, [taskQuery]);
 
   return (
     <TasksPage

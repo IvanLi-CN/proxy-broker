@@ -353,7 +353,7 @@ impl TaskRunEventRecord {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskSummary {
     pub total_runs: usize,
     pub queued_runs: usize,

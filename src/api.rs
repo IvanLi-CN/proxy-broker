@@ -19,7 +19,7 @@ use crate::{
         RefreshRequest, TaskListQuery, TaskRunDetail, TaskRunSummary, TaskStreamEnvelope,
     },
     service::BrokerService,
-    tasks::TaskBusEvent,
+    tasks::{TaskBusEvent, build_task_list_response, matches_task_query},
     web_ui::spa_fallback,
 };
 
@@ -137,14 +137,17 @@ async fn stream_tasks(
     auth.require_admin()?;
 
     let mut receiver = state.service.subscribe_task_events();
-    let snapshot = state.service.list_tasks(&query).await?;
-    let service = state.service.clone();
     let stream_query = query.clone();
+    let service = state.service.clone();
+    let mut matching_runs = service.list_task_run_summaries(&query).await?;
+    let snapshot = build_task_list_response(&query, matching_runs.clone());
     let initial_visible_run_ids = snapshot_visible_run_ids(&snapshot.runs);
 
     let stream = async_stream::stream! {
         yield Ok(sse_event("snapshot", serde_json::to_value(snapshot.clone())));
         let mut visible_run_ids = initial_visible_run_ids;
+        let mut summary = snapshot.summary.clone();
+        let mut next_cursor = snapshot.next_cursor.clone();
 
         let mut heartbeat = tokio::time::interval(Duration::from_secs(15));
         heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -159,18 +162,27 @@ async fn stream_tasks(
                 message = receiver.recv() => {
                     match message {
                         Ok(TaskBusEvent::RunUpsert(run)) => {
-                            match service.list_tasks(&stream_query).await {
-                                Ok(response) => {
-                                    visible_run_ids = snapshot_visible_run_ids(&response.runs);
-                                    let emit_run_upsert = should_stream_run_upsert(&visible_run_ids, &run);
-                                    yield Ok(sse_event("snapshot", serde_json::to_value(response)));
-                                    if emit_run_upsert {
-                                        yield Ok(sse_event("run-upsert", serde_json::to_value(run.clone())));
-                                    }
+                            upsert_stream_matching_runs(&mut matching_runs, &stream_query, &run);
+                            let response = build_task_list_response(&stream_query, matching_runs.clone());
+                            let next_visible_run_ids = snapshot_visible_run_ids(&response.runs);
+                            let snapshot_changed =
+                                next_visible_run_ids != visible_run_ids || response.next_cursor != next_cursor;
+                            let emit_run_upsert = should_stream_run_upsert(&next_visible_run_ids, &run);
+                            let emit_summary = response.summary != summary;
+
+                            visible_run_ids = next_visible_run_ids;
+                            next_cursor = response.next_cursor.clone();
+
+                            if snapshot_changed {
+                                summary = response.summary.clone();
+                                yield Ok(sse_event("snapshot", serde_json::to_value(response)));
+                            } else {
+                                if emit_summary {
+                                    summary = response.summary.clone();
+                                    yield Ok(sse_event("summary", serde_json::to_value(summary.clone())));
                                 }
-                                Err(err) => {
-                                    tracing::warn!(error = %err, "task sse failed to rebuild snapshot after run upsert");
-                                    break;
+                                if emit_run_upsert {
+                                    yield Ok(sse_event("run-upsert", serde_json::to_value(run.clone())));
                                 }
                             }
                         }
@@ -181,10 +193,14 @@ async fn stream_tasks(
                             yield Ok(sse_event("run-event", serde_json::to_value(event.as_public())));
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                            match service.list_tasks(&stream_query).await {
+                            match service.list_task_run_summaries(&stream_query).await {
                                 Ok(response) => {
-                                    visible_run_ids = snapshot_visible_run_ids(&response.runs);
-                                    yield Ok(sse_event("snapshot", serde_json::to_value(response)));
+                                    matching_runs = response;
+                                    let snapshot = build_task_list_response(&stream_query, matching_runs.clone());
+                                    visible_run_ids = snapshot_visible_run_ids(&snapshot.runs);
+                                    summary = snapshot.summary.clone();
+                                    next_cursor = snapshot.next_cursor.clone();
+                                    yield Ok(sse_event("snapshot", serde_json::to_value(snapshot)));
                                 }
                                 Err(err) => {
                                     tracing::warn!(error = %err, "task sse failed to rebuild snapshot after lag");
@@ -285,6 +301,17 @@ fn should_stream_run_event(visible_run_ids: &HashSet<String>, run_id: &str) -> b
 
 fn snapshot_visible_run_ids(runs: &[TaskRunSummary]) -> HashSet<String> {
     runs.iter().map(|run| run.run_id.clone()).collect()
+}
+
+fn upsert_stream_matching_runs(
+    matching_runs: &mut Vec<TaskRunSummary>,
+    query: &TaskListQuery,
+    run: &TaskRunSummary,
+) {
+    matching_runs.retain(|item| item.run_id != run.run_id);
+    if matches_task_query(run, query) {
+        matching_runs.push(run.clone());
+    }
 }
 
 async fn extract_ips(
@@ -395,13 +422,13 @@ mod tests {
 
     use super::{
         AppState, build_router, decode_refresh_request, should_stream_run_event,
-        should_stream_run_upsert, snapshot_visible_run_ids,
+        should_stream_run_upsert, snapshot_visible_run_ids, upsert_stream_matching_runs,
     };
     use crate::{
         auth::{AuthConfig, AuthConfigOptions},
         models::{
-            ProfileSyncConfig, SubscriptionSource, TaskRunKind, TaskRunScope, TaskRunStage,
-            TaskRunStatus, TaskRunSummary, TaskRunTrigger, now_epoch_sec,
+            ProfileSyncConfig, SubscriptionSource, TaskListQuery, TaskRunKind, TaskRunScope,
+            TaskRunStage, TaskRunStatus, TaskRunSummary, TaskRunTrigger, now_epoch_sec,
         },
         runtime::MihomoRuntime,
         service::{BrokerService, BrokerServiceOptions},
@@ -671,5 +698,74 @@ mod tests {
         assert_eq!(visible_run_ids.len(), 2);
         assert!(visible_run_ids.contains("run-1"));
         assert!(visible_run_ids.contains("run-2"));
+    }
+
+    #[test]
+    fn upsert_stream_matching_runs_replaces_visible_run_without_requery() {
+        let query = TaskListQuery {
+            profile_id: Some("default".to_string()),
+            ..TaskListQuery::default()
+        };
+        let mut matching_runs = vec![TaskRunSummary {
+            run_id: "run-1".to_string(),
+            profile_id: "default".to_string(),
+            kind: TaskRunKind::SubscriptionSync,
+            trigger: TaskRunTrigger::Schedule,
+            status: TaskRunStatus::Running,
+            stage: TaskRunStage::Probing,
+            progress_current: Some(1),
+            progress_total: Some(2),
+            created_at: 1,
+            started_at: Some(1),
+            finished_at: None,
+            summary_json: None,
+            error_code: None,
+            error_message: None,
+        }];
+
+        let updated_run = TaskRunSummary {
+            status: TaskRunStatus::Succeeded,
+            stage: TaskRunStage::Completed,
+            finished_at: Some(2),
+            ..matching_runs[0].clone()
+        };
+        upsert_stream_matching_runs(&mut matching_runs, &query, &updated_run);
+
+        assert_eq!(matching_runs.len(), 1);
+        assert_eq!(matching_runs[0].status, TaskRunStatus::Succeeded);
+    }
+
+    #[test]
+    fn upsert_stream_matching_runs_drops_runs_that_leave_the_filter() {
+        let query = TaskListQuery {
+            running_only: true,
+            ..TaskListQuery::default()
+        };
+        let mut matching_runs = vec![TaskRunSummary {
+            run_id: "run-1".to_string(),
+            profile_id: "default".to_string(),
+            kind: TaskRunKind::SubscriptionSync,
+            trigger: TaskRunTrigger::Schedule,
+            status: TaskRunStatus::Running,
+            stage: TaskRunStage::Probing,
+            progress_current: Some(1),
+            progress_total: Some(2),
+            created_at: 1,
+            started_at: Some(1),
+            finished_at: None,
+            summary_json: None,
+            error_code: None,
+            error_message: None,
+        }];
+
+        let updated_run = TaskRunSummary {
+            status: TaskRunStatus::Succeeded,
+            stage: TaskRunStage::Completed,
+            finished_at: Some(2),
+            ..matching_runs[0].clone()
+        };
+        upsert_stream_matching_runs(&mut matching_runs, &query, &updated_run);
+
+        assert!(matching_runs.is_empty());
     }
 }

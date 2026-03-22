@@ -1,5 +1,6 @@
 use crate::models::{
-    TaskListQuery, TaskRunDetail, TaskRunEventRecord, TaskRunStatus, TaskRunSummary, TaskSummary,
+    TaskListQuery, TaskListResponse, TaskRunDetail, TaskRunEventRecord, TaskRunStatus,
+    TaskRunSummary, TaskSummary,
 };
 
 #[derive(Debug, Clone)]
@@ -56,6 +57,54 @@ pub fn build_task_summary(runs: &[TaskRunSummary]) -> TaskSummary {
         );
     }
     summary
+}
+
+pub fn sort_task_runs(runs: &mut [TaskRunSummary]) {
+    runs.sort_by(|left, right| {
+        right
+            .created_at
+            .cmp(&left.created_at)
+            .then_with(|| right.run_id.cmp(&left.run_id))
+    });
+}
+
+pub fn build_task_list_response(
+    query: &TaskListQuery,
+    mut all_summaries: Vec<TaskRunSummary>,
+) -> TaskListResponse {
+    sort_task_runs(&mut all_summaries);
+    let summary = build_task_summary(&all_summaries);
+
+    let start_index = query
+        .cursor
+        .as_ref()
+        .and_then(|cursor| {
+            all_summaries
+                .iter()
+                .position(|run| &run.run_id == cursor)
+                .map(|index| index + 1)
+        })
+        .unwrap_or(0);
+    let limit = query
+        .limit
+        .unwrap_or(all_summaries.len().saturating_sub(start_index));
+    let runs = all_summaries
+        .iter()
+        .skip(start_index)
+        .take(limit)
+        .cloned()
+        .collect::<Vec<_>>();
+    let next_cursor = if start_index + runs.len() < all_summaries.len() {
+        runs.last().map(|run| run.run_id.clone())
+    } else {
+        None
+    };
+
+    TaskListResponse {
+        summary,
+        runs,
+        next_cursor,
+    }
 }
 
 pub fn to_detail(run: TaskRunSummary, events: Vec<TaskRunEventRecord>) -> TaskRunDetail {
@@ -115,5 +164,42 @@ mod tests {
             ..TaskListQuery::default()
         };
         assert!(!matches_task_query(&run, &query));
+    }
+
+    #[test]
+    fn build_task_list_response_sorts_and_paginates_runs() {
+        let query = TaskListQuery {
+            limit: Some(1),
+            ..TaskListQuery::default()
+        };
+        let response = build_task_list_response(
+            &query,
+            vec![
+                TaskRunSummary {
+                    run_id: "run-1".to_string(),
+                    created_at: 1,
+                    ..sample_run(
+                        "default",
+                        TaskRunKind::SubscriptionSync,
+                        TaskRunStatus::Queued,
+                    )
+                },
+                TaskRunSummary {
+                    run_id: "run-2".to_string(),
+                    created_at: 2,
+                    ..sample_run(
+                        "default",
+                        TaskRunKind::SubscriptionSync,
+                        TaskRunStatus::Running,
+                    )
+                },
+            ],
+        );
+
+        assert_eq!(response.runs.len(), 1);
+        assert_eq!(response.runs[0].run_id, "run-2");
+        assert_eq!(response.next_cursor.as_deref(), Some("run-2"));
+        assert_eq!(response.summary.total_runs, 2);
+        assert_eq!(response.summary.running_runs, 1);
     }
 }
