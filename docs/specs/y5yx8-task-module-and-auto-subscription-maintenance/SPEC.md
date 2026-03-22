@@ -2,7 +2,7 @@
 
 ## 状态
 
-- Status: 待实现
+- Status: 已完成
 - Created: 2026-03-22
 - Last: 2026-03-22
 
@@ -203,10 +203,10 @@
 ## 实现里程碑（Milestones / Delivery checklist）
 
 - [x] M1: 新 spec、contracts 与全局文档索引完成更新。
-- [ ] M2: Rust models/store/service/scheduler 完成任务持久化与自动调度。
-- [ ] M3: HTTP + SSE 任务接口完成。
-- [ ] M4: Web `/tasks` 监控页面与实时集成完成。
-- [ ] M5: Stories、测试与验证全部通过。
+- [x] M2: Rust models/store/service/scheduler 完成任务持久化与自动调度。
+- [x] M3: HTTP + SSE 任务接口完成。
+- [x] M4: Web `/tasks` 监控页面与实时集成完成。
+- [x] M5: Stories、测试与验证全部通过。
 
 ## 方案概述（Approach, high-level）
 
@@ -218,11 +218,12 @@
 
 - 风险：后台调度与手动 `load/refresh` 会共享 profile lock，若任务阶段过粗，可能放大单 profile 等待时间。
 - 风险：`SSE` 需要处理 snapshot + delta 一致性，前后端 contract 必须稳定。
-- 假设（需主人确认）：自动增量元数据刷新的判定单位是“新增 IP”，而不是“新增 proxy name”。
+- 假设：自动增量元数据刷新的判定单位按“新增 IP”落地，而不是“新增 proxy name”。
 
 ## 变更记录（Change log）
 
 - 2026-03-22: 初始规格，冻结任务模块、自动订阅维护与 SSE 方案。
+- 2026-03-22: 实现完成，补齐任务中心视觉证据并将规格状态同步为已完成。
 
 ## 参考（References）
 
