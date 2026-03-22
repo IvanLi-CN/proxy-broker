@@ -1,3 +1,4 @@
+import { buildTaskSearchParams } from "@/lib/tasks";
 import type {
   AuthMeResponse,
   CreateApiKeyRequest,
@@ -19,6 +20,9 @@ import type {
   OpenSessionResponse,
   RefreshRequest,
   RefreshResponse,
+  TaskListQuery,
+  TaskListResponse,
+  TaskRunDetail,
 } from "@/lib/types";
 
 class ApiError extends Error {
@@ -67,6 +71,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 const profilePath = (profileId: string, suffix: string) =>
   `/api/v1/profiles/${encodeURIComponent(profileId)}${suffix}`;
 
+const withSearch = (path: string, query?: TaskListQuery) => {
+  if (!query) {
+    return path;
+  }
+  const params = buildTaskSearchParams(query);
+  const suffix = params.toString();
+  return suffix ? `${path}?${suffix}` : path;
+};
+
 export { ApiError };
 
 export const api = {
@@ -78,6 +91,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  listTasks: (query?: TaskListQuery) =>
+    request<TaskListResponse>(withSearch("/api/v1/tasks", query)),
+  getTaskRunDetail: (runId: string) =>
+    request<TaskRunDetail>(`/api/v1/tasks/${encodeURIComponent(runId)}`),
+  getTaskEventsUrl: (query?: TaskListQuery) => withSearch("/api/v1/tasks/events", query),
   listSessions: (profileId: string) =>
     request<ListSessionsResponse>(profilePath(profileId, "/sessions")),
   loadSubscription: (profileId: string, payload: LoadSubscriptionRequest) =>

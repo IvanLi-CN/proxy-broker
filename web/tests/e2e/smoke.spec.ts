@@ -2,6 +2,96 @@ import { expect, test } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
   let profiles = ["default", "edge-jp"];
+  const taskList = {
+    summary: {
+      total_runs: 3,
+      queued_runs: 1,
+      running_runs: 1,
+      failed_runs: 0,
+      succeeded_runs: 1,
+      skipped_runs: 0,
+      last_run_at: 1741748520,
+    },
+    runs: [
+      {
+        run_id: "run_live_sync",
+        profile_id: "default",
+        kind: "subscription_sync",
+        trigger: "schedule",
+        status: "running",
+        stage: "probing",
+        progress_current: 8,
+        progress_total: 12,
+        created_at: 1741748520,
+        started_at: 1741748510,
+        finished_at: null,
+        summary_json: null,
+        error_code: null,
+        error_message: null,
+      },
+      {
+        run_id: "run_post_load",
+        profile_id: "default",
+        kind: "metadata_refresh_incremental",
+        trigger: "post_load",
+        status: "queued",
+        stage: "queued",
+        progress_current: 0,
+        progress_total: 6,
+        created_at: 1741748500,
+        started_at: null,
+        finished_at: null,
+        summary_json: null,
+        error_code: null,
+        error_message: null,
+      },
+      {
+        run_id: "run_full_ok",
+        profile_id: "edge-jp",
+        kind: "metadata_refresh_full",
+        trigger: "schedule",
+        status: "succeeded",
+        stage: "completed",
+        progress_current: 32,
+        progress_total: 32,
+        created_at: 1741748460,
+        started_at: 1741748430,
+        finished_at: 1741748460,
+        summary_json: {
+          targeted_ips: 32,
+          probed_ips: 32,
+          geo_updated: 28,
+          skipped_cached: 0,
+        },
+        error_code: null,
+        error_message: null,
+      },
+    ],
+    next_cursor: null,
+  };
+  const taskDetail = {
+    run: taskList.runs[0],
+    events: [
+      {
+        event_id: "evt_1",
+        run_id: "run_live_sync",
+        at: 1741748511,
+        level: "info",
+        stage: "loading_subscription",
+        message: "Refreshing subscription feed for profile.",
+        payload_json: null,
+      },
+      {
+        event_id: "evt_2",
+        run_id: "run_live_sync",
+        at: 1741748516,
+        level: "info",
+        stage: "probing",
+        message: "Refreshing probe metadata.",
+        payload_json: { targeted_ips: 12 },
+      },
+    ],
+  };
   const sessionsByProfile: Record<
     string,
     Array<{
@@ -37,6 +127,21 @@ test.beforeEach(async ({ page }) => {
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({ status: "ok" }),
+    });
+  });
+
+  await page.route("**/api/v1/auth/me", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        authenticated: true,
+        principal_type: "development",
+        subject: "dev-admin",
+        email: "dev@example.com",
+        groups: ["proxy-broker-admins"],
+        is_admin: true,
+      }),
     });
   });
 
@@ -89,6 +194,42 @@ test.beforeEach(async ({ page }) => {
     await route.fallback();
   });
 
+  await page.route("**/api/v1/tasks/events*", async (route) => {
+    const snapshotEnvelope = JSON.stringify({
+      type: "snapshot",
+      data: taskList,
+    });
+    const summaryEnvelope = JSON.stringify({
+      type: "summary",
+      data: taskList.summary,
+    });
+    await route.fulfill({
+      status: 200,
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      },
+      body: `event: snapshot\ndata: ${snapshotEnvelope}\n\nevent: summary\ndata: ${summaryEnvelope}\n\n`,
+    });
+  });
+
+  await page.route("**/api/v1/tasks/*", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(taskDetail),
+    });
+  });
+
+  await page.route("**/api/v1/tasks*", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(taskList),
+    });
+  });
+
   await page.route("**/api/v1/profiles/*/subscriptions/load", async (route) => {
     await route.fulfill({
       status: 200,
@@ -99,6 +240,45 @@ test.beforeEach(async ({ page }) => {
         warnings: ["JP-Relay-02 reused 1 cached IP"],
       }),
     });
+  });
+
+  await page.route("**/api/v1/profiles/*/api-keys*", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ api_keys: [] }),
+      });
+      return;
+    }
+
+    if (route.request().method() === "POST") {
+      await route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: JSON.stringify({
+          api_key: {
+            key_id: "key_1",
+            profile_id: extractProfileId(route.request().url()),
+            name: "ops",
+            prefix: "pbk_mock",
+            created_by: "dev-admin",
+            created_at: 1741748460,
+            last_used_at: null,
+            revoked_at: null,
+          },
+          secret: "pbk_mock_secret",
+        }),
+      });
+      return;
+    }
+
+    if (route.request().method() === "DELETE") {
+      await route.fulfill({ status: 204, body: "" });
+      return;
+    }
+
+    await route.fallback();
   });
 
   await page.route("**/api/v1/profiles/*/refresh", async (route) => {
@@ -233,6 +413,11 @@ test("operator can drive the main workflows", async ({ page }) => {
   await expect(
     page.getByText("Probed 26 IPs, updated 12 geo records, skipped 14 cached entries."),
   ).toBeVisible();
+
+  await page.getByRole("link", { name: /Tasks/i }).click();
+  await expect(page.getByText("Task history and current activity")).toBeVisible();
+  await expect(page.getByRole("table").getByText("Subscription sync")).toBeVisible();
+  await expect(page.getByText("Refreshing probe metadata.")).toBeVisible();
 
   await page.getByRole("link", { name: /IP Extract/i }).click();
   await page.getByRole("button", { name: /extract ips/i }).click();

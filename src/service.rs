@@ -4,7 +4,10 @@ use std::{
     net::{IpAddr, Ipv4Addr},
     path::PathBuf,
     str::FromStr,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 
@@ -12,7 +15,7 @@ use anyhow::{Context, anyhow};
 use futures_util::{StreamExt, TryStreamExt, stream};
 use maxminddb::{Reader, geoip2};
 use serde::Deserialize;
-use tokio::sync::Mutex as TokioMutex;
+use tokio::sync::{Mutex as TokioMutex, broadcast};
 
 use crate::{
     auth::{Principal, constant_time_eq, hash_secret, issue_api_key, parse_api_key_secret},
@@ -27,13 +30,21 @@ use crate::{
         CreateApiKeyRequest, CreateApiKeyResponse, CreateProfileResponse, ExtractIpItem,
         ExtractIpRequest, ExtractIpResponse, IpRecord, ListApiKeysResponse, ListProfilesResponse,
         ListSessionsResponse, LoadSubscriptionResponse, OpenBatchRequest, OpenBatchResponse,
-        OpenSessionRequest, OpenSessionResponse, ProbeRecord, ProxyNode, RefreshRequest,
-        RefreshResponse, SessionRecord, now_epoch_sec,
+        OpenSessionRequest, OpenSessionResponse, ProbeRecord, ProfileSyncConfig, ProxyNode,
+        RefreshRequest, RefreshResponse, SessionRecord, SubscriptionSource, TaskEventLevel,
+        TaskListQuery, TaskListResponse, TaskRunDetail, TaskRunEventRecord, TaskRunKind,
+        TaskRunRecord, TaskRunScope, TaskRunStage, TaskRunStatus, TaskRunTrigger, now_epoch_sec,
     },
     runtime::MihomoRuntime,
     store::BrokerStore,
     subscription,
+    tasks::{TaskBusEvent, build_task_summary, to_detail},
 };
+
+const DEFAULT_AUTO_SYNC_EVERY_SEC: u64 = 600;
+const DEFAULT_AUTO_FULL_REFRESH_EVERY_SEC: u64 = 86_400;
+const TASK_SCHEDULE_SCAN_SEC: u64 = 30;
+const TASK_DISPATCH_POLL_SEC: u64 = 1;
 
 #[derive(Debug, Clone)]
 pub struct BrokerServiceOptions {
@@ -75,6 +86,15 @@ pub struct BrokerService {
     http: reqwest::Client,
     options: BrokerServiceOptions,
     profile_locks: Vec<Arc<TokioMutex<()>>>,
+    task_events: broadcast::Sender<TaskBusEvent>,
+    task_active_profiles: Arc<TokioMutex<HashSet<String>>>,
+    task_supervisor_started: Arc<AtomicBool>,
+}
+
+#[derive(Debug, Clone)]
+struct LoadSubscriptionOutcome {
+    response: LoadSubscriptionResponse,
+    new_ips: Vec<String>,
 }
 
 impl BrokerService {
@@ -88,12 +108,16 @@ impl BrokerService {
             .timeout(Duration::from_secs(15))
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
+        let (task_events, _) = broadcast::channel(256);
         Self {
             store,
             runtime,
             http,
             options,
             profile_locks: (0..64).map(|_| Arc::new(TokioMutex::new(()))).collect(),
+            task_events,
+            task_active_profiles: Arc::new(TokioMutex::new(HashSet::new())),
+            task_supervisor_started: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -241,11 +265,695 @@ impl BrokerService {
         Ok(())
     }
 
+    pub fn start_background_workers(self: &Arc<Self>) {
+        if self.task_supervisor_started.swap(true, Ordering::SeqCst) {
+            return;
+        }
+
+        let service = Arc::clone(self);
+        tokio::spawn(async move {
+            service.task_supervisor_loop().await;
+        });
+    }
+
+    async fn task_supervisor_loop(self: Arc<Self>) {
+        if let Err(err) = self.recover_interrupted_task_runs().await {
+            tracing::warn!(error = %err, "task supervisor failed to recover interrupted runs");
+        }
+
+        let mut schedule_tick =
+            tokio::time::interval(Duration::from_secs(TASK_SCHEDULE_SCAN_SEC));
+        schedule_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut dispatch_tick =
+            tokio::time::interval(Duration::from_secs(TASK_DISPATCH_POLL_SEC));
+        dispatch_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+        loop {
+            tokio::select! {
+                _ = schedule_tick.tick() => {
+                    if let Err(err) = self.enqueue_due_tasks().await {
+                        tracing::warn!(error = %err, "task supervisor failed to enqueue due tasks");
+                    }
+                }
+                _ = dispatch_tick.tick() => {
+                    if let Err(err) = self.dispatch_queued_tasks().await {
+                        tracing::warn!(error = %err, "task supervisor failed to dispatch queued tasks");
+                    }
+                }
+            }
+        }
+    }
+
+    async fn recover_interrupted_task_runs(&self) -> BrokerResult<()> {
+        let runs = self
+            .store
+            .list_task_runs(&TaskListQuery::default())
+            .await
+            .map_err(BrokerError::from)?;
+        let now = now_epoch_sec();
+
+        for mut run in runs
+            .into_iter()
+            .filter(|run| run.status == TaskRunStatus::Running)
+        {
+            run.status = TaskRunStatus::Failed;
+            run.stage = TaskRunStage::Completed;
+            run.finished_at = Some(now);
+            run.error_code = Some("interrupted_on_restart".to_string());
+            run.error_message = Some("task run interrupted while service was restarting".to_string());
+            self.update_task_run_and_emit(&run).await?;
+            self.append_task_event(
+                &run,
+                TaskEventLevel::Error,
+                TaskRunStage::Completed,
+                "Task run was interrupted by service restart.",
+                None,
+            )
+            .await?;
+        }
+
+        Ok(())
+    }
+
+    async fn enqueue_due_tasks(&self) -> BrokerResult<()> {
+        let configs = self
+            .store
+            .list_profile_sync_configs()
+            .await
+            .map_err(BrokerError::from)?;
+        let now = now_epoch_sec();
+
+        for config in configs {
+            if !config.enabled {
+                continue;
+            }
+            if self.has_pending_or_running_tasks(&config.profile_id).await? {
+                continue;
+            }
+
+            let sync_due = config.last_sync_due_at.map(|ts| ts <= now).unwrap_or(false);
+            let full_due = config
+                .last_full_refresh_due_at
+                .map(|ts| ts <= now)
+                .unwrap_or(false);
+
+            if !sync_due && !full_due {
+                continue;
+            }
+
+            if sync_due {
+                self.enqueue_task_run(
+                    &config.profile_id,
+                    TaskRunKind::SubscriptionSync,
+                    TaskRunTrigger::Schedule,
+                    TaskRunScope::All,
+                )
+                .await?;
+            }
+
+            if full_due {
+                self.enqueue_task_run(
+                    &config.profile_id,
+                    TaskRunKind::MetadataRefreshFull,
+                    TaskRunTrigger::Schedule,
+                    TaskRunScope::All,
+                )
+                .await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn dispatch_queued_tasks(self: &Arc<Self>) -> BrokerResult<()> {
+        let mut runs = self
+            .store
+            .list_task_runs(&TaskListQuery::default())
+            .await
+            .map_err(BrokerError::from)?;
+        runs.retain(|run| run.status == TaskRunStatus::Queued);
+        runs.sort_by(|left, right| {
+            left.created_at
+                .cmp(&right.created_at)
+                .then_with(|| left.run_id.cmp(&right.run_id))
+        });
+
+        for run in runs {
+            if !self.claim_task_profile(&run.profile_id).await {
+                continue;
+            }
+
+            let service = Arc::clone(self);
+            tokio::spawn(async move {
+                service.run_task(run).await;
+            });
+        }
+
+        Ok(())
+    }
+
+    async fn claim_task_profile(&self, profile_id: &str) -> bool {
+        let mut active = self.task_active_profiles.lock().await;
+        active.insert(profile_id.to_string())
+    }
+
+    async fn release_task_profile(&self, profile_id: &str) {
+        let mut active = self.task_active_profiles.lock().await;
+        active.remove(profile_id);
+    }
+
+    async fn has_pending_or_running_tasks(&self, profile_id: &str) -> BrokerResult<bool> {
+        let runs = self
+            .store
+            .list_task_runs(&TaskListQuery {
+                profile_id: Some(profile_id.to_string()),
+                ..TaskListQuery::default()
+            })
+            .await
+            .map_err(BrokerError::from)?;
+        Ok(runs.into_iter().any(|run| {
+            matches!(run.status, TaskRunStatus::Queued | TaskRunStatus::Running)
+        }))
+    }
+
+    async fn run_task(self: Arc<Self>, mut run: TaskRunRecord) {
+        let result = match run.kind {
+            TaskRunKind::SubscriptionSync => self.execute_subscription_sync_task(&mut run).await,
+            TaskRunKind::MetadataRefreshIncremental => {
+                self.execute_incremental_refresh_task(&mut run).await
+            }
+            TaskRunKind::MetadataRefreshFull => self.execute_full_refresh_task(&mut run).await,
+        };
+
+        if let Err(err) = result {
+            tracing::warn!(
+                run_id = %run.run_id,
+                profile_id = %run.profile_id,
+                error = %err,
+                "task run failed"
+            );
+            let _ = self.fail_task_run(&mut run, err).await;
+        }
+
+        self.release_task_profile(&run.profile_id).await;
+    }
+
+    async fn execute_subscription_sync_task(&self, run: &mut TaskRunRecord) -> BrokerResult<()> {
+        self.mark_task_running(run, TaskRunStage::LoadingSubscription, None, None)
+            .await?;
+        self.append_task_event(
+            run,
+            TaskEventLevel::Info,
+            TaskRunStage::LoadingSubscription,
+            "Refreshing subscription feed for profile.",
+            None,
+        )
+        .await?;
+
+        self.mark_sync_started(&run.profile_id).await?;
+        let config = self
+            .store
+            .get_profile_sync_config(&run.profile_id)
+            .await
+            .map_err(BrokerError::from)?
+            .ok_or_else(|| {
+                BrokerError::InvalidRequest(format!(
+                    "profile `{}` has no persisted subscription source",
+                    run.profile_id
+                ))
+            })?;
+        let outcome = self
+            .load_subscription_internal(&run.profile_id, &config.source)
+            .await;
+
+        let completed_at = now_epoch_sec();
+        self.mark_sync_finished(&run.profile_id, completed_at).await?;
+
+        let outcome = outcome?;
+        let targeted_ips = outcome.new_ips.len() as u64;
+        run.progress_total = Some(targeted_ips);
+        self.update_task_run_and_emit(run).await?;
+        self.append_task_event(
+            run,
+            TaskEventLevel::Info,
+            TaskRunStage::DiffingInventory,
+            format!(
+                "Subscription sync finished with {} new IP(s).",
+                outcome.new_ips.len()
+            ),
+            Some(serde_json::json!({
+                "loaded_proxies": outcome.response.loaded_proxies,
+                "distinct_ips": outcome.response.distinct_ips,
+                "warnings": outcome.response.warnings,
+                "new_ips": outcome.new_ips,
+            })),
+        )
+        .await?;
+
+        if outcome.new_ips.is_empty() {
+            self.complete_task_run(
+                run,
+                TaskRunStatus::Succeeded,
+                Some(serde_json::json!({
+                    "loaded_proxies": outcome.response.loaded_proxies,
+                    "distinct_ips": outcome.response.distinct_ips,
+                    "warnings": outcome.response.warnings,
+                    "new_ips": 0,
+                    "probed_ips": 0,
+                    "geo_updated": 0,
+                    "skipped_cached": 0,
+                })),
+                None,
+                None,
+            )
+            .await?;
+            return Ok(());
+        }
+
+        let target_ip_set = outcome.new_ips.iter().cloned().collect::<HashSet<_>>();
+        let refresh = self
+            .refresh_metadata_internal(
+                &run.profile_id,
+                false,
+                Some(&target_ip_set),
+                Some(&run.run_id),
+            )
+            .await?;
+
+        self.complete_task_run(
+            run,
+            TaskRunStatus::Succeeded,
+            Some(serde_json::json!({
+                "loaded_proxies": outcome.response.loaded_proxies,
+                "distinct_ips": outcome.response.distinct_ips,
+                "warnings": outcome.response.warnings,
+                "new_ips": targeted_ips,
+                "probed_ips": refresh.probed_ips,
+                "geo_updated": refresh.geo_updated,
+                "skipped_cached": refresh.skipped_cached,
+            })),
+            None,
+            None,
+        )
+        .await
+    }
+
+    async fn execute_incremental_refresh_task(&self, run: &mut TaskRunRecord) -> BrokerResult<()> {
+        let target_ips = match &run.scope {
+            TaskRunScope::Ips { ips } => ips.clone(),
+            TaskRunScope::All => self
+                .store
+                .list_ip_records(&run.profile_id)
+                .await
+                .map_err(BrokerError::from)?
+                .into_iter()
+                .map(|record| record.ip)
+                .collect(),
+        };
+
+        if target_ips.is_empty() {
+            self.complete_task_run(
+                run,
+                TaskRunStatus::Skipped,
+                Some(serde_json::json!({ "reason": "no_target_ips" })),
+                None,
+                None,
+            )
+            .await?;
+            return Ok(());
+        }
+
+        let target_ip_set = target_ips.iter().cloned().collect::<HashSet<_>>();
+        let refresh = self
+            .refresh_metadata_internal(
+                &run.profile_id,
+                false,
+                Some(&target_ip_set),
+                Some(&run.run_id),
+            )
+            .await?;
+
+        self.complete_task_run(
+            run,
+            TaskRunStatus::Succeeded,
+            Some(serde_json::json!({
+                "targeted_ips": target_ips.len(),
+                "probed_ips": refresh.probed_ips,
+                "geo_updated": refresh.geo_updated,
+                "skipped_cached": refresh.skipped_cached,
+            })),
+            None,
+            None,
+        )
+        .await
+    }
+
+    async fn execute_full_refresh_task(&self, run: &mut TaskRunRecord) -> BrokerResult<()> {
+        self.mark_full_refresh_started(&run.profile_id).await?;
+        let refresh = self
+            .refresh_metadata_internal(&run.profile_id, true, None, Some(&run.run_id))
+            .await;
+        let completed_at = now_epoch_sec();
+        self.mark_full_refresh_finished(&run.profile_id, completed_at)
+            .await?;
+        let refresh = refresh?;
+
+        let targeted_ips = self
+            .store
+            .list_ip_records(&run.profile_id)
+            .await
+            .map_err(BrokerError::from)?
+            .len();
+
+        self.complete_task_run(
+            run,
+            TaskRunStatus::Succeeded,
+            Some(serde_json::json!({
+                "targeted_ips": targeted_ips,
+                "probed_ips": refresh.probed_ips,
+                "geo_updated": refresh.geo_updated,
+                "skipped_cached": refresh.skipped_cached,
+            })),
+            None,
+            None,
+        )
+        .await
+    }
+
+    async fn enqueue_task_run(
+        &self,
+        profile_id: &str,
+        kind: TaskRunKind,
+        trigger: TaskRunTrigger,
+        scope: TaskRunScope,
+    ) -> BrokerResult<TaskRunRecord> {
+        let run = TaskRunRecord {
+            run_id: uuid::Uuid::new_v4().to_string(),
+            profile_id: profile_id.to_string(),
+            kind,
+            trigger,
+            status: TaskRunStatus::Queued,
+            stage: TaskRunStage::Queued,
+            progress_current: Some(0),
+            progress_total: None,
+            created_at: now_epoch_sec(),
+            started_at: None,
+            finished_at: None,
+            summary_json: None,
+            error_code: None,
+            error_message: None,
+            scope,
+        };
+        self.insert_task_run_and_emit(&run).await?;
+        self.append_task_event(
+            &run,
+            TaskEventLevel::Info,
+            TaskRunStage::Queued,
+            "Task run queued.",
+            None,
+        )
+        .await?;
+        Ok(run)
+    }
+
+    async fn insert_task_run_and_emit(&self, run: &TaskRunRecord) -> BrokerResult<()> {
+        self.store
+            .insert_task_run(run)
+            .await
+            .map_err(BrokerError::from)?;
+        let _ = self.task_events.send(TaskBusEvent::RunUpsert(run.as_summary()));
+        Ok(())
+    }
+
+    async fn update_task_run_and_emit(&self, run: &TaskRunRecord) -> BrokerResult<()> {
+        self.store
+            .update_task_run(run)
+            .await
+            .map_err(BrokerError::from)?;
+        let _ = self.task_events.send(TaskBusEvent::RunUpsert(run.as_summary()));
+        Ok(())
+    }
+
+    async fn append_task_event(
+        &self,
+        run: &TaskRunRecord,
+        level: TaskEventLevel,
+        stage: TaskRunStage,
+        message: impl Into<String>,
+        payload_json: Option<serde_json::Value>,
+    ) -> BrokerResult<()> {
+        let event = TaskRunEventRecord {
+            event_id: uuid::Uuid::new_v4().to_string(),
+            run_id: run.run_id.clone(),
+            profile_id: run.profile_id.clone(),
+            at: now_epoch_sec(),
+            level,
+            stage,
+            message: message.into(),
+            payload_json,
+        };
+        self.store
+            .insert_task_run_event(&event)
+            .await
+            .map_err(BrokerError::from)?;
+        let _ = self.task_events.send(TaskBusEvent::RunEvent(event));
+        Ok(())
+    }
+
+    async fn mark_task_running(
+        &self,
+        run: &mut TaskRunRecord,
+        stage: TaskRunStage,
+        progress_current: Option<u64>,
+        progress_total: Option<u64>,
+    ) -> BrokerResult<()> {
+        run.status = TaskRunStatus::Running;
+        run.stage = stage;
+        run.progress_current = progress_current;
+        run.progress_total = progress_total;
+        if run.started_at.is_none() {
+            run.started_at = Some(now_epoch_sec());
+        }
+        self.update_task_run_and_emit(run).await
+    }
+
+    async fn complete_task_run(
+        &self,
+        run: &mut TaskRunRecord,
+        status: TaskRunStatus,
+        summary_json: Option<serde_json::Value>,
+        error_code: Option<String>,
+        error_message: Option<String>,
+    ) -> BrokerResult<()> {
+        run.status = status;
+        run.stage = TaskRunStage::Completed;
+        run.progress_current = run.progress_total.or(run.progress_current);
+        run.finished_at = Some(now_epoch_sec());
+        run.summary_json = summary_json.clone();
+        run.error_code = error_code;
+        run.error_message = error_message;
+        self.update_task_run_and_emit(run).await?;
+
+        let level = match status {
+            TaskRunStatus::Failed => TaskEventLevel::Error,
+            TaskRunStatus::Skipped => TaskEventLevel::Warning,
+            _ => TaskEventLevel::Info,
+        };
+        let message = match status {
+            TaskRunStatus::Succeeded => "Task run completed successfully.",
+            TaskRunStatus::Skipped => "Task run skipped.",
+            TaskRunStatus::Failed => "Task run failed.",
+            TaskRunStatus::Queued => "Task run queued.",
+            TaskRunStatus::Running => "Task run is running.",
+        };
+        self.append_task_event(run, level, TaskRunStage::Completed, message, summary_json)
+            .await
+    }
+
+    async fn fail_task_run(
+        &self,
+        run: &mut TaskRunRecord,
+        error: BrokerError,
+    ) -> BrokerResult<()> {
+        self.complete_task_run(
+            run,
+            TaskRunStatus::Failed,
+            None,
+            Some(error.code().to_string()),
+            Some(error.to_string()),
+        )
+        .await
+    }
+
+    async fn update_task_stage_by_id(
+        &self,
+        run_id: &str,
+        stage: TaskRunStage,
+        progress_current: Option<u64>,
+        progress_total: Option<u64>,
+        message: &str,
+        payload_json: Option<serde_json::Value>,
+    ) -> BrokerResult<()> {
+        let mut run = self
+            .store
+            .get_task_run(run_id)
+            .await
+            .map_err(BrokerError::from)?
+            .ok_or(BrokerError::TaskRunNotFound)?;
+        self.mark_task_running(&mut run, stage, progress_current, progress_total)
+            .await?;
+        self.append_task_event(&run, TaskEventLevel::Info, stage, message, payload_json)
+            .await
+    }
+
+    async fn register_profile_sync_source(
+        &self,
+        profile_id: &str,
+        source: &SubscriptionSource,
+    ) -> BrokerResult<()> {
+        let now = now_epoch_sec();
+        let mut config = self
+            .store
+            .get_profile_sync_config(profile_id)
+            .await
+            .map_err(BrokerError::from)?
+            .unwrap_or(ProfileSyncConfig {
+                profile_id: profile_id.to_string(),
+                source: source.clone(),
+                enabled: true,
+                sync_every_sec: DEFAULT_AUTO_SYNC_EVERY_SEC,
+                full_refresh_every_sec: DEFAULT_AUTO_FULL_REFRESH_EVERY_SEC,
+                last_sync_due_at: None,
+                last_sync_started_at: None,
+                last_sync_finished_at: None,
+                last_full_refresh_due_at: None,
+                last_full_refresh_started_at: None,
+                last_full_refresh_finished_at: None,
+                updated_at: now,
+            });
+        config.source = source.clone();
+        config.enabled = true;
+        config.sync_every_sec = DEFAULT_AUTO_SYNC_EVERY_SEC;
+        config.full_refresh_every_sec = DEFAULT_AUTO_FULL_REFRESH_EVERY_SEC;
+        config.last_sync_due_at = Some(now + DEFAULT_AUTO_SYNC_EVERY_SEC as i64);
+        config.last_full_refresh_due_at = Some(now + DEFAULT_AUTO_FULL_REFRESH_EVERY_SEC as i64);
+        config.updated_at = now;
+        self.store
+            .upsert_profile_sync_config(&config)
+            .await
+            .map_err(BrokerError::from)
+    }
+
+    async fn mark_sync_started(&self, profile_id: &str) -> BrokerResult<()> {
+        let now = now_epoch_sec();
+        if let Some(mut config) = self
+            .store
+            .get_profile_sync_config(profile_id)
+            .await
+            .map_err(BrokerError::from)?
+        {
+            config.last_sync_started_at = Some(now);
+            config.updated_at = now;
+            self.store
+                .upsert_profile_sync_config(&config)
+                .await
+                .map_err(BrokerError::from)?;
+        }
+        Ok(())
+    }
+
+    async fn mark_sync_finished(&self, profile_id: &str, finished_at: i64) -> BrokerResult<()> {
+        if let Some(mut config) = self
+            .store
+            .get_profile_sync_config(profile_id)
+            .await
+            .map_err(BrokerError::from)?
+        {
+            config.last_sync_finished_at = Some(finished_at);
+            config.last_sync_due_at = Some(finished_at + config.sync_every_sec as i64);
+            config.updated_at = finished_at;
+            self.store
+                .upsert_profile_sync_config(&config)
+                .await
+                .map_err(BrokerError::from)?;
+        }
+        Ok(())
+    }
+
+    async fn mark_full_refresh_started(&self, profile_id: &str) -> BrokerResult<()> {
+        let now = now_epoch_sec();
+        if let Some(mut config) = self
+            .store
+            .get_profile_sync_config(profile_id)
+            .await
+            .map_err(BrokerError::from)?
+        {
+            config.last_full_refresh_started_at = Some(now);
+            config.updated_at = now;
+            self.store
+                .upsert_profile_sync_config(&config)
+                .await
+                .map_err(BrokerError::from)?;
+        }
+        Ok(())
+    }
+
+    async fn mark_full_refresh_finished(
+        &self,
+        profile_id: &str,
+        finished_at: i64,
+    ) -> BrokerResult<()> {
+        if let Some(mut config) = self
+            .store
+            .get_profile_sync_config(profile_id)
+            .await
+            .map_err(BrokerError::from)?
+        {
+            config.last_full_refresh_finished_at = Some(finished_at);
+            config.last_full_refresh_due_at =
+                Some(finished_at + config.full_refresh_every_sec as i64);
+            config.updated_at = finished_at;
+            self.store
+                .upsert_profile_sync_config(&config)
+                .await
+                .map_err(BrokerError::from)?;
+        }
+        Ok(())
+    }
+
     pub async fn load_subscription(
         &self,
         profile_id: &str,
         source: &crate::models::SubscriptionSource,
     ) -> BrokerResult<LoadSubscriptionResponse> {
+        let outcome = self.load_subscription_internal(profile_id, source).await?;
+        self.register_profile_sync_source(profile_id, source).await?;
+        self.enqueue_task_run(
+            profile_id,
+            TaskRunKind::MetadataRefreshIncremental,
+            TaskRunTrigger::PostLoad,
+            TaskRunScope::Ips {
+                ips: outcome.new_ips.clone(),
+            },
+        )
+        .await?;
+        Ok(outcome.response)
+    }
+
+    pub async fn refresh(
+        &self,
+        profile_id: &str,
+        request: &RefreshRequest,
+    ) -> BrokerResult<RefreshResponse> {
+        self.refresh_metadata_internal(profile_id, request.force, None, None)
+            .await
+    }
+
+    async fn load_subscription_internal(
+        &self,
+        profile_id: &str,
+        source: &SubscriptionSource,
+    ) -> BrokerResult<LoadSubscriptionOutcome> {
         let _profile_guard = self.lock_profile(profile_id).await;
 
         let (mut nodes, mut warnings) = subscription::load_from_source(&self.http, source)
@@ -309,6 +1017,7 @@ impl BrokerService {
             .into_iter()
             .map(|record| (record.ip.clone(), record))
             .collect();
+        let existing_ip_keys: HashSet<String> = existing_ip_map.keys().cloned().collect();
 
         let mut ip_map: HashMap<String, IpRecord> = HashMap::new();
         for node in &nodes {
@@ -412,19 +1121,28 @@ impl BrokerService {
         self.cleanup_profile_runtime_if_idle(profile_id, &active_sessions)
             .await;
 
-        let distinct_ips = valid_ips.len();
+        let mut new_ips = valid_ips
+            .difference(&existing_ip_keys)
+            .cloned()
+            .collect::<Vec<_>>();
+        new_ips.sort();
 
-        Ok(LoadSubscriptionResponse {
-            loaded_proxies: nodes.len(),
-            distinct_ips,
-            warnings,
+        Ok(LoadSubscriptionOutcome {
+            response: LoadSubscriptionResponse {
+                loaded_proxies: nodes.len(),
+                distinct_ips: valid_ips.len(),
+                warnings,
+            },
+            new_ips,
         })
     }
 
-    pub async fn refresh(
+    async fn refresh_metadata_internal(
         &self,
         profile_id: &str,
-        request: &RefreshRequest,
+        force: bool,
+        target_ips: Option<&HashSet<String>>,
+        run_id: Option<&str>,
     ) -> BrokerResult<RefreshResponse> {
         let _profile_guard = self.lock_profile(profile_id).await;
 
@@ -442,25 +1160,68 @@ impl BrokerService {
             .list_ip_records(profile_id)
             .await
             .map_err(BrokerError::from)?;
+        let scoped_ip_set = scoped_ip_records(&ip_records, target_ips);
+        if target_ips.is_some() && scoped_ip_set.is_empty() {
+            return Ok(RefreshResponse {
+                probed_ips: 0,
+                geo_updated: 0,
+                skipped_cached: 0,
+            });
+        }
+        let scoped_nodes = scope_nodes_for_ips(&nodes, Some(&scoped_ip_set));
 
         let stored_probe_records = self
             .store
             .list_probe_records(profile_id)
             .await
             .map_err(BrokerError::from)?;
-        let probe_cache_complete =
-            has_complete_probe_records(&nodes, &self.options.probe_targets, &stored_probe_records);
+        let scoped_probe_records = filter_probe_records_to_ips(&stored_probe_records, &scoped_ip_set);
+        let probe_cache_complete = has_complete_probe_records(
+            &scoped_nodes,
+            &self.options.probe_targets,
+            &scoped_probe_records,
+        );
 
         let now = now_epoch_sec();
-        let should_probe = request.force
+        let should_probe = force
             || !probe_cache_complete
-            || ip_records.iter().any(|r| {
-                r.probe_updated_at
-                    .map(|ts| ts + (self.options.probe_ttl_sec as i64) < now)
-                    .unwrap_or(true)
+            || ip_records.iter().any(|record| {
+                scoped_ip_set.contains(&record.ip)
+                    && record
+                        .probe_updated_at
+                        .map(|ts| ts + (self.options.probe_ttl_sec as i64) < now)
+                        .unwrap_or(true)
             });
 
+        if let Some(run_id) = run_id {
+            self.update_task_stage_by_id(
+                run_id,
+                TaskRunStage::DiffingInventory,
+                Some(0),
+                Some(scoped_ip_set.len() as u64),
+                "Preparing metadata refresh scope.",
+                Some(serde_json::json!({
+                    "targeted_ips": scoped_ip_set.len(),
+                    "force": force,
+                })),
+            )
+            .await?;
+        }
+
         let mut probe_records = if should_probe {
+            if let Some(run_id) = run_id {
+                self.update_task_stage_by_id(
+                    run_id,
+                    TaskRunStage::Probing,
+                    Some(0),
+                    Some(scoped_ip_set.len() as u64),
+                    "Refreshing probe metadata.",
+                    Some(serde_json::json!({
+                        "targeted_ips": scoped_ip_set.len(),
+                    })),
+                )
+                .await?;
+            }
             self.runtime
                 .ensure_started(profile_id)
                 .await
@@ -472,14 +1233,17 @@ impl BrokerService {
                 .map_err(BrokerError::from)?;
             self.apply_sessions_config(profile_id, &nodes, &sessions)
                 .await?;
-            self.refresh_probe_records(profile_id, now, &nodes).await?
+            self.refresh_probe_records(profile_id, now, &nodes, Some(&scoped_ip_set))
+                .await?
         } else {
-            stored_probe_records
+            scoped_probe_records
         };
 
         if should_probe {
             for record in &mut ip_records {
-                if probe_records.iter().any(|p| p.ip == record.ip) {
+                if scoped_ip_set.contains(&record.ip)
+                    && probe_records.iter().any(|probe| probe.ip == record.ip)
+                {
                     record.probe_updated_at = Some(now);
                 }
             }
@@ -489,20 +1253,53 @@ impl BrokerService {
                 .map_err(BrokerError::from)?;
         }
 
-        let geo_updated = self
-            .refresh_geo_records(profile_id, request.force, now, &mut ip_records)
+        if let Some(run_id) = run_id {
+            self.update_task_stage_by_id(
+                run_id,
+                TaskRunStage::GeoEnrichment,
+                Some(scoped_ip_set.len() as u64),
+                Some(scoped_ip_set.len() as u64),
+                "Refreshing geo metadata.",
+                Some(serde_json::json!({
+                    "targeted_ips": scoped_ip_set.len(),
+                })),
+            )
             .await?;
+        }
+
+        let geo_updated = self
+            .refresh_geo_records(profile_id, force, now, &mut ip_records, Some(&scoped_ip_set))
+            .await?;
+
+        if let Some(run_id) = run_id {
+            self.update_task_stage_by_id(
+                run_id,
+                TaskRunStage::Persisting,
+                Some(scoped_ip_set.len() as u64),
+                Some(scoped_ip_set.len() as u64),
+                "Persisting refreshed metadata.",
+                Some(serde_json::json!({
+                    "targeted_ips": scoped_ip_set.len(),
+                    "geo_updated": geo_updated,
+                })),
+            )
+            .await?;
+        }
+
         self.store
             .upsert_ip_records(profile_id, &ip_records)
             .await
             .map_err(BrokerError::from)?;
 
         if !should_probe {
-            probe_records = self
-                .store
-                .list_probe_records(profile_id)
-                .await
-                .map_err(BrokerError::from)?;
+            probe_records = filter_probe_records_to_ips(
+                &self
+                    .store
+                    .list_probe_records(profile_id)
+                    .await
+                    .map_err(BrokerError::from)?,
+                &scoped_ip_set,
+            );
         }
 
         let sessions = self
@@ -513,12 +1310,12 @@ impl BrokerService {
         self.cleanup_profile_runtime_if_idle(profile_id, &sessions)
             .await;
 
-        let probed_ips: HashSet<String> = probe_records.into_iter().map(|r| r.ip).collect();
+        let probed_ips: HashSet<String> = probe_records.into_iter().map(|record| record.ip).collect();
 
         Ok(RefreshResponse {
             probed_ips: probed_ips.len(),
             geo_updated,
-            skipped_cached: if should_probe { 0 } else { ip_records.len() },
+            skipped_cached: if should_probe { 0 } else { scoped_ip_set.len() },
         })
     }
 
@@ -527,10 +1324,16 @@ impl BrokerService {
         profile_id: &str,
         now: i64,
         nodes: &[ProxyNode],
+        target_ips: Option<&HashSet<String>>,
     ) -> BrokerResult<Vec<ProbeRecord>> {
         let mut tasks = Vec::new();
         for node in nodes {
             for ip in &node.resolved_ips {
+                if let Some(target_ips) = target_ips
+                    && !target_ips.contains(ip)
+                {
+                    continue;
+                }
                 let probe_proxy_name = dedicated_ip_proxy_name(&node.proxy_name, ip);
                 for target in &self.options.probe_targets {
                     tasks.push((
@@ -647,6 +1450,7 @@ impl BrokerService {
         force: bool,
         now: i64,
         ip_records: &mut [IpRecord],
+        target_ips: Option<&HashSet<String>>,
     ) -> BrokerResult<usize> {
         let mmdb_path = self.ensure_mmdb_file().await.ok();
         let mmdb_reader = if let Some(path) = mmdb_path {
@@ -658,6 +1462,9 @@ impl BrokerService {
         let candidate_ips: HashSet<String> = ip_records
             .iter()
             .filter_map(|record| {
+                if !ip_in_scope(&record.ip, target_ips) {
+                    return None;
+                }
                 let stale = record
                     .geo_updated_at
                     .map(|ts| ts + (self.options.geo_ttl_sec as i64) < now)
@@ -673,6 +1480,9 @@ impl BrokerService {
 
         let mut changed = 0usize;
         for record in ip_records.iter_mut() {
+            if !ip_in_scope(&record.ip, target_ips) {
+                continue;
+            }
             let stale = record
                 .geo_updated_at
                 .map(|ts| ts + (self.options.geo_ttl_sec as i64) < now)
@@ -1244,6 +2054,71 @@ impl BrokerService {
         })
     }
 
+    pub async fn list_tasks(&self, query: &TaskListQuery) -> BrokerResult<TaskListResponse> {
+        let mut full_query = query.clone();
+        full_query.limit = None;
+        full_query.cursor = None;
+
+        let all_runs = self
+            .store
+            .list_task_runs(&full_query)
+            .await
+            .map_err(BrokerError::from)?;
+        let all_summaries = all_runs
+            .into_iter()
+            .map(|run| run.as_summary())
+            .collect::<Vec<_>>();
+        let summary = build_task_summary(&all_summaries);
+
+        let start_index = query
+            .cursor
+            .as_ref()
+            .and_then(|cursor| {
+                all_summaries
+                    .iter()
+                    .position(|run| &run.run_id == cursor)
+                    .map(|index| index + 1)
+            })
+            .unwrap_or(0);
+        let limit = query.limit.unwrap_or(all_summaries.len().saturating_sub(start_index));
+        let runs = all_summaries
+            .iter()
+            .skip(start_index)
+            .take(limit)
+            .cloned()
+            .collect::<Vec<_>>();
+        let next_cursor = if start_index + runs.len() < all_summaries.len() {
+            runs.last().map(|run| run.run_id.clone())
+        } else {
+            None
+        };
+
+        Ok(TaskListResponse {
+            summary,
+            runs,
+            next_cursor,
+        })
+    }
+
+    pub async fn get_task_run_detail(&self, run_id: &str) -> BrokerResult<TaskRunDetail> {
+        let run = self
+            .store
+            .get_task_run(run_id)
+            .await
+            .map_err(BrokerError::from)?
+            .ok_or(BrokerError::TaskRunNotFound)?;
+        let events = self
+            .store
+            .list_task_run_events(run_id)
+            .await
+            .map_err(BrokerError::from)?;
+        Ok(to_detail(run.as_summary(), events))
+    }
+
+    pub fn subscribe_task_events(&self) -> broadcast::Receiver<TaskBusEvent> {
+        self.task_events.subscribe()
+    }
+
     pub async fn list_api_keys(&self, profile_id: &str) -> BrokerResult<ListApiKeysResponse> {
         if !self.profile_exists(profile_id).await? {
             return Err(BrokerError::ProfileNotFound);
@@ -1469,6 +2344,50 @@ fn clear_stale_probe_timestamps(ip_records: &mut [IpRecord], probe_records: &[Pr
             record.probe_updated_at = None;
         }
     }
+}
+
+fn ip_in_scope(ip: &str, target_ips: Option<&HashSet<String>>) -> bool {
+    target_ips.map(|target_ips| target_ips.contains(ip)).unwrap_or(true)
+}
+
+fn scoped_ip_records(ip_records: &[IpRecord], target_ips: Option<&HashSet<String>>) -> HashSet<String> {
+    ip_records
+        .iter()
+        .filter(|record| ip_in_scope(&record.ip, target_ips))
+        .map(|record| record.ip.clone())
+        .collect()
+}
+
+fn filter_probe_records_to_ips(
+    probe_records: &[ProbeRecord],
+    target_ips: &HashSet<String>,
+) -> Vec<ProbeRecord> {
+    probe_records
+        .iter()
+        .filter(|record| target_ips.contains(&record.ip))
+        .cloned()
+        .collect()
+}
+
+fn scope_nodes_for_ips(nodes: &[ProxyNode], target_ips: Option<&HashSet<String>>) -> Vec<ProxyNode> {
+    nodes
+        .iter()
+        .filter_map(|node| {
+            let resolved_ips = node
+                .resolved_ips
+                .iter()
+                .filter(|ip| ip_in_scope(ip, target_ips))
+                .cloned()
+                .collect::<Vec<_>>();
+            if resolved_ips.is_empty() {
+                None
+            } else {
+                let mut scoped = node.clone();
+                scoped.resolved_ips = resolved_ips;
+                Some(scoped)
+            }
+        })
+        .collect()
 }
 
 fn expected_probe_keys(
@@ -2678,5 +3597,107 @@ proxies:
         .expect("session should be prepared");
 
         assert_eq!(session.listen, "0.0.0.0");
+    }
+
+    #[tokio::test]
+    async fn load_subscription_registers_sync_config_and_queues_post_load_task() {
+        let profile_id = "p-tasks";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
+        let source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: new
+    type: socks5
+    server: 2.2.2.2
+"#,
+        )
+        .await;
+
+        let response = service
+            .load_subscription(profile_id, &SubscriptionSource::File(source_path.clone()))
+            .await
+            .expect("load should succeed");
+
+        let _ = tokio::fs::remove_file(&source_path).await;
+
+        assert_eq!(response.loaded_proxies, 1);
+
+        let config = store
+            .get_profile_sync_config(profile_id)
+            .await
+            .expect("sync config query should succeed")
+            .expect("sync config should be persisted");
+        assert!(matches!(config.source, SubscriptionSource::File(path) if path == source_path));
+        assert!(config.enabled);
+
+        let tasks = service
+            .list_tasks(&TaskListQuery {
+                profile_id: Some(profile_id.to_string()),
+                ..TaskListQuery::default()
+            })
+            .await
+            .expect("task list should succeed");
+        assert_eq!(tasks.runs.len(), 1);
+        let run = &tasks.runs[0];
+        assert_eq!(run.kind, TaskRunKind::MetadataRefreshIncremental);
+        assert_eq!(run.trigger, TaskRunTrigger::PostLoad);
+        assert_eq!(run.status, TaskRunStatus::Queued);
+
+        let detail = service
+            .get_task_run_detail(&run.run_id)
+            .await
+            .expect("task detail should succeed");
+        assert_eq!(detail.events.len(), 1);
+        assert_eq!(detail.events[0].stage, TaskRunStage::Queued);
+    }
+
+    #[tokio::test]
+    async fn enqueue_due_tasks_queues_sync_then_full_refresh_for_due_profile() {
+        let profile_id = "p-schedule";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
+        let now = now_epoch_sec();
+
+        store
+            .upsert_profile_sync_config(&ProfileSyncConfig {
+                profile_id: profile_id.to_string(),
+                source: SubscriptionSource::Url("https://example.com/subscription".to_string()),
+                enabled: true,
+                sync_every_sec: DEFAULT_AUTO_SYNC_EVERY_SEC,
+                full_refresh_every_sec: DEFAULT_AUTO_FULL_REFRESH_EVERY_SEC,
+                last_sync_due_at: Some(now - 1),
+                last_sync_started_at: None,
+                last_sync_finished_at: None,
+                last_full_refresh_due_at: Some(now - 1),
+                last_full_refresh_started_at: None,
+                last_full_refresh_finished_at: None,
+                updated_at: now,
+            })
+            .await
+            .expect("config seed should succeed");
+
+        service
+            .enqueue_due_tasks()
+            .await
+            .expect("due tasks should enqueue");
+
+        let tasks = service
+            .list_tasks(&TaskListQuery {
+                profile_id: Some(profile_id.to_string()),
+                ..TaskListQuery::default()
+            })
+            .await
+            .expect("task list should succeed");
+        assert_eq!(tasks.runs.len(), 2);
+        let kinds = tasks
+            .runs
+            .iter()
+            .map(|run| run.kind)
+            .collect::<HashSet<_>>();
+        assert!(kinds.contains(&TaskRunKind::SubscriptionSync));
+        assert!(kinds.contains(&TaskRunKind::MetadataRefreshFull));
     }
 }
