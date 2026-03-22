@@ -248,17 +248,14 @@ pub struct ProfileSyncConfig {
     pub updated_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TaskRunScope {
+    #[default]
     All,
-    Ips { ips: Vec<String> },
-}
-
-impl Default for TaskRunScope {
-    fn default() -> Self {
-        Self::All
-    }
+    Ips {
+        ips: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
