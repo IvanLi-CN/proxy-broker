@@ -16,7 +16,7 @@ use crate::{
     models::{
         CreateApiKeyRequest, CreateApiKeyResponse, CreateProfileRequest, CreateProfileResponse,
         HealthResponse, LoadSubscriptionRequest, OpenBatchRequest, OpenSessionRequest,
-        RefreshRequest, TaskListQuery, TaskRunDetail, TaskStreamEnvelope,
+        RefreshRequest, TaskListQuery, TaskRunDetail, TaskRunSummary, TaskStreamEnvelope,
     },
     service::BrokerService,
     tasks::{TaskBusEvent, matches_task_query},
@@ -157,12 +157,9 @@ async fn stream_tasks(
                 message = receiver.recv() => {
                     match message {
                         Ok(TaskBusEvent::RunUpsert(run)) => {
-                            if !matches_task_query(&run, &stream_query)
-                            {
-                                continue;
+                            if should_stream_run_upsert(&stream_query, &run) {
+                                yield Ok(sse_event("run-upsert", serde_json::to_value(run.clone())));
                             }
-
-                            yield Ok(sse_event("run-upsert", serde_json::to_value(run.clone())));
                             match service.list_tasks(&stream_query).await {
                                 Ok(response) => {
                                     yield Ok(sse_event("summary", serde_json::to_value(response.summary)));
@@ -283,6 +280,10 @@ fn sse_event(event_type: &str, data: Result<serde_json::Value, serde_json::Error
         }))
 }
 
+fn should_stream_run_upsert(_query: &TaskListQuery, _run: &TaskRunSummary) -> bool {
+    true
+}
+
 async fn extract_ips(
     auth: AuthContext,
     State(state): State<AppState>,
@@ -388,12 +389,12 @@ mod tests {
     use axum::{body::Body, extract::ConnectInfo, http::Request};
     use tower::ServiceExt;
 
-    use super::{AppState, build_router, decode_refresh_request};
+    use super::{AppState, build_router, decode_refresh_request, should_stream_run_upsert};
     use crate::{
         auth::{AuthConfig, AuthConfigOptions},
         models::{
             ProfileSyncConfig, SubscriptionSource, TaskRunKind, TaskRunScope, TaskRunStage,
-            TaskRunStatus, TaskRunTrigger, now_epoch_sec,
+            TaskRunStatus, TaskRunSummary, TaskRunTrigger, now_epoch_sec,
         },
         runtime::MihomoRuntime,
         service::{BrokerService, BrokerServiceOptions},
@@ -569,5 +570,32 @@ mod tests {
                 .and_then(|value| value.to_str().ok()),
             Some("text/event-stream")
         );
+    }
+
+    #[test]
+    fn run_upsert_streaming_does_not_drop_runs_that_leave_filter() {
+        let query = crate::models::TaskListQuery {
+            status: Some(TaskRunStatus::Running),
+            running_only: true,
+            ..crate::models::TaskListQuery::default()
+        };
+        let run = TaskRunSummary {
+            run_id: "run-1".to_string(),
+            profile_id: "default".to_string(),
+            kind: TaskRunKind::SubscriptionSync,
+            trigger: TaskRunTrigger::Schedule,
+            status: TaskRunStatus::Succeeded,
+            stage: TaskRunStage::Completed,
+            progress_current: Some(1),
+            progress_total: Some(1),
+            created_at: 1,
+            started_at: Some(1),
+            finished_at: Some(2),
+            summary_json: None,
+            error_code: None,
+            error_message: None,
+        };
+
+        assert!(should_stream_run_upsert(&query, &run));
     }
 }

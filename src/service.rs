@@ -1,4 +1,5 @@
 use std::{
+    cmp::Ordering as CmpOrdering,
     collections::{HashMap, HashSet},
     hash::{Hash, Hasher},
     net::{IpAddr, Ipv4Addr},
@@ -395,11 +396,7 @@ impl BrokerService {
             .await
             .map_err(BrokerError::from)?;
         runs.retain(|run| run.status == TaskRunStatus::Queued);
-        runs.sort_by(|left, right| {
-            left.created_at
-                .cmp(&right.created_at)
-                .then_with(|| left.run_id.cmp(&right.run_id))
-        });
+        sort_queued_runs_for_dispatch(&mut runs);
 
         for run in runs {
             if !self.claim_task_profile(&run.profile_id).await {
@@ -2887,6 +2884,38 @@ fn has_duplicate_proxy_names(nodes: &[ProxyNode]) -> bool {
     false
 }
 
+fn sort_queued_runs_for_dispatch(runs: &mut [TaskRunRecord]) {
+    runs.sort_by(|left, right| {
+        left.created_at
+            .cmp(&right.created_at)
+            .then_with(|| same_profile_schedule_dispatch_order(left, right))
+            .then_with(|| left.run_id.cmp(&right.run_id))
+    });
+}
+
+fn same_profile_schedule_dispatch_order(
+    left: &TaskRunRecord,
+    right: &TaskRunRecord,
+) -> CmpOrdering {
+    if left.profile_id != right.profile_id
+        || left.created_at != right.created_at
+        || left.trigger != TaskRunTrigger::Schedule
+        || right.trigger != TaskRunTrigger::Schedule
+    {
+        return CmpOrdering::Equal;
+    }
+
+    scheduled_dispatch_rank(left.kind).cmp(&scheduled_dispatch_rank(right.kind))
+}
+
+fn scheduled_dispatch_rank(kind: TaskRunKind) -> u8 {
+    match kind {
+        TaskRunKind::SubscriptionSync => 0,
+        TaskRunKind::MetadataRefreshIncremental => 1,
+        TaskRunKind::MetadataRefreshFull => 2,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3870,6 +3899,51 @@ proxies:
             .collect::<HashSet<_>>();
         assert!(kinds.contains(&TaskRunKind::SubscriptionSync));
         assert!(kinds.contains(&TaskRunKind::MetadataRefreshFull));
+    }
+
+    #[test]
+    fn dispatch_sort_keeps_due_sync_before_full_refresh_for_same_profile() {
+        let mut runs = vec![
+            TaskRunRecord {
+                run_id: "zzz".to_string(),
+                profile_id: "profile-a".to_string(),
+                kind: TaskRunKind::MetadataRefreshFull,
+                trigger: TaskRunTrigger::Schedule,
+                status: TaskRunStatus::Queued,
+                stage: TaskRunStage::Queued,
+                progress_current: Some(0),
+                progress_total: None,
+                created_at: 42,
+                started_at: None,
+                finished_at: None,
+                summary_json: None,
+                error_code: None,
+                error_message: None,
+                scope: TaskRunScope::All,
+            },
+            TaskRunRecord {
+                run_id: "aaa".to_string(),
+                profile_id: "profile-a".to_string(),
+                kind: TaskRunKind::SubscriptionSync,
+                trigger: TaskRunTrigger::Schedule,
+                status: TaskRunStatus::Queued,
+                stage: TaskRunStage::Queued,
+                progress_current: Some(0),
+                progress_total: None,
+                created_at: 42,
+                started_at: None,
+                finished_at: None,
+                summary_json: None,
+                error_code: None,
+                error_message: None,
+                scope: TaskRunScope::All,
+            },
+        ];
+
+        sort_queued_runs_for_dispatch(&mut runs);
+
+        assert_eq!(runs[0].kind, TaskRunKind::SubscriptionSync);
+        assert_eq!(runs[1].kind, TaskRunKind::MetadataRefreshFull);
     }
 
     #[tokio::test]
