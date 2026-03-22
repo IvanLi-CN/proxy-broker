@@ -995,22 +995,15 @@ impl BrokerService {
             .await?;
 
         let queued_or_running = self.queued_or_running_task_runs(profile_id).await?;
+        // Only queued incremental runs can safely absorb new IPs. Running runs may have already
+        // snapshotted their scope, so later loads must queue a follow-up task instead.
         let mut existing_incremental = queued_or_running
             .iter()
             .find(|run| {
                 run.status == TaskRunStatus::Queued
                     && run.kind == TaskRunKind::MetadataRefreshIncremental
             })
-            .cloned()
-            .or_else(|| {
-                queued_or_running
-                    .iter()
-                    .find(|run| {
-                        run.status == TaskRunStatus::Running
-                            && run.kind == TaskRunKind::MetadataRefreshIncremental
-                    })
-                    .cloned()
-            });
+            .cloned();
 
         if let Some(mut existing_run) = existing_incremental.take() {
             if let Some(targeted_ips) =
@@ -4223,8 +4216,8 @@ proxies:
     }
 
     #[tokio::test]
-    async fn load_subscription_coalesces_running_post_load_task_scope() {
-        let profile_id = "p-tasks-coalesce-running";
+    async fn load_subscription_queues_follow_up_post_load_task_when_incremental_is_running() {
+        let profile_id = "p-tasks-follow-up-while-running";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
@@ -4288,17 +4281,27 @@ proxies:
             })
             .await
             .expect("task list query should succeed");
-        assert_eq!(tasks.len(), 1);
-        let run = tasks.first().expect("coalesced task should exist");
-        assert_eq!(run.status, TaskRunStatus::Running);
-        match &run.scope {
+        assert_eq!(tasks.len(), 2);
+        assert!(
+            tasks
+                .iter()
+                .any(|task| task.status == TaskRunStatus::Running)
+        );
+        let queued_run = tasks
+            .iter()
+            .find(|task| {
+                task.status == TaskRunStatus::Queued
+                    && task.kind == TaskRunKind::MetadataRefreshIncremental
+                    && task.trigger == TaskRunTrigger::PostLoad
+            })
+            .expect("follow-up queued incremental should exist");
+        match &queued_run.scope {
             TaskRunScope::Ips { ips } => {
                 let ips = ips.iter().cloned().collect::<HashSet<_>>();
-                assert_eq!(ips.len(), 2);
-                assert!(ips.contains("2.2.2.2"));
+                assert_eq!(ips.len(), 1);
                 assert!(ips.contains("3.3.3.3"));
             }
-            TaskRunScope::All => panic!("post-load task should stay scoped to explicit IPs"),
+            TaskRunScope::All => panic!("follow-up task should stay scoped to explicit IPs"),
         }
     }
 
