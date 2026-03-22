@@ -19,7 +19,7 @@ use crate::{
         RefreshRequest, TaskListQuery, TaskRunDetail, TaskStreamEnvelope,
     },
     service::BrokerService,
-    tasks::TaskBusEvent,
+    tasks::{TaskBusEvent, matches_task_query},
     web_ui::spa_fallback,
 };
 
@@ -157,8 +157,7 @@ async fn stream_tasks(
                 message = receiver.recv() => {
                     match message {
                         Ok(TaskBusEvent::RunUpsert(run)) => {
-                            if let Some(profile_id) = &stream_query.profile_id
-                                && profile_id != &run.profile_id
+                            if !matches_task_query(&run, &stream_query)
                             {
                                 continue;
                             }
@@ -175,10 +174,17 @@ async fn stream_tasks(
                             }
                         }
                         Ok(TaskBusEvent::RunEvent(event)) => {
-                            if let Some(profile_id) = &stream_query.profile_id
-                                && profile_id != &event.profile_id
-                            {
-                                continue;
+                            match service.get_task_run_summary(&event.run_id).await {
+                                Ok(Some(run)) => {
+                                    if !matches_task_query(&run, &stream_query) {
+                                        continue;
+                                    }
+                                }
+                                Ok(None) => continue,
+                                Err(err) => {
+                                    tracing::warn!(error = %err, "task sse failed to resolve event run");
+                                    break;
+                                }
                             }
                             yield Ok(sse_event("run-event", serde_json::to_value(event.as_public())));
                         }

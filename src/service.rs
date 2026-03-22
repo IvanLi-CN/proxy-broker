@@ -33,7 +33,8 @@ use crate::{
         OpenSessionRequest, OpenSessionResponse, ProbeRecord, ProfileSyncConfig, ProxyNode,
         RefreshRequest, RefreshResponse, SessionRecord, SubscriptionSource, TaskEventLevel,
         TaskListQuery, TaskListResponse, TaskRunDetail, TaskRunEventRecord, TaskRunKind,
-        TaskRunRecord, TaskRunScope, TaskRunStage, TaskRunStatus, TaskRunTrigger, now_epoch_sec,
+        TaskRunRecord, TaskRunScope, TaskRunStage, TaskRunStatus, TaskRunSummary, TaskRunTrigger,
+        now_epoch_sec,
     },
     runtime::MihomoRuntime,
     store::BrokerStore,
@@ -438,6 +439,24 @@ impl BrokerService {
             .any(|run| matches!(run.status, TaskRunStatus::Queued | TaskRunStatus::Running)))
     }
 
+    async fn queued_or_running_task_runs(
+        &self,
+        profile_id: &str,
+    ) -> BrokerResult<Vec<TaskRunRecord>> {
+        let runs = self
+            .store
+            .list_task_runs(&TaskListQuery {
+                profile_id: Some(profile_id.to_string()),
+                ..TaskListQuery::default()
+            })
+            .await
+            .map_err(BrokerError::from)?;
+        Ok(runs
+            .into_iter()
+            .filter(|run| matches!(run.status, TaskRunStatus::Queued | TaskRunStatus::Running))
+            .collect())
+    }
+
     async fn run_task(self: Arc<Self>, mut run: TaskRunRecord) {
         let result = match run.kind {
             TaskRunKind::SubscriptionSync => self.execute_subscription_sync_task(&mut run).await,
@@ -525,6 +544,35 @@ impl BrokerService {
                     "probed_ips": 0,
                     "geo_updated": 0,
                     "skipped_cached": 0,
+                })),
+                None,
+                None,
+            )
+            .await?;
+            return Ok(());
+        }
+
+        if self
+            .queued_or_running_task_runs(&run.profile_id)
+            .await?
+            .into_iter()
+            .any(|queued_run| {
+                queued_run.run_id != run.run_id
+                    && queued_run.kind == TaskRunKind::MetadataRefreshFull
+            })
+        {
+            self.complete_task_run(
+                run,
+                TaskRunStatus::Succeeded,
+                Some(serde_json::json!({
+                    "loaded_proxies": outcome.response.loaded_proxies,
+                    "distinct_ips": outcome.response.distinct_ips,
+                    "warnings": outcome.response.warnings,
+                    "new_ips": targeted_ips,
+                    "probed_ips": 0,
+                    "geo_updated": 0,
+                    "skipped_cached": 0,
+                    "deferred_to_full_refresh": true,
                 })),
                 None,
                 None,
@@ -932,15 +980,47 @@ impl BrokerService {
         let outcome = self.load_subscription_internal(profile_id, source).await?;
         self.register_profile_sync_source(profile_id, source)
             .await?;
-        self.enqueue_task_run(
-            profile_id,
-            TaskRunKind::MetadataRefreshIncremental,
-            TaskRunTrigger::PostLoad,
-            TaskRunScope::Ips {
-                ips: outcome.new_ips.clone(),
-            },
-        )
-        .await?;
+
+        if !outcome.new_ips.is_empty() {
+            let mut queued_incremental = self
+                .queued_or_running_task_runs(profile_id)
+                .await?
+                .into_iter()
+                .find(|run| {
+                    run.status == TaskRunStatus::Queued
+                        && run.kind == TaskRunKind::MetadataRefreshIncremental
+                });
+
+            if let Some(mut existing_run) = queued_incremental.take() {
+                let mut ips = match &existing_run.scope {
+                    TaskRunScope::All => outcome.new_ips.clone(),
+                    TaskRunScope::Ips { ips } => ips.clone(),
+                };
+                ips.extend(outcome.new_ips.clone());
+                ips.sort();
+                ips.dedup();
+                existing_run.scope = TaskRunScope::Ips { ips: ips.clone() };
+                self.update_task_run_and_emit(&existing_run).await?;
+                self.append_task_event(
+                    &existing_run,
+                    TaskEventLevel::Info,
+                    TaskRunStage::Queued,
+                    "Queued task scope expanded to include newly loaded IPs.",
+                    Some(serde_json::json!({ "targeted_ips": ips.len() })),
+                )
+                .await?;
+            } else if !self.has_pending_or_running_tasks(profile_id).await? {
+                self.enqueue_task_run(
+                    profile_id,
+                    TaskRunKind::MetadataRefreshIncremental,
+                    TaskRunTrigger::PostLoad,
+                    TaskRunScope::Ips {
+                        ips: outcome.new_ips.clone(),
+                    },
+                )
+                .await?;
+            }
+        }
         Ok(outcome.response)
     }
 
@@ -2127,6 +2207,15 @@ impl BrokerService {
             .await
             .map_err(BrokerError::from)?;
         Ok(to_detail(run.as_summary(), events))
+    }
+
+    pub async fn get_task_run_summary(&self, run_id: &str) -> BrokerResult<Option<TaskRunSummary>> {
+        Ok(self
+            .store
+            .get_task_run(run_id)
+            .await
+            .map_err(BrokerError::from)?
+            .map(|run| run.as_summary()))
     }
 
     pub fn subscribe_task_events(&self) -> broadcast::Receiver<TaskBusEvent> {
@@ -3676,6 +3765,66 @@ proxies:
     }
 
     #[tokio::test]
+    async fn load_subscription_coalesces_post_load_task_scope() {
+        let profile_id = "p-tasks-coalesce";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
+        let first_source = write_subscription_file(
+            r#"
+proxies:
+  - name: first
+    type: socks5
+    server: 2.2.2.2
+"#,
+        )
+        .await;
+        let second_source = write_subscription_file(
+            r#"
+proxies:
+  - name: first
+    type: socks5
+    server: 2.2.2.2
+  - name: second
+    type: socks5
+    server: 3.3.3.3
+"#,
+        )
+        .await;
+
+        service
+            .load_subscription(profile_id, &SubscriptionSource::File(first_source.clone()))
+            .await
+            .expect("first load should succeed");
+        service
+            .load_subscription(profile_id, &SubscriptionSource::File(second_source.clone()))
+            .await
+            .expect("second load should succeed");
+
+        let _ = tokio::fs::remove_file(&first_source).await;
+        let _ = tokio::fs::remove_file(&second_source).await;
+
+        let tasks = store
+            .list_task_runs(&TaskListQuery {
+                profile_id: Some(profile_id.to_string()),
+                ..TaskListQuery::default()
+            })
+            .await
+            .expect("task list query should succeed");
+        assert_eq!(tasks.len(), 1);
+        let run = tasks.first().expect("coalesced task should exist");
+        match &run.scope {
+            TaskRunScope::Ips { ips } => {
+                let ips = ips.iter().cloned().collect::<HashSet<_>>();
+                assert_eq!(ips.len(), 2);
+                assert!(ips.contains("2.2.2.2"));
+                assert!(ips.contains("3.3.3.3"));
+            }
+            TaskRunScope::All => panic!("post-load task should stay scoped to explicit IPs"),
+        }
+    }
+
+    #[tokio::test]
     async fn enqueue_due_tasks_queues_sync_then_full_refresh_for_due_profile() {
         let profile_id = "p-schedule";
         let store = Arc::new(MemoryStore::new());
@@ -3721,5 +3870,92 @@ proxies:
             .collect::<HashSet<_>>();
         assert!(kinds.contains(&TaskRunKind::SubscriptionSync));
         assert!(kinds.contains(&TaskRunKind::MetadataRefreshFull));
+    }
+
+    #[tokio::test]
+    async fn subscription_sync_defers_incremental_refresh_when_full_refresh_is_queued() {
+        let profile_id = "p-sync-deferred";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
+        let source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: fresh
+    type: socks5
+    server: 4.4.4.4
+"#,
+        )
+        .await;
+        let now = now_epoch_sec();
+
+        store
+            .upsert_profile_sync_config(&ProfileSyncConfig {
+                profile_id: profile_id.to_string(),
+                source: SubscriptionSource::File(source_path.clone()),
+                enabled: true,
+                sync_every_sec: DEFAULT_AUTO_SYNC_EVERY_SEC,
+                full_refresh_every_sec: DEFAULT_AUTO_FULL_REFRESH_EVERY_SEC,
+                last_sync_due_at: Some(now - 1),
+                last_sync_started_at: None,
+                last_sync_finished_at: None,
+                last_full_refresh_due_at: Some(now - 1),
+                last_full_refresh_started_at: None,
+                last_full_refresh_finished_at: None,
+                updated_at: now,
+            })
+            .await
+            .expect("sync config seed should succeed");
+
+        service
+            .enqueue_task_run(
+                profile_id,
+                TaskRunKind::MetadataRefreshFull,
+                TaskRunTrigger::Schedule,
+                TaskRunScope::All,
+            )
+            .await
+            .expect("full refresh queue should succeed");
+        let mut sync_run = service
+            .enqueue_task_run(
+                profile_id,
+                TaskRunKind::SubscriptionSync,
+                TaskRunTrigger::Schedule,
+                TaskRunScope::All,
+            )
+            .await
+            .expect("sync queue should succeed");
+
+        service
+            .execute_subscription_sync_task(&mut sync_run)
+            .await
+            .expect("sync should defer inline refresh");
+
+        let _ = tokio::fs::remove_file(&source_path).await;
+
+        let detail = service
+            .get_task_run_detail(&sync_run.run_id)
+            .await
+            .expect("task detail should succeed");
+        assert_eq!(detail.run.status, TaskRunStatus::Succeeded);
+        assert_eq!(
+            detail.run.summary_json,
+            Some(serde_json::json!({
+                "loaded_proxies": 1,
+                "distinct_ips": 1,
+                "warnings": [],
+                "new_ips": 1,
+                "probed_ips": 0,
+                "geo_updated": 0,
+                "skipped_cached": 0,
+                "deferred_to_full_refresh": true,
+            }))
+        );
+
+        let probe_records = store
+            .list_probe_records(profile_id)
+            .await
+            .expect("probe record query should succeed");
+        assert!(probe_records.is_empty());
     }
 }
