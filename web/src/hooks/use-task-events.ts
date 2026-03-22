@@ -40,6 +40,10 @@ export function useTaskEvents({ query, enabled = true }: UseTaskEventsOptions) {
     const handleSnapshot = (event: MessageEvent<string>) => {
       const envelope = parseTaskEnvelope<TaskListResponse>(event.data);
       queryClient.setQueryData(listQueryKey, envelope.data);
+      void queryClient.refetchQueries({
+        queryKey: ["task-run"],
+        type: "active",
+      });
       setState("live");
     };
     const handleRunUpsert = (event: MessageEvent<string>) => {

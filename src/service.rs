@@ -883,12 +883,16 @@ impl BrokerService {
         config.enabled = true;
         config.sync_every_sec = DEFAULT_AUTO_SYNC_EVERY_SEC;
         config.full_refresh_every_sec = DEFAULT_AUTO_FULL_REFRESH_EVERY_SEC;
-        config
-            .last_sync_due_at
-            .get_or_insert(now + DEFAULT_AUTO_SYNC_EVERY_SEC as i64);
-        config
-            .last_full_refresh_due_at
-            .get_or_insert(now + DEFAULT_AUTO_FULL_REFRESH_EVERY_SEC as i64);
+        config.last_sync_due_at = Some(preserve_or_advance_due_at(
+            config.last_sync_due_at,
+            now,
+            DEFAULT_AUTO_SYNC_EVERY_SEC,
+        ));
+        config.last_full_refresh_due_at = Some(preserve_or_advance_due_at(
+            config.last_full_refresh_due_at,
+            now,
+            DEFAULT_AUTO_FULL_REFRESH_EVERY_SEC,
+        ));
         config.updated_at = now;
         self.store
             .upsert_profile_sync_config(&config)
@@ -982,17 +986,17 @@ impl BrokerService {
         self.register_profile_sync_source(profile_id, source)
             .await?;
 
-        if !outcome.new_ips.is_empty() {
-            let mut queued_incremental = self
-                .queued_or_running_task_runs(profile_id)
-                .await?
-                .into_iter()
-                .find(|run| {
-                    run.status == TaskRunStatus::Queued
-                        && run.kind == TaskRunKind::MetadataRefreshIncremental
-                });
+        let mut queued_incremental = self
+            .queued_or_running_task_runs(profile_id)
+            .await?
+            .into_iter()
+            .find(|run| {
+                run.status == TaskRunStatus::Queued
+                    && run.kind == TaskRunKind::MetadataRefreshIncremental
+            });
 
-            if let Some(mut existing_run) = queued_incremental.take() {
+        if let Some(mut existing_run) = queued_incremental.take() {
+            if !outcome.new_ips.is_empty() {
                 let mut ips = match &existing_run.scope {
                     TaskRunScope::All => outcome.new_ips.clone(),
                     TaskRunScope::Ips { ips } => ips.clone(),
@@ -1010,17 +1014,17 @@ impl BrokerService {
                     Some(serde_json::json!({ "targeted_ips": ips.len() })),
                 )
                 .await?;
-            } else {
-                self.enqueue_task_run(
-                    profile_id,
-                    TaskRunKind::MetadataRefreshIncremental,
-                    TaskRunTrigger::PostLoad,
-                    TaskRunScope::Ips {
-                        ips: outcome.new_ips.clone(),
-                    },
-                )
-                .await?;
             }
+        } else {
+            self.enqueue_task_run(
+                profile_id,
+                TaskRunKind::MetadataRefreshIncremental,
+                TaskRunTrigger::PostLoad,
+                TaskRunScope::Ips {
+                    ips: outcome.new_ips.clone(),
+                },
+            )
+            .await?;
         }
         Ok(outcome.response)
     }
@@ -2494,6 +2498,13 @@ fn expected_probe_keys(
         .collect()
 }
 
+fn preserve_or_advance_due_at(existing_due_at: Option<i64>, now: i64, interval_sec: u64) -> i64 {
+    match existing_due_at {
+        Some(due_at) if due_at > now => due_at,
+        _ => now + interval_sec as i64,
+    }
+}
+
 fn has_complete_probe_records(
     nodes: &[ProxyNode],
     probe_targets: &[String],
@@ -3878,6 +3889,113 @@ proxies:
             .expect("sync config should persist");
         assert_eq!(config.last_sync_due_at, Some(expected_sync_due_at));
         assert_eq!(config.last_full_refresh_due_at, Some(expected_full_due_at));
+    }
+
+    #[tokio::test]
+    async fn load_subscription_advances_overdue_auto_refresh_due_times() {
+        let profile_id = "p-tasks-advance-overdue-due-at";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
+        let source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: new
+    type: socks5
+    server: 7.7.7.7
+"#,
+        )
+        .await;
+        let now = now_epoch_sec();
+
+        store
+            .upsert_profile_sync_config(&ProfileSyncConfig {
+                profile_id: profile_id.to_string(),
+                source: SubscriptionSource::Url("https://example.com/subscription".to_string()),
+                enabled: true,
+                sync_every_sec: DEFAULT_AUTO_SYNC_EVERY_SEC,
+                full_refresh_every_sec: DEFAULT_AUTO_FULL_REFRESH_EVERY_SEC,
+                last_sync_due_at: Some(now - 5),
+                last_sync_started_at: None,
+                last_sync_finished_at: None,
+                last_full_refresh_due_at: Some(now - 10),
+                last_full_refresh_started_at: None,
+                last_full_refresh_finished_at: None,
+                updated_at: now,
+            })
+            .await
+            .expect("sync config seed should succeed");
+
+        service
+            .load_subscription(profile_id, &SubscriptionSource::File(source_path.clone()))
+            .await
+            .expect("load should succeed");
+
+        let _ = tokio::fs::remove_file(&source_path).await;
+
+        let config = store
+            .get_profile_sync_config(profile_id)
+            .await
+            .expect("sync config query should succeed")
+            .expect("sync config should persist");
+        assert!(config.last_sync_due_at.expect("sync due at") > now);
+        assert!(config.last_full_refresh_due_at.expect("full due at") > now);
+    }
+
+    #[tokio::test]
+    async fn load_subscription_creates_post_load_task_even_when_no_new_ips_arrive() {
+        let profile_id = "p-tasks-no-new-ips";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
+        let source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: first
+    type: socks5
+    server: 4.4.4.4
+"#,
+        )
+        .await;
+
+        service
+            .load_subscription(profile_id, &SubscriptionSource::File(source_path.clone()))
+            .await
+            .expect("first load should succeed");
+        let mut existing_runs = store
+            .list_task_runs(&TaskListQuery {
+                profile_id: Some(profile_id.to_string()),
+                ..TaskListQuery::default()
+            })
+            .await
+            .expect("task list should succeed");
+        let mut first_run = existing_runs.remove(0);
+        first_run.status = TaskRunStatus::Succeeded;
+        first_run.stage = TaskRunStage::Completed;
+        first_run.finished_at = Some(now_epoch_sec());
+        store
+            .update_task_run(&first_run)
+            .await
+            .expect("task run update should succeed");
+        service
+            .load_subscription(profile_id, &SubscriptionSource::File(source_path.clone()))
+            .await
+            .expect("second load should succeed");
+
+        let _ = tokio::fs::remove_file(&source_path).await;
+
+        let tasks = service
+            .list_tasks(&TaskListQuery {
+                profile_id: Some(profile_id.to_string()),
+                ..TaskListQuery::default()
+            })
+            .await
+            .expect("task list should succeed");
+        assert_eq!(tasks.runs.len(), 2);
+        assert!(tasks.runs.iter().all(|run| {
+            run.kind == TaskRunKind::MetadataRefreshIncremental
+                && run.trigger == TaskRunTrigger::PostLoad
+        }));
     }
 
     #[tokio::test]
