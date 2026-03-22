@@ -831,6 +831,19 @@ impl BrokerService {
     }
 
     async fn fail_task_run(&self, run: &mut TaskRunRecord, error: BrokerError) -> BrokerResult<()> {
+        let failed_at = now_epoch_sec();
+        if run.trigger == TaskRunTrigger::Schedule {
+            match run.kind {
+                TaskRunKind::SubscriptionSync => {
+                    self.mark_sync_failed(&run.profile_id, failed_at).await?;
+                }
+                TaskRunKind::MetadataRefreshFull => {
+                    self.mark_full_refresh_failed(&run.profile_id, failed_at)
+                        .await?;
+                }
+                TaskRunKind::MetadataRefreshIncremental => {}
+            }
+        }
         self.complete_task_run(
             run,
             TaskRunStatus::Failed,
@@ -944,6 +957,27 @@ impl BrokerService {
         Ok(())
     }
 
+    async fn mark_sync_failed(&self, profile_id: &str, failed_at: i64) -> BrokerResult<()> {
+        if let Some(mut config) = self
+            .store
+            .get_profile_sync_config(profile_id)
+            .await
+            .map_err(BrokerError::from)?
+        {
+            config.last_sync_due_at = Some(preserve_or_advance_due_at(
+                config.last_sync_due_at,
+                failed_at,
+                config.sync_every_sec,
+            ));
+            config.updated_at = failed_at;
+            self.store
+                .upsert_profile_sync_config(&config)
+                .await
+                .map_err(BrokerError::from)?;
+        }
+        Ok(())
+    }
+
     async fn mark_full_refresh_started(&self, profile_id: &str) -> BrokerResult<()> {
         let now = now_epoch_sec();
         if let Some(mut config) = self
@@ -954,6 +988,27 @@ impl BrokerService {
         {
             config.last_full_refresh_started_at = Some(now);
             config.updated_at = now;
+            self.store
+                .upsert_profile_sync_config(&config)
+                .await
+                .map_err(BrokerError::from)?;
+        }
+        Ok(())
+    }
+
+    async fn mark_full_refresh_failed(&self, profile_id: &str, failed_at: i64) -> BrokerResult<()> {
+        if let Some(mut config) = self
+            .store
+            .get_profile_sync_config(profile_id)
+            .await
+            .map_err(BrokerError::from)?
+        {
+            config.last_full_refresh_due_at = Some(preserve_or_advance_due_at(
+                config.last_full_refresh_due_at,
+                failed_at,
+                config.full_refresh_every_sec,
+            ));
+            config.updated_at = failed_at;
             self.store
                 .upsert_profile_sync_config(&config)
                 .await
@@ -4024,7 +4079,7 @@ proxies:
     }
 
     #[tokio::test]
-    async fn failed_full_refresh_keeps_existing_due_at_for_retry() {
+    async fn failed_full_refresh_advances_due_at_before_retry() {
         let profile_id = "p-tasks-full-refresh-retry";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::with_failures(true, false));
@@ -4071,6 +4126,10 @@ proxies:
             .await
             .expect_err("full refresh should fail");
         assert!(matches!(err, BrokerError::MihomoUnavailable(_)));
+        service
+            .fail_task_run(&mut run, err)
+            .await
+            .expect("failure closeout should succeed");
 
         let _ = tokio::fs::remove_file(&source_path).await;
 
@@ -4079,11 +4138,17 @@ proxies:
             .await
             .expect("sync config query should succeed")
             .expect("sync config should persist");
-        assert_eq!(config.last_full_refresh_due_at, Some(now - 1));
+        assert_ne!(config.last_full_refresh_due_at, Some(now - 1));
+        assert!(
+            config
+                .last_full_refresh_due_at
+                .expect("full refresh due at")
+                >= now + DEFAULT_AUTO_FULL_REFRESH_EVERY_SEC as i64
+        );
     }
 
     #[tokio::test]
-    async fn failed_subscription_sync_keeps_existing_due_at_for_retry() {
+    async fn failed_subscription_sync_advances_due_at_before_retry() {
         let profile_id = "p-tasks-sync-retry";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::with_failures(true, false));
@@ -4144,6 +4209,10 @@ proxies:
             .await
             .expect_err("subscription sync should fail");
         assert!(matches!(err, BrokerError::MihomoUnavailable(_)));
+        service
+            .fail_task_run(&mut run, err)
+            .await
+            .expect("failure closeout should succeed");
 
         let _ = tokio::fs::remove_file(&source_path).await;
 
@@ -4152,7 +4221,11 @@ proxies:
             .await
             .expect("sync config query should succeed")
             .expect("sync config should persist");
-        assert_eq!(config.last_sync_due_at, Some(now - 1));
+        assert_ne!(config.last_sync_due_at, Some(now - 1));
+        assert!(
+            config.last_sync_due_at.expect("sync due at")
+                >= now + DEFAULT_AUTO_SYNC_EVERY_SEC as i64
+        );
     }
 
     #[tokio::test]

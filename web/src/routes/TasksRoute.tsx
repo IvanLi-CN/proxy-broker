@@ -8,6 +8,7 @@ import { TasksPage } from "@/pages/TasksPage";
 import type { RootOutletContext } from "@/routes/RootRoute";
 
 const DEFAULT_TASK_HISTORY_WINDOW_SEC = 7 * 24 * 60 * 60;
+const TASK_HISTORY_WINDOW_REFRESH_INTERVAL_MS = 60 * 1000;
 
 const getErrorMessage = (error: unknown) =>
   error instanceof ApiError ? `${error.code}: ${error.message}` : "Unexpected request error";
@@ -20,9 +21,7 @@ export function TasksRoute() {
   const [trigger, setTrigger] = useState<TaskRunTrigger | undefined>(undefined);
   const [runningOnly, setRunningOnly] = useState(false);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const [defaultSince] = useState(
-    () => Math.floor(Date.now() / 1000) - DEFAULT_TASK_HISTORY_WINDOW_SEC,
-  );
+  const [taskWindowNowSec, setTaskWindowNowSec] = useState(() => Math.floor(Date.now() / 1000));
   const lastTaskQuerySignature = useRef<string | null>(null);
   const canAccess =
     currentUser.status === "resolved" ? currentUser.identity.is_admin : Boolean(authMe?.is_admin);
@@ -31,6 +30,14 @@ export function TasksRoute() {
     (currentUser.status === "resolved" && !currentUser.identity.is_admin);
   const authError = currentUser.status === "error" ? currentUser.message : null;
 
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setTaskWindowNowSec(Math.floor(Date.now() / 1000));
+    }, TASK_HISTORY_WINDOW_REFRESH_INTERVAL_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, []);
+
   const taskQuery = useMemo(
     () => ({
       profile_id: scope === "current" ? profileId : undefined,
@@ -38,9 +45,9 @@ export function TasksRoute() {
       status,
       trigger,
       running_only: runningOnly,
-      since: defaultSince,
+      since: taskWindowNowSec - DEFAULT_TASK_HISTORY_WINDOW_SEC,
     }),
-    [defaultSince, kind, profileId, runningOnly, scope, status, trigger],
+    [kind, profileId, runningOnly, scope, status, taskWindowNowSec, trigger],
   );
   const taskQuerySignature = useMemo(() => JSON.stringify(taskQuery), [taskQuery]);
 

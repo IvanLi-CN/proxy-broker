@@ -1,4 +1,4 @@
-import { render, waitFor } from "@testing-library/react";
+import { act, render, waitFor } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -129,6 +129,36 @@ describe("TasksRoute", () => {
       expect(latestTasksQueryKey?.[1]).toMatchObject({
         profile_id: "default",
         since: 1773619200,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("slides the default task query window forward while the board stays open", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-03-23T00:00:00Z"));
+      mockOutletContext.mockReturnValue({
+        profileId: "default",
+        authMe: { is_admin: true },
+        currentUser: { status: "resolved", identity: { is_admin: true } },
+      });
+
+      render(<TasksRoute />);
+
+      expect(latestTasksQueryKey?.[1]).toMatchObject({
+        profile_id: "default",
+        since: 1773619200,
+      });
+
+      act(() => {
+        vi.advanceTimersByTime(60_000);
+      });
+
+      expect(latestTasksQueryKey?.[1]).toMatchObject({
+        profile_id: "default",
+        since: 1773619260,
       });
     } finally {
       vi.useRealTimers();
