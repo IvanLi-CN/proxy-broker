@@ -18,7 +18,7 @@ export function TasksRoute() {
   const [trigger, setTrigger] = useState<TaskRunTrigger | undefined>(undefined);
   const [runningOnly, setRunningOnly] = useState(false);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const hasMountedTaskQuery = useRef(false);
+  const lastTaskQuerySignature = useRef<string | null>(null);
   const canAccess = Boolean(authMe?.is_admin);
   const accessDenied = currentUser.status !== "loading" && !canAccess;
 
@@ -33,6 +33,7 @@ export function TasksRoute() {
     }),
     [kind, profileId, runningOnly, scope, status, trigger],
   );
+  const taskQuerySignature = useMemo(() => JSON.stringify(taskQuery), [taskQuery]);
 
   const tasksQuery = useQuery({
     queryKey: ["tasks", taskQuery],
@@ -61,12 +62,15 @@ export function TasksRoute() {
   }, [selectedRunId, tasksQuery.data?.runs]);
 
   useEffect(() => {
-    if (!hasMountedTaskQuery.current) {
-      hasMountedTaskQuery.current = true;
+    if (lastTaskQuerySignature.current === null) {
+      lastTaskQuerySignature.current = taskQuerySignature;
       return;
     }
-    setSelectedRunId(null);
-  }, [taskQuery]);
+    if (lastTaskQuerySignature.current !== taskQuerySignature) {
+      lastTaskQuerySignature.current = taskQuerySignature;
+      setSelectedRunId(null);
+    }
+  }, [taskQuerySignature]);
 
   return (
     <TasksPage
