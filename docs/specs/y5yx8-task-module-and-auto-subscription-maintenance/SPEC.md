@@ -189,7 +189,16 @@
 
 ## Visual Evidence (PR)
 
-Pending implementation.
+- source_type: storybook_canvas
+  target_program: mock-only
+  capture_scope: element
+  sensitive_exclusion: N/A
+  submission_gate: approved
+  story_id_or_title: Pages/TasksPage/Default
+  state: live
+  evidence_note: 验证任务中心默认实时视图已同时呈现摘要卡、筛选条、运行表和右侧事件详情流。
+  image:
+  ![Tasks page live board](./assets/tasks-page-live.png)
 
 ## 实现里程碑（Milestones / Delivery checklist）
 
