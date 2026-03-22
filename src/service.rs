@@ -607,6 +607,15 @@ impl BrokerService {
     }
 
     async fn execute_incremental_refresh_task(&self, run: &mut TaskRunRecord) -> BrokerResult<()> {
+        if let Some(latest_run) = self
+            .store
+            .get_task_run(&run.run_id)
+            .await
+            .map_err(BrokerError::from)?
+        {
+            run.scope = latest_run.scope;
+        }
+
         let target_ips = match &run.scope {
             TaskRunScope::Ips { ips } => ips.clone(),
             TaskRunScope::All => self
@@ -887,7 +896,7 @@ impl BrokerService {
             now,
             DEFAULT_AUTO_SYNC_EVERY_SEC,
         ));
-        config.last_full_refresh_due_at = Some(preserve_or_advance_due_at(
+        config.last_full_refresh_due_at = Some(seed_due_at_if_missing(
             config.last_full_refresh_due_at,
             now,
             DEFAULT_AUTO_FULL_REFRESH_EVERY_SEC,
@@ -985,32 +994,35 @@ impl BrokerService {
         self.register_profile_sync_source(profile_id, source)
             .await?;
 
-        let mut queued_incremental = self
-            .queued_or_running_task_runs(profile_id)
-            .await?
-            .into_iter()
+        let queued_or_running = self.queued_or_running_task_runs(profile_id).await?;
+        let mut existing_incremental = queued_or_running
+            .iter()
             .find(|run| {
                 run.status == TaskRunStatus::Queued
                     && run.kind == TaskRunKind::MetadataRefreshIncremental
+            })
+            .cloned()
+            .or_else(|| {
+                queued_or_running
+                    .iter()
+                    .find(|run| {
+                        run.status == TaskRunStatus::Running
+                            && run.kind == TaskRunKind::MetadataRefreshIncremental
+                    })
+                    .cloned()
             });
 
-        if let Some(mut existing_run) = queued_incremental.take() {
-            if !outcome.new_ips.is_empty() {
-                let mut ips = match &existing_run.scope {
-                    TaskRunScope::All => outcome.new_ips.clone(),
-                    TaskRunScope::Ips { ips } => ips.clone(),
-                };
-                ips.extend(outcome.new_ips.clone());
-                ips.sort();
-                ips.dedup();
-                existing_run.scope = TaskRunScope::Ips { ips: ips.clone() };
+        if let Some(mut existing_run) = existing_incremental.take() {
+            if let Some(targeted_ips) =
+                expand_incremental_task_scope(&mut existing_run, &outcome.new_ips)
+            {
                 self.update_task_run_and_emit(&existing_run).await?;
                 self.append_task_event(
                     &existing_run,
                     TaskEventLevel::Info,
-                    TaskRunStage::Queued,
-                    "Queued task scope expanded to include newly loaded IPs.",
-                    Some(serde_json::json!({ "targeted_ips": ips.len() })),
+                    existing_run.stage,
+                    "Incremental task scope expanded to include newly loaded IPs.",
+                    Some(serde_json::json!({ "targeted_ips": targeted_ips })),
                 )
                 .await?;
             }
@@ -2504,6 +2516,27 @@ fn preserve_or_advance_due_at(existing_due_at: Option<i64>, now: i64, interval_s
     }
 }
 
+fn seed_due_at_if_missing(existing_due_at: Option<i64>, now: i64, interval_sec: u64) -> i64 {
+    existing_due_at.unwrap_or(now + interval_sec as i64)
+}
+
+fn expand_incremental_task_scope(run: &mut TaskRunRecord, new_ips: &[String]) -> Option<usize> {
+    if new_ips.is_empty() {
+        return None;
+    }
+
+    match &mut run.scope {
+        TaskRunScope::All => None,
+        TaskRunScope::Ips { ips } => {
+            let previous_len = ips.len();
+            ips.extend(new_ips.iter().cloned());
+            ips.sort();
+            ips.dedup();
+            (ips.len() != previous_len).then_some(ips.len())
+        }
+    }
+}
+
 fn has_complete_probe_records(
     nodes: &[ProxyNode],
     probe_targets: &[String],
@@ -3891,8 +3924,8 @@ proxies:
     }
 
     #[tokio::test]
-    async fn load_subscription_advances_overdue_auto_refresh_due_times() {
-        let profile_id = "p-tasks-advance-overdue-due-at";
+    async fn load_subscription_advances_overdue_sync_due_without_moving_full_refresh_due_at() {
+        let profile_id = "p-tasks-preserve-overdue-full-refresh-due-at";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
@@ -3938,7 +3971,7 @@ proxies:
             .expect("sync config query should succeed")
             .expect("sync config should persist");
         assert!(config.last_sync_due_at.expect("sync due at") > now);
-        assert!(config.last_full_refresh_due_at.expect("full due at") > now);
+        assert_eq!(config.last_full_refresh_due_at, Some(now - 10));
     }
 
     #[tokio::test]
@@ -4178,6 +4211,86 @@ proxies:
             .expect("task list query should succeed");
         assert_eq!(tasks.len(), 1);
         let run = tasks.first().expect("coalesced task should exist");
+        match &run.scope {
+            TaskRunScope::Ips { ips } => {
+                let ips = ips.iter().cloned().collect::<HashSet<_>>();
+                assert_eq!(ips.len(), 2);
+                assert!(ips.contains("2.2.2.2"));
+                assert!(ips.contains("3.3.3.3"));
+            }
+            TaskRunScope::All => panic!("post-load task should stay scoped to explicit IPs"),
+        }
+    }
+
+    #[tokio::test]
+    async fn load_subscription_coalesces_running_post_load_task_scope() {
+        let profile_id = "p-tasks-coalesce-running";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
+        let first_source = write_subscription_file(
+            r#"
+proxies:
+  - name: first
+    type: socks5
+    server: 2.2.2.2
+"#,
+        )
+        .await;
+        let second_source = write_subscription_file(
+            r#"
+proxies:
+  - name: first
+    type: socks5
+    server: 2.2.2.2
+  - name: second
+    type: socks5
+    server: 3.3.3.3
+"#,
+        )
+        .await;
+
+        service
+            .load_subscription(profile_id, &SubscriptionSource::File(first_source.clone()))
+            .await
+            .expect("first load should succeed");
+
+        let mut run = store
+            .list_task_runs(&TaskListQuery {
+                profile_id: Some(profile_id.to_string()),
+                ..TaskListQuery::default()
+            })
+            .await
+            .expect("task list query should succeed")
+            .into_iter()
+            .next()
+            .expect("incremental run should exist");
+        run.status = TaskRunStatus::Running;
+        run.stage = TaskRunStage::DiffingInventory;
+        run.started_at = Some(now_epoch_sec());
+        store
+            .update_task_run(&run)
+            .await
+            .expect("task run update should succeed");
+
+        service
+            .load_subscription(profile_id, &SubscriptionSource::File(second_source.clone()))
+            .await
+            .expect("second load should succeed");
+
+        let _ = tokio::fs::remove_file(&first_source).await;
+        let _ = tokio::fs::remove_file(&second_source).await;
+
+        let tasks = store
+            .list_task_runs(&TaskListQuery {
+                profile_id: Some(profile_id.to_string()),
+                ..TaskListQuery::default()
+            })
+            .await
+            .expect("task list query should succeed");
+        assert_eq!(tasks.len(), 1);
+        let run = tasks.first().expect("coalesced task should exist");
+        assert_eq!(run.status, TaskRunStatus::Running);
         match &run.scope {
             TaskRunScope::Ips { ips } => {
                 let ips = ips.iter().cloned().collect::<HashSet<_>>();
