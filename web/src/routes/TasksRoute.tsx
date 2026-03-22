@@ -7,6 +7,8 @@ import type { TaskRunKind, TaskRunStatus, TaskRunTrigger } from "@/lib/types";
 import { TasksPage } from "@/pages/TasksPage";
 import type { RootOutletContext } from "@/routes/RootRoute";
 
+const DEFAULT_TASK_HISTORY_WINDOW_SEC = 7 * 24 * 60 * 60;
+
 const getErrorMessage = (error: unknown) =>
   error instanceof ApiError ? `${error.code}: ${error.message}` : "Unexpected request error";
 
@@ -18,9 +20,16 @@ export function TasksRoute() {
   const [trigger, setTrigger] = useState<TaskRunTrigger | undefined>(undefined);
   const [runningOnly, setRunningOnly] = useState(false);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [defaultSince] = useState(
+    () => Math.floor(Date.now() / 1000) - DEFAULT_TASK_HISTORY_WINDOW_SEC,
+  );
   const lastTaskQuerySignature = useRef<string | null>(null);
-  const canAccess = Boolean(authMe?.is_admin);
-  const accessDenied = currentUser.status !== "loading" && !canAccess;
+  const canAccess =
+    currentUser.status === "resolved" ? currentUser.identity.is_admin : Boolean(authMe?.is_admin);
+  const accessDenied =
+    currentUser.status === "anonymous" ||
+    (currentUser.status === "resolved" && !currentUser.identity.is_admin);
+  const authError = currentUser.status === "error" ? currentUser.message : null;
 
   const taskQuery = useMemo(
     () => ({
@@ -29,8 +38,9 @@ export function TasksRoute() {
       status,
       trigger,
       running_only: runningOnly,
+      since: defaultSince,
     }),
-    [kind, profileId, runningOnly, scope, status, trigger],
+    [defaultSince, kind, profileId, runningOnly, scope, status, trigger],
   );
   const taskQuerySignature = useMemo(() => JSON.stringify(taskQuery), [taskQuery]);
 
@@ -89,8 +99,8 @@ export function TasksRoute() {
       selectedRunId={selectedRunId}
       selectedRunLoading={detailQuery.isLoading}
       status={status}
-      streamState={streamState}
-      taskError={tasksQuery.isError ? getErrorMessage(tasksQuery.error) : null}
+      streamState={authError ? "reconnecting" : streamState}
+      taskError={authError ?? (tasksQuery.isError ? getErrorMessage(tasksQuery.error) : null)}
       taskList={tasksQuery.data ?? null}
       tasksLoading={tasksQuery.isLoading}
       trigger={trigger}

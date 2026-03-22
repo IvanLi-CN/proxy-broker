@@ -9,6 +9,7 @@
   - `status?`: `queued|running|succeeded|failed|skipped`
   - `trigger?`: `schedule|post_load`
   - `running_only?`: `bool`
+  - `since?`: `unix timestamp seconds`
   - `limit?`: `u32`
   - `cursor?`: `string`
 - Success: `200`

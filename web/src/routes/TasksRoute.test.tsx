@@ -24,6 +24,7 @@ let detailQueryResult: {
   isError: boolean;
   isLoading: boolean;
 };
+let latestTasksQueryKey: [string, ...unknown[]] | null = null;
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: (options: unknown) => mockUseQuery(options),
@@ -47,6 +48,7 @@ vi.mock("@/pages/TasksPage", () => ({
 describe("TasksRoute", () => {
   beforeEach(() => {
     latestTasksPageProps = null;
+    latestTasksQueryKey = null;
     mockOutletContext.mockReset();
     mockUseQuery.mockReset();
     mockUseTaskEvents.mockReset();
@@ -63,9 +65,13 @@ describe("TasksRoute", () => {
       isError: false,
       isLoading: false,
     };
-    mockUseQuery.mockImplementation((options: { queryKey: [string, ...unknown[]] }) =>
-      options.queryKey[0] === "tasks" ? tasksQueryResult : detailQueryResult,
-    );
+    mockUseQuery.mockImplementation((options: { queryKey: [string, ...unknown[]] }) => {
+      if (options.queryKey[0] === "tasks") {
+        latestTasksQueryKey = options.queryKey;
+        return tasksQueryResult;
+      }
+      return detailQueryResult;
+    });
     mockUseTaskEvents.mockReturnValue("connecting");
   });
 
@@ -91,6 +97,42 @@ describe("TasksRoute", () => {
     render(<TasksRoute />);
 
     expect(latestTasksPageProps?.accessDenied).toBe(false);
+  });
+
+  it("surfaces auth resolution failures without mislabeling them as access denied", () => {
+    mockOutletContext.mockReturnValue({
+      profileId: "default",
+      authMe: null,
+      currentUser: { status: "error", message: "auth_unavailable: upstream timeout" },
+    });
+
+    render(<TasksRoute />);
+
+    expect(latestTasksPageProps?.accessDenied).toBe(false);
+    expect(latestTasksPageProps?.taskError).toBe("auth_unavailable: upstream timeout");
+    expect(latestTasksPageProps?.streamState).toBe("reconnecting");
+  });
+
+  it("scopes the default task query to the current profile and last 7 days", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-03-23T00:00:00Z"));
+      mockOutletContext.mockReturnValue({
+        profileId: "default",
+        authMe: { is_admin: true },
+        currentUser: { status: "resolved", identity: { is_admin: true } },
+      });
+
+      render(<TasksRoute />);
+
+      expect(latestTasksQueryKey).not.toBeNull();
+      expect(latestTasksQueryKey?.[1]).toMatchObject({
+        profile_id: "default",
+        since: 1773619200,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("clears the selected run while a new task query is loading", async () => {

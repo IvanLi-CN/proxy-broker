@@ -18,6 +18,9 @@ export function buildTaskSearchParams(query: TaskListQuery) {
   if (query.running_only) {
     params.set("running_only", "true");
   }
+  if (query.since != null) {
+    params.set("since", String(query.since));
+  }
   if (query.limit != null) {
     params.set("limit", String(query.limit));
   }
@@ -42,6 +45,9 @@ export function matchesTaskQuery(run: TaskRunSummary, query: TaskListQuery) {
     return false;
   }
   if (query.running_only && run.status !== "running") {
+    return false;
+  }
+  if (query.since != null && run.created_at < query.since) {
     return false;
   }
   return true;

@@ -372,6 +372,7 @@ pub struct TaskListQuery {
     pub trigger: Option<TaskRunTrigger>,
     #[serde(default)]
     pub running_only: bool,
+    pub since: Option<i64>,
     pub limit: Option<usize>,
     pub cursor: Option<String>,
 }

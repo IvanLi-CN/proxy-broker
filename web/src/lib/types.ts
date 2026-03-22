@@ -219,6 +219,7 @@ export interface TaskListQuery {
   status?: TaskRunStatus;
   trigger?: TaskRunTrigger;
   running_only?: boolean;
+  since?: number;
   limit?: number;
   cursor?: string;
 }

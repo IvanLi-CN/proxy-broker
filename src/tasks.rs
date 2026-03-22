@@ -34,6 +34,11 @@ pub fn matches_task_query(run: &TaskRunSummary, query: &TaskListQuery) -> bool {
     if query.running_only && run.status != TaskRunStatus::Running {
         return false;
     }
+    if let Some(since) = query.since
+        && run.created_at < since
+    {
+        return false;
+    }
     true
 }
 
@@ -164,6 +169,26 @@ mod tests {
             ..TaskListQuery::default()
         };
         assert!(!matches_task_query(&run, &query));
+    }
+
+    #[test]
+    fn matches_task_query_respects_since_filter() {
+        let run = sample_run(
+            "default",
+            TaskRunKind::SubscriptionSync,
+            TaskRunStatus::Succeeded,
+        );
+        let query = TaskListQuery {
+            since: Some(2),
+            ..TaskListQuery::default()
+        };
+        assert!(!matches_task_query(&run, &query));
+
+        let query = TaskListQuery {
+            since: Some(1),
+            ..TaskListQuery::default()
+        };
+        assert!(matches_task_query(&run, &query));
     }
 
     #[test]
