@@ -1100,7 +1100,13 @@ impl BrokerStore for SqliteStore {
         .bind(event.level.as_str())
         .bind(event.stage.as_str())
         .bind(&event.message)
-        .bind(event.payload_json.as_ref().map(serde_json::to_string).transpose()?)
+        .bind(
+            event
+                .payload_json
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?,
+        )
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -1141,9 +1147,8 @@ fn map_api_key_row(row: sqlx::sqlite::SqliteRow) -> anyhow::Result<ApiKeyRecord>
 fn map_profile_sync_config_row(row: sqlx::sqlite::SqliteRow) -> anyhow::Result<ProfileSyncConfig> {
     let source_type: String = row.try_get("source_type")?;
     let source_value: String = row.try_get("source_value")?;
-    let source = SubscriptionSource::from_parts(&source_type, source_value).with_context(|| {
-        format!("unsupported profile sync source type: {source_type}")
-    })?;
+    let source = SubscriptionSource::from_parts(&source_type, source_value)
+        .with_context(|| format!("unsupported profile sync source type: {source_type}"))?;
     let sync_every_sec: i64 = row.try_get("sync_every_sec")?;
     let full_refresh_every_sec: i64 = row.try_get("full_refresh_every_sec")?;
     Ok(ProfileSyncConfig {
@@ -1198,7 +1203,12 @@ async fn persist_task_run(pool: &SqlitePool, run: &TaskRunRecord) -> anyhow::Res
     .bind(run.created_at)
     .bind(run.started_at)
     .bind(run.finished_at)
-    .bind(run.summary_json.as_ref().map(serde_json::to_string).transpose()?)
+    .bind(
+        run.summary_json
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?,
+    )
     .bind(&run.error_code)
     .bind(&run.error_message)
     .bind(Some(serde_json::to_string(&run.scope)?))
@@ -1219,7 +1229,8 @@ fn map_task_run_row(row: sqlx::sqlite::SqliteRow) -> anyhow::Result<TaskRunRecor
     Ok(TaskRunRecord {
         run_id: row.try_get("run_id")?,
         profile_id: row.try_get("profile_id")?,
-        kind: TaskRunKind::parse(&kind).with_context(|| format!("unsupported task kind: {kind}"))?,
+        kind: TaskRunKind::parse(&kind)
+            .with_context(|| format!("unsupported task kind: {kind}"))?,
         trigger: TaskRunTrigger::parse(&trigger)
             .with_context(|| format!("unsupported task trigger: {trigger}"))?,
         status: TaskRunStatus::parse(&status)

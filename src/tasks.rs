@@ -48,7 +48,11 @@ pub fn build_task_summary(runs: &[TaskRunSummary]) -> TaskSummary {
         }
 
         let candidate = run.finished_at.or(run.started_at).unwrap_or(run.created_at);
-        summary.last_run_at = Some(summary.last_run_at.map_or(candidate, |current| current.max(candidate)));
+        summary.last_run_at = Some(
+            summary
+                .last_run_at
+                .map_or(candidate, |current| current.max(candidate)),
+        );
     }
     summary
 }

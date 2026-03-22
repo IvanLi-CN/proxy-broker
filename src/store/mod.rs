@@ -4,8 +4,8 @@ mod sqlite;
 use async_trait::async_trait;
 
 use crate::models::{
-    ApiKeyRecord, IpRecord, ProbeRecord, ProfileSyncConfig, ProxyNode, SessionRecord, TaskListQuery,
-    TaskRunEventRecord, TaskRunRecord,
+    ApiKeyRecord, IpRecord, ProbeRecord, ProfileSyncConfig, ProxyNode, SessionRecord,
+    TaskListQuery, TaskRunEventRecord, TaskRunRecord,
 };
 
 pub use memory::MemoryStore;

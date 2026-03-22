@@ -521,14 +521,12 @@ mod tests {
         });
 
         let response = app
-            .oneshot(
-                trusted_request(
-                    Request::builder()
-                        .uri("/api/v1/tasks?profile_id=default")
-                        .body(Body::empty())
-                        .unwrap(),
-                ),
-            )
+            .oneshot(trusted_request(
+                Request::builder()
+                    .uri("/api/v1/tasks?profile_id=default")
+                    .body(Body::empty())
+                    .unwrap(),
+            ))
             .await
             .expect("request should succeed");
 
@@ -548,14 +546,12 @@ mod tests {
         });
 
         let response = app
-            .oneshot(
-                trusted_request(
-                    Request::builder()
-                        .uri("/api/v1/tasks/events")
-                        .body(Body::empty())
-                        .unwrap(),
-                ),
-            )
+            .oneshot(trusted_request(
+                Request::builder()
+                    .uri("/api/v1/tasks/events")
+                    .body(Body::empty())
+                    .unwrap(),
+            ))
             .await
             .expect("request should succeed");
 

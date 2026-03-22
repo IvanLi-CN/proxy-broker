@@ -281,11 +281,9 @@ impl BrokerService {
             tracing::warn!(error = %err, "task supervisor failed to recover interrupted runs");
         }
 
-        let mut schedule_tick =
-            tokio::time::interval(Duration::from_secs(TASK_SCHEDULE_SCAN_SEC));
+        let mut schedule_tick = tokio::time::interval(Duration::from_secs(TASK_SCHEDULE_SCAN_SEC));
         schedule_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        let mut dispatch_tick =
-            tokio::time::interval(Duration::from_secs(TASK_DISPATCH_POLL_SEC));
+        let mut dispatch_tick = tokio::time::interval(Duration::from_secs(TASK_DISPATCH_POLL_SEC));
         dispatch_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
         loop {
@@ -320,7 +318,8 @@ impl BrokerService {
             run.stage = TaskRunStage::Completed;
             run.finished_at = Some(now);
             run.error_code = Some("interrupted_on_restart".to_string());
-            run.error_message = Some("task run interrupted while service was restarting".to_string());
+            run.error_message =
+                Some("task run interrupted while service was restarting".to_string());
             self.update_task_run_and_emit(&run).await?;
             self.append_task_event(
                 &run,
@@ -347,7 +346,10 @@ impl BrokerService {
             if !config.enabled {
                 continue;
             }
-            if self.has_pending_or_running_tasks(&config.profile_id).await? {
+            if self
+                .has_pending_or_running_tasks(&config.profile_id)
+                .await?
+            {
                 continue;
             }
 
@@ -431,9 +433,9 @@ impl BrokerService {
             })
             .await
             .map_err(BrokerError::from)?;
-        Ok(runs.into_iter().any(|run| {
-            matches!(run.status, TaskRunStatus::Queued | TaskRunStatus::Running)
-        }))
+        Ok(runs
+            .into_iter()
+            .any(|run| matches!(run.status, TaskRunStatus::Queued | TaskRunStatus::Running)))
     }
 
     async fn run_task(self: Arc<Self>, mut run: TaskRunRecord) {
@@ -487,7 +489,8 @@ impl BrokerService {
             .await;
 
         let completed_at = now_epoch_sec();
-        self.mark_sync_finished(&run.profile_id, completed_at).await?;
+        self.mark_sync_finished(&run.profile_id, completed_at)
+            .await?;
 
         let outcome = outcome?;
         let targeted_ips = outcome.new_ips.len() as u64;
@@ -681,7 +684,9 @@ impl BrokerService {
             .insert_task_run(run)
             .await
             .map_err(BrokerError::from)?;
-        let _ = self.task_events.send(TaskBusEvent::RunUpsert(run.as_summary()));
+        let _ = self
+            .task_events
+            .send(TaskBusEvent::RunUpsert(run.as_summary()));
         Ok(())
     }
 
@@ -690,7 +695,9 @@ impl BrokerService {
             .update_task_run(run)
             .await
             .map_err(BrokerError::from)?;
-        let _ = self.task_events.send(TaskBusEvent::RunUpsert(run.as_summary()));
+        let _ = self
+            .task_events
+            .send(TaskBusEvent::RunUpsert(run.as_summary()));
         Ok(())
     }
 
@@ -770,11 +777,7 @@ impl BrokerService {
             .await
     }
 
-    async fn fail_task_run(
-        &self,
-        run: &mut TaskRunRecord,
-        error: BrokerError,
-    ) -> BrokerResult<()> {
+    async fn fail_task_run(&self, run: &mut TaskRunRecord, error: BrokerError) -> BrokerResult<()> {
         self.complete_task_run(
             run,
             TaskRunStatus::Failed,
@@ -927,7 +930,8 @@ impl BrokerService {
         source: &crate::models::SubscriptionSource,
     ) -> BrokerResult<LoadSubscriptionResponse> {
         let outcome = self.load_subscription_internal(profile_id, source).await?;
-        self.register_profile_sync_source(profile_id, source).await?;
+        self.register_profile_sync_source(profile_id, source)
+            .await?;
         self.enqueue_task_run(
             profile_id,
             TaskRunKind::MetadataRefreshIncremental,
@@ -1175,7 +1179,8 @@ impl BrokerService {
             .list_probe_records(profile_id)
             .await
             .map_err(BrokerError::from)?;
-        let scoped_probe_records = filter_probe_records_to_ips(&stored_probe_records, &scoped_ip_set);
+        let scoped_probe_records =
+            filter_probe_records_to_ips(&stored_probe_records, &scoped_ip_set);
         let probe_cache_complete = has_complete_probe_records(
             &scoped_nodes,
             &self.options.probe_targets,
@@ -1268,7 +1273,13 @@ impl BrokerService {
         }
 
         let geo_updated = self
-            .refresh_geo_records(profile_id, force, now, &mut ip_records, Some(&scoped_ip_set))
+            .refresh_geo_records(
+                profile_id,
+                force,
+                now,
+                &mut ip_records,
+                Some(&scoped_ip_set),
+            )
             .await?;
 
         if let Some(run_id) = run_id {
@@ -1310,7 +1321,8 @@ impl BrokerService {
         self.cleanup_profile_runtime_if_idle(profile_id, &sessions)
             .await;
 
-        let probed_ips: HashSet<String> = probe_records.into_iter().map(|record| record.ip).collect();
+        let probed_ips: HashSet<String> =
+            probe_records.into_iter().map(|record| record.ip).collect();
 
         Ok(RefreshResponse {
             probed_ips: probed_ips.len(),
@@ -2080,7 +2092,9 @@ impl BrokerService {
                     .map(|index| index + 1)
             })
             .unwrap_or(0);
-        let limit = query.limit.unwrap_or(all_summaries.len().saturating_sub(start_index));
+        let limit = query
+            .limit
+            .unwrap_or(all_summaries.len().saturating_sub(start_index));
         let runs = all_summaries
             .iter()
             .skip(start_index)
@@ -2347,10 +2361,15 @@ fn clear_stale_probe_timestamps(ip_records: &mut [IpRecord], probe_records: &[Pr
 }
 
 fn ip_in_scope(ip: &str, target_ips: Option<&HashSet<String>>) -> bool {
-    target_ips.map(|target_ips| target_ips.contains(ip)).unwrap_or(true)
+    target_ips
+        .map(|target_ips| target_ips.contains(ip))
+        .unwrap_or(true)
 }
 
-fn scoped_ip_records(ip_records: &[IpRecord], target_ips: Option<&HashSet<String>>) -> HashSet<String> {
+fn scoped_ip_records(
+    ip_records: &[IpRecord],
+    target_ips: Option<&HashSet<String>>,
+) -> HashSet<String> {
     ip_records
         .iter()
         .filter(|record| ip_in_scope(&record.ip, target_ips))
@@ -2369,7 +2388,10 @@ fn filter_probe_records_to_ips(
         .collect()
 }
 
-fn scope_nodes_for_ips(nodes: &[ProxyNode], target_ips: Option<&HashSet<String>>) -> Vec<ProxyNode> {
+fn scope_nodes_for_ips(
+    nodes: &[ProxyNode],
+    target_ips: Option<&HashSet<String>>,
+) -> Vec<ProxyNode> {
     nodes
         .iter()
         .filter_map(|node| {
