@@ -320,7 +320,14 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
             )
         )
         assert exit_code == 0
-        assert output.read_text() == f"target_sha={sha1}\nassets_only=false\n"
+        assert output.read_text() == (
+            f"requested_sha={sha2}\n"
+            f"selected_target_sha={sha2}\n"
+            f"target_sha={sha2}\n"
+            "assets_only=false\n"
+            "backlog_pending_count=1\n"
+            f"backlog_pending_targets={sha1}\n"
+        )
 
         run("tag", "v0.1.2", sha2, cwd=work)
         output = work / "select-target-pending.out"
@@ -332,7 +339,14 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
             )
         )
         assert exit_code == 0
-        assert output.read_text() == f"target_sha={sha2}\nassets_only=true\n"
+        assert output.read_text() == (
+            f"requested_sha={sha2}\n"
+            f"selected_target_sha={sha2}\n"
+            f"target_sha={sha2}\n"
+            "assets_only=true\n"
+            "backlog_pending_count=1\n"
+            f"backlog_pending_targets={sha1}\n"
+        )
         run("tag", "v0.1.1", sha1, cwd=work)
         output = work / "select-target-skipped.out"
         exit_code = module.select_dispatch_target(
@@ -343,7 +357,14 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
             )
         )
         assert exit_code == 0
-        assert output.read_text() == f"target_sha={sha1}\nassets_only=true\n"
+        assert output.read_text() == (
+            f"requested_sha={sha3}\n"
+            f"selected_target_sha={sha3}\n"
+            f"target_sha={sha3}\n"
+            "assets_only=false\n"
+            "backlog_pending_count=2\n"
+            f"backlog_pending_targets={sha1},{sha2}\n"
+        )
 
         exit_code = module.mark_released(
             argparse.Namespace(
@@ -383,7 +404,14 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
             )
         )
         assert exit_code == 0
-        assert output.read_text() == f"target_sha={sha4}\nassets_only=true\n"
+        assert output.read_text() == (
+            f"requested_sha={sha4}\n"
+            f"selected_target_sha={sha4}\n"
+            f"target_sha={sha4}\n"
+            "assets_only=true\n"
+            "backlog_pending_count=1\n"
+            f"backlog_pending_targets={sha2}\n"
+        )
 
         output = work / "select-target-partial-release.out"
         exit_code = module.select_dispatch_target(
@@ -394,7 +422,14 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
             )
         )
         assert exit_code == 0
-        assert output.read_text() == f"target_sha={sha2}\nassets_only=true\n"
+        assert output.read_text() == (
+            f"requested_sha={sha2}\n"
+            f"selected_target_sha={sha2}\n"
+            f"target_sha={sha2}\n"
+            "assets_only=true\n"
+            "backlog_pending_count=0\n"
+            "backlog_pending_targets=\n"
+        )
 
         exit_code = module.mark_released(
             argparse.Namespace(
@@ -415,7 +450,14 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
             )
         )
         assert exit_code == 0
-        assert output.read_text() == f"target_sha={sha2}\nassets_only=true\n"
+        assert output.read_text() == (
+            f"requested_sha={sha2}\n"
+            f"selected_target_sha={sha2}\n"
+            f"target_sha={sha2}\n"
+            "assets_only=true\n"
+            "backlog_pending_count=0\n"
+            "backlog_pending_targets=\n"
+        )
     finally:
         module.load_pr_for_commit = original_load_pr
         os.chdir(original_cwd)
