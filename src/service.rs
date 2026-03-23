@@ -1270,6 +1270,12 @@ impl BrokerService {
             .await?;
 
         let queued_or_running = self.queued_or_running_task_runs(profile_id).await?;
+        if queued_or_running
+            .iter()
+            .any(|run| run.kind == TaskRunKind::MetadataRefreshFull)
+        {
+            return Ok(());
+        }
         // Only queued incremental runs can safely absorb new IPs. Running runs may have already
         // snapshotted their scope, so later loads must queue a follow-up task instead.
         let mut existing_incremental = queued_or_running
@@ -4170,7 +4176,7 @@ proxies:
     }
 
     #[tokio::test]
-    async fn load_subscription_queues_post_load_task_even_with_pending_full_refresh() {
+    async fn load_subscription_skips_post_load_task_when_full_refresh_is_pending() {
         let profile_id = "p-tasks-with-full-refresh";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
@@ -4209,18 +4215,9 @@ proxies:
             })
             .await
             .expect("task list should succeed");
-        assert_eq!(tasks.runs.len(), 2);
-        assert!(
-            tasks
-                .runs
-                .iter()
-                .any(|run| run.kind == TaskRunKind::MetadataRefreshFull)
-        );
-        assert!(tasks.runs.iter().any(|run| {
-            run.kind == TaskRunKind::MetadataRefreshIncremental
-                && run.trigger == TaskRunTrigger::PostLoad
-                && run.status == TaskRunStatus::Queued
-        }));
+        assert_eq!(tasks.runs.len(), 1);
+        assert_eq!(tasks.runs[0].kind, TaskRunKind::MetadataRefreshFull);
+        assert_eq!(tasks.runs[0].trigger, TaskRunTrigger::Schedule);
     }
 
     #[tokio::test]
