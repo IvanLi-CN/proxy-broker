@@ -113,7 +113,7 @@ describe("TasksRoute", () => {
     expect(latestTasksPageProps?.streamState).toBe("reconnecting");
   });
 
-  it("scopes the live task query to the current profile without time-based churn", () => {
+  it("scopes the request task query to the current profile and 7-day backend window", () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(new Date("2026-03-23T00:00:00Z"));
@@ -128,6 +128,7 @@ describe("TasksRoute", () => {
       expect(latestTasksQueryKey).not.toBeNull();
       expect(latestTasksQueryKey?.[1]).toMatchObject({
         profile_id: "default",
+        since: 1773619200,
       });
     } finally {
       vi.useRealTimers();
@@ -183,6 +184,7 @@ describe("TasksRoute", () => {
 
       expect(latestTasksQueryKey?.[1]).toMatchObject({
         profile_id: "default",
+        since: 1773619200,
       });
       expect(latestTasksPageProps?.taskList?.runs).toHaveLength(1);
 
@@ -192,6 +194,7 @@ describe("TasksRoute", () => {
 
       expect(latestTasksQueryKey?.[1]).toMatchObject({
         profile_id: "default",
+        since: 1773619200,
       });
       expect(latestTasksPageProps?.taskList?.runs).toHaveLength(0);
     } finally {
@@ -258,8 +261,39 @@ describe("TasksRoute", () => {
 
       expect(latestTasksQueryKey?.[1]).toMatchObject({
         profile_id: "default",
+        since: 1773619200,
       });
       expect(latestTasksPageProps?.selectedRunId).toBe("run-1");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rebases the backend task window on an hourly cadence", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-03-23T00:00:00Z"));
+      mockOutletContext.mockReturnValue({
+        profileId: "default",
+        authMe: { is_admin: true },
+        currentUser: { status: "resolved", identity: { is_admin: true } },
+      });
+
+      render(<TasksRoute />);
+
+      expect(latestTasksQueryKey?.[1]).toMatchObject({
+        profile_id: "default",
+        since: 1773619200,
+      });
+
+      act(() => {
+        vi.advanceTimersByTime(60 * 60 * 1000);
+      });
+
+      expect(latestTasksQueryKey?.[1]).toMatchObject({
+        profile_id: "default",
+        since: 1773622800,
+      });
     } finally {
       vi.useRealTimers();
     }

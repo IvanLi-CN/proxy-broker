@@ -10,6 +10,8 @@ import type {
   TaskRunDetail,
 } from "@/lib/types";
 
+const recentTaskBaseSec = Math.floor(Date.now() / 1000) - 120;
+
 export const healthFixture: HealthResponse = {
   status: "ok",
 };
@@ -101,7 +103,7 @@ export const tasksFixture: TaskListResponse = {
     failed_runs: 0,
     succeeded_runs: 1,
     skipped_runs: 0,
-    last_run_at: 1_741_748_520,
+    last_run_at: recentTaskBaseSec,
   },
   runs: [
     {
@@ -113,8 +115,8 @@ export const tasksFixture: TaskListResponse = {
       stage: "probing",
       progress_current: 8,
       progress_total: 12,
-      created_at: 1_741_748_520,
-      started_at: 1_741_748_510,
+      created_at: recentTaskBaseSec,
+      started_at: recentTaskBaseSec - 10,
       finished_at: null,
       summary_json: null,
       error_code: null,
@@ -129,7 +131,7 @@ export const tasksFixture: TaskListResponse = {
       stage: "queued",
       progress_current: 0,
       progress_total: 6,
-      created_at: 1_741_748_500,
+      created_at: recentTaskBaseSec - 20,
       started_at: null,
       finished_at: null,
       summary_json: null,
@@ -145,9 +147,9 @@ export const tasksFixture: TaskListResponse = {
       stage: "completed",
       progress_current: 32,
       progress_total: 32,
-      created_at: 1_741_748_460,
-      started_at: 1_741_748_430,
-      finished_at: 1_741_748_460,
+      created_at: recentTaskBaseSec - 60,
+      started_at: recentTaskBaseSec - 90,
+      finished_at: recentTaskBaseSec - 60,
       summary_json: {
         targeted_ips: 32,
         probed_ips: 32,
@@ -182,7 +184,7 @@ export const taskDetailFixture: TaskRunDetail = {
     {
       event_id: "evt_1",
       run_id: "run_live_sync",
-      at: 1_741_748_511,
+      at: recentTaskBaseSec - 9,
       level: "info",
       stage: "loading_subscription",
       message: "Refreshing subscription feed for profile.",
@@ -191,7 +193,7 @@ export const taskDetailFixture: TaskRunDetail = {
     {
       event_id: "evt_2",
       run_id: "run_live_sync",
-      at: 1_741_748_516,
+      at: recentTaskBaseSec - 4,
       level: "info",
       stage: "probing",
       message: "Refreshing probe metadata.",

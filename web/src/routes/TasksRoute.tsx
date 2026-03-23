@@ -10,6 +10,7 @@ import type { RootOutletContext } from "@/routes/RootRoute";
 
 const DEFAULT_TASK_HISTORY_WINDOW_SEC = 7 * 24 * 60 * 60;
 const TASK_HISTORY_WINDOW_REFRESH_INTERVAL_MS = 60 * 1000;
+const TASK_HISTORY_QUERY_REBASE_INTERVAL_MS = 60 * 60 * 1000;
 
 const getErrorMessage = (error: unknown) =>
   error instanceof ApiError ? `${error.code}: ${error.message}` : "Unexpected request error";
@@ -23,6 +24,7 @@ export function TasksRoute() {
   const [runningOnly, setRunningOnly] = useState(false);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [taskWindowNowSec, setTaskWindowNowSec] = useState(() => Math.floor(Date.now() / 1000));
+  const [taskQueryNowSec, setTaskQueryNowSec] = useState(() => Math.floor(Date.now() / 1000));
   const lastTaskQuerySignature = useRef<string | null>(null);
   const canAccess =
     currentUser.status === "resolved" ? currentUser.identity.is_admin : Boolean(authMe?.is_admin);
@@ -39,6 +41,14 @@ export function TasksRoute() {
     return () => window.clearInterval(intervalId);
   }, []);
 
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setTaskQueryNowSec(Math.floor(Date.now() / 1000));
+    }, TASK_HISTORY_QUERY_REBASE_INTERVAL_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, []);
+
   const liveTaskQuery = useMemo(
     () => ({
       profile_id: scope === "current" ? profileId : undefined,
@@ -48,6 +58,13 @@ export function TasksRoute() {
       running_only: runningOnly,
     }),
     [kind, profileId, runningOnly, scope, status, trigger],
+  );
+  const requestTaskQuery = useMemo(
+    () => ({
+      ...liveTaskQuery,
+      since: taskQueryNowSec - DEFAULT_TASK_HISTORY_WINDOW_SEC,
+    }),
+    [liveTaskQuery, taskQueryNowSec],
   );
   const visibleTaskQuery = useMemo(
     () => ({
@@ -75,9 +92,10 @@ export function TasksRoute() {
   );
 
   const tasksQuery = useQuery({
-    queryKey: ["tasks", liveTaskQuery],
-    queryFn: () => api.listTasks(liveTaskQuery),
+    queryKey: ["tasks", requestTaskQuery],
+    queryFn: () => api.listTasks(requestTaskQuery),
     enabled: canAccess,
+    placeholderData: (previousData) => previousData,
   });
   const detailQuery = useQuery({
     queryKey: ["task-run", selectedRunId],
@@ -85,7 +103,7 @@ export function TasksRoute() {
     enabled: canAccess && Boolean(selectedRunId),
   });
   const streamState = useTaskEvents({
-    query: liveTaskQuery,
+    query: requestTaskQuery,
     enabled: canAccess,
   });
   const visibleTaskList = useMemo(

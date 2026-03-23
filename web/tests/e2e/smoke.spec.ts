@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
+  const recentTaskBaseSec = Math.floor(Date.now() / 1000) - 120;
   let profiles = ["default", "edge-jp"];
   const taskList = {
     summary: {
@@ -10,20 +11,20 @@ test.beforeEach(async ({ page }) => {
       failed_runs: 0,
       succeeded_runs: 1,
       skipped_runs: 0,
-      last_run_at: 1741748520,
+      last_run_at: recentTaskBaseSec,
     },
     runs: [
       {
         run_id: "run_live_sync",
-        profile_id: "default",
+        profile_id: "fresh-lab",
         kind: "subscription_sync",
         trigger: "schedule",
         status: "running",
         stage: "probing",
         progress_current: 8,
         progress_total: 12,
-        created_at: 1741748520,
-        started_at: 1741748510,
+        created_at: recentTaskBaseSec,
+        started_at: recentTaskBaseSec - 10,
         finished_at: null,
         summary_json: null,
         error_code: null,
@@ -31,14 +32,14 @@ test.beforeEach(async ({ page }) => {
       },
       {
         run_id: "run_post_load",
-        profile_id: "default",
+        profile_id: "fresh-lab",
         kind: "metadata_refresh_incremental",
         trigger: "post_load",
         status: "queued",
         stage: "queued",
         progress_current: 0,
         progress_total: 6,
-        created_at: 1741748500,
+        created_at: recentTaskBaseSec - 20,
         started_at: null,
         finished_at: null,
         summary_json: null,
@@ -54,9 +55,9 @@ test.beforeEach(async ({ page }) => {
         stage: "completed",
         progress_current: 32,
         progress_total: 32,
-        created_at: 1741748460,
-        started_at: 1741748430,
-        finished_at: 1741748460,
+        created_at: recentTaskBaseSec - 60,
+        started_at: recentTaskBaseSec - 90,
+        finished_at: recentTaskBaseSec - 60,
         summary_json: {
           targeted_ips: 32,
           probed_ips: 32,
@@ -75,7 +76,7 @@ test.beforeEach(async ({ page }) => {
       {
         event_id: "evt_1",
         run_id: "run_live_sync",
-        at: 1741748511,
+        at: recentTaskBaseSec - 9,
         level: "info",
         stage: "loading_subscription",
         message: "Refreshing subscription feed for profile.",
@@ -84,7 +85,7 @@ test.beforeEach(async ({ page }) => {
       {
         event_id: "evt_2",
         run_id: "run_live_sync",
-        at: 1741748516,
+        at: recentTaskBaseSec - 4,
         level: "info",
         stage: "probing",
         message: "Refreshing probe metadata.",
