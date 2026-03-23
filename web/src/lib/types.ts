@@ -155,3 +155,87 @@ export interface ErrorResponse {
   message: string;
   details?: unknown;
 }
+
+export type TaskRunKind =
+  | "subscription_sync"
+  | "metadata_refresh_incremental"
+  | "metadata_refresh_full";
+
+export type TaskRunTrigger = "schedule" | "post_load";
+
+export type TaskRunStatus = "queued" | "running" | "succeeded" | "failed" | "skipped";
+
+export type TaskRunStage =
+  | "queued"
+  | "loading_subscription"
+  | "diffing_inventory"
+  | "probing"
+  | "geo_enrichment"
+  | "persisting"
+  | "completed";
+
+export type TaskEventLevel = "info" | "warning" | "error";
+
+export interface TaskRunSummary {
+  run_id: string;
+  profile_id: string;
+  kind: TaskRunKind;
+  trigger: TaskRunTrigger;
+  status: TaskRunStatus;
+  stage: TaskRunStage;
+  progress_current?: number | null;
+  progress_total?: number | null;
+  created_at: number;
+  started_at?: number | null;
+  finished_at?: number | null;
+  summary_json?: Record<string, unknown> | null;
+  error_code?: string | null;
+  error_message?: string | null;
+}
+
+export interface TaskRunEvent {
+  event_id: string;
+  run_id: string;
+  at: number;
+  level: TaskEventLevel;
+  stage: TaskRunStage;
+  message: string;
+  payload_json?: Record<string, unknown> | null;
+}
+
+export interface TaskSummary {
+  total_runs: number;
+  queued_runs: number;
+  running_runs: number;
+  failed_runs: number;
+  succeeded_runs: number;
+  skipped_runs: number;
+  last_run_at?: number | null;
+}
+
+export interface TaskListQuery {
+  profile_id?: string;
+  kind?: TaskRunKind;
+  status?: TaskRunStatus;
+  trigger?: TaskRunTrigger;
+  running_only?: boolean;
+  since?: number;
+  limit?: number;
+  cursor?: string;
+}
+
+export interface TaskListResponse {
+  summary: TaskSummary;
+  runs: TaskRunSummary[];
+  next_cursor?: string | null;
+}
+
+export interface TaskRunDetail {
+  run: TaskRunSummary;
+  events: TaskRunEvent[];
+}
+
+export interface TaskStreamEnvelope<T = unknown> {
+  type: "snapshot" | "run-upsert" | "run-event" | "summary" | "heartbeat";
+  data: T;
+}

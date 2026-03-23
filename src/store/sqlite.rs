@@ -5,8 +5,13 @@ use async_trait::async_trait;
 use sqlx::{Row, SqlitePool, sqlite::SqliteConnectOptions, sqlite::SqlitePoolOptions};
 
 use crate::{
-    models::{ApiKeyRecord, IpRecord, ProbeRecord, ProxyNode, SessionRecord},
+    models::{
+        ApiKeyRecord, IpRecord, ProbeRecord, ProfileSyncConfig, ProxyNode, SessionRecord,
+        SubscriptionSource, TaskEventLevel, TaskListQuery, TaskRunEventRecord, TaskRunKind,
+        TaskRunRecord, TaskRunStage, TaskRunStatus, TaskRunTrigger,
+    },
     store::BrokerStore,
+    tasks::matches_task_query,
 };
 
 #[derive(Clone)]
@@ -134,6 +139,87 @@ impl SqliteStore {
               last_used_at INTEGER,
               revoked_at INTEGER
             )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS profile_sync_configs (
+              profile_id TEXT PRIMARY KEY,
+              source_type TEXT NOT NULL,
+              source_value TEXT NOT NULL,
+              enabled INTEGER NOT NULL,
+              sync_every_sec INTEGER NOT NULL,
+              full_refresh_every_sec INTEGER NOT NULL,
+              last_sync_due_at INTEGER,
+              last_sync_started_at INTEGER,
+              last_sync_finished_at INTEGER,
+              last_full_refresh_due_at INTEGER,
+              last_full_refresh_started_at INTEGER,
+              last_full_refresh_finished_at INTEGER,
+              updated_at INTEGER NOT NULL
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS task_runs (
+              run_id TEXT PRIMARY KEY,
+              profile_id TEXT NOT NULL,
+              kind TEXT NOT NULL,
+              trigger TEXT NOT NULL,
+              status TEXT NOT NULL,
+              stage TEXT NOT NULL,
+              progress_current INTEGER,
+              progress_total INTEGER,
+              created_at INTEGER NOT NULL,
+              started_at INTEGER,
+              finished_at INTEGER,
+              summary_json TEXT,
+              error_code TEXT,
+              error_message TEXT,
+              scope_json TEXT
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_task_runs_profile_created
+            ON task_runs(profile_id, created_at DESC, run_id DESC)
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS task_run_events (
+              event_id TEXT PRIMARY KEY,
+              run_id TEXT NOT NULL,
+              profile_id TEXT NOT NULL,
+              at INTEGER NOT NULL,
+              level TEXT NOT NULL,
+              stage TEXT NOT NULL,
+              message TEXT NOT NULL,
+              payload_json TEXT
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_task_run_events_run
+            ON task_run_events(run_id, at ASC, event_id ASC)
             "#,
         )
         .execute(&self.pool)
@@ -861,6 +947,186 @@ impl BrokerStore for SqliteStore {
         tx.commit().await?;
         Ok(())
     }
+
+    async fn upsert_profile_sync_config(&self, config: &ProfileSyncConfig) -> anyhow::Result<()> {
+        let (source_type, source_value) = config.source.parts();
+        sqlx::query(
+            r#"
+            INSERT INTO profile_sync_configs (
+              profile_id, source_type, source_value, enabled, sync_every_sec, full_refresh_every_sec,
+              last_sync_due_at, last_sync_started_at, last_sync_finished_at,
+              last_full_refresh_due_at, last_full_refresh_started_at, last_full_refresh_finished_at,
+              updated_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+            ON CONFLICT(profile_id) DO UPDATE SET
+              source_type = excluded.source_type,
+              source_value = excluded.source_value,
+              enabled = excluded.enabled,
+              sync_every_sec = excluded.sync_every_sec,
+              full_refresh_every_sec = excluded.full_refresh_every_sec,
+              last_sync_due_at = excluded.last_sync_due_at,
+              last_sync_started_at = excluded.last_sync_started_at,
+              last_sync_finished_at = excluded.last_sync_finished_at,
+              last_full_refresh_due_at = excluded.last_full_refresh_due_at,
+              last_full_refresh_started_at = excluded.last_full_refresh_started_at,
+              last_full_refresh_finished_at = excluded.last_full_refresh_finished_at,
+              updated_at = excluded.updated_at
+            "#,
+        )
+        .bind(&config.profile_id)
+        .bind(source_type)
+        .bind(source_value)
+        .bind(config.enabled as i64)
+        .bind(config.sync_every_sec as i64)
+        .bind(config.full_refresh_every_sec as i64)
+        .bind(config.last_sync_due_at)
+        .bind(config.last_sync_started_at)
+        .bind(config.last_sync_finished_at)
+        .bind(config.last_full_refresh_due_at)
+        .bind(config.last_full_refresh_started_at)
+        .bind(config.last_full_refresh_finished_at)
+        .bind(config.updated_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn get_profile_sync_config(
+        &self,
+        profile_id: &str,
+    ) -> anyhow::Result<Option<ProfileSyncConfig>> {
+        let row = sqlx::query(
+            r#"
+            SELECT profile_id, source_type, source_value, enabled, sync_every_sec, full_refresh_every_sec,
+                   last_sync_due_at, last_sync_started_at, last_sync_finished_at,
+                   last_full_refresh_due_at, last_full_refresh_started_at, last_full_refresh_finished_at,
+                   updated_at
+            FROM profile_sync_configs
+            WHERE profile_id = ?1
+            "#,
+        )
+        .bind(profile_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(map_profile_sync_config_row).transpose()
+    }
+
+    async fn list_profile_sync_configs(&self) -> anyhow::Result<Vec<ProfileSyncConfig>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT profile_id, source_type, source_value, enabled, sync_every_sec, full_refresh_every_sec,
+                   last_sync_due_at, last_sync_started_at, last_sync_finished_at,
+                   last_full_refresh_due_at, last_full_refresh_started_at, last_full_refresh_finished_at,
+                   updated_at
+            FROM profile_sync_configs
+            ORDER BY profile_id ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(map_profile_sync_config_row).collect()
+    }
+
+    async fn insert_task_run(&self, run: &TaskRunRecord) -> anyhow::Result<()> {
+        persist_task_run(&self.pool, run).await
+    }
+
+    async fn update_task_run(&self, run: &TaskRunRecord) -> anyhow::Result<()> {
+        persist_task_run(&self.pool, run).await
+    }
+
+    async fn get_task_run(&self, run_id: &str) -> anyhow::Result<Option<TaskRunRecord>> {
+        let row = sqlx::query(
+            r#"
+            SELECT run_id, profile_id, kind, trigger, status, stage, progress_current, progress_total,
+                   created_at, started_at, finished_at, summary_json, error_code, error_message, scope_json
+            FROM task_runs
+            WHERE run_id = ?1
+            "#,
+        )
+        .bind(run_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(map_task_run_row).transpose()
+    }
+
+    async fn list_task_runs(&self, query: &TaskListQuery) -> anyhow::Result<Vec<TaskRunRecord>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT run_id, profile_id, kind, trigger, status, stage, progress_current, progress_total,
+                   created_at, started_at, finished_at, summary_json, error_code, error_message, scope_json
+            FROM task_runs
+            ORDER BY created_at DESC, run_id DESC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut runs = rows
+            .into_iter()
+            .map(map_task_run_row)
+            .collect::<anyhow::Result<Vec<_>>>()?
+            .into_iter()
+            .filter(|run| matches_task_query(&run.as_summary(), query))
+            .collect::<Vec<_>>();
+        if let Some(cursor) = &query.cursor
+            && let Some(position) = runs.iter().position(|run| &run.run_id == cursor)
+        {
+            runs = runs.into_iter().skip(position + 1).collect();
+        }
+        if let Some(limit) = query.limit {
+            runs.truncate(limit);
+        }
+        Ok(runs)
+    }
+
+    async fn insert_task_run_event(&self, event: &TaskRunEventRecord) -> anyhow::Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO task_run_events (
+              event_id, run_id, profile_id, at, level, stage, message, payload_json
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            "#,
+        )
+        .bind(&event.event_id)
+        .bind(&event.run_id)
+        .bind(&event.profile_id)
+        .bind(event.at)
+        .bind(event.level.as_str())
+        .bind(event.stage.as_str())
+        .bind(&event.message)
+        .bind(
+            event
+                .payload_json
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?,
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn list_task_run_events(&self, run_id: &str) -> anyhow::Result<Vec<TaskRunEventRecord>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT event_id, run_id, profile_id, at, level, stage, message, payload_json
+            FROM task_run_events
+            WHERE run_id = ?1
+            ORDER BY at ASC, event_id ASC
+            "#,
+        )
+        .bind(run_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(map_task_run_event_row).collect()
+    }
 }
 
 fn map_api_key_row(row: sqlx::sqlite::SqliteRow) -> anyhow::Result<ApiKeyRecord> {
@@ -875,6 +1141,136 @@ fn map_api_key_row(row: sqlx::sqlite::SqliteRow) -> anyhow::Result<ApiKeyRecord>
         created_at: row.try_get("created_at")?,
         last_used_at: row.try_get("last_used_at")?,
         revoked_at: row.try_get("revoked_at")?,
+    })
+}
+
+fn map_profile_sync_config_row(row: sqlx::sqlite::SqliteRow) -> anyhow::Result<ProfileSyncConfig> {
+    let source_type: String = row.try_get("source_type")?;
+    let source_value: String = row.try_get("source_value")?;
+    let source = SubscriptionSource::from_parts(&source_type, source_value)
+        .with_context(|| format!("unsupported profile sync source type: {source_type}"))?;
+    let sync_every_sec: i64 = row.try_get("sync_every_sec")?;
+    let full_refresh_every_sec: i64 = row.try_get("full_refresh_every_sec")?;
+    Ok(ProfileSyncConfig {
+        profile_id: row.try_get("profile_id")?,
+        source,
+        enabled: row.try_get::<i64, _>("enabled")? != 0,
+        sync_every_sec: sync_every_sec as u64,
+        full_refresh_every_sec: full_refresh_every_sec as u64,
+        last_sync_due_at: row.try_get("last_sync_due_at")?,
+        last_sync_started_at: row.try_get("last_sync_started_at")?,
+        last_sync_finished_at: row.try_get("last_sync_finished_at")?,
+        last_full_refresh_due_at: row.try_get("last_full_refresh_due_at")?,
+        last_full_refresh_started_at: row.try_get("last_full_refresh_started_at")?,
+        last_full_refresh_finished_at: row.try_get("last_full_refresh_finished_at")?,
+        updated_at: row.try_get("updated_at")?,
+    })
+}
+
+async fn persist_task_run(pool: &SqlitePool, run: &TaskRunRecord) -> anyhow::Result<()> {
+    sqlx::query(
+        r#"
+        INSERT INTO task_runs (
+          run_id, profile_id, kind, trigger, status, stage, progress_current, progress_total,
+          created_at, started_at, finished_at, summary_json, error_code, error_message, scope_json
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+        ON CONFLICT(run_id) DO UPDATE SET
+          profile_id = excluded.profile_id,
+          kind = excluded.kind,
+          trigger = excluded.trigger,
+          status = excluded.status,
+          stage = excluded.stage,
+          progress_current = excluded.progress_current,
+          progress_total = excluded.progress_total,
+          created_at = excluded.created_at,
+          started_at = excluded.started_at,
+          finished_at = excluded.finished_at,
+          summary_json = excluded.summary_json,
+          error_code = excluded.error_code,
+          error_message = excluded.error_message,
+          scope_json = excluded.scope_json
+        "#,
+    )
+    .bind(&run.run_id)
+    .bind(&run.profile_id)
+    .bind(run.kind.as_str())
+    .bind(run.trigger.as_str())
+    .bind(run.status.as_str())
+    .bind(run.stage.as_str())
+    .bind(run.progress_current.map(|value| value as i64))
+    .bind(run.progress_total.map(|value| value as i64))
+    .bind(run.created_at)
+    .bind(run.started_at)
+    .bind(run.finished_at)
+    .bind(
+        run.summary_json
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?,
+    )
+    .bind(&run.error_code)
+    .bind(&run.error_message)
+    .bind(Some(serde_json::to_string(&run.scope)?))
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+fn map_task_run_row(row: sqlx::sqlite::SqliteRow) -> anyhow::Result<TaskRunRecord> {
+    let kind: String = row.try_get("kind")?;
+    let trigger: String = row.try_get("trigger")?;
+    let status: String = row.try_get("status")?;
+    let stage: String = row.try_get("stage")?;
+    let summary_json: Option<String> = row.try_get("summary_json")?;
+    let scope_json: Option<String> = row.try_get("scope_json")?;
+    let progress_current: Option<i64> = row.try_get("progress_current")?;
+    let progress_total: Option<i64> = row.try_get("progress_total")?;
+    Ok(TaskRunRecord {
+        run_id: row.try_get("run_id")?,
+        profile_id: row.try_get("profile_id")?,
+        kind: TaskRunKind::parse(&kind)
+            .with_context(|| format!("unsupported task kind: {kind}"))?,
+        trigger: TaskRunTrigger::parse(&trigger)
+            .with_context(|| format!("unsupported task trigger: {trigger}"))?,
+        status: TaskRunStatus::parse(&status)
+            .with_context(|| format!("unsupported task status: {status}"))?,
+        stage: TaskRunStage::parse(&stage)
+            .with_context(|| format!("unsupported task stage: {stage}"))?,
+        progress_current: progress_current.map(|value| value as u64),
+        progress_total: progress_total.map(|value| value as u64),
+        created_at: row.try_get("created_at")?,
+        started_at: row.try_get("started_at")?,
+        finished_at: row.try_get("finished_at")?,
+        summary_json: summary_json
+            .map(|value| serde_json::from_str(&value))
+            .transpose()?,
+        error_code: row.try_get("error_code")?,
+        error_message: row.try_get("error_message")?,
+        scope: scope_json
+            .map(|value| serde_json::from_str(&value))
+            .transpose()?
+            .unwrap_or_default(),
+    })
+}
+
+fn map_task_run_event_row(row: sqlx::sqlite::SqliteRow) -> anyhow::Result<TaskRunEventRecord> {
+    let level: String = row.try_get("level")?;
+    let stage: String = row.try_get("stage")?;
+    let payload_json: Option<String> = row.try_get("payload_json")?;
+    Ok(TaskRunEventRecord {
+        event_id: row.try_get("event_id")?,
+        run_id: row.try_get("run_id")?,
+        profile_id: row.try_get("profile_id")?,
+        at: row.try_get("at")?,
+        level: TaskEventLevel::parse(&level)
+            .with_context(|| format!("unsupported task event level: {level}"))?,
+        stage: TaskRunStage::parse(&stage)
+            .with_context(|| format!("unsupported task event stage: {stage}"))?,
+        message: row.try_get("message")?,
+        payload_json: payload_json
+            .map(|value| serde_json::from_str(&value))
+            .transpose()?,
     })
 }
 

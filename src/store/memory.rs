@@ -7,8 +7,12 @@ use anyhow::Context;
 use async_trait::async_trait;
 
 use crate::{
-    models::{ApiKeyRecord, IpRecord, ProbeRecord, ProfileSnapshot, ProxyNode, SessionRecord},
+    models::{
+        ApiKeyRecord, IpRecord, ProbeRecord, ProfileSnapshot, ProfileSyncConfig, ProxyNode,
+        SessionRecord, TaskListQuery, TaskRunEventRecord, TaskRunRecord,
+    },
     store::BrokerStore,
+    tasks::matches_task_query,
 };
 
 #[derive(Default, Clone)]
@@ -373,6 +377,112 @@ impl BrokerStore for MemoryStore {
             }
         })?;
         Ok(())
+    }
+
+    async fn upsert_profile_sync_config(&self, config: &ProfileSyncConfig) -> anyhow::Result<()> {
+        self.with_profile_mut(&config.profile_id, |profile| {
+            profile.sync_config = Some(config.clone());
+        })?;
+        Ok(())
+    }
+
+    async fn get_profile_sync_config(
+        &self,
+        profile_id: &str,
+    ) -> anyhow::Result<Option<ProfileSyncConfig>> {
+        self.with_profile(profile_id, |profile| profile.sync_config.clone())
+    }
+
+    async fn list_profile_sync_configs(&self) -> anyhow::Result<Vec<ProfileSyncConfig>> {
+        let guard = self
+            .inner
+            .read()
+            .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
+        let mut items = guard
+            .values()
+            .filter_map(|profile| profile.sync_config.clone())
+            .collect::<Vec<_>>();
+        items.sort_by(|left, right| left.profile_id.cmp(&right.profile_id));
+        Ok(items)
+    }
+
+    async fn insert_task_run(&self, run: &TaskRunRecord) -> anyhow::Result<()> {
+        self.with_profile_mut(&run.profile_id, |profile| {
+            profile.task_runs.insert(run.run_id.clone(), run.clone());
+        })?;
+        Ok(())
+    }
+
+    async fn update_task_run(&self, run: &TaskRunRecord) -> anyhow::Result<()> {
+        self.with_profile_mut(&run.profile_id, |profile| {
+            profile.task_runs.insert(run.run_id.clone(), run.clone());
+        })?;
+        Ok(())
+    }
+
+    async fn get_task_run(&self, run_id: &str) -> anyhow::Result<Option<TaskRunRecord>> {
+        let guard = self
+            .inner
+            .read()
+            .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
+        Ok(guard
+            .values()
+            .find_map(|profile| profile.task_runs.get(run_id).cloned()))
+    }
+
+    async fn list_task_runs(&self, query: &TaskListQuery) -> anyhow::Result<Vec<TaskRunRecord>> {
+        let guard = self
+            .inner
+            .read()
+            .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
+        let mut runs = guard
+            .values()
+            .flat_map(|profile| profile.task_runs.values().cloned())
+            .filter(|run| matches_task_query(&run.as_summary(), query))
+            .collect::<Vec<_>>();
+        runs.sort_by(|left, right| {
+            right
+                .created_at
+                .cmp(&left.created_at)
+                .then_with(|| right.run_id.cmp(&left.run_id))
+        });
+        if let Some(cursor) = &query.cursor
+            && let Some(position) = runs.iter().position(|run| &run.run_id == cursor)
+        {
+            runs = runs.into_iter().skip(position + 1).collect();
+        }
+        if let Some(limit) = query.limit {
+            runs.truncate(limit);
+        }
+        Ok(runs)
+    }
+
+    async fn insert_task_run_event(&self, event: &TaskRunEventRecord) -> anyhow::Result<()> {
+        self.with_profile_mut(&event.profile_id, |profile| {
+            profile
+                .task_run_events
+                .entry(event.run_id.clone())
+                .or_default()
+                .push(event.clone());
+        })?;
+        Ok(())
+    }
+
+    async fn list_task_run_events(&self, run_id: &str) -> anyhow::Result<Vec<TaskRunEventRecord>> {
+        let guard = self
+            .inner
+            .read()
+            .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
+        let mut events = guard
+            .values()
+            .find_map(|profile| profile.task_run_events.get(run_id).cloned())
+            .unwrap_or_default();
+        events.sort_by(|left, right| {
+            left.at
+                .cmp(&right.at)
+                .then_with(|| left.event_id.cmp(&right.event_id))
+        });
+        Ok(events)
     }
 }
 

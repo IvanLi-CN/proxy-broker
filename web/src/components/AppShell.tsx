@@ -1,6 +1,7 @@
 import {
   ActivityIcon,
   ChevronRightIcon,
+  ClipboardListIcon,
   CommandIcon,
   GlobeIcon,
   LayoutDashboardIcon,
@@ -54,6 +55,12 @@ const navItems = [
     label: "Overview",
     icon: LayoutDashboardIcon,
     meta: "Load feeds and refresh pool metadata",
+  },
+  {
+    to: "/tasks",
+    label: "Tasks",
+    icon: ClipboardListIcon,
+    meta: "Watch scheduled sync and metadata refresh runs",
   },
   {
     to: "/ips",

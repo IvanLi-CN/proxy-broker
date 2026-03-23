@@ -8,6 +8,7 @@ pub mod runtime;
 pub mod service;
 pub mod store;
 pub mod subscription;
+pub mod tasks;
 mod web_ui;
 
 pub use api::{AppState, build_router};
