@@ -353,6 +353,7 @@ describe("TasksRoute", () => {
       const view = render(<TasksRoute />);
       await act(async () => {});
       expect(latestTasksPageProps?.selectedRunId).toBe("run-1");
+      expect(latestTasksPageProps?.selectedRunDetail).toEqual({ run, events: [] });
 
       outletContext = {
         ...outletContext,
@@ -374,6 +375,7 @@ describe("TasksRoute", () => {
       view.rerender(<TasksRoute />);
       await act(async () => {});
       expect(latestTasksPageProps?.selectedRunId).toBe(null);
+      expect(latestTasksPageProps?.selectedRunDetail).toBeNull();
     } finally {
       vi.useRealTimers();
     }

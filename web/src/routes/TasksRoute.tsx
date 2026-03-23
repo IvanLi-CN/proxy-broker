@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { useTaskEvents } from "@/hooks/use-task-events";
 import { ApiError, api } from "@/lib/api";
@@ -22,10 +22,15 @@ export function TasksRoute() {
   const [status, setStatus] = useState<TaskRunStatus | undefined>(undefined);
   const [trigger, setTrigger] = useState<TaskRunTrigger | undefined>(undefined);
   const [runningOnly, setRunningOnly] = useState(false);
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [selectedRun, setSelectedRun] = useState<{
+    viewSignature: string | null;
+    runId: string | null;
+  }>({
+    viewSignature: null,
+    runId: null,
+  });
   const [taskWindowNowSec, setTaskWindowNowSec] = useState(() => Math.floor(Date.now() / 1000));
   const [taskQueryNowSec, setTaskQueryNowSec] = useState(() => Math.floor(Date.now() / 1000));
-  const lastTaskQuerySignature = useRef<string | null>(null);
   const canAccess =
     currentUser.status === "resolved" ? currentUser.identity.is_admin : Boolean(authMe?.is_admin);
   const accessDenied =
@@ -90,6 +95,8 @@ export function TasksRoute() {
       liveTaskQuery.trigger,
     ],
   );
+  const selectedRunId =
+    selectedRun.viewSignature === selectionResetSignature ? selectedRun.runId : null;
 
   const tasksQuery = useQuery({
     queryKey: ["tasks", requestTaskQuery],
@@ -114,24 +121,19 @@ export function TasksRoute() {
   useEffect(() => {
     const runs = visibleTaskList?.runs ?? [];
     if (!runs.length) {
-      setSelectedRunId(null);
+      setSelectedRun({
+        viewSignature: selectionResetSignature,
+        runId: null,
+      });
       return;
     }
     if (!selectedRunId || !runs.some((run) => run.run_id === selectedRunId)) {
-      setSelectedRunId(runs[0]?.run_id ?? null);
+      setSelectedRun({
+        viewSignature: selectionResetSignature,
+        runId: runs[0]?.run_id ?? null,
+      });
     }
-  }, [selectedRunId, visibleTaskList?.runs]);
-
-  useEffect(() => {
-    if (lastTaskQuerySignature.current === null) {
-      lastTaskQuerySignature.current = selectionResetSignature;
-      return;
-    }
-    if (lastTaskQuerySignature.current !== selectionResetSignature) {
-      lastTaskQuerySignature.current = selectionResetSignature;
-      setSelectedRunId(null);
-    }
-  }, [selectionResetSignature]);
+  }, [selectedRunId, selectionResetSignature, visibleTaskList?.runs]);
 
   return (
     <TasksPage
@@ -141,15 +143,20 @@ export function TasksRoute() {
       onKindChange={setKind}
       onRunningOnlyChange={setRunningOnly}
       onScopeChange={setScope}
-      onSelectRun={setSelectedRunId}
+      onSelectRun={(runId) =>
+        setSelectedRun({
+          viewSignature: selectionResetSignature,
+          runId,
+        })
+      }
       onStatusChange={setStatus}
       onTriggerChange={setTrigger}
       profileId={profileId}
       runningOnly={runningOnly}
       scope={scope}
-      selectedRunDetail={detailQuery.data ?? null}
+      selectedRunDetail={selectedRunId ? (detailQuery.data ?? null) : null}
       selectedRunId={selectedRunId}
-      selectedRunLoading={detailQuery.isLoading}
+      selectedRunLoading={Boolean(selectedRunId) && detailQuery.isLoading}
       status={status}
       streamState={authError ? "reconnecting" : streamState}
       taskError={authError ?? (tasksQuery.isError ? getErrorMessage(tasksQuery.error) : null)}
