@@ -49,7 +49,23 @@ export function TasksRoute() {
     }),
     [kind, profileId, runningOnly, scope, status, taskWindowNowSec, trigger],
   );
-  const taskQuerySignature = useMemo(() => JSON.stringify(taskQuery), [taskQuery]);
+  const selectionResetSignature = useMemo(
+    () =>
+      JSON.stringify({
+        profile_id: taskQuery.profile_id,
+        kind: taskQuery.kind,
+        status: taskQuery.status,
+        trigger: taskQuery.trigger,
+        running_only: taskQuery.running_only,
+      }),
+    [
+      taskQuery.kind,
+      taskQuery.profile_id,
+      taskQuery.running_only,
+      taskQuery.status,
+      taskQuery.trigger,
+    ],
+  );
 
   const tasksQuery = useQuery({
     queryKey: ["tasks", taskQuery],
@@ -79,14 +95,14 @@ export function TasksRoute() {
 
   useEffect(() => {
     if (lastTaskQuerySignature.current === null) {
-      lastTaskQuerySignature.current = taskQuerySignature;
+      lastTaskQuerySignature.current = selectionResetSignature;
       return;
     }
-    if (lastTaskQuerySignature.current !== taskQuerySignature) {
-      lastTaskQuerySignature.current = taskQuerySignature;
+    if (lastTaskQuerySignature.current !== selectionResetSignature) {
+      lastTaskQuerySignature.current = selectionResetSignature;
       setSelectedRunId(null);
     }
-  }, [taskQuerySignature]);
+  }, [selectionResetSignature]);
 
   return (
     <TasksPage

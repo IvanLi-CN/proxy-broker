@@ -1,4 +1,4 @@
-import { act, render, waitFor } from "@testing-library/react";
+import { act, render } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -165,7 +165,74 @@ describe("TasksRoute", () => {
     }
   });
 
-  it("clears the selected run while a new task query is loading", async () => {
+  it("keeps the selected run while the default time window slides forward", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-03-23T00:00:00Z"));
+      const run = {
+        run_id: "run-1",
+        profile_id: "default",
+        kind: "subscription_sync",
+        trigger: "schedule",
+        status: "running",
+        stage: "probing",
+        progress_current: 1,
+        progress_total: 2,
+        created_at: 1,
+        started_at: 1,
+        finished_at: null,
+        summary_json: null,
+        error_code: null,
+        error_message: null,
+      };
+      mockOutletContext.mockReturnValue({
+        profileId: "default",
+        authMe: { is_admin: true },
+        currentUser: { status: "resolved", identity: { is_admin: true } },
+      });
+      tasksQueryResult = {
+        data: {
+          summary: {
+            total_runs: 1,
+            queued_runs: 0,
+            running_runs: 1,
+            failed_runs: 0,
+            succeeded_runs: 0,
+            skipped_runs: 0,
+            last_run_at: 1,
+          },
+          runs: [run],
+          next_cursor: null,
+        },
+        error: null,
+        isError: false,
+        isLoading: false,
+      };
+      detailQueryResult = {
+        data: { run, events: [] },
+        error: null,
+        isError: false,
+        isLoading: false,
+      };
+
+      render(<TasksRoute />);
+      expect(latestTasksPageProps?.selectedRunId).toBe("run-1");
+
+      act(() => {
+        vi.advanceTimersByTime(60_000);
+      });
+
+      expect(latestTasksQueryKey?.[1]).toMatchObject({
+        profile_id: "default",
+        since: 1773619260,
+      });
+      expect(latestTasksPageProps?.selectedRunId).toBe("run-1");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears the selected run while a new task query is loading", () => {
     const run = {
       run_id: "run-1",
       profile_id: "default",
@@ -214,8 +281,7 @@ describe("TasksRoute", () => {
     };
 
     const view = render(<TasksRoute />);
-
-    await waitFor(() => expect(latestTasksPageProps?.selectedRunId).toBe("run-1"));
+    expect(latestTasksPageProps?.selectedRunId).toBe("run-1");
 
     outletContext = {
       ...outletContext,
@@ -235,7 +301,6 @@ describe("TasksRoute", () => {
     };
 
     view.rerender(<TasksRoute />);
-
-    await waitFor(() => expect(latestTasksPageProps?.selectedRunId).toBe(null));
+    expect(latestTasksPageProps?.selectedRunId).toBe(null);
   });
 });
