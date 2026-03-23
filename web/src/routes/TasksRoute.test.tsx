@@ -113,7 +113,7 @@ describe("TasksRoute", () => {
     expect(latestTasksPageProps?.streamState).toBe("reconnecting");
   });
 
-  it("scopes the default task query to the current profile and last 7 days", () => {
+  it("scopes the live task query to the current profile without time-based churn", () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(new Date("2026-03-23T00:00:00Z"));
@@ -128,17 +128,51 @@ describe("TasksRoute", () => {
       expect(latestTasksQueryKey).not.toBeNull();
       expect(latestTasksQueryKey?.[1]).toMatchObject({
         profile_id: "default",
-        since: 1773619200,
       });
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("slides the default task query window forward while the board stays open", () => {
+  it("slides the visible task window forward without rebuilding the live query", () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(new Date("2026-03-23T00:00:00Z"));
+      tasksQueryResult = {
+        data: {
+          summary: {
+            total_runs: 1,
+            queued_runs: 0,
+            running_runs: 1,
+            failed_runs: 0,
+            succeeded_runs: 0,
+            skipped_runs: 0,
+            last_run_at: 1773619230,
+          },
+          runs: [
+            {
+              run_id: "run-1",
+              profile_id: "default",
+              kind: "subscription_sync",
+              trigger: "schedule",
+              status: "running",
+              stage: "probing",
+              progress_current: 1,
+              progress_total: 2,
+              created_at: 1773619230,
+              started_at: 1773619230,
+              finished_at: null,
+              summary_json: null,
+              error_code: null,
+              error_message: null,
+            },
+          ],
+          next_cursor: null,
+        },
+        error: null,
+        isError: false,
+        isLoading: false,
+      };
       mockOutletContext.mockReturnValue({
         profileId: "default",
         authMe: { is_admin: true },
@@ -149,8 +183,8 @@ describe("TasksRoute", () => {
 
       expect(latestTasksQueryKey?.[1]).toMatchObject({
         profile_id: "default",
-        since: 1773619200,
       });
+      expect(latestTasksPageProps?.taskList?.runs).toHaveLength(1);
 
       act(() => {
         vi.advanceTimersByTime(60_000);
@@ -158,8 +192,8 @@ describe("TasksRoute", () => {
 
       expect(latestTasksQueryKey?.[1]).toMatchObject({
         profile_id: "default",
-        since: 1773619260,
       });
+      expect(latestTasksPageProps?.taskList?.runs).toHaveLength(0);
     } finally {
       vi.useRealTimers();
     }
@@ -178,8 +212,8 @@ describe("TasksRoute", () => {
         stage: "probing",
         progress_current: 1,
         progress_total: 2,
-        created_at: 1,
-        started_at: 1,
+        created_at: 1773619261,
+        started_at: 1773619261,
         finished_at: null,
         summary_json: null,
         error_code: null,
@@ -199,7 +233,7 @@ describe("TasksRoute", () => {
             failed_runs: 0,
             succeeded_runs: 0,
             skipped_runs: 0,
-            last_run_at: 1,
+            last_run_at: 1773619261,
           },
           runs: [run],
           next_cursor: null,
@@ -224,7 +258,6 @@ describe("TasksRoute", () => {
 
       expect(latestTasksQueryKey?.[1]).toMatchObject({
         profile_id: "default",
-        since: 1773619260,
       });
       expect(latestTasksPageProps?.selectedRunId).toBe("run-1");
     } finally {
@@ -232,75 +265,83 @@ describe("TasksRoute", () => {
     }
   });
 
-  it("clears the selected run while a new task query is loading", () => {
-    const run = {
-      run_id: "run-1",
-      profile_id: "default",
-      kind: "subscription_sync",
-      trigger: "schedule",
-      status: "running",
-      stage: "probing",
-      progress_current: 1,
-      progress_total: 2,
-      created_at: 1,
-      started_at: 1,
-      finished_at: null,
-      summary_json: null,
-      error_code: null,
-      error_message: null,
-    };
-    let outletContext = {
-      profileId: "default",
-      authMe: { is_admin: true },
-      currentUser: { status: "authenticated" },
-    };
-    mockOutletContext.mockImplementation(() => outletContext);
-    tasksQueryResult = {
-      data: {
-        summary: {
-          total_runs: 1,
-          queued_runs: 0,
-          running_runs: 1,
-          failed_runs: 0,
-          succeeded_runs: 0,
-          skipped_runs: 0,
-          last_run_at: 1,
+  it("clears the selected run while a new task query is loading", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-03-23T00:00:00Z"));
+      const run = {
+        run_id: "run-1",
+        profile_id: "default",
+        kind: "subscription_sync",
+        trigger: "schedule",
+        status: "running",
+        stage: "probing",
+        progress_current: 1,
+        progress_total: 2,
+        created_at: 1773619261,
+        started_at: 1773619261,
+        finished_at: null,
+        summary_json: null,
+        error_code: null,
+        error_message: null,
+      };
+      let outletContext = {
+        profileId: "default",
+        authMe: { is_admin: true },
+        currentUser: { status: "authenticated" },
+      };
+      mockOutletContext.mockImplementation(() => outletContext);
+      tasksQueryResult = {
+        data: {
+          summary: {
+            total_runs: 1,
+            queued_runs: 0,
+            running_runs: 1,
+            failed_runs: 0,
+            succeeded_runs: 0,
+            skipped_runs: 0,
+            last_run_at: 1773619261,
+          },
+          runs: [run],
+          next_cursor: null,
         },
-        runs: [run],
-        next_cursor: null,
-      },
-      error: null,
-      isError: false,
-      isLoading: false,
-    };
-    detailQueryResult = {
-      data: { run, events: [] },
-      error: null,
-      isError: false,
-      isLoading: false,
-    };
+        error: null,
+        isError: false,
+        isLoading: false,
+      };
+      detailQueryResult = {
+        data: { run, events: [] },
+        error: null,
+        isError: false,
+        isLoading: false,
+      };
 
-    const view = render(<TasksRoute />);
-    expect(latestTasksPageProps?.selectedRunId).toBe("run-1");
+      const view = render(<TasksRoute />);
+      await act(async () => {});
+      expect(latestTasksPageProps?.selectedRunId).toBe("run-1");
 
-    outletContext = {
-      ...outletContext,
-      profileId: "other",
-    };
-    tasksQueryResult = {
-      data: null,
-      error: null,
-      isError: false,
-      isLoading: true,
-    };
-    detailQueryResult = {
-      data: null,
-      error: null,
-      isError: false,
-      isLoading: false,
-    };
+      outletContext = {
+        ...outletContext,
+        profileId: "other",
+      };
+      tasksQueryResult = {
+        data: null,
+        error: null,
+        isError: false,
+        isLoading: true,
+      };
+      detailQueryResult = {
+        data: null,
+        error: null,
+        isError: false,
+        isLoading: false,
+      };
 
-    view.rerender(<TasksRoute />);
-    expect(latestTasksPageProps?.selectedRunId).toBe(null);
+      view.rerender(<TasksRoute />);
+      await act(async () => {});
+      expect(latestTasksPageProps?.selectedRunId).toBe(null);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

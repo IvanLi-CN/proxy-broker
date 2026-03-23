@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { useTaskEvents } from "@/hooks/use-task-events";
 import { ApiError, api } from "@/lib/api";
+import { filterTaskListResponse } from "@/lib/tasks";
 import type { TaskRunKind, TaskRunStatus, TaskRunTrigger } from "@/lib/types";
 import { TasksPage } from "@/pages/TasksPage";
 import type { RootOutletContext } from "@/routes/RootRoute";
@@ -38,38 +39,44 @@ export function TasksRoute() {
     return () => window.clearInterval(intervalId);
   }, []);
 
-  const taskQuery = useMemo(
+  const liveTaskQuery = useMemo(
     () => ({
       profile_id: scope === "current" ? profileId : undefined,
       kind,
       status,
       trigger,
       running_only: runningOnly,
+    }),
+    [kind, profileId, runningOnly, scope, status, trigger],
+  );
+  const visibleTaskQuery = useMemo(
+    () => ({
+      ...liveTaskQuery,
       since: taskWindowNowSec - DEFAULT_TASK_HISTORY_WINDOW_SEC,
     }),
-    [kind, profileId, runningOnly, scope, status, taskWindowNowSec, trigger],
+    [liveTaskQuery, taskWindowNowSec],
   );
   const selectionResetSignature = useMemo(
     () =>
       JSON.stringify({
-        profile_id: taskQuery.profile_id,
-        kind: taskQuery.kind,
-        status: taskQuery.status,
-        trigger: taskQuery.trigger,
-        running_only: taskQuery.running_only,
+        profile_id: liveTaskQuery.profile_id,
+        kind: liveTaskQuery.kind,
+        status: liveTaskQuery.status,
+        trigger: liveTaskQuery.trigger,
+        running_only: liveTaskQuery.running_only,
       }),
     [
-      taskQuery.kind,
-      taskQuery.profile_id,
-      taskQuery.running_only,
-      taskQuery.status,
-      taskQuery.trigger,
+      liveTaskQuery.kind,
+      liveTaskQuery.profile_id,
+      liveTaskQuery.running_only,
+      liveTaskQuery.status,
+      liveTaskQuery.trigger,
     ],
   );
 
   const tasksQuery = useQuery({
-    queryKey: ["tasks", taskQuery],
-    queryFn: () => api.listTasks(taskQuery),
+    queryKey: ["tasks", liveTaskQuery],
+    queryFn: () => api.listTasks(liveTaskQuery),
     enabled: canAccess,
   });
   const detailQuery = useQuery({
@@ -78,12 +85,16 @@ export function TasksRoute() {
     enabled: canAccess && Boolean(selectedRunId),
   });
   const streamState = useTaskEvents({
-    query: taskQuery,
+    query: liveTaskQuery,
     enabled: canAccess,
   });
+  const visibleTaskList = useMemo(
+    () => filterTaskListResponse(tasksQuery.data ?? null, visibleTaskQuery),
+    [tasksQuery.data, visibleTaskQuery],
+  );
 
   useEffect(() => {
-    const runs = tasksQuery.data?.runs ?? [];
+    const runs = visibleTaskList?.runs ?? [];
     if (!runs.length) {
       setSelectedRunId(null);
       return;
@@ -91,7 +102,7 @@ export function TasksRoute() {
     if (!selectedRunId || !runs.some((run) => run.run_id === selectedRunId)) {
       setSelectedRunId(runs[0]?.run_id ?? null);
     }
-  }, [selectedRunId, tasksQuery.data?.runs]);
+  }, [selectedRunId, visibleTaskList?.runs]);
 
   useEffect(() => {
     if (lastTaskQuerySignature.current === null) {
@@ -124,7 +135,7 @@ export function TasksRoute() {
       status={status}
       streamState={authError ? "reconnecting" : streamState}
       taskError={authError ?? (tasksQuery.isError ? getErrorMessage(tasksQuery.error) : null)}
-      taskList={tasksQuery.data ?? null}
+      taskList={visibleTaskList}
       tasksLoading={tasksQuery.isLoading}
       trigger={trigger}
     />

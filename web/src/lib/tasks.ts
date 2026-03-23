@@ -1,4 +1,10 @@
-import type { TaskListQuery, TaskRunSummary, TaskStreamEnvelope, TaskSummary } from "@/lib/types";
+import type {
+  TaskListQuery,
+  TaskListResponse,
+  TaskRunSummary,
+  TaskStreamEnvelope,
+  TaskSummary,
+} from "@/lib/types";
 
 export function buildTaskSearchParams(query: TaskListQuery) {
   const params = new URLSearchParams();
@@ -96,6 +102,27 @@ export function summarizeTaskRuns(runs: TaskRunSummary[]): TaskSummary {
   }
 
   return summary;
+}
+
+export function filterTaskListResponse(
+  taskList: TaskListResponse | null,
+  query: TaskListQuery,
+): TaskListResponse | null {
+  if (!taskList) {
+    return null;
+  }
+
+  let runs = sortTaskRuns(taskList.runs.filter((run) => matchesTaskQuery(run, query)));
+  if (query.limit != null) {
+    runs = runs.slice(0, query.limit);
+  }
+
+  return {
+    ...taskList,
+    runs,
+    summary: summarizeTaskRuns(runs),
+    next_cursor: null,
+  };
 }
 
 export function parseTaskEnvelope<T>(payload: string): TaskStreamEnvelope<T> {
