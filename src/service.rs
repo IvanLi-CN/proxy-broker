@@ -1046,46 +1046,21 @@ impl BrokerService {
         source: &crate::models::SubscriptionSource,
     ) -> BrokerResult<LoadSubscriptionResponse> {
         let outcome = self.load_subscription_internal(profile_id, source).await?;
-        self.register_profile_sync_source(profile_id, source)
-            .await?;
-
-        let queued_or_running = self.queued_or_running_task_runs(profile_id).await?;
-        // Only queued incremental runs can safely absorb new IPs. Running runs may have already
-        // snapshotted their scope, so later loads must queue a follow-up task instead.
-        let mut existing_incremental = queued_or_running
-            .iter()
-            .find(|run| {
-                run.status == TaskRunStatus::Queued
-                    && run.kind == TaskRunKind::MetadataRefreshIncremental
-            })
-            .cloned();
-
-        if let Some(mut existing_run) = existing_incremental.take() {
-            if let Some(targeted_ips) =
-                expand_incremental_task_scope(&mut existing_run, &outcome.new_ips)
-            {
-                self.update_task_run_and_emit(&existing_run).await?;
-                self.append_task_event(
-                    &existing_run,
-                    TaskEventLevel::Info,
-                    existing_run.stage,
-                    "Incremental task scope expanded to include newly loaded IPs.",
-                    Some(serde_json::json!({ "targeted_ips": targeted_ips })),
-                )
-                .await?;
-            }
-        } else {
-            self.enqueue_task_run(
+        let mut response = outcome.response;
+        if let Err(err) = self
+            .register_post_load_bookkeeping(profile_id, source, &outcome.new_ips)
+            .await
+        {
+            tracing::warn!(
                 profile_id,
-                TaskRunKind::MetadataRefreshIncremental,
-                TaskRunTrigger::PostLoad,
-                TaskRunScope::Ips {
-                    ips: outcome.new_ips.clone(),
-                },
-            )
-            .await?;
+                error = %err,
+                "post-load task bookkeeping failed after successful subscription import"
+            );
+            response.warnings.push(format!(
+                "Imported subscription, but automatic task bookkeeping failed: {err}"
+            ));
         }
-        Ok(outcome.response)
+        Ok(response)
     }
 
     pub async fn refresh(
@@ -1283,6 +1258,53 @@ impl BrokerService {
             },
             new_ips,
         })
+    }
+
+    async fn register_post_load_bookkeeping(
+        &self,
+        profile_id: &str,
+        source: &SubscriptionSource,
+        new_ips: &[String],
+    ) -> BrokerResult<()> {
+        self.register_profile_sync_source(profile_id, source)
+            .await?;
+
+        let queued_or_running = self.queued_or_running_task_runs(profile_id).await?;
+        // Only queued incremental runs can safely absorb new IPs. Running runs may have already
+        // snapshotted their scope, so later loads must queue a follow-up task instead.
+        let mut existing_incremental = queued_or_running
+            .iter()
+            .find(|run| {
+                run.status == TaskRunStatus::Queued
+                    && run.kind == TaskRunKind::MetadataRefreshIncremental
+            })
+            .cloned();
+
+        if let Some(mut existing_run) = existing_incremental.take() {
+            if let Some(targeted_ips) = expand_incremental_task_scope(&mut existing_run, new_ips) {
+                self.update_task_run_and_emit(&existing_run).await?;
+                self.append_task_event(
+                    &existing_run,
+                    TaskEventLevel::Info,
+                    existing_run.stage,
+                    "Incremental task scope expanded to include newly loaded IPs.",
+                    Some(serde_json::json!({ "targeted_ips": targeted_ips })),
+                )
+                .await?;
+            }
+        } else {
+            self.enqueue_task_run(
+                profile_id,
+                TaskRunKind::MetadataRefreshIncremental,
+                TaskRunTrigger::PostLoad,
+                TaskRunScope::Ips {
+                    ips: new_ips.to_vec(),
+                },
+            )
+            .await?;
+        }
+
+        Ok(())
     }
 
     async fn refresh_metadata_internal(
@@ -2991,7 +3013,10 @@ fn scheduled_dispatch_rank(kind: TaskRunKind) -> u8 {
 mod tests {
     use super::*;
     use crate::{
-        models::{SortMode, SubscriptionSource},
+        models::{
+            ApiKeyRecord, IpRecord, ProbeRecord, ProfileSyncConfig, SessionRecord, SortMode,
+            SubscriptionSource, TaskListQuery, TaskRunEventRecord, TaskRunRecord,
+        },
         runtime::MihomoRuntime,
         store::{BrokerStore, MemoryStore},
         subscription::SUBSCRIPTION_FETCH_USER_AGENTS,
@@ -3027,6 +3052,231 @@ mod tests {
                 apply_calls: AtomicUsize::new(0),
                 shutdown_calls: AtomicUsize::new(0),
             }
+        }
+    }
+
+    #[derive(Default)]
+    struct FailProfileSyncConfigStore {
+        inner: MemoryStore,
+    }
+
+    #[async_trait]
+    impl BrokerStore for FailProfileSyncConfigStore {
+        async fn list_profiles(&self) -> anyhow::Result<Vec<String>> {
+            self.inner.list_profiles().await
+        }
+
+        async fn create_profile(&self, profile_id: &str, created_at: i64) -> anyhow::Result<()> {
+            self.inner.create_profile(profile_id, created_at).await
+        }
+
+        async fn replace_subscription(
+            &self,
+            profile_id: &str,
+            nodes: &[ProxyNode],
+        ) -> anyhow::Result<()> {
+            self.inner.replace_subscription(profile_id, nodes).await
+        }
+
+        async fn apply_subscription_snapshot(
+            &self,
+            profile_id: &str,
+            nodes: &[ProxyNode],
+            ip_records: &[IpRecord],
+            probe_records: &[ProbeRecord],
+            removed_session_ids: &[String],
+        ) -> anyhow::Result<()> {
+            self.inner
+                .apply_subscription_snapshot(
+                    profile_id,
+                    nodes,
+                    ip_records,
+                    probe_records,
+                    removed_session_ids,
+                )
+                .await
+        }
+
+        async fn list_subscription(&self, profile_id: &str) -> anyhow::Result<Vec<ProxyNode>> {
+            self.inner.list_subscription(profile_id).await
+        }
+
+        async fn replace_ip_records(
+            &self,
+            profile_id: &str,
+            records: &[IpRecord],
+        ) -> anyhow::Result<()> {
+            self.inner.replace_ip_records(profile_id, records).await
+        }
+
+        async fn upsert_ip_records(
+            &self,
+            profile_id: &str,
+            records: &[IpRecord],
+        ) -> anyhow::Result<()> {
+            self.inner.upsert_ip_records(profile_id, records).await
+        }
+
+        async fn list_ip_records(&self, profile_id: &str) -> anyhow::Result<Vec<IpRecord>> {
+            self.inner.list_ip_records(profile_id).await
+        }
+
+        async fn replace_probe_records(
+            &self,
+            profile_id: &str,
+            records: &[ProbeRecord],
+        ) -> anyhow::Result<()> {
+            self.inner.replace_probe_records(profile_id, records).await
+        }
+
+        async fn upsert_probe_records(
+            &self,
+            profile_id: &str,
+            records: &[ProbeRecord],
+        ) -> anyhow::Result<()> {
+            self.inner.upsert_probe_records(profile_id, records).await
+        }
+
+        async fn list_probe_records(&self, profile_id: &str) -> anyhow::Result<Vec<ProbeRecord>> {
+            self.inner.list_probe_records(profile_id).await
+        }
+
+        async fn insert_session(
+            &self,
+            profile_id: &str,
+            session: &SessionRecord,
+        ) -> anyhow::Result<()> {
+            self.inner.insert_session(profile_id, session).await
+        }
+
+        async fn insert_sessions(
+            &self,
+            profile_id: &str,
+            sessions: &[SessionRecord],
+        ) -> anyhow::Result<()> {
+            self.inner.insert_sessions(profile_id, sessions).await
+        }
+
+        async fn insert_sessions_with_touch(
+            &self,
+            profile_id: &str,
+            sessions: &[SessionRecord],
+            last_used_at: i64,
+        ) -> anyhow::Result<()> {
+            self.inner
+                .insert_sessions_with_touch(profile_id, sessions, last_used_at)
+                .await
+        }
+
+        async fn delete_session(&self, profile_id: &str, session_id: &str) -> anyhow::Result<()> {
+            self.inner.delete_session(profile_id, session_id).await
+        }
+
+        async fn list_sessions(&self, profile_id: &str) -> anyhow::Result<Vec<SessionRecord>> {
+            self.inner.list_sessions(profile_id).await
+        }
+
+        async fn insert_api_key(&self, api_key: &ApiKeyRecord) -> anyhow::Result<()> {
+            self.inner.insert_api_key(api_key).await
+        }
+
+        async fn get_api_key(&self, key_id: &str) -> anyhow::Result<Option<ApiKeyRecord>> {
+            self.inner.get_api_key(key_id).await
+        }
+
+        async fn list_api_keys(&self, profile_id: &str) -> anyhow::Result<Vec<ApiKeyRecord>> {
+            self.inner.list_api_keys(profile_id).await
+        }
+
+        async fn revoke_api_key(
+            &self,
+            profile_id: &str,
+            key_id: &str,
+            revoked_at: i64,
+        ) -> anyhow::Result<bool> {
+            self.inner
+                .revoke_api_key(profile_id, key_id, revoked_at)
+                .await
+        }
+
+        async fn touch_api_key_last_used(
+            &self,
+            key_id: &str,
+            last_used_at: i64,
+        ) -> anyhow::Result<()> {
+            self.inner
+                .touch_api_key_last_used(key_id, last_used_at)
+                .await
+        }
+
+        async fn touch_ip_usage(
+            &self,
+            profile_id: &str,
+            ip: &str,
+            last_used_at: i64,
+        ) -> anyhow::Result<()> {
+            self.inner
+                .touch_ip_usage(profile_id, ip, last_used_at)
+                .await
+        }
+
+        async fn touch_ip_usages(
+            &self,
+            profile_id: &str,
+            ips: &[String],
+            last_used_at: i64,
+        ) -> anyhow::Result<()> {
+            self.inner
+                .touch_ip_usages(profile_id, ips, last_used_at)
+                .await
+        }
+
+        async fn upsert_profile_sync_config(
+            &self,
+            _config: &ProfileSyncConfig,
+        ) -> anyhow::Result<()> {
+            Err(anyhow!("sync config unavailable"))
+        }
+
+        async fn get_profile_sync_config(
+            &self,
+            profile_id: &str,
+        ) -> anyhow::Result<Option<ProfileSyncConfig>> {
+            self.inner.get_profile_sync_config(profile_id).await
+        }
+
+        async fn list_profile_sync_configs(&self) -> anyhow::Result<Vec<ProfileSyncConfig>> {
+            self.inner.list_profile_sync_configs().await
+        }
+
+        async fn insert_task_run(&self, run: &TaskRunRecord) -> anyhow::Result<()> {
+            self.inner.insert_task_run(run).await
+        }
+
+        async fn update_task_run(&self, run: &TaskRunRecord) -> anyhow::Result<()> {
+            self.inner.update_task_run(run).await
+        }
+
+        async fn get_task_run(&self, run_id: &str) -> anyhow::Result<Option<TaskRunRecord>> {
+            self.inner.get_task_run(run_id).await
+        }
+
+        async fn list_task_runs(
+            &self,
+            query: &TaskListQuery,
+        ) -> anyhow::Result<Vec<TaskRunRecord>> {
+            self.inner.list_task_runs(query).await
+        }
+
+        async fn insert_task_run_event(&self, event: &TaskRunEventRecord) -> anyhow::Result<()> {
+            self.inner.insert_task_run_event(event).await
+        }
+
+        async fn list_task_run_events(
+            &self,
+            run_id: &str,
+        ) -> anyhow::Result<Vec<TaskRunEventRecord>> {
+            self.inner.list_task_run_events(run_id).await
         }
     }
 
@@ -3216,6 +3466,61 @@ proxies:
                 .is_empty(),
             "stale sessions should be cleaned from store"
         );
+    }
+
+    #[tokio::test]
+    async fn load_subscription_returns_success_with_warning_when_post_load_bookkeeping_fails() {
+        let profile_id = "p-load-bookkeeping-warning";
+        let store = Arc::new(FailProfileSyncConfigStore::default());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
+        let source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: new
+    type: socks5
+    server: 2.2.2.2
+"#,
+        )
+        .await;
+
+        let response = service
+            .load_subscription(profile_id, &SubscriptionSource::File(source_path.clone()))
+            .await
+            .expect("subscription import should still succeed");
+
+        let _ = tokio::fs::remove_file(&source_path).await;
+
+        assert_eq!(response.loaded_proxies, 1);
+        assert_eq!(response.distinct_ips, 1);
+        assert!(
+            response
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("automatic task bookkeeping failed"))
+        );
+
+        let nodes = store
+            .list_subscription(profile_id)
+            .await
+            .expect("subscription query should succeed");
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].proxy_name, "new");
+
+        let sync_config = store
+            .get_profile_sync_config(profile_id)
+            .await
+            .expect("sync config query should succeed");
+        assert!(sync_config.is_none());
+
+        let task_runs = store
+            .list_task_runs(&TaskListQuery {
+                profile_id: Some(profile_id.to_string()),
+                ..TaskListQuery::default()
+            })
+            .await
+            .expect("task list should succeed");
+        assert!(task_runs.is_empty());
     }
 
     #[tokio::test]
