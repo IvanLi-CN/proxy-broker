@@ -902,6 +902,7 @@ jobs:
           RELEASE_COMMITISH: ${{ steps.release-ref.outputs.release_ref_sha }}
           RELEASE_TAG: ${{ needs.release-meta.outputs.release_tag }}
           RELEASE_PRERELEASE: ${{ needs.release-meta.outputs.release_prerelease }}
+          RELEASE_TAGS_CSV: ${{ needs.release-meta.outputs.tags_csv }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
@@ -909,6 +910,11 @@ jobs:
             const tag = process.env.RELEASE_TAG
             const targetSha = process.env.RELEASE_COMMITISH
             const prerelease = process.env.RELEASE_PRERELEASE === 'true'
+            const publicationTags = (process.env.RELEASE_TAGS_CSV || '')
+              .split(',')
+              .map(value => value.trim())
+              .filter(Boolean)
+            const makeLatest = publicationTags.some(value => value.endsWith(':latest')) ? 'true' : 'false'
 
             if (!tag) {
               core.setFailed('Missing RELEASE_TAG')
@@ -918,8 +924,18 @@ jobs:
             let release
             try {
               const existing = await github.rest.repos.getReleaseByTag({ owner, repo, tag })
-              release = existing.data
-              core.notice(`GitHub Release already exists for tag ${tag}, reusing ${release.id}.`)
+              const updated = await github.rest.repos.updateRelease({
+                owner,
+                repo,
+                release_id: existing.data.id,
+                tag_name: tag,
+                name: tag,
+                target_commitish: targetSha,
+                prerelease,
+                make_latest: makeLatest,
+              })
+              release = updated.data
+              core.notice(`GitHub Release already exists for tag ${tag}; normalized latest=${makeLatest} on ${release.id}.`)
             } catch (error) {
               if (error.status !== 404) {
                 throw error
@@ -932,10 +948,11 @@ jobs:
                 name: tag,
                 target_commitish: targetSha,
                 prerelease,
+                make_latest: makeLatest,
                 generate_release_notes: true,
               })
               release = created.data
-              core.notice(`Created GitHub Release for tag ${tag}.`)
+              core.notice(`Created GitHub Release for tag ${tag} with latest=${makeLatest}.`)
             }
 
             core.setOutput('release_id', String(release.id))
