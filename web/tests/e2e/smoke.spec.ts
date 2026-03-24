@@ -394,7 +394,9 @@ test("operator can drive the main workflows", async ({ page }) => {
   await expect(page.getByText(/^Proxy broker$/i)).toBeVisible();
   await expect(page.getByText("Local API heartbeat")).toBeVisible();
   await expect(
-    page.getByText("Run the operator plane like a control room, not a note pile."),
+    page.getByText(
+      "Run the operator plane like a control room instead of a stack of scattered notes.",
+    ),
   ).toBeVisible();
 
   await page.getByRole("combobox", { name: /profile id/i }).click();
