@@ -238,17 +238,25 @@ jobs:
         run: |
           set -euo pipefail
           target_touches_workflows=false
+          target_workflow_tree_differs=false
           requires_release_anchor=false
+
+          git fetch --no-tags origin "+refs/heads/main:refs/remotes/origin/main"
 
           if git diff-tree --no-commit-id --name-only -r -m --first-parent "${TARGET_SHA}" | grep -q '^.github/workflows/'; then
             target_touches_workflows=true
           fi
 
-          if [ "${RELEASE_ENABLED}" = "true" ] && [ "${ASSETS_ONLY}" != "true" ] && [ "${target_touches_workflows}" = "true" ]; then
+          if ! git diff --quiet "${TARGET_SHA}" refs/remotes/origin/main -- .github/workflows; then
+            target_workflow_tree_differs=true
+          fi
+
+          if [ "${RELEASE_ENABLED}" = "true" ] && [ "${ASSETS_ONLY}" != "true" ] && [ "${target_workflow_tree_differs}" = "true" ]; then
             requires_release_anchor=true
           fi
 
           echo "target_touches_workflows=${target_touches_workflows}" >> "$GITHUB_OUTPUT"
+          echo "target_workflow_tree_differs=${target_workflow_tree_differs}" >> "$GITHUB_OUTPUT"
           echo "requires_release_anchor=${requires_release_anchor}" >> "$GITHUB_OUTPUT"
 
       - name: Summarize release selection
@@ -263,6 +271,7 @@ jobs:
           BACKLOG_PENDING_COUNT: ${{ steps.release-target.outputs.backlog_pending_count }}
           BACKLOG_PENDING_TARGETS: ${{ steps.release-target.outputs.backlog_pending_targets }}
           TARGET_TOUCHES_WORKFLOWS: ${{ steps.release-ref-mode.outputs.target_touches_workflows }}
+          TARGET_WORKFLOW_TREE_DIFFERS: ${{ steps.release-ref-mode.outputs.target_workflow_tree_differs }}
           REQUIRES_RELEASE_ANCHOR: ${{ steps.release-ref-mode.outputs.requires_release_anchor }}
         run: |
           set -euo pipefail
@@ -276,6 +285,7 @@ jobs:
             echo "- assets_only: \`${ASSETS_ONLY}\`"
             echo "- publish_container: \`${PUBLISH_CONTAINER}\`"
             echo "- target_touches_workflows: \`${TARGET_TOUCHES_WORKFLOWS:-false}\`"
+            echo "- target_workflow_tree_differs: \`${TARGET_WORKFLOW_TREE_DIFFERS:-false}\`"
             echo "- requires_release_anchor: \`${REQUIRES_RELEASE_ANCHOR:-false}\`"
             echo "- backlog_pending_count: \`${BACKLOG_PENDING_COUNT:-0}\`"
             if [ -n "${BACKLOG_PENDING_TARGETS}" ]; then
@@ -291,7 +301,7 @@ jobs:
               echo "> Historical backlog remains pending and requires an explicit \`workflow_dispatch(commit_sha)\` backfill."
             fi
             if [ "${REQUIRES_RELEASE_ANCHOR:-false}" = "true" ]; then
-              echo "> The selected target updates \`.github/workflows/**\`, so release publication will use a synthetic anchor commit on \`release-anchors/<tag>\` and still ship the latest version without extra repository secrets."
+              echo "> The selected target carries a workflow tree that differs from current \`main\`, so release publication will use a synthetic anchor commit on \`release-anchors/<tag>\` and still ship the latest version without extra repository secrets."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
