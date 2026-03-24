@@ -46,6 +46,12 @@ type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {};
 
+export const ZhCN: Story = {
+  globals: {
+    locale: "zh-CN",
+  },
+};
+
 export const Reconnecting: Story = {
   args: {
     streamState: "reconnecting",

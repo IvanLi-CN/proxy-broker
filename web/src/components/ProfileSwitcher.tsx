@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/command";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 interface ProfileSwitcherProps {
@@ -44,6 +45,7 @@ export function ProfileSwitcher({
   onCreateProfile,
   onRetryProfiles,
 }: ProfileSwitcherProps) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
@@ -79,11 +81,11 @@ export function ProfileSwitcher({
     <div className="rounded-[26px] border border-sidebar-border/80 bg-sidebar-accent/45 p-4 shadow-sm">
       <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.28em] text-sidebar-foreground/68">
         <FolderSearchIcon className="size-3.5" />
-        Active profile
+        {t("Active profile")}
       </div>
       <div className="mt-3 space-y-2">
         <Label className="text-sidebar-foreground/76" htmlFor="profile-id">
-          Profile ID
+          {t("Profile ID")}
         </Label>
         <Popover open={open} onOpenChange={handleOpenChange}>
           <PopoverTrigger asChild>
@@ -101,7 +103,7 @@ export function ProfileSwitcher({
           <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-72 overflow-hidden border-sidebar-border bg-background/96 p-0 backdrop-blur-xl">
             <Command shouldFilter={false}>
               <CommandInput
-                placeholder="Search profiles or type a new ID"
+                placeholder={t("Search profiles or type a new ID")}
                 value={query}
                 onValueChange={setQuery}
               />
@@ -119,7 +121,7 @@ export function ProfileSwitcher({
                         onClick={onRetryProfiles}
                       >
                         <RefreshCwIcon className="size-3.5" />
-                        Retry catalog
+                        {t("Retry catalog")}
                       </Button>
                     ) : null}
                   </div>
@@ -127,11 +129,11 @@ export function ProfileSwitcher({
                 {!loadError && isLoading && profiles.length === 0 ? (
                   <div className="flex items-center justify-center gap-2 px-3 py-6 text-sm text-muted-foreground">
                     <LoaderCircleIcon className="size-4 animate-spin" />
-                    Loading profiles…
+                    {t("Loading profiles...")}
                   </div>
                 ) : null}
                 {!loadError && filteredProfiles.length > 0 ? (
-                  <CommandGroup heading="Known profiles">
+                  <CommandGroup heading={t("Known profiles")}>
                     {filteredProfiles.map((candidate) => (
                       <CommandItem
                         key={candidate}
@@ -147,14 +149,16 @@ export function ProfileSwitcher({
                         <div className="min-w-0 flex-1">
                           <div className="truncate font-mono text-sm">{candidate}</div>
                         </div>
-                        {candidate === profileId ? <CommandShortcut>Active</CommandShortcut> : null}
+                        {candidate === profileId ? (
+                          <CommandShortcut>{t("Active")}</CommandShortcut>
+                        ) : null}
                       </CommandItem>
                     ))}
                   </CommandGroup>
                 ) : null}
                 {!loadError && canCreate ? <CommandSeparator /> : null}
                 {!loadError && canCreate ? (
-                  <CommandGroup heading="Create">
+                  <CommandGroup heading={t("Create")}>
                     <CommandItem
                       value={`create:${trimmedQuery}`}
                       onSelect={() => void handleCreate()}
@@ -165,23 +169,27 @@ export function ProfileSwitcher({
                         <PlusIcon className="size-4 text-primary" />
                       )}
                       <div className="min-w-0 flex-1">
-                        <div className="truncate font-medium">Create "{trimmedQuery}"</div>
+                        <div className="truncate font-medium">
+                          {t('Create "{value}"', { value: trimmedQuery })}
+                        </div>
                         <div className="truncate text-xs text-muted-foreground">
-                          Start an empty profile catalog entry and switch to it immediately.
+                          {t("Start an empty profile catalog entry and switch to it immediately.")}
                         </div>
                       </div>
                     </CommandItem>
                   </CommandGroup>
                 ) : null}
                 {!loadError && !isLoading && filteredProfiles.length === 0 && !canCreate ? (
-                  <CommandEmpty>No matching profiles. Type a new ID to create one.</CommandEmpty>
+                  <CommandEmpty>
+                    {t("No matching profiles. Type a new ID to create one.")}
+                  </CommandEmpty>
                 ) : null}
               </CommandList>
             </Command>
           </PopoverContent>
         </Popover>
         <p className="text-xs leading-5 text-sidebar-foreground/60">
-          Search the catalog or create a new empty profile before loading any feed.
+          {t("Search the catalog or create a new empty profile before loading any feed.")}
         </p>
       </div>
     </div>

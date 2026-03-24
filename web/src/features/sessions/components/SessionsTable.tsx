@@ -12,6 +12,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useI18n } from "@/i18n";
 import { formatTimestamp } from "@/lib/format";
 import type { SessionRecord } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -29,13 +30,17 @@ export function SessionsTable({
   closingSessionId,
   onCloseSession,
 }: SessionsTableProps) {
+  const { locale, t } = useI18n();
+
   if (isLoading && sessions.length === 0) {
     return (
       <EmptyPanel
-        title="Loading sessions"
-        description="Polling the backend for active listeners on this profile."
+        title={t("Loading sessions")}
+        description={t("Polling the backend for active listeners on this profile.")}
         icon={LoaderCircleIcon}
-        hint="The live listener inventory will appear here as soon as the first response lands."
+        hint={t(
+          "The live listener inventory will appear here as soon as the first response lands.",
+        )}
       />
     );
   }
@@ -43,8 +48,8 @@ export function SessionsTable({
   if (sessions.length === 0) {
     return (
       <EmptyPanel
-        title="No active sessions"
-        description="Open a single session or a batch to populate this listener deck."
+        title={t("No active sessions")}
+        description={t("Open a single session or a batch to populate this listener deck.")}
         icon={PlugZapIcon}
       />
     );
@@ -55,12 +60,12 @@ export function SessionsTable({
       <Table className="min-w-[860px]">
         <TableHeader>
           <TableRow className="border-b border-border/70 bg-muted/20">
-            <TableHead className="px-4">Session ID</TableHead>
-            <TableHead>Proxy</TableHead>
-            <TableHead>Selected IP</TableHead>
-            <TableHead>Listen</TableHead>
-            <TableHead>Created</TableHead>
-            <TableHead className="pr-4 text-right">Action</TableHead>
+            <TableHead className="px-4">{t("Session ID")}</TableHead>
+            <TableHead>{t("Proxy")}</TableHead>
+            <TableHead>{t("Selected IP")}</TableHead>
+            <TableHead>{t("Listen")}</TableHead>
+            <TableHead>{t("Created")}</TableHead>
+            <TableHead className="pr-4 text-right">{t("Action")}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -78,7 +83,7 @@ export function SessionsTable({
                       variant="outline"
                       className="rounded-full px-3 py-1 font-mono text-[11px] uppercase tracking-[0.14em]"
                     >
-                      port {session.port}
+                      {t("port {port}", { port: session.port })}
                     </Badge>
                   </div>
                 </TableCell>
@@ -87,7 +92,7 @@ export function SessionsTable({
                 </TableCell>
                 <TableCell className="font-mono text-xs md:text-sm">{session.listen}</TableCell>
                 <TableCell className="text-xs md:text-sm">
-                  {formatTimestamp(session.created_at)}
+                  {formatTimestamp(locale, t, session.created_at)}
                 </TableCell>
                 <TableCell className="pr-4 text-right">
                   <Button
@@ -97,7 +102,7 @@ export function SessionsTable({
                     disabled={isClosing}
                     className={cn(isClosing && "opacity-70")}
                   >
-                    {isClosing ? "Closing..." : "Close"}
+                    {isClosing ? t("Closing...") : t("Close")}
                   </Button>
                 </TableCell>
               </TableRow>

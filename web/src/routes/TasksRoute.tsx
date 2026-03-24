@@ -1,8 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useOutletContext } from "react-router-dom";
+
 import { useTaskEvents } from "@/hooks/use-task-events";
-import { ApiError, api } from "@/lib/api";
+import { useI18n } from "@/i18n";
+import { api } from "@/lib/api";
+import { formatApiErrorMessage } from "@/lib/error-messages";
 import { filterTaskListResponse } from "@/lib/tasks";
 import type { TaskRunKind, TaskRunStatus, TaskRunTrigger } from "@/lib/types";
 import { TasksPage } from "@/pages/TasksPage";
@@ -12,10 +15,8 @@ const DEFAULT_TASK_HISTORY_WINDOW_SEC = 7 * 24 * 60 * 60;
 const TASK_HISTORY_WINDOW_REFRESH_INTERVAL_MS = 60 * 1000;
 const TASK_HISTORY_QUERY_REBASE_INTERVAL_MS = 60 * 60 * 1000;
 
-const getErrorMessage = (error: unknown) =>
-  error instanceof ApiError ? `${error.code}: ${error.message}` : "Unexpected request error";
-
 export function TasksRoute() {
+  const { t } = useI18n();
   const { profileId, authMe, currentUser } = useOutletContext<RootOutletContext>();
   const [scope, setScope] = useState<"current" | "all">("current");
   const [kind, setKind] = useState<TaskRunKind | undefined>(undefined);
@@ -138,7 +139,7 @@ export function TasksRoute() {
   return (
     <TasksPage
       accessDenied={accessDenied}
-      detailError={detailQuery.isError ? getErrorMessage(detailQuery.error) : null}
+      detailError={detailQuery.isError ? formatApiErrorMessage(detailQuery.error, t) : null}
       kind={kind}
       onKindChange={setKind}
       onRunningOnlyChange={setRunningOnly}
@@ -159,7 +160,9 @@ export function TasksRoute() {
       selectedRunLoading={Boolean(selectedRunId) && detailQuery.isLoading}
       status={status}
       streamState={authError ? "reconnecting" : streamState}
-      taskError={authError ?? (tasksQuery.isError ? getErrorMessage(tasksQuery.error) : null)}
+      taskError={
+        authError ?? (tasksQuery.isError ? formatApiErrorMessage(tasksQuery.error, t) : null)
+      }
       taskList={visibleTaskList}
       tasksLoading={tasksQuery.isLoading}
       trigger={trigger}

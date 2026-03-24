@@ -1,4 +1,15 @@
+import type { Locale, Translator } from "@/i18n";
 import type { ExtractIpRequest, OpenSessionRequest, SortMode } from "@/lib/types";
+
+const zhGeoLabels: Record<string, string> = {
+  Japan: "日本",
+  "United States": "美国",
+  Tokyo: "东京",
+  Osaka: "大阪",
+  Chiyoda: "千代田",
+  California: "加利福尼亚",
+  "San Jose": "圣何塞",
+};
 
 export function splitListInput(value: string) {
   return value
@@ -16,28 +27,87 @@ export function optionalNumber(value: string) {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-export function formatTimestamp(epoch?: number | null) {
+export function formatTimestamp(locale: Locale, t: Translator, epoch?: number | null) {
   if (!epoch) {
-    return "Never";
+    return t("Never");
   }
-  return new Intl.DateTimeFormat("zh-CN", {
+  return new Intl.DateTimeFormat(locale, {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(epoch * 1000);
 }
 
-export function formatLatency(value?: number | null) {
+export function formatLatency(locale: Locale, t: Translator, value?: number | null) {
   if (value == null) {
-    return "N/A";
+    return t("N/A");
   }
-  return `${value} ms`;
+  return `${new Intl.NumberFormat(locale).format(value)} ms`;
 }
 
-export function formatListSummary(items: string[]) {
+export function formatListSummary(t: Translator, items: string[]) {
   if (items.length === 0) {
-    return "Not set";
+    return t("Not set");
   }
   return items.join(" / ");
+}
+
+export function formatSortMode(sortMode: SortMode, t: Translator) {
+  switch (sortMode) {
+    case "lru":
+      return t("Least recently used first");
+    case "mru":
+      return t("Most recently used first");
+  }
+}
+
+export function formatGeoLabel(locale: Locale, value?: string | null) {
+  if (!value) {
+    return null;
+  }
+  if (locale !== "zh-CN") {
+    return value;
+  }
+  return zhGeoLabels[value] ?? value;
+}
+
+export function formatCountryName(
+  locale: Locale,
+  countryCode?: string | null,
+  fallbackName?: string | null,
+) {
+  if (countryCode) {
+    const name = new Intl.DisplayNames([locale], { type: "region" }).of(countryCode);
+    if (name) {
+      return name;
+    }
+  }
+
+  return formatGeoLabel(locale, fallbackName) ?? fallbackName ?? null;
+}
+
+export function formatOperatorWarning(t: Translator, warning: string) {
+  const dnsFallbackMatch = warning.match(
+    /^proxy `([^`]+)` dns resolve failed, reused (\d+) cached ip\(s\)$/i,
+  );
+  if (dnsFallbackMatch) {
+    const [, proxyName, count] = dnsFallbackMatch;
+    return t("Proxy {proxyName} DNS resolution failed; reused {count} cached IPs.", {
+      proxyName,
+      count,
+    });
+  }
+
+  const reusedMatch = warning.match(/^(.+?) reused (\d+) cached IPs?$/i);
+  if (reusedMatch) {
+    const [, proxyName, count] = reusedMatch;
+    return t("Proxy {proxyName} reused {count} cached IPs.", { proxyName, count });
+  }
+
+  return warning;
+}
+
+export function formatHealthStatus(status: string, t: Translator) {
+  return status.trim().toLowerCase() === "ok" ? t("Healthy") : status.toUpperCase();
 }
 
 export function buildExtractRequest(values: {

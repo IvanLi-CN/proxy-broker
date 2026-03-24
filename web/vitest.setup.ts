@@ -36,6 +36,21 @@ Object.defineProperty(window, "PointerEvent", {
   value: PointerEventMock,
 });
 
+Object.defineProperty(HTMLElement.prototype, "hasPointerCapture", {
+  writable: true,
+  value: () => false,
+});
+
+Object.defineProperty(HTMLElement.prototype, "setPointerCapture", {
+  writable: true,
+  value: () => {},
+});
+
+Object.defineProperty(HTMLElement.prototype, "releasePointerCapture", {
+  writable: true,
+  value: () => {},
+});
+
 Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
   writable: true,
   value: () => {},

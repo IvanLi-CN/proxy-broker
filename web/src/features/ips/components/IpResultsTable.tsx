@@ -11,7 +11,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatLatency, formatTimestamp } from "@/lib/format";
+import { useI18n } from "@/i18n";
+import { formatCountryName, formatGeoLabel, formatLatency, formatTimestamp } from "@/lib/format";
 import type { ExtractIpItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -21,13 +22,19 @@ interface IpResultsTableProps {
 }
 
 export function IpResultsTable({ items, isLoading }: IpResultsTableProps) {
+  const { locale, t } = useI18n();
+
   if (isLoading && items.length === 0) {
     return (
       <EmptyPanel
-        title="Extracting candidate IPs"
-        description="The backend is applying your filters and assembling the current shortlist."
+        title={t("Extracting candidate IPs")}
+        description={t(
+          "The backend is applying your filters and assembling the current shortlist.",
+        )}
         icon={LoaderCircleIcon}
-        hint="Results will land here with probe, geo, and last-used metadata once the request returns."
+        hint={t(
+          "Results will land here with probe, geo, and last-used metadata once the request returns.",
+        )}
       />
     );
   }
@@ -35,8 +42,10 @@ export function IpResultsTable({ items, isLoading }: IpResultsTableProps) {
   if (items.length === 0) {
     return (
       <EmptyPanel
-        title="No extracted IPs yet"
-        description="Run an extract query to inspect geo hints, probe outcomes, and last-used timestamps."
+        title={t("No extracted IPs yet")}
+        description={t(
+          "Run an extract query to inspect geo hints, probe outcomes, and last-used timestamps.",
+        )}
         icon={MapPinnedIcon}
       />
     );
@@ -47,11 +56,11 @@ export function IpResultsTable({ items, isLoading }: IpResultsTableProps) {
       <Table>
         <TableHeader>
           <TableRow className="border-b border-border/70 bg-muted/20">
-            <TableHead className="px-4">IP</TableHead>
-            <TableHead>Geo</TableHead>
-            <TableHead>Probe</TableHead>
-            <TableHead>Latency</TableHead>
-            <TableHead>Last used</TableHead>
+            <TableHead className="px-4">{t("IP")}</TableHead>
+            <TableHead>{t("Geo")}</TableHead>
+            <TableHead>{t("Probe")}</TableHead>
+            <TableHead>{t("Latency")}</TableHead>
+            <TableHead>{t("Last used")}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -61,11 +70,14 @@ export function IpResultsTable({ items, isLoading }: IpResultsTableProps) {
               <TableCell>
                 <div className="space-y-1">
                   <div className="font-medium">
-                    {item.country_name ?? item.country_code ?? "Unknown"}
+                    {formatCountryName(locale, item.country_code, item.country_name) ??
+                      item.country_code ??
+                      t("Unknown")}
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    {[item.region_name, item.city].filter(Boolean).join(" / ") ||
-                      "No city metadata"}
+                    {[formatGeoLabel(locale, item.region_name), formatGeoLabel(locale, item.city)]
+                      .filter(Boolean)
+                      .join(" / ") || t("No city metadata")}
                   </div>
                 </div>
               </TableCell>
@@ -79,14 +91,14 @@ export function IpResultsTable({ items, isLoading }: IpResultsTableProps) {
                       : "border-amber-500/25 bg-amber-500/[0.1] text-amber-700 dark:text-amber-300",
                   )}
                 >
-                  {item.probe_ok ? "Reachable" : "Unverified"}
+                  {item.probe_ok ? t("Reachable") : t("Unverified")}
                 </Badge>
               </TableCell>
               <TableCell className="font-mono text-xs md:text-sm">
-                {formatLatency(item.best_latency_ms)}
+                {formatLatency(locale, t, item.best_latency_ms)}
               </TableCell>
               <TableCell className="text-xs md:text-sm">
-                {formatTimestamp(item.last_used_at)}
+                {formatTimestamp(locale, t, item.last_used_at)}
               </TableCell>
             </TableRow>
           ))}

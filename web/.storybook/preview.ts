@@ -36,6 +36,17 @@ const preview: Preview = {
         ],
       },
     },
+    locale: {
+      description: "Operator locale",
+      defaultValue: "en-US",
+      toolbar: {
+        title: "Locale",
+        items: [
+          { value: "en-US", title: "English" },
+          { value: "zh-CN", title: "简中" },
+        ],
+      },
+    },
   },
   decorators: [withAppProviders],
 };

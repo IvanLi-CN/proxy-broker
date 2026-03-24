@@ -16,7 +16,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { buildExtractRequest } from "@/lib/format";
+import { useI18n } from "@/i18n";
+import { buildExtractRequest, formatSortMode } from "@/lib/format";
 import type { ExtractIpRequest, SortMode } from "@/lib/types";
 
 const schema = z.object({
@@ -32,7 +33,7 @@ type FormValues = z.infer<typeof schema>;
 
 const defaultValues: FormValues = {
   countryCodes: "JP, US",
-  cities: "Tokyo",
+  cities: "",
   specifiedIps: "",
   blacklistIps: "",
   limit: "20",
@@ -45,6 +46,7 @@ interface IpFiltersFormProps {
 }
 
 export function IpFiltersForm({ isPending, onSubmit }: IpFiltersFormProps) {
+  const { t } = useI18n();
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues,
@@ -56,22 +58,23 @@ export function IpFiltersForm({ isPending, onSubmit }: IpFiltersFormProps) {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="space-y-2">
             <div className="text-[11px] font-semibold uppercase tracking-[0.32em] text-primary/80">
-              Filter builder
+              {t("Filter builder")}
             </div>
             <CardTitle className="flex items-center gap-2 text-xl tracking-tight">
               <FilterIcon className="size-4 text-primary" />
-              Shape the candidate slice
+              {t("Shape the candidate slice")}
             </CardTitle>
             <CardDescription className="text-sm leading-6 text-muted-foreground md:text-[15px]">
-              Start broad with country and city hints, then tighten the set with allow-lists or
-              blacklist fences once probe feedback starts telling a story.
+              {t(
+                "Start broad with country and city hints, then tighten the set with allow-lists or blacklist fences once probe feedback starts telling a story.",
+              )}
             </CardDescription>
           </div>
           <Badge
             variant="outline"
             className="rounded-full px-3 py-1 font-mono text-[11px] uppercase tracking-[0.16em]"
           >
-            default sort lru
+            {t("Default sort: {sortMode}", { sortMode: formatSortMode("lru", t) })}
           </Badge>
         </div>
       </CardHeader>
@@ -89,8 +92,8 @@ export function IpFiltersForm({ isPending, onSubmit }: IpFiltersFormProps) {
               render={({ field }) => (
                 <StringListField
                   id="country-codes"
-                  label="Country codes"
-                  helper="Comma or newline separated ISO country codes."
+                  label={t("Country codes")}
+                  helper={t("Comma or newline separated ISO country codes.")}
                   onChange={field.onChange}
                   placeholder="JP, US, SG"
                   value={field.value}
@@ -103,10 +106,10 @@ export function IpFiltersForm({ isPending, onSubmit }: IpFiltersFormProps) {
               render={({ field }) => (
                 <StringListField
                   id="cities"
-                  label="Cities"
-                  helper="Optional city shortlist to bias the result set."
+                  label={t("Cities")}
+                  helper={t("Optional city shortlist to bias the result set.")}
                   onChange={field.onChange}
-                  placeholder="Tokyo\nOsaka"
+                  placeholder={t("Enter one city per line")}
                   value={field.value}
                 />
               )}
@@ -117,8 +120,8 @@ export function IpFiltersForm({ isPending, onSubmit }: IpFiltersFormProps) {
               render={({ field }) => (
                 <StringListField
                   id="specified-ips"
-                  label="Specified IPs"
-                  helper="Force-include these IPs before sorting."
+                  label={t("Specified IPs")}
+                  helper={t("Force-include these IPs before sorting.")}
                   onChange={field.onChange}
                   placeholder="203.0.113.10"
                   value={field.value}
@@ -131,8 +134,8 @@ export function IpFiltersForm({ isPending, onSubmit }: IpFiltersFormProps) {
               render={({ field }) => (
                 <StringListField
                   id="blacklist-ips"
-                  label="Blacklist IPs"
-                  helper="IPs the extractor must exclude."
+                  label={t("Blacklist IPs")}
+                  helper={t("IPs the extractor must exclude.")}
                   onChange={field.onChange}
                   placeholder="198.51.100.42"
                   value={field.value}
@@ -142,7 +145,7 @@ export function IpFiltersForm({ isPending, onSubmit }: IpFiltersFormProps) {
           </div>
           <div className="grid gap-4 rounded-[28px] border border-border/70 bg-background/80 p-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="limit">Limit</Label>
+              <Label htmlFor="limit">{t("Limit")}</Label>
               <Input
                 id="limit"
                 {...form.register("limit")}
@@ -152,18 +155,18 @@ export function IpFiltersForm({ isPending, onSubmit }: IpFiltersFormProps) {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="sort-mode">Sort mode</Label>
+              <Label htmlFor="sort-mode">{t("Sort mode")}</Label>
               <Controller
                 control={form.control}
                 name="sortMode"
                 render={({ field }) => (
                   <Select onValueChange={field.onChange} value={field.value}>
                     <SelectTrigger id="sort-mode" className="w-full bg-card">
-                      <SelectValue placeholder="Sort mode" />
+                      <SelectValue placeholder={t("Sort mode")} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="lru">LRU</SelectItem>
-                      <SelectItem value="mru">MRU</SelectItem>
+                      <SelectItem value="lru">{formatSortMode("lru", t)}</SelectItem>
+                      <SelectItem value="mru">{formatSortMode("mru", t)}</SelectItem>
                     </SelectContent>
                   </Select>
                 )}
@@ -171,7 +174,7 @@ export function IpFiltersForm({ isPending, onSubmit }: IpFiltersFormProps) {
             </div>
             <div className="flex items-end justify-stretch sm:col-span-2 sm:justify-end">
               <Button disabled={isPending} type="submit" size="lg" className="min-w-40">
-                {isPending ? "Extracting..." : "Extract IPs"}
+                {isPending ? t("Extracting...") : t("Extract IPs")}
               </Button>
             </div>
           </div>

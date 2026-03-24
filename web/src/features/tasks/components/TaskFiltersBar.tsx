@@ -9,6 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useI18n } from "@/i18n";
 import { formatTaskKind, formatTaskStatus, formatTaskTrigger } from "@/lib/tasks-view";
 import type { TaskRunKind, TaskRunStatus, TaskRunTrigger } from "@/lib/types";
 
@@ -45,12 +46,14 @@ export function TaskFiltersBar({
   onTriggerChange,
   onRunningOnlyChange,
 }: TaskFiltersBarProps) {
+  const { t } = useI18n();
+
   return (
     <div className="rounded-[28px] border border-border/70 bg-card/95 p-4 shadow-[0_20px_60px_-42px_rgba(15,23,42,0.5)]">
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
           <FilterIcon className="size-4 text-primary" />
-          Task filters
+          {t("Task filters")}
         </div>
         <div className="flex flex-1 flex-wrap items-center gap-3">
           <Select
@@ -58,11 +61,11 @@ export function TaskFiltersBar({
             onValueChange={(value) => onScopeChange(value as "current" | "all")}
           >
             <SelectTrigger className="min-w-[150px] rounded-full bg-background/80">
-              <SelectValue placeholder="View scope" />
+              <SelectValue placeholder={t("View scope")} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="current">Current profile</SelectItem>
-              <SelectItem value="all">All profiles</SelectItem>
+              <SelectItem value="current">{t("Current profile")}</SelectItem>
+              <SelectItem value="all">{t("All profiles")}</SelectItem>
             </SelectContent>
           </Select>
 
@@ -73,13 +76,13 @@ export function TaskFiltersBar({
             }
           >
             <SelectTrigger className="min-w-[180px] rounded-full bg-background/80">
-              <SelectValue placeholder="Task kind" />
+              <SelectValue placeholder={t("Task kind")} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All kinds</SelectItem>
+              <SelectItem value="all">{t("All kinds")}</SelectItem>
               {taskKinds.map((item) => (
                 <SelectItem key={item} value={item}>
-                  {formatTaskKind(item)}
+                  {formatTaskKind(item, t)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -92,13 +95,13 @@ export function TaskFiltersBar({
             }
           >
             <SelectTrigger className="min-w-[160px] rounded-full bg-background/80">
-              <SelectValue placeholder="Task status" />
+              <SelectValue placeholder={t("Task status")} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All statuses</SelectItem>
+              <SelectItem value="all">{t("All statuses")}</SelectItem>
               {taskStatuses.map((item) => (
                 <SelectItem key={item} value={item}>
-                  {formatTaskStatus(item)}
+                  {formatTaskStatus(item, t)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -111,13 +114,13 @@ export function TaskFiltersBar({
             }
           >
             <SelectTrigger className="min-w-[160px] rounded-full bg-background/80">
-              <SelectValue placeholder="Task trigger" />
+              <SelectValue placeholder={t("Task trigger")} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All triggers</SelectItem>
+              <SelectItem value="all">{t("All triggers")}</SelectItem>
               {taskTriggers.map((item) => (
                 <SelectItem key={item} value={item}>
-                  {formatTaskTrigger(item)}
+                  {formatTaskTrigger(item, t)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -128,7 +131,7 @@ export function TaskFiltersBar({
               checked={runningOnly}
               onCheckedChange={(checked) => onRunningOnlyChange(checked === true)}
             />
-            Running only
+            {t("Running only")}
           </Label>
         </div>
       </div>

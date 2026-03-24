@@ -17,7 +17,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { buildOpenSessionRequest } from "@/lib/format";
+import { useI18n } from "@/i18n";
+import { buildOpenSessionRequest, formatSortMode } from "@/lib/format";
 import type { OpenBatchRequest, OpenBatchResponse, SortMode } from "@/lib/types";
 
 const rowSchema = z.object({
@@ -57,10 +58,11 @@ interface OpenBatchFormProps {
 }
 
 export function OpenBatchForm({ isPending, response, error, onSubmit }: OpenBatchFormProps) {
+  const { t } = useI18n();
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
-      requests: [emptyRow(), { ...emptyRow(), desiredPort: "10081", cities: "Osaka" }],
+      requests: [emptyRow(), { ...emptyRow(), desiredPort: "10081" }],
     },
   });
   const fieldArray = useFieldArray({ control: form.control, name: "requests" });
@@ -71,22 +73,23 @@ export function OpenBatchForm({ isPending, response, error, onSubmit }: OpenBatc
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="space-y-2">
             <div className="text-[11px] font-semibold uppercase tracking-[0.32em] text-primary/80">
-              Batch open
+              {t("Batch open")}
             </div>
             <CardTitle className="flex items-center gap-2 text-xl tracking-tight">
               <Rows4Icon className="size-4 text-primary" />
-              Queue a transactional batch
+              {t("Queue a transactional batch")}
             </CardTitle>
             <CardDescription className="text-sm leading-6 text-muted-foreground md:text-[15px]">
-              Stage multiple open-session requests and let the backend roll the whole set back if
-              any row fails validation or allocation.
+              {t(
+                "Stage multiple open-session requests and let the backend roll the whole set back if any row fails validation or allocation.",
+              )}
             </CardDescription>
           </div>
           <Badge
             variant="outline"
             className="rounded-full px-3 py-1 font-mono text-[11px] uppercase tracking-[0.16em]"
           >
-            rollback on failure
+            {t("rollback on failure")}
           </Badge>
         </div>
       </CardHeader>
@@ -108,10 +111,10 @@ export function OpenBatchForm({ isPending, response, error, onSubmit }: OpenBatc
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div>
                     <div className="text-sm font-semibold text-foreground">
-                      Request #{index + 1}
+                      {t("Request #{index}", { index: index + 1 })}
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      Compact selector for one listener entry.
+                      {t("Compact selector for one listener entry.")}
                     </div>
                   </div>
                   <Button
@@ -120,14 +123,14 @@ export function OpenBatchForm({ isPending, response, error, onSubmit }: OpenBatc
                     size="icon-sm"
                     onClick={() => fieldArray.remove(index)}
                     disabled={fieldArray.fields.length === 1}
-                    aria-label={`Remove request ${index + 1}`}
+                    aria-label={t("Remove request {index}", { index: index + 1 })}
                   >
                     <Trash2Icon />
                   </Button>
                 </div>
                 <div className="grid gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor={`batch-specified-ip-${index}`}>Specified IP</Label>
+                    <Label htmlFor={`batch-specified-ip-${index}`}>{t("Specified IP")}</Label>
                     <Input
                       id={`batch-specified-ip-${index}`}
                       {...form.register(`requests.${index}.specifiedIp`)}
@@ -136,7 +139,7 @@ export function OpenBatchForm({ isPending, response, error, onSubmit }: OpenBatc
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor={`batch-desired-port-${index}`}>Desired port</Label>
+                    <Label htmlFor={`batch-desired-port-${index}`}>{t("Desired port")}</Label>
                     <Input
                       id={`batch-desired-port-${index}`}
                       {...form.register(`requests.${index}.desiredPort`)}
@@ -150,8 +153,8 @@ export function OpenBatchForm({ isPending, response, error, onSubmit }: OpenBatc
                     render={({ field }) => (
                       <StringListField
                         id={`batch-country-codes-${index}`}
-                        label="Country codes"
-                        helper="Optional geo scope."
+                        label={t("Country codes")}
+                        helper={t("Optional geo scope.")}
                         onChange={field.onChange}
                         placeholder="JP, SG"
                         value={field.value}
@@ -164,10 +167,10 @@ export function OpenBatchForm({ isPending, response, error, onSubmit }: OpenBatc
                     render={({ field }) => (
                       <StringListField
                         id={`batch-cities-${index}`}
-                        label="Cities"
-                        helper="Optional city scope."
+                        label={t("Cities")}
+                        helper={t("Optional city scope.")}
                         onChange={field.onChange}
-                        placeholder="Tokyo"
+                        placeholder={t("Enter one city per line")}
                         value={field.value}
                       />
                     )}
@@ -178,8 +181,8 @@ export function OpenBatchForm({ isPending, response, error, onSubmit }: OpenBatc
                     render={({ field }) => (
                       <StringListField
                         id={`batch-includes-${index}`}
-                        label="Selector include list"
-                        helper="IPs allowed for this row."
+                        label={t("Selector include list")}
+                        helper={t("IPs allowed for this row.")}
                         onChange={field.onChange}
                         placeholder="203.0.113.10"
                         value={field.value}
@@ -192,8 +195,8 @@ export function OpenBatchForm({ isPending, response, error, onSubmit }: OpenBatc
                     render={({ field }) => (
                       <StringListField
                         id={`batch-blacklist-${index}`}
-                        label="Blacklist"
-                        helper="IPs to exclude in this row."
+                        label={t("Blacklist")}
+                        helper={t("IPs to exclude in this row.")}
                         onChange={field.onChange}
                         placeholder="198.51.100.42"
                         value={field.value}
@@ -203,7 +206,7 @@ export function OpenBatchForm({ isPending, response, error, onSubmit }: OpenBatc
                 </div>
                 <div className="mt-4 grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
-                    <Label htmlFor={`batch-limit-${index}`}>Selector limit</Label>
+                    <Label htmlFor={`batch-limit-${index}`}>{t("Selector limit")}</Label>
                     <Input
                       id={`batch-limit-${index}`}
                       {...form.register(`requests.${index}.limit`)}
@@ -212,18 +215,18 @@ export function OpenBatchForm({ isPending, response, error, onSubmit }: OpenBatc
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor={`batch-sort-mode-${index}`}>Sort mode</Label>
+                    <Label htmlFor={`batch-sort-mode-${index}`}>{t("Sort mode")}</Label>
                     <Controller
                       control={form.control}
                       name={`requests.${index}.sortMode`}
                       render={({ field }) => (
                         <Select onValueChange={field.onChange} value={field.value}>
                           <SelectTrigger id={`batch-sort-mode-${index}`} className="w-full bg-card">
-                            <SelectValue placeholder="Sort mode" />
+                            <SelectValue placeholder={t("Sort mode")} />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="lru">LRU</SelectItem>
-                            <SelectItem value="mru">MRU</SelectItem>
+                            <SelectItem value="lru">{formatSortMode("lru", t)}</SelectItem>
+                            <SelectItem value="mru">{formatSortMode("mru", t)}</SelectItem>
                           </SelectContent>
                         </Select>
                       )}
@@ -236,24 +239,26 @@ export function OpenBatchForm({ isPending, response, error, onSubmit }: OpenBatc
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-[28px] border border-border/70 bg-[linear-gradient(135deg,rgba(59,130,246,0.08),rgba(20,184,166,0.06))] p-4">
             <Button type="button" variant="outline" onClick={() => fieldArray.append(emptyRow())}>
               <PlusIcon />
-              Add request row
+              {t("Add request row")}
             </Button>
             <Button disabled={isPending} type="submit" size="lg" className="min-w-40">
-              {isPending ? "Opening batch..." : "Open batch"}
+              {isPending ? t("Opening batch...") : t("Open batch")}
             </Button>
           </div>
         </form>
         {response ? (
           <ActionResponsePanel
-            title="Batch opened"
-            description={`Opened ${response.sessions.length} sessions in one transaction.`}
+            title={t("Batch opened")}
+            description={t("Opened {count} sessions in one transaction.", {
+              count: response.sessions.length,
+            })}
             bullets={response.sessions.map(
               (session) => `${session.session_id} -> ${session.listen}`,
             )}
           />
         ) : null}
         {error ? (
-          <ActionResponsePanel title="Batch failed" description={error} tone="error" />
+          <ActionResponsePanel title={t("Batch failed")} description={error} tone="error" />
         ) : null}
       </CardContent>
     </Card>

@@ -5,6 +5,10 @@
 @import "@fontsource/fira-sans/latin-500.css";
 @import "@fontsource/fira-sans/latin-600.css";
 @import "@fontsource/fira-sans/latin-700.css";
+@import "@fontsource/noto-sans-sc/chinese-simplified-400.css";
+@import "@fontsource/noto-sans-sc/chinese-simplified-500.css";
+@import "@fontsource/noto-sans-sc/chinese-simplified-600.css";
+@import "@fontsource/noto-sans-sc/chinese-simplified-700.css";
 @import "@fontsource/fira-code/latin-400.css";
 @import "@fontsource/fira-code/latin-500.css";
 @import "@fontsource/fira-code/latin-600.css";
@@ -138,6 +142,16 @@
     @apply font-sans scroll-smooth;
   }
 
+  html:lang(zh-CN) {
+    --font-sans:
+      "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC",
+      "Microsoft YaHei UI", "Microsoft YaHei", "Fira Sans", "Geist Variable", sans-serif;
+    --font-mono:
+      "Fira Code", "Geist Mono Variable", "IBM Plex Mono", "Sarasa Mono SC",
+      "Noto Sans Mono CJK SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", monospace;
+    font-family: var(--font-sans);
+  }
+
   body {
     @apply bg-background text-foreground antialiased;
     min-width: 320px;
@@ -171,6 +185,14 @@
   a,
   summary {
     cursor: pointer;
+  }
+
+  html:lang(zh-CN) body,
+  html:lang(zh-CN) button,
+  html:lang(zh-CN) input,
+  html:lang(zh-CN) textarea,
+  html:lang(zh-CN) select {
+    font-family: var(--font-sans);
   }
 
   #root {

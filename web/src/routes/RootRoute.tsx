@@ -4,8 +4,10 @@ import { toast } from "sonner";
 
 import { AppShell } from "@/components/AppShell";
 import { useProfilePreference } from "@/hooks/use-profile-preference";
+import { useI18n } from "@/i18n";
 import { ApiError, api } from "@/lib/api";
 import { resolveCurrentUserState } from "@/lib/current-user";
+import { formatApiErrorMessage } from "@/lib/error-messages";
 import type { AuthMeResponse, CurrentUserState } from "@/lib/types";
 
 export interface RootOutletContext {
@@ -14,10 +16,8 @@ export interface RootOutletContext {
   currentUser: CurrentUserState;
 }
 
-const getErrorMessage = (error: unknown) =>
-  error instanceof ApiError ? `${error.code}: ${error.message}` : "Unexpected request error";
-
 export function RootRoute() {
+  const { t } = useI18n();
   const [profileId, setProfileId] = useProfilePreference();
   const queryClient = useQueryClient();
   const healthQuery = useQuery({
@@ -50,16 +50,20 @@ export function RootRoute() {
     try {
       const created = await createProfileMutation.mutateAsync(nextProfileId);
       setProfileId(created.profile_id);
-      toast.success(`Created profile ${created.profile_id}`);
+      toast.success(t("Created profile {profileId}", { profileId: created.profile_id }));
       await queryClient.invalidateQueries({ queryKey: ["profiles"] });
       return created.profile_id;
     } catch (error) {
       if (error instanceof ApiError && error.code === "profile_exists") {
         const existingProfileId = nextProfileId.trim();
-        toast.info(`Profile ${existingProfileId} already exists. Refreshing catalog.`);
+        toast.info(
+          t("Profile {profileId} already exists. Refreshing catalog.", {
+            profileId: existingProfileId,
+          }),
+        );
         await queryClient.invalidateQueries({ queryKey: ["profiles"] });
       }
-      toast.error(getErrorMessage(error));
+      toast.error(formatApiErrorMessage(error, t));
       throw error;
     }
   };
@@ -76,7 +80,9 @@ export function RootRoute() {
       profiles={profiles}
       profilesCreating={createProfileMutation.isPending}
       profilesError={
-        profilesQuery.isError && !profilesQuery.data ? getErrorMessage(profilesQuery.error) : null
+        profilesQuery.isError && !profilesQuery.data
+          ? formatApiErrorMessage(profilesQuery.error, t)
+          : null
       }
       profilesLoading={profilesQuery.isLoading}
       profileId={profileId}

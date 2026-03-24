@@ -8,6 +8,7 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useI18n } from "@/i18n";
 import { formatTimestamp } from "@/lib/format";
 import type { TaskSummary } from "@/lib/types";
 
@@ -23,39 +24,48 @@ const streamTone = {
 } as const;
 
 export function TaskSummaryCards({ summary, streamState }: TaskSummaryCardsProps) {
+  const { formatNumber, locale, t } = useI18n();
+  const streamValue =
+    streamState === "live"
+      ? t("Live")
+      : streamState === "connecting"
+        ? t("Connecting")
+        : t("Reconnecting");
   const cards = [
     {
-      title: "Live stream",
-      value: streamState,
-      meta: `Last run ${formatTimestamp(summary.last_run_at)}`,
+      title: t("Live stream"),
+      value: streamValue,
+      meta: t("Last run {value}", {
+        value: formatTimestamp(locale, t, summary.last_run_at),
+      }),
       icon: RadioTowerIcon,
       accent: streamTone[streamState],
     },
     {
-      title: "Running now",
-      value: `${summary.running_runs}`,
-      meta: `${summary.queued_runs} queued behind`,
+      title: t("Running now"),
+      value: formatNumber(summary.running_runs),
+      meta: t("{count} queued behind", { count: formatNumber(summary.queued_runs) }),
       icon: LoaderCircleIcon,
       accent: "border-sky-500/20 bg-sky-500/[0.08] text-sky-700 dark:text-sky-300",
     },
     {
-      title: "Failures",
-      value: `${summary.failed_runs}`,
-      meta: `${summary.skipped_runs} skipped`,
+      title: t("Failures"),
+      value: formatNumber(summary.failed_runs),
+      meta: t("{count} skipped", { count: formatNumber(summary.skipped_runs) }),
       icon: CircleAlertIcon,
       accent: "border-rose-500/20 bg-rose-500/[0.08] text-rose-700 dark:text-rose-300",
     },
     {
-      title: "Succeeded",
-      value: `${summary.succeeded_runs}`,
-      meta: `${summary.total_runs} total tracked`,
+      title: t("Succeeded"),
+      value: formatNumber(summary.succeeded_runs),
+      meta: t("{count} total tracked", { count: formatNumber(summary.total_runs) }),
       icon: ActivityIcon,
       accent: "border-emerald-500/20 bg-emerald-500/[0.09] text-emerald-700 dark:text-emerald-300",
     },
     {
-      title: "Most recent",
-      value: formatTimestamp(summary.last_run_at),
-      meta: "Derived from finish/start/create timestamps",
+      title: t("Most recent"),
+      value: formatTimestamp(locale, t, summary.last_run_at),
+      meta: t("Derived from finish/start/create timestamps"),
       icon: Clock3Icon,
       accent: "border-violet-500/20 bg-violet-500/[0.08] text-violet-700 dark:text-violet-300",
     },
