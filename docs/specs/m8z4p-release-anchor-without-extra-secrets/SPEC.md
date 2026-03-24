@@ -40,6 +40,7 @@
 - 手工 `workflow_dispatch(commit_sha)`：
   - 仍只处理指定 commit。
   - 若该 snapshot 已发布，即使 release tag 最终指向锚点提交，也必须继续走 assets-only 回填。
+  - 旧版本 backfill 必须复用 snapshot 已解析出的 publication tags；只有当前最新 stable 版本可以持有 `latest`，历史补发不得抢占 latest release。
 
 ### Observability
 
@@ -57,6 +58,7 @@
 - Given 发布目标修改了 `.github/workflows/**` 且 workflow 树与当前 `main` 存在差异，When `Release` 发布该版本，Then workflow 不要求新增 publisher secret，且会改用 `release-anchors/<tag>` 上的合成锚点提交承接 tag / GitHub Release。
 - Given 发布目标修改了 `.github/workflows/**` 但 workflow 树已经等于当前 `main`，When `Release` 发布该版本，Then workflow 直接发布原始目标 commit，而不是在 `git commit` 处因为 no-op 失败。
 - Given 已发布 snapshot 的 release tag 指向锚点提交而不是原始 main commit，When 手工 `workflow_dispatch(commit_sha)` 重新补资产，Then workflow 仍识别为 assets-only，不会误触发全量重发。
+- Given 历史 stable 版本通过 `workflow_dispatch(commit_sha)` 补发，When workflow 创建或复用 GitHub Release，Then 该 release 不会被标记为 latest，且最新 stable 版本继续保留 `latest`。
 
 ## 非功能性验收 / 质量门槛（Quality Gates）
 
@@ -78,6 +80,7 @@
 - 移除 GitHub App publisher preflight 与 secrets 依赖，恢复使用默认 `GITHUB_TOKEN` 完成 tag / release / notes 写入。
 - 当目标 commit 触碰 workflow 文件且 workflow 树确实需要被“替换为当前 main”时，在专用 `release-anchors/<tag>` 分支上生成一个合成锚点提交；该提交保留目标内容，但 workflow 文件树始终来自当前 `main`，从而可以由默认 token 正常承接 tag 创建。
 - `mark-released` 仍标记原始 snapshot target，让发布事实继续绑定到主线 merge commit，而不是锚点分支。
+- GitHub Release 的 `make_latest` 必须由 snapshot 导出的 publication tags 决定，而不是由手工 backfill 的创建时间决定。
 
 ## 风险 / 假设
 
@@ -88,6 +91,7 @@
 
 - 2026-03-24: 新增 follow-up 规格，收敛为“无额外 secrets + 必要时自动锚点提交”的主线发版语义。
 - 2026-03-24: 收敛锚点细节为“目标内容树 + 当前 workflow 树”的合成提交，并在无差异时直接回退到原始目标 commit。
+- 2026-03-24: 补充历史 backfill 不得抢占 `latest` 的发布约束，GitHub Release latest 状态改由 snapshot publication tags 决定。
 
 ## 参考（References）
 
