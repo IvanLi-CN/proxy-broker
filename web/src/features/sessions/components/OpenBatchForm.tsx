@@ -18,7 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useI18n } from "@/i18n";
-import { buildOpenSessionRequest } from "@/lib/format";
+import { buildOpenSessionRequest, formatSortMode } from "@/lib/format";
 import type { OpenBatchRequest, OpenBatchResponse, SortMode } from "@/lib/types";
 
 const rowSchema = z.object({
@@ -62,7 +62,7 @@ export function OpenBatchForm({ isPending, response, error, onSubmit }: OpenBatc
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
-      requests: [emptyRow(), { ...emptyRow(), desiredPort: "10081", cities: "Osaka" }],
+      requests: [emptyRow(), { ...emptyRow(), desiredPort: "10081" }],
     },
   });
   const fieldArray = useFieldArray({ control: form.control, name: "requests" });
@@ -170,7 +170,7 @@ export function OpenBatchForm({ isPending, response, error, onSubmit }: OpenBatc
                         label={t("Cities")}
                         helper={t("Optional city scope.")}
                         onChange={field.onChange}
-                        placeholder="Tokyo"
+                        placeholder={t("Enter one city per line")}
                         value={field.value}
                       />
                     )}
@@ -225,8 +225,8 @@ export function OpenBatchForm({ isPending, response, error, onSubmit }: OpenBatc
                             <SelectValue placeholder={t("Sort mode")} />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="lru">LRU</SelectItem>
-                            <SelectItem value="mru">MRU</SelectItem>
+                            <SelectItem value="lru">{formatSortMode("lru", t)}</SelectItem>
+                            <SelectItem value="mru">{formatSortMode("mru", t)}</SelectItem>
                           </SelectContent>
                         </Select>
                       )}

@@ -17,6 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useI18n } from "@/i18n";
+import { formatOperatorWarning } from "@/lib/format";
 import type { LoadSubscriptionRequest, LoadSubscriptionResponse } from "@/lib/types";
 
 const schema = z.object({
@@ -48,6 +49,7 @@ export function SubscriptionFormCard({
     },
   });
   const sourceType = form.watch("sourceType");
+  const sourceTypeLabel = sourceType === "url" ? t("URL") : t("File path");
 
   return (
     <Card className="overflow-hidden border-border/70 bg-card/96 shadow-[0_24px_70px_-44px_rgba(15,23,42,0.55)]">
@@ -72,7 +74,7 @@ export function SubscriptionFormCard({
               variant="outline"
               className="rounded-full px-3 py-1 font-mono text-[11px] uppercase tracking-[0.16em]"
             >
-              {t("source {sourceType}", { sourceType })}
+              {t("source {sourceType}", { sourceType: sourceTypeLabel })}
             </Badge>
             <Badge
               variant="outline"
@@ -171,7 +173,7 @@ export function SubscriptionFormCard({
               ipCount: response.distinct_ips,
             })}
             tone={response.warnings.length > 0 ? "warning" : "success"}
-            bullets={response.warnings}
+            bullets={response.warnings.map((warning) => formatOperatorWarning(t, warning))}
           />
         ) : null}
         {error ? (

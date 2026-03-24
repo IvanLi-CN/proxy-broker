@@ -1,6 +1,31 @@
 import type { MessageCatalog } from "@/i18n/types";
 
 export const zhCN: MessageCatalog = {
+  Healthy: "正常",
+  "Least recently used first": "最久未使用优先",
+  "Most recently used first": "最近使用优先",
+  "Default sort: {sortMode}": "默认排序：{sortMode}",
+  "Enter one city per line": "每行输入一个城市",
+  "Proxy {proxyName} DNS resolution failed; reused {count} cached IPs.":
+    "代理 {proxyName} 的 DNS 解析失败；已复用 {count} 个缓存 IP。",
+  "Proxy {proxyName} reused {count} cached IPs.":
+    "代理 {proxyName} 已复用 {count} 个缓存 IP。",
+  "Targeted IPs": "目标 IP 数",
+  "Probed IPs": "已探测 IP 数",
+  "Geo records updated": "已更新地理记录",
+  "Cached entries skipped": "已跳过缓存项",
+  "Loaded proxies": "已加载代理数",
+  "Distinct IPs": "不同 IP 数",
+  Reason: "原因",
+  "Refreshing subscription feed for profile.": "正在刷新当前配置的订阅源。",
+  "Refreshing probe metadata.": "正在刷新探测元数据。",
+  "Task run queued.": "任务运行已进入队列。",
+  "Task run completed successfully.": "任务运行已成功完成。",
+  "Task run skipped.": "任务运行已跳过。",
+  "Task run failed.": "任务运行失败。",
+  "Task run is running.": "任务运行中。",
+  "Subscription sync finished with {count} new IPs.":
+    "订阅同步完成，新增 {count} 个 IP。",
   English: "英文",
   "Simplified Chinese": "简体中文",
   Language: "语言",
@@ -19,10 +44,10 @@ export const zhCN: MessageCatalog = {
   "Local API heartbeat": "本地 API 心跳",
   "Refreshed from /healthz": "来自 /healthz 的刷新结果",
   "Use cmd/ctrl + b to collapse the sidebar when the tables need more room.":
-    "当表格需要更多空间时，可用 cmd/ctrl + b 收起侧边栏。",
+    "当表格需要更多空间时，可用快捷键收起侧边栏。",
   "Theme surface": "主题外观",
   "Light-first, still dark-safe.": "默认浅色，也兼容深色。",
-  "Inspect shadcn/ui system": "查看 shadcn/ui 体系",
+  "Inspect shadcn/ui system": "查看组件设计系统",
   "Local operator plane": "本地运维控制台",
   "Profile {profileId}": "配置 {profileId}",
   "Health checking": "健康检查中",
@@ -41,7 +66,7 @@ export const zhCN: MessageCatalog = {
   "Access control": "访问控制",
   "Identity and project keys": "身份与项目密钥",
   "Forward Auth only tells the backend who the operator is. Admin checks and profile-scoped machine keys are enforced here.":
-    "Forward Auth 只负责告诉后端当前操作者是谁；管理员校验与按配置绑定的机器密钥都在这里执行。",
+    "前置认证只负责告诉后端当前操作者是谁；管理员校验与按配置绑定的机器密钥都在这里执行。",
   "New API key issued": "已签发新的 API 密钥",
   "Copy this secret now. The backend will only reveal it once.":
     "现在就复制这个密钥吧，后端只会展示这一次。",
@@ -49,7 +74,7 @@ export const zhCN: MessageCatalog = {
   "prefix {prefix}": "前缀 {prefix}",
   "Create a profile key": "创建配置密钥",
   "Machine keys can only be issued by an admin human or the development identity.":
-    "只有管理员用户或 development 身份可以签发机器密钥。",
+    "只有管理员用户或开发模式身份可以签发机器密钥。",
   "API key name": "API 密钥名称",
   "Create key": "创建密钥",
   "Issued keys": "已签发密钥",
@@ -74,7 +99,7 @@ export const zhCN: MessageCatalog = {
   "no forwarded identity": "没有转发身份",
   "Anonymous browser session": "匿名浏览器会话",
   "No Forward Auth identity is available. The backend treats this browser as anonymous until a user session or forwarded headers appear.":
-    "当前没有可用的 Forward Auth 身份；在出现用户会话或转发头之前，后端会把这个浏览器视为匿名访问。",
+    "当前没有可用的前置认证身份；在出现用户会话或转发头之前，后端会把这个浏览器视为匿名访问。",
   "protected actions blocked": "受保护操作已阻止",
   "Expected backend result: 401 authentication_required for protected routes.":
     "预期后端结果：受保护路由返回 401 authentication_required。",
@@ -98,9 +123,9 @@ export const zhCN: MessageCatalog = {
   "human admin": "管理员用户",
   human: "用户",
   "Forward Auth identified an administrator. The backend authorizes admin-only routes.":
-    "Forward Auth 已识别为管理员，后端会放行仅管理员可访问的路由。",
+    "前置认证已识别为管理员，后端会放行仅管理员可访问的路由。",
   "Forward Auth identified a human user, but the backend did not classify them as admin.":
-    "Forward Auth 已识别为普通用户，但后端未将其判定为管理员。",
+    "前置认证已识别为普通用户，但后端未将其判定为管理员。",
   "non-admin": "非管理员",
   "Active profile": "当前配置",
   "Profile ID": "配置 ID",
@@ -124,15 +149,15 @@ export const zhCN: MessageCatalog = {
   "pool reset on success": "成功后重置池子",
   "Source type": "来源类型",
   "Choose source type": "选择来源类型",
-  URL: "URL",
+  URL: "链接地址",
   "File path": "文件路径",
   "URL mode fetches remotely; file mode resolves from the Rust host filesystem.":
-    "URL 模式会远程抓取；文件模式会从 Rust 主机文件系统解析路径。",
+    "链接模式会远程抓取；文件模式会从服务端主机文件系统解析路径。",
   Value: "值",
   "Use the upstream subscription URL that the backend can fetch directly.":
-    "填写后端可以直接抓取的上游订阅 URL。",
+    "填写后端可以直接抓取的上游订阅链接。",
   "Provide a server-local path that the Rust process can read on disk.":
-    "填写 Rust 进程在服务器本机可读取的文件路径。",
+    "填写后端服务在服务器本机可读取的文件路径。",
   "What happens next": "接下来会发生什么",
   "A successful load replaces the candidate pool for this profile. Review warnings at once if the upstream feed contains skipped or malformed records.":
     "加载成功后会替换这个配置的候选池；如果上游订阅里有跳过或损坏的记录，请立刻检查警告。",
@@ -182,9 +207,9 @@ export const zhCN: MessageCatalog = {
   "Shape the candidate slice": "塑造候选切片",
   "Start broad with country and city hints, then tighten the set with allow-lists or blacklist fences once probe feedback starts telling a story.":
     "先用国家和城市做宽筛，再根据探测反馈逐步收紧范围，加入白名单或黑名单限制。",
-  "default sort lru": "默认排序 lru",
+  "default sort lru": "默认排序：最久未使用优先",
   "Country codes": "国家代码",
-  "Comma or newline separated ISO country codes.": "用逗号或换行分隔的 ISO 国家代码。",
+  "Comma or newline separated ISO country codes.": "用逗号或换行分隔的国家二字代码。",
   Cities: "城市",
   "Optional city shortlist to bias the result set.": "可选的城市短名单，用来偏向结果集。",
   "Specified IPs": "指定 IP",
@@ -362,7 +387,7 @@ export const zhCN: MessageCatalog = {
     "/healthz 每 10 秒更新一次，并驱动上方的命令条。",
   "File-mode sources resolve on the host": "文件模式来源在主机侧解析",
   "Browser uploads are not involved here. Use a path visible to the Rust service.":
-    "这里不涉及浏览器上传；请使用 Rust 服务在主机上可见的路径。",
+    "这里不涉及浏览器上传；请使用后端服务在主机上可见的路径。",
   "Subscription warnings": "订阅警告",
   "The backend loaded the subscription, but some records still need operator attention before you keep drilling down.":
     "后端已经加载订阅，但在继续深入操作前，仍有部分记录需要运维确认。",
@@ -386,17 +411,17 @@ export const zhCN: MessageCatalog = {
     "失败的运行应该解释清楚究竟是订阅抓取、探测还是地理补全卡住了。",
   "Admin access required": "需要管理员权限",
   "The task center is currently restricted to the admin operator plane and development principal.":
-    "任务中心目前仅对管理员运维平面和 development 主体开放。",
+    "任务中心目前仅对管理员运维平面和开发模式主体开放。",
   "Connecting to the task stream": "正在连接任务流",
   "Task stream reconnecting": "任务流正在重连",
   "The page keeps the last snapshot visible while SSE catches up.":
-    "在 SSE 追上最新状态之前，页面会继续显示上一份快照。",
+    "在事件流追上最新状态之前，页面会继续显示上一份快照。",
   "Task list failed": "任务列表加载失败",
   "Task detail failed": "任务详情加载失败",
   "Run board": "运行看板",
   "Task history and current activity": "任务历史与当前活动",
   "Rows are kept hot by SSE, so stage changes and result summaries land without polling.":
-    "这些行会由 SSE 实时保温，因此阶段变化与结果摘要无需轮询就会抵达。",
+    "这些行会由事件流实时保温，因此阶段变化与结果摘要无需轮询就会抵达。",
   "{count} visible runs": "可见运行 {count} 条",
   "{count} visible run": "可见运行 {count} 条",
   "running-only filter": "仅看运行中",
@@ -428,7 +453,7 @@ export const zhCN: MessageCatalog = {
   "Succeeded card": "成功数",
   "{count} total tracked": "累计跟踪 {count} 个",
   "Most recent": "最近一次",
-  "Derived from finish/start/create timestamps": "基于 finished/start/create 时间推导",
+  "Derived from finish/start/create timestamps": "基于完成/开始/创建时间推导",
   "Task filters": "任务筛选",
   "View scope": "查看范围",
   "Current profile": "当前配置",

@@ -18,7 +18,7 @@ const meta = {
   render: (args) => (
     <AppShell {...args}>
       <div className="rounded-3xl border border-border/70 bg-card/90 p-8 text-sm text-muted-foreground">
-        Routed content renders here.
+        路由内容会渲染在这里。
       </div>
     </AppShell>
   ),

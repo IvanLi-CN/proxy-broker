@@ -7,6 +7,16 @@ import type {
   TaskRunTrigger,
 } from "@/lib/types";
 
+const taskPayloadLabelMap: Record<string, string> = {
+  targeted_ips: "Targeted IPs",
+  probed_ips: "Probed IPs",
+  geo_updated: "Geo records updated",
+  skipped_cached: "Cached entries skipped",
+  loaded_proxies: "Loaded proxies",
+  distinct_ips: "Distinct IPs",
+  reason: "Reason",
+};
+
 export function formatTaskKind(kind: TaskRunKind, t: Translator) {
   switch (kind) {
     case "subscription_sync":
@@ -83,4 +93,47 @@ export function formatTaskProgress(
     return current != null ? formatter.format(current) : t("N/A");
   }
   return `${formatter.format(current ?? 0)}/${formatter.format(total)}`;
+}
+
+export function formatTaskPayloadKey(key: string, t: Translator) {
+  return t(taskPayloadLabelMap[key] ?? key);
+}
+
+export function localizeTaskPayload(value: unknown, t: Translator): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => localizeTaskPayload(item, t));
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, nestedValue]) => [
+        formatTaskPayloadKey(key, t),
+        localizeTaskPayload(nestedValue, t),
+      ]),
+    );
+  }
+
+  return value;
+}
+
+export function formatTaskEventMessage(message: string, t: Translator) {
+  switch (message) {
+    case "Refreshing subscription feed for profile.":
+    case "Refreshing probe metadata.":
+    case "Task run queued.":
+    case "Task run completed successfully.":
+    case "Task run skipped.":
+    case "Task run failed.":
+    case "Task run is running.":
+      return t(message);
+  }
+
+  const syncFinishedMatch = message.match(/^Subscription sync finished with (\d+) new IP\(s\)\.$/);
+  if (syncFinishedMatch) {
+    return t("Subscription sync finished with {count} new IPs.", {
+      count: syncFinishedMatch[1] ?? "0",
+    });
+  }
+
+  return message;
 }

@@ -10,6 +10,7 @@ import { HealthSummaryCard } from "@/features/overview/components/HealthSummaryC
 import { RefreshCard } from "@/features/overview/components/RefreshCard";
 import { SubscriptionFormCard } from "@/features/overview/components/SubscriptionFormCard";
 import { useI18n } from "@/i18n";
+import { formatOperatorWarning } from "@/lib/format";
 import type {
   ApiKeySummary,
   CreateApiKeyResponse,
@@ -217,7 +218,7 @@ export function OverviewPage({
                   description={t(
                     "The backend loaded the subscription, but some records still need operator attention before you keep drilling down.",
                   )}
-                  bullets={loadResponse.warnings}
+                  bullets={loadResponse.warnings.map((warning) => formatOperatorWarning(t, warning))}
                 />
               ) : null}
               {loadResponse && !loadResponse.warnings.length ? (

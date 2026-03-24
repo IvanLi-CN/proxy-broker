@@ -2,6 +2,7 @@ import { AlertTriangleIcon, HeartPulseIcon, RefreshCwIcon, RouterIcon } from "lu
 
 import { TopMetricCard } from "@/components/TopMetricCard";
 import { useI18n } from "@/i18n";
+import { formatHealthStatus } from "@/lib/format";
 
 interface HealthSummaryCardProps {
   status: string;
@@ -35,7 +36,7 @@ export function HealthSummaryCard({
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <TopMetricCard
           title={t("Service pulse")}
-          value={status.toUpperCase()}
+          value={formatHealthStatus(status, t)}
           description={t("Polled from /healthz every 10 seconds so the shell stays honest.")}
           icon={HeartPulseIcon}
           tone={status === "ok" ? "positive" : "warning"}

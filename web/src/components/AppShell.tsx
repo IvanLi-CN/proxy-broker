@@ -34,6 +34,7 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { useI18n } from "@/i18n";
+import { formatHealthStatus } from "@/lib/format";
 import type { CurrentUserState } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -66,6 +67,7 @@ export function AppShell({
 }: AppShellProps) {
   const { t } = useI18n();
   const isHealthy = (healthStatus ?? "").toLowerCase() === "ok";
+  const healthStatusLabel = formatHealthStatus(healthStatus, t);
   const navItems = [
     {
       to: "/",
@@ -175,7 +177,7 @@ export function AppShell({
                     variant="secondary"
                     className="rounded-full bg-background/80 font-mono text-[11px] uppercase tracking-[0.18em] text-sidebar-foreground"
                   >
-                    {healthStatus.toUpperCase()}
+                    {healthStatusLabel}
                   </Badge>
                   <span className="text-xs text-sidebar-foreground/65">
                     {t("Refreshed from /healthz")}
@@ -246,7 +248,7 @@ export function AppShell({
                   : "border-amber-500/25 bg-amber-500/[0.12] text-amber-700 dark:text-amber-300",
               )}
             >
-              {healthStatus}
+              {healthStatusLabel}
             </Badge>
           </div>
         </div>

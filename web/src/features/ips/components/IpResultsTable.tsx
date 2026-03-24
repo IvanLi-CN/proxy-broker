@@ -12,7 +12,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useI18n } from "@/i18n";
-import { formatLatency, formatTimestamp } from "@/lib/format";
+import { formatCountryName, formatGeoLabel, formatLatency, formatTimestamp } from "@/lib/format";
 import type { ExtractIpItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -70,11 +70,16 @@ export function IpResultsTable({ items, isLoading }: IpResultsTableProps) {
               <TableCell>
                 <div className="space-y-1">
                   <div className="font-medium">
-                    {item.country_name ?? item.country_code ?? t("Unknown")}
+                    {formatCountryName(locale, item.country_code, item.country_name) ??
+                      item.country_code ??
+                      t("Unknown")}
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    {[item.region_name, item.city].filter(Boolean).join(" / ") ||
-                      t("No city metadata")}
+                    {
+                      [formatGeoLabel(locale, item.region_name), formatGeoLabel(locale, item.city)]
+                        .filter(Boolean)
+                        .join(" / ") || t("No city metadata")
+                    }
                   </div>
                 </div>
               </TableCell>

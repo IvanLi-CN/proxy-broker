@@ -1,6 +1,31 @@
 import type { MessageCatalog } from "@/i18n/types";
 
 export const enUS: MessageCatalog = {
+  Healthy: "Healthy",
+  "Least recently used first": "Least recently used first",
+  "Most recently used first": "Most recently used first",
+  "Default sort: {sortMode}": "Default sort: {sortMode}",
+  "Enter one city per line": "Enter one city per line",
+  "Proxy {proxyName} DNS resolution failed; reused {count} cached IPs.":
+    "Proxy {proxyName} DNS resolution failed; reused {count} cached IPs.",
+  "Proxy {proxyName} reused {count} cached IPs.":
+    "Proxy {proxyName} reused {count} cached IPs.",
+  "Targeted IPs": "Targeted IPs",
+  "Probed IPs": "Probed IPs",
+  "Geo records updated": "Geo records updated",
+  "Cached entries skipped": "Cached entries skipped",
+  "Loaded proxies": "Loaded proxies",
+  "Distinct IPs": "Distinct IPs",
+  Reason: "Reason",
+  "Refreshing subscription feed for profile.": "Refreshing subscription feed for profile.",
+  "Refreshing probe metadata.": "Refreshing probe metadata.",
+  "Task run queued.": "Task run queued.",
+  "Task run completed successfully.": "Task run completed successfully.",
+  "Task run skipped.": "Task run skipped.",
+  "Task run failed.": "Task run failed.",
+  "Task run is running.": "Task run is running.",
+  "Subscription sync finished with {count} new IPs.":
+    "Subscription sync finished with {count} new IPs.",
   "Overview hero title":
     "Run the operator plane like a control room instead of a stack of scattered notes.",
   "Overview hero description":

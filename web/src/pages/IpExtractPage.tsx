@@ -9,6 +9,7 @@ import { WorkflowRail } from "@/components/WorkflowRail";
 import { IpFiltersForm } from "@/features/ips/components/IpFiltersForm";
 import { IpResultsTable } from "@/features/ips/components/IpResultsTable";
 import { useI18n } from "@/i18n";
+import { formatGeoLabel, formatSortMode } from "@/lib/format";
 import type { ExtractIpRequest, ExtractIpResponse } from "@/lib/types";
 
 interface IpExtractPageProps {
@@ -21,6 +22,7 @@ interface IpExtractPageProps {
 
 function summarizeRequest(
   request: ExtractIpRequest | null | undefined,
+  locale: ReturnType<typeof useI18n>["locale"],
   count: number,
   formatNumber: (value: number) => string,
   t: ReturnType<typeof useI18n>["t"],
@@ -36,14 +38,20 @@ function summarizeRequest(
 
   const chips = [
     t(count === 1 ? "{count} row" : "{count} rows", { count: formatNumber(count) }),
-    t("sort: {sortMode}", { sortMode: (request.sort_mode ?? "lru").toUpperCase() }),
+    t("sort: {sortMode}", { sortMode: formatSortMode(request.sort_mode ?? "lru", t) }),
   ];
 
   if (request.country_codes?.length) {
     chips.push(t("countries: {countries}", { countries: request.country_codes.join(", ") }));
   }
   if (request.cities?.length) {
-    chips.push(t("cities: {cities}", { cities: request.cities.join(", ") }));
+    chips.push(
+      t("cities: {cities}", {
+        cities: request.cities
+          .map((city) => formatGeoLabel(locale, city) ?? city)
+          .join(", "),
+      }),
+    );
   }
   if (request.specified_ips?.length) {
     chips.push(t("include: {count}", { count: formatNumber(request.specified_ips.length) }));
@@ -65,7 +73,7 @@ export function IpExtractPage({
   lastRequest,
   onSubmit,
 }: IpExtractPageProps) {
-  const { formatNumber, t } = useI18n();
+  const { formatNumber, locale, t } = useI18n();
   const resultCount = response?.items.length ?? 0;
 
   return (
@@ -157,7 +165,7 @@ export function IpExtractPage({
             description={t(
               "Each surviving row reflects the current request plus the latest probe and location metadata returned by the backend.",
             )}
-            chips={summarizeRequest(lastRequest, resultCount, formatNumber, t)}
+            chips={summarizeRequest(lastRequest, locale, resultCount, formatNumber, t)}
             actions={
               <Badge
                 variant="outline"

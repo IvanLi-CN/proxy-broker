@@ -18,7 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useI18n } from "@/i18n";
-import { buildOpenSessionRequest } from "@/lib/format";
+import { buildOpenSessionRequest, formatSortMode } from "@/lib/format";
 import type { OpenSessionRequest, OpenSessionResponse, SortMode } from "@/lib/types";
 
 const schema = z.object({
@@ -137,7 +137,7 @@ export function OpenSessionForm({ isPending, response, error, onSubmit }: OpenSe
                   label={t("Cities")}
                   helper={t("Optional city shortlist.")}
                   onChange={field.onChange}
-                  placeholder="Tokyo"
+                  placeholder={t("Enter one city per line")}
                   value={field.value}
                 />
               )}
@@ -193,8 +193,8 @@ export function OpenSessionForm({ isPending, response, error, onSubmit }: OpenSe
                       <SelectValue placeholder={t("Sort mode")} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="lru">LRU</SelectItem>
-                      <SelectItem value="mru">MRU</SelectItem>
+                      <SelectItem value="lru">{formatSortMode("lru", t)}</SelectItem>
+                      <SelectItem value="mru">{formatSortMode("mru", t)}</SelectItem>
                     </SelectContent>
                   </Select>
                 )}

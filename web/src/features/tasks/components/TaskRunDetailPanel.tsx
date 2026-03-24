@@ -7,12 +7,15 @@ import { useI18n } from "@/i18n";
 import { formatTaskErrorMessage } from "@/lib/error-messages";
 import { formatTimestamp } from "@/lib/format";
 import {
+  formatTaskEventMessage,
   formatTaskEventLevel,
   formatTaskKind,
+  formatTaskPayloadKey,
   formatTaskProgress,
   formatTaskStage,
   formatTaskStatus,
   formatTaskTrigger,
+  localizeTaskPayload,
 } from "@/lib/tasks-view";
 import type { TaskRunDetail } from "@/lib/types";
 
@@ -126,7 +129,9 @@ export function TaskRunDetailPanel({ detail, isLoading }: TaskRunDetailPanelProp
                       key={key}
                       className="flex items-start justify-between gap-4 rounded-xl bg-background/80 px-3 py-2"
                     >
-                      <span className="font-medium text-foreground">{key}</span>
+                      <span className="font-medium text-foreground">
+                        {formatTaskPayloadKey(key, t)}
+                      </span>
                       <span className="max-w-[60%] text-right font-mono text-xs">
                         {typeof value === "string" || typeof value === "number"
                           ? String(value)
@@ -177,14 +182,14 @@ export function TaskRunDetailPanel({ detail, isLoading }: TaskRunDetailPanelProp
                       </div>
                     </div>
                     <div className="mt-3 text-sm font-semibold text-foreground">
-                      {event.message}
+                      {formatTaskEventMessage(event.message, t)}
                     </div>
                     <div className="mt-1 text-xs uppercase tracking-[0.16em] text-muted-foreground">
                       {formatTaskStage(event.stage, t)}
                     </div>
                     {event.payload_json ? (
                       <pre className="mt-3 overflow-x-auto rounded-xl bg-background/85 p-3 text-xs text-muted-foreground">
-                        {JSON.stringify(event.payload_json, null, 2)}
+                        {JSON.stringify(localizeTaskPayload(event.payload_json, t), null, 2)}
                       </pre>
                     ) : null}
                   </div>
