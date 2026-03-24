@@ -785,7 +785,10 @@ def select_dispatch_target(args: argparse.Namespace) -> int:
 
     selected_target_sha = requested_sha
     backlog = backlog_pending_targets(args.notes_ref, requested_sha, exclude={requested_sha})
-    assets_only = bool(snapshot.get("release_enabled") and existing_release_tags(selected_target_sha))
+    assets_only = bool(
+        snapshot.get("release_enabled")
+        and (snapshot.get("status") == "released" or existing_release_tags(selected_target_sha))
+    )
     export_key_values(
         {
             "requested_sha": requested_sha,
