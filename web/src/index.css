@@ -138,6 +138,29 @@
     @apply font-sans scroll-smooth;
   }
 
+  html:lang(zh-CN) {
+    --font-sans:
+      "PingFang SC",
+      "Hiragino Sans GB",
+      "Noto Sans CJK SC",
+      "Source Han Sans SC",
+      "Microsoft YaHei UI",
+      "Microsoft YaHei",
+      "Fira Sans",
+      "Geist Variable",
+      sans-serif;
+    --font-mono:
+      "Fira Code",
+      "Geist Mono Variable",
+      "IBM Plex Mono",
+      "Sarasa Mono SC",
+      "Noto Sans Mono CJK SC",
+      "PingFang SC",
+      "Hiragino Sans GB",
+      "Microsoft YaHei UI",
+      monospace;
+  }
+
   body {
     @apply bg-background text-foreground antialiased;
     min-width: 320px;
