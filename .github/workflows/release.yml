@@ -728,14 +728,21 @@ jobs:
               git restore --source "${TARGET_SHA}" --staged --worktree -- .
               git restore --source "${workflow_source_ref}" --staged --worktree -- .github/workflows
               git add -A
-              git commit \
-                -m "${expected_subject}" \
-                -m "Release anchor for ${TARGET_SHA} so the workflow can publish the latest version without requiring workflows permission on the original merge commit." \
-                -m "${expected_target_trailer}" \
-                -m "Workflow-Tree-Source: origin/main"
-              release_ref_sha="$(git rev-parse HEAD)"
-              git push origin "HEAD:refs/heads/${release_anchor_branch}"
-              release_ref_kind="anchor"
+
+              if git diff --cached --quiet; then
+                release_ref_sha="${TARGET_SHA}"
+                release_ref_kind="target"
+                release_anchor_branch=""
+              else
+                git commit \
+                  -m "${expected_subject}" \
+                  -m "Release anchor for ${TARGET_SHA} so the workflow can publish the latest version without requiring workflows permission on the original merge commit." \
+                  -m "${expected_target_trailer}" \
+                  -m "Workflow-Tree-Source: origin/main"
+                release_ref_sha="$(git rev-parse HEAD)"
+                git push origin "HEAD:refs/heads/${release_anchor_branch}"
+                release_ref_kind="anchor"
+              fi
             fi
           fi
 

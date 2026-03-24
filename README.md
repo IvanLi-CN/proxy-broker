@@ -200,10 +200,13 @@ backlog remains visible in the release summary and must be backfilled
 explicitly with `workflow_dispatch(commit_sha)`. When the selected release
 target updates `.github/workflows/**`, the workflow automatically creates or
 reuses a synthetic `release-anchors/<tag>` branch and publishes the release tag
-from that empty anchor commit so the latest version still ships with the
-default `GITHUB_TOKEN`. Manual asset backfills continue to target the original
-merged `main` commit SHA even when the final release tag points at a release
-anchor. For `v0.4.0`, use `7c60216b58dbdf5dd0eacac411876849299a1ffc`.
+from a synthetic release commit whose tree keeps the selected target content
+but restores `.github/workflows/**` from the latest `main`. If restoring the
+workflow tree produces no content change, the workflow publishes the original
+target commit directly instead of forcing a no-op anchor commit. Manual asset
+backfills continue to target the original merged `main` commit SHA even when
+the final release tag points at a release anchor. For `v0.4.0`, use
+`7c60216b58dbdf5dd0eacac411876849299a1ffc`.
 
 ## Health check
 
