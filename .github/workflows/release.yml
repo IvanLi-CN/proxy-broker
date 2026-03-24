@@ -240,7 +240,7 @@ jobs:
           target_touches_workflows=false
           requires_release_anchor=false
 
-          if git diff-tree --no-commit-id --name-only -r "${TARGET_SHA}" | grep -q '^.github/workflows/'; then
+          if git diff-tree --no-commit-id --name-only -r -m --first-parent "${TARGET_SHA}" | grep -q '^.github/workflows/'; then
             target_touches_workflows=true
           fi
 
