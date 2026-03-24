@@ -125,6 +125,11 @@ def parse_args() -> argparse.Namespace:
     )
     select_target.add_argument("--notes-ref", default=DEFAULT_NOTES_REF)
     select_target.add_argument("--requested-sha", required=True)
+    select_target.add_argument(
+        "--allow-released-target",
+        action="store_true",
+        help="Allow selecting an already released snapshot (used for manual asset backfills).",
+    )
     select_target.add_argument("--github-output", default=os.environ.get("GITHUB_OUTPUT", ""))
 
     mark_released = subparsers.add_parser("mark-released", help="Mark a stored snapshot as released.")
@@ -449,6 +454,21 @@ def pending_release_targets(notes_ref: str, upper_bound_sha: str) -> list[str]:
     return pending
 
 
+def backlog_pending_targets(notes_ref: str, upper_bound_sha: str, *, exclude: set[str] | None = None) -> list[str]:
+    excluded = exclude or set()
+    return [commit for commit in pending_release_targets(notes_ref, upper_bound_sha) if commit not in excluded]
+
+
+def summarize_targets(targets: list[str], *, limit: int = 5) -> str:
+    if not targets:
+        return ""
+    visible = targets[:limit]
+    summary = ",".join(visible)
+    if len(targets) > limit:
+        summary = f"{summary},+{len(targets) - limit} more"
+    return summary
+
+
 def build_snapshot(
     *,
     target_sha: str,
@@ -636,6 +656,7 @@ def export_snapshot(snapshot: dict[str, Any], github_output: str) -> None:
             "image_name_lower": snapshot.get("image_name_lower", ""),
             "app_effective_version": snapshot.get("app_effective_version", ""),
             "release_tag": snapshot.get("release_tag", ""),
+            "selected_release_tag": snapshot.get("release_tag", ""),
             "release_prerelease": snapshot.get("release_prerelease", False),
             "tags_csv": snapshot.get("tags_csv", ""),
         },
@@ -727,34 +748,55 @@ def export_next_pending(args: argparse.Namespace) -> int:
     git("merge-base", "--is-ancestor", upper_bound, args.main_ref)
     fetch_notes_ref(args.notes_ref)
     pending = pending_release_targets(args.notes_ref, upper_bound)
-    export_key_values({"target_sha": pending[0] if pending else ""}, args.github_output)
+    backlog = pending[1:] if len(pending) > 1 else []
+    export_key_values(
+        {
+            "target_sha": pending[0] if pending else "",
+            "backlog_pending_count": len(backlog),
+            "backlog_pending_targets": summarize_targets(backlog),
+        },
+        args.github_output,
+    )
     return 0
 
 
 def select_dispatch_target(args: argparse.Namespace) -> int:
     requested_sha = normalize_sha(args.requested_sha)
+    allow_released_target = bool(getattr(args, "allow_released_target", False))
     fetch_notes_ref(args.notes_ref)
     snapshot = read_snapshot(args.notes_ref, requested_sha)
     if snapshot is None:
         raise SnapshotError(f"Missing immutable release snapshot for {requested_sha}")
 
-    if not snapshot.get("release_enabled"):
-        pending = pending_release_targets(args.notes_ref, requested_sha)
-        target_sha = pending[0] if pending else ""
-        assets_only = bool(target_sha and existing_release_tags(target_sha))
-        export_key_values({"target_sha": target_sha, "assets_only": assets_only}, args.github_output)
+    if snapshot.get("status") == "released" and not allow_released_target:
+        backlog = backlog_pending_targets(args.notes_ref, requested_sha, exclude={requested_sha})
+        export_key_values(
+            {
+                "requested_sha": requested_sha,
+                "selected_target_sha": "",
+                "target_sha": "",
+                "assets_only": False,
+                "backlog_pending_count": len(backlog),
+                "backlog_pending_targets": summarize_targets(backlog),
+            },
+            args.github_output,
+        )
         return 0
 
-    # release.yml only pushes the git release tag after GHCR manifests are created and verified,
-    # so tag-bearing reruns can safely stay on the GitHub Release asset recovery path.
-    if existing_release_tags(requested_sha):
-        export_key_values({"target_sha": requested_sha, "assets_only": True}, args.github_output)
-        return 0
-
-    pending = pending_release_targets(args.notes_ref, requested_sha)
-    target_sha = pending[0] if pending else requested_sha
-    assets_only = bool(target_sha and existing_release_tags(target_sha))
-    export_key_values({"target_sha": target_sha, "assets_only": assets_only}, args.github_output)
+    selected_target_sha = requested_sha
+    backlog = backlog_pending_targets(args.notes_ref, requested_sha, exclude={requested_sha})
+    assets_only = bool(snapshot.get("release_enabled") and existing_release_tags(selected_target_sha))
+    export_key_values(
+        {
+            "requested_sha": requested_sha,
+            "selected_target_sha": selected_target_sha,
+            "target_sha": selected_target_sha,
+            "assets_only": assets_only,
+            "backlog_pending_count": len(backlog),
+            "backlog_pending_targets": summarize_targets(backlog),
+        },
+        args.github_output,
+    )
     return 0
 
 
