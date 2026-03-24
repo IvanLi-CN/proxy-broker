@@ -1,7 +1,7 @@
 import type { MessageCatalog } from "@/i18n/types";
 
 export const zhCN: MessageCatalog = {
-  English: "English",
+  English: "英文",
   "Simplified Chinese": "简体中文",
   Language: "语言",
   "Toggle theme": "切换主题",
@@ -12,7 +12,7 @@ export const zhCN: MessageCatalog = {
   "Displays the mobile sidebar.": "显示移动端侧边栏。",
   "Operator console language": "控制台语言",
   "Choose the interface language.": "选择界面语言。",
-  "Proxy broker": "Proxy broker",
+  "Proxy broker": "代理中枢",
   "Operator plane": "运维控制台",
   Workspace: "工作区",
   Runtime: "运行状态",
@@ -41,13 +41,13 @@ export const zhCN: MessageCatalog = {
   "Access control": "访问控制",
   "Identity and project keys": "身份与项目密钥",
   "Forward Auth only tells the backend who the operator is. Admin checks and profile-scoped machine keys are enforced here.":
-    "Forward Auth 只负责告诉后端当前操作者是谁；管理员校验与按 profile 绑定的机器密钥都在这里执行。",
+    "Forward Auth 只负责告诉后端当前操作者是谁；管理员校验与按配置绑定的机器密钥都在这里执行。",
   "New API key issued": "已签发新的 API 密钥",
   "Copy this secret now. The backend will only reveal it once.":
     "现在就复制这个密钥吧，后端只会展示这一次。",
   "profile {profileId}": "配置 {profileId}",
   "prefix {prefix}": "前缀 {prefix}",
-  "Create a profile key": "创建 profile 密钥",
+  "Create a profile key": "创建配置密钥",
   "Machine keys can only be issued by an admin human or the development identity.":
     "只有管理员用户或 development 身份可以签发机器密钥。",
   "API key name": "API 密钥名称",
@@ -56,7 +56,7 @@ export const zhCN: MessageCatalog = {
   "{count} total": "共 {count} 个",
   "Key inventory unavailable": "密钥列表暂不可用",
   "Loading issued keys...": "正在加载已签发密钥……",
-  "No machine keys have been issued for this profile yet.": "这个 profile 还没有签发任何机器密钥。",
+  "No machine keys have been issued for this profile yet.": "这个配置还没有签发任何机器密钥。",
   revoked: "已撤销",
   active: "生效中",
   Revoke: "撤销",
@@ -92,9 +92,9 @@ export const zhCN: MessageCatalog = {
   admin: "管理员",
   "api key": "API 密钥",
   "Machine principal resolved from a profile-scoped API key.":
-    "这是通过按 profile 绑定的 API 密钥解析出的机器主体。",
+    "这是通过按配置绑定的 API 密钥解析出的机器主体。",
   "API key ID: {id}": "API 密钥 ID：{id}",
-  "Bound profile: {profileId}": "绑定的 profile：{profileId}",
+  "Bound profile: {profileId}": "绑定配置：{profileId}",
   "human admin": "管理员用户",
   human: "用户",
   "Forward Auth identified an administrator. The backend authorizes admin-only routes.":
@@ -102,24 +102,24 @@ export const zhCN: MessageCatalog = {
   "Forward Auth identified a human user, but the backend did not classify them as admin.":
     "Forward Auth 已识别为普通用户，但后端未将其判定为管理员。",
   "non-admin": "非管理员",
-  "Active profile": "当前 profile",
-  "Profile ID": "Profile ID",
-  "Search profiles or type a new ID": "搜索 profile，或输入新的 ID",
+  "Active profile": "当前配置",
+  "Profile ID": "配置 ID",
+  "Search profiles or type a new ID": "搜索配置，或输入新的 ID",
   "Retry catalog": "重试刷新目录",
-  "Loading profiles...": "正在加载 profile……",
-  "Known profiles": "已有 profile",
+  "Loading profiles...": "正在加载配置……",
+  "Known profiles": "已有配置",
   Active: "当前使用中",
   Create: "创建",
   'Create "{value}"': "创建“{value}”",
   "Start an empty profile catalog entry and switch to it immediately.":
-    "新建一个空的 profile 目录项，并立即切换过去。",
-  "No matching profiles. Type a new ID to create one.": "没有匹配的 profile。输入新 ID 即可创建。",
+    "新建一个空的配置目录项，并立即切换过去。",
+  "No matching profiles. Type a new ID to create one.": "没有匹配的配置。输入新 ID 即可创建。",
   "Search the catalog or create a new empty profile before loading any feed.":
-    "先搜索目录，或创建一个新的空 profile，再去加载订阅。",
+    "先搜索目录，或创建一个新的空配置，再去加载订阅。",
   "Primary action": "主操作",
   "Load a fresh subscription feed": "加载新的订阅源",
   "Reset the working inventory for the current profile before you extract IPs or open any new listeners.":
-    "在提取 IP 或打开新监听前，先为当前 profile 重置工作库存。",
+    "在提取 IP 或打开新监听前，先为当前配置重置工作库存。",
   "source {sourceType}": "来源 {sourceType}",
   "pool reset on success": "成功后重置池子",
   "Source type": "来源类型",
@@ -135,7 +135,7 @@ export const zhCN: MessageCatalog = {
     "填写 Rust 进程在服务器本机可读取的文件路径。",
   "What happens next": "接下来会发生什么",
   "A successful load replaces the candidate pool for this profile. Review warnings at once if the upstream feed contains skipped or malformed records.":
-    "加载成功后会替换这个 profile 的候选池；如果上游订阅里有跳过或损坏的记录，请立刻检查警告。",
+    "加载成功后会替换这个配置的候选池；如果上游订阅里有跳过或损坏的记录，请立刻检查警告。",
   "Loading subscription...": "正在加载订阅……",
   "Load subscription": "加载订阅",
   "Subscription loaded": "订阅已加载",
@@ -145,7 +145,7 @@ export const zhCN: MessageCatalog = {
   "Probe refresh": "探测刷新",
   "Refresh probes and geo hints": "刷新探测与地理提示",
   "Use this when latency or geo attribution feels stale. The refresh updates operator hints without changing profile identity.":
-    "当延迟或地理归属显得陈旧时就用这个；刷新只会更新运维提示，不会改变 profile 身份。",
+    "当延迟或地理归属显得陈旧时就用这个；刷新只会更新运维提示，不会改变配置身份。",
   "safe to repeat": "可安全重复执行",
   "Force refresh stale entries": "强制刷新陈旧条目",
   "Ignore cached probe hints and attempt a full refresh for every matching IP when the current metadata looks suspiciously old.":
@@ -166,7 +166,7 @@ export const zhCN: MessageCatalog = {
   "Polled from /healthz every 10 seconds so the shell stays honest.":
     "每 10 秒轮询一次 /healthz，让壳层状态保持可信。",
   "Live listeners": "在线监听",
-  "Sessions currently consuming the active profile.": "当前正在消费活动 profile 的会话数。",
+  "Sessions currently consuming the active profile.": "当前正在使用活动配置的会话数。",
   "Pool inventory": "池库存",
   "Most recent successful subscription load reflected in the runway.":
     "显示最近一次成功订阅加载后的库存状态。",
@@ -215,7 +215,7 @@ export const zhCN: MessageCatalog = {
   "Single open": "单条打开",
   "Open one listener fast": "快速打开一个监听",
   "Pin a specific IP when you know exactly what you want, or let the selector pick the next best edge for the active profile.":
-    "当你明确知道目标 IP 时就直接指定；否则让选择器为当前 profile 选出下一个最优边缘。",
+    "当你明确知道目标 IP 时就直接指定；否则让选择器为当前配置选出下一个最优边缘。",
   "selector limit 1": "选择器上限 1",
   "Specified IP": "指定 IP",
   "Desired port": "期望端口",
@@ -254,7 +254,7 @@ export const zhCN: MessageCatalog = {
   "Batch failed": "批次失败",
   "Loading sessions": "正在加载会话",
   "Polling the backend for active listeners on this profile.":
-    "正在轮询后端，获取这个 profile 的在线监听。",
+    "正在轮询后端，获取这个配置的在线监听。",
   "The live listener inventory will appear here as soon as the first response lands.":
     "第一条响应回来后，在线监听清单就会显示在这里。",
   "No active sessions": "没有活动会话",
@@ -272,7 +272,7 @@ export const zhCN: MessageCatalog = {
   "No task runs match this view": "当前视图下没有匹配的任务运行",
   "Narrow the filters less aggressively or wait for the next scheduled subscription sync.":
     "把筛选条件放宽一点，或者等下一轮定时订阅同步。",
-  Profile: "Profile",
+  Profile: "配置",
   Task: "任务",
   Status: "状态",
   Stage: "阶段",
@@ -336,7 +336,7 @@ export const zhCN: MessageCatalog = {
   "Keep the runway clean": "保持跑道整洁",
   "Refresh inventory": "刷新库存",
   "Load the newest upstream feed into the active profile before anything else.":
-    "在做其他事之前，先把最新上游订阅加载到当前 profile。",
+    "在做其他事之前，先把最新上游订阅加载到当前配置。",
   "Re-probe the edges": "重新探测边缘节点",
   "Update geo and latency metadata so the next extract is based on current facts.":
     "更新地理与延迟元数据，让下一次提取基于最新事实。",
@@ -367,12 +367,12 @@ export const zhCN: MessageCatalog = {
   "The backend loaded the subscription, but some records still need operator attention before you keep drilling down.":
     "后端已经加载订阅，但在继续深入操作前，仍有部分记录需要运维确认。",
   "latest load completed without warnings": "最近一次加载没有警告",
-  "Tasks hero title": "把订阅维护循环当成实时看板来看，而不是看不见的 cron。",
+  "Tasks hero title": "把订阅维护循环当成实时看板来看，而不是看不见的定时任务。",
   "Tasks hero description":
     "这个路由把新的自动化层变成对运维可见的表面：同步节奏、元数据刷新压力、失败信息和单次运行事件流都集中在这里。",
   "{count} running": "运行中 {count} 个",
   "{count} failed": "失败 {count} 个",
-  "all profiles": "所有 profile",
+  "all profiles": "所有配置",
   "Realtime loop": "实时循环",
   "How the board should be read": "这块看板应该怎么读",
   "Read the cadence": "先看节奏",
@@ -431,8 +431,8 @@ export const zhCN: MessageCatalog = {
   "Derived from finish/start/create timestamps": "基于 finished/start/create 时间推导",
   "Task filters": "任务筛选",
   "View scope": "查看范围",
-  "Current profile": "当前 profile",
-  "All profiles": "所有 profile",
+  "Current profile": "当前配置",
+  "All profiles": "所有配置",
   "Task kind": "任务类型",
   "All kinds": "全部类型",
   "Task status": "任务状态",
@@ -462,7 +462,7 @@ export const zhCN: MessageCatalog = {
     "探测与最近使用两列通常能告诉你该收紧还是放宽筛选条件。",
   "Promote only the good rows": "只提升优质结果",
   "Carry the shortlist into Sessions once the candidate deck looks credible.":
-    "等候选牌组可信之后，再把短名单带到 Sessions。",
+    "等候选牌组可信之后，再把短名单带到会话页。",
   "Best practice": "最佳实践",
   "Filter-first, then judge the edges": "先筛选，再判断边缘节点",
   "IP extraction works best when the request stays readable. Keep the request shape clear enough that you can explain why each row survived.":
@@ -501,7 +501,7 @@ export const zhCN: MessageCatalog = {
   "Control note": "控制提示",
   "Listener hygiene matters": "监听卫生很重要",
   "Ports and proxy edges are operational resources. The cleaner this deck stays, the easier it is to understand what the profile is actually doing.":
-    "端口和代理边缘都是运维资源。这个牌组越干净，你就越容易理解当前 profile 真正在做什么。",
+    "端口和代理边缘都是运维资源。这个牌组越干净，你就越容易理解当前配置真正在做什么。",
   "Use the single-session form when you need one deterministic listener quickly. Switch to batch only when several ports must succeed or fail together.":
     "当你需要快速拿到一个确定性的监听时，用单会话表单；只有在多个端口必须共同成功或失败时，才切到批量模式。",
   "newest listen {listen}": "最新监听 {listen}",
@@ -519,7 +519,7 @@ export const zhCN: MessageCatalog = {
   "live control": "在线控制",
   "Nothing on this route yet": "这个路由还没有内容",
   "The control surface only exposes Overview, Tasks, IP Extract, and Sessions right now.":
-    "当前控制台只开放了 Overview、Tasks、IP Extract 和 Sessions 这几个路由。",
+    "当前控制台只开放了总览、任务、IP 提取和会话这几个路由。",
   "Back to overview": "返回总览",
   "validation.source_value_required": "必须填写来源值",
   "error.api.with_code": "{code}: {message}",
@@ -529,8 +529,8 @@ export const zhCN: MessageCatalog = {
   "error.api.ip_conflict_blacklist": "以下 IP 同时出现在包含列表与黑名单中：{conflicts}。",
   "error.api.session_not_found": "找不到指定会话。",
   "error.api.port_in_use": "端口已被占用。",
-  "error.api.profile_exists": "该 profile 已存在。",
-  "error.api.profile_not_found": "找不到指定 profile。",
+  "error.api.profile_exists": "该配置已存在。",
+  "error.api.profile_not_found": "找不到指定配置。",
   "error.api.invalid_port": "端口无效。",
   "error.api.invalid_request": "请求参数无效。",
   "error.api.authentication_required": "需要先完成身份认证。",
@@ -539,7 +539,7 @@ export const zhCN: MessageCatalog = {
   "error.api.api_key_revoked": "API 密钥已撤销。",
   "error.api.api_key_not_found": "找不到 API 密钥。",
   "error.api.task_run_not_found": "找不到任务运行记录。",
-  "error.api.profile_access_denied": "当前身份无权访问这个 profile。",
+  "error.api.profile_access_denied": "当前身份无权访问这个配置。",
   "error.api.mihomo_unavailable": "mihomo 运行时当前不可用。",
   "error.api.batch_open_failed": "批量打开失败。",
   "error.api.internal_error": "发生内部错误。",
