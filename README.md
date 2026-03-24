@@ -194,22 +194,9 @@ If an existing GitHub Release is missing those assets, rerun
 `.github/workflows/release.yml` with `workflow_dispatch` and pass the merged
 `main` commit SHA for that release. Historical commits that already have a
 release tag are backfilled in place without rebuilding or republishing GHCR
-images. Mainline post-merge releases now always publish the current merged
-commit instead of draining older pending snapshots first. Any older pending
-backlog remains visible in the release summary and must be backfilled
-explicitly with `workflow_dispatch(commit_sha)`. When the selected release
-target carries a `.github/workflows/**` tree that differs from current `main`,
-the workflow automatically creates or reuses a synthetic
-`release-anchors/<tag>` branch and publishes the release tag from a synthetic
-release commit whose tree keeps the selected target content but restores
-`.github/workflows/**` from the latest `main`. If restoring the workflow tree
-produces no content change, the workflow publishes the original target commit
-directly instead of forcing a no-op anchor commit. Manual asset backfills
-continue to target the original merged `main` commit SHA even when the final
-release tag points at a release anchor. Historical backfills also reuse the
-snapshot-derived publication tags, so only the newest stable release keeps
-`latest` while older backfilled versions publish only their versioned tag. For
-`v0.4.0`, use `7c60216b58dbdf5dd0eacac411876849299a1ffc`.
+images or draining the pending release queue, while unreleased dispatches still
+respect the oldest pending snapshot on the mainline path. For `v0.4.0`, use
+`7c60216b58dbdf5dd0eacac411876849299a1ffc`.
 
 ## Health check
 
