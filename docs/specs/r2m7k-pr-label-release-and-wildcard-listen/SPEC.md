@@ -4,7 +4,7 @@
 
 - Status: 已完成
 - Created: 2026-03-18
-- Last: 2026-03-24
+- Last: 2026-03-21
 
 ## Goal
 
@@ -59,8 +59,8 @@ deployments.
 - A manual `workflow_dispatch(commit_sha)` backfill can attach missing native
   assets to an existing release without minting a new tag or release record,
   even when that commit's snapshot is already marked `released`, and that
-  assets-only path must not republish container tags or implicitly publish
-  other pending snapshots.
+  assets-only path must not republish container tags or drain the pending
+  release queue.
 - The Rust service can bind session listeners to a configured IP, and the
   published container defaults to `0.0.0.0` for both HTTP and session listeners.
 - Local and containerized validation demonstrate that wildcard binds do not
@@ -82,9 +82,9 @@ deployments.
 
 - `proxy-broker` has a reproducible PR-label-driven release path.
 - Mainline release decisions survive burst merges and reruns through immutable
-  snapshots, current-first mainline target selection, and exact historical
+  snapshots, oldest-pending automatic queue selection, and exact historical
   release backfills for `workflow_dispatch(commit_sha)` when the requested
-  commit already carries the release tag, without implicitly publishing other
+  commit already carries the release tag, without implicitly publishing newer
   queued snapshots.
 - Stable releases continue to derive their next base version only from prior
   stable releases, so `channel:rc` snapshots cannot accidentally advance a
@@ -103,5 +103,3 @@ deployments.
 - 2026-03-18: 初始规格，冻结 label-driven release、GHCR 发布和 wildcard bind 范围。
 - 2026-03-21: 补充 GitHub Release 原生二进制资产、SHA256 清单与 `workflow_dispatch(commit_sha)` 回填契约。
 - 2026-03-21: 明确原生资产文件名使用 release tag，但二进制内嵌版本必须与容器镜像保持一致。
-- 2026-03-24: 后续规格 `#tqs62` 将主线自动发布语义收敛为 current-first。
-- 2026-03-24: 后续规格 `#m8z4p` 进一步收敛为“默认 `GITHUB_TOKEN` + release anchor”发布路径，不再要求额外 publisher secrets。
