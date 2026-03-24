@@ -689,16 +689,25 @@ jobs:
             release_anchor_branch="release-anchors/${RELEASE_TAG}"
             remote_ref="refs/remotes/origin/${release_anchor_branch}"
             expected_subject="chore(release): anchor ${RELEASE_TAG}"
+            expected_target_trailer="Target-SHA: ${TARGET_SHA}"
+            workflow_source_ref="refs/remotes/origin/main"
 
-            git fetch --no-tags origin "+refs/heads/release-anchors/*:refs/remotes/origin/release-anchors/*" || true
+            git fetch --no-tags origin \
+              "+refs/heads/main:refs/remotes/origin/main" \
+              "+refs/heads/release-anchors/*:refs/remotes/origin/release-anchors/*" || true
+
+            if ! git show-ref --verify --quiet "${workflow_source_ref}"; then
+              echo "Unable to resolve ${workflow_source_ref} for release anchor synthesis" >&2
+              exit 1
+            fi
 
             if git show-ref --verify --quiet "${remote_ref}"; then
               candidate_sha="$(git rev-parse "${remote_ref}")"
-              parent_sha="$(git rev-parse "${candidate_sha}^")"
               subject="$(git log -1 --format=%s "${candidate_sha}")"
+              body="$(git log -1 --format=%B "${candidate_sha}")"
 
-              if [ "${parent_sha}" != "${TARGET_SHA}" ]; then
-                echo "Existing ${release_anchor_branch} parent ${parent_sha} does not match target ${TARGET_SHA}" >&2
+              if ! printf '%s\n' "${body}" | grep -Fxq "${expected_target_trailer}"; then
+                echo "Existing ${release_anchor_branch} does not declare target ${TARGET_SHA}" >&2
                 exit 1
               fi
 
@@ -707,13 +716,23 @@ jobs:
                 exit 1
               fi
 
+              if ! git diff --quiet "${candidate_sha}" "${workflow_source_ref}" -- .github/workflows; then
+                echo "Existing ${release_anchor_branch} does not preserve current workflow files" >&2
+                exit 1
+              fi
+
               release_ref_sha="${candidate_sha}"
               release_ref_kind="anchor"
             else
-              git checkout --detach "${TARGET_SHA}"
-              git commit --allow-empty \
+              git checkout --detach "${workflow_source_ref}"
+              git restore --source "${TARGET_SHA}" --staged --worktree -- .
+              git restore --source "${workflow_source_ref}" --staged --worktree -- .github/workflows
+              git add -A
+              git commit \
                 -m "${expected_subject}" \
-                -m "Release anchor for ${TARGET_SHA} so the workflow can publish the latest version without requiring workflows permission on the original merge commit."
+                -m "Release anchor for ${TARGET_SHA} so the workflow can publish the latest version without requiring workflows permission on the original merge commit." \
+                -m "${expected_target_trailer}" \
+                -m "Workflow-Tree-Source: origin/main"
               release_ref_sha="$(git rev-parse HEAD)"
               git push origin "HEAD:refs/heads/${release_anchor_branch}"
               release_ref_kind="anchor"
