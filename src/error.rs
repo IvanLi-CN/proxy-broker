@@ -39,8 +39,6 @@ pub enum BrokerError {
     ApiKeyRevoked,
     #[error("api key not found")]
     ApiKeyNotFound,
-    #[error("task run not found")]
-    TaskRunNotFound,
     #[error("profile access denied")]
     ProfileAccessDenied,
     #[error("mihomo runtime unavailable: {0}")]
@@ -69,7 +67,6 @@ impl BrokerError {
             Self::ApiKeyInvalid => "api_key_invalid",
             Self::ApiKeyRevoked => "api_key_revoked",
             Self::ApiKeyNotFound => "api_key_not_found",
-            Self::TaskRunNotFound => "task_run_not_found",
             Self::ProfileAccessDenied => "profile_access_denied",
             Self::MihomoUnavailable(_) => "mihomo_unavailable",
             Self::BatchOpenFailed => "batch_open_failed",
@@ -94,7 +91,6 @@ impl BrokerError {
             Self::ApiKeyInvalid => StatusCode::UNAUTHORIZED,
             Self::ApiKeyRevoked => StatusCode::UNAUTHORIZED,
             Self::ApiKeyNotFound => StatusCode::NOT_FOUND,
-            Self::TaskRunNotFound => StatusCode::NOT_FOUND,
             Self::ProfileAccessDenied => StatusCode::FORBIDDEN,
             Self::MihomoUnavailable(_) => StatusCode::BAD_GATEWAY,
             Self::BatchOpenFailed => StatusCode::CONFLICT,

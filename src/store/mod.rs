@@ -3,10 +3,7 @@ mod sqlite;
 
 use async_trait::async_trait;
 
-use crate::models::{
-    ApiKeyRecord, IpRecord, ProbeRecord, ProfileSyncConfig, ProxyNode, SessionRecord,
-    TaskListQuery, TaskRunEventRecord, TaskRunRecord,
-};
+use crate::models::{ApiKeyRecord, IpRecord, ProbeRecord, ProxyNode, SessionRecord};
 
 pub use memory::MemoryStore;
 pub use sqlite::SqliteStore;
@@ -91,19 +88,4 @@ pub trait BrokerStore: Send + Sync {
         ips: &[String],
         last_used_at: i64,
     ) -> anyhow::Result<()>;
-
-    async fn upsert_profile_sync_config(&self, config: &ProfileSyncConfig) -> anyhow::Result<()>;
-    async fn get_profile_sync_config(
-        &self,
-        profile_id: &str,
-    ) -> anyhow::Result<Option<ProfileSyncConfig>>;
-    async fn list_profile_sync_configs(&self) -> anyhow::Result<Vec<ProfileSyncConfig>>;
-
-    async fn insert_task_run(&self, run: &TaskRunRecord) -> anyhow::Result<()>;
-    async fn update_task_run(&self, run: &TaskRunRecord) -> anyhow::Result<()>;
-    async fn get_task_run(&self, run_id: &str) -> anyhow::Result<Option<TaskRunRecord>>;
-    async fn list_task_runs(&self, query: &TaskListQuery) -> anyhow::Result<Vec<TaskRunRecord>>;
-
-    async fn insert_task_run_event(&self, event: &TaskRunEventRecord) -> anyhow::Result<()>;
-    async fn list_task_run_events(&self, run_id: &str) -> anyhow::Result<Vec<TaskRunEventRecord>>;
 }

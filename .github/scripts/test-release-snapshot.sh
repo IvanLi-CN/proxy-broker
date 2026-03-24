@@ -316,19 +316,11 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
             argparse.Namespace(
                 notes_ref=manual_notes_ref,
                 requested_sha=sha2,
-                allow_released_target=True,
                 github_output=str(output),
             )
         )
         assert exit_code == 0
-        assert output.read_text() == (
-            f"requested_sha={sha2}\n"
-            f"selected_target_sha={sha2}\n"
-            f"target_sha={sha2}\n"
-            "assets_only=false\n"
-            "backlog_pending_count=1\n"
-            f"backlog_pending_targets={sha1}\n"
-        )
+        assert output.read_text() == f"target_sha={sha1}\nassets_only=false\n"
 
         run("tag", "v0.1.2", sha2, cwd=work)
         output = work / "select-target-pending.out"
@@ -336,38 +328,22 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
             argparse.Namespace(
                 notes_ref=module.DEFAULT_NOTES_REF,
                 requested_sha=sha2,
-                allow_released_target=True,
                 github_output=str(output),
             )
         )
         assert exit_code == 0
-        assert output.read_text() == (
-            f"requested_sha={sha2}\n"
-            f"selected_target_sha={sha2}\n"
-            f"target_sha={sha2}\n"
-            "assets_only=true\n"
-            "backlog_pending_count=1\n"
-            f"backlog_pending_targets={sha1}\n"
-        )
+        assert output.read_text() == f"target_sha={sha2}\nassets_only=true\n"
         run("tag", "v0.1.1", sha1, cwd=work)
         output = work / "select-target-skipped.out"
         exit_code = module.select_dispatch_target(
             argparse.Namespace(
                 notes_ref=module.DEFAULT_NOTES_REF,
                 requested_sha=sha3,
-                allow_released_target=True,
                 github_output=str(output),
             )
         )
         assert exit_code == 0
-        assert output.read_text() == (
-            f"requested_sha={sha3}\n"
-            f"selected_target_sha={sha3}\n"
-            f"target_sha={sha3}\n"
-            "assets_only=false\n"
-            "backlog_pending_count=2\n"
-            f"backlog_pending_targets={sha1},{sha2}\n"
-        )
+        assert output.read_text() == f"target_sha={sha1}\nassets_only=true\n"
 
         exit_code = module.mark_released(
             argparse.Namespace(
@@ -403,38 +379,22 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
             argparse.Namespace(
                 notes_ref=module.DEFAULT_NOTES_REF,
                 requested_sha=sha4,
-                allow_released_target=True,
                 github_output=str(output),
             )
         )
         assert exit_code == 0
-        assert output.read_text() == (
-            f"requested_sha={sha4}\n"
-            f"selected_target_sha={sha4}\n"
-            f"target_sha={sha4}\n"
-            "assets_only=true\n"
-            "backlog_pending_count=1\n"
-            f"backlog_pending_targets={sha2}\n"
-        )
+        assert output.read_text() == f"target_sha={sha4}\nassets_only=true\n"
 
         output = work / "select-target-partial-release.out"
         exit_code = module.select_dispatch_target(
             argparse.Namespace(
                 notes_ref=module.DEFAULT_NOTES_REF,
                 requested_sha=sha2,
-                allow_released_target=True,
                 github_output=str(output),
             )
         )
         assert exit_code == 0
-        assert output.read_text() == (
-            f"requested_sha={sha2}\n"
-            f"selected_target_sha={sha2}\n"
-            f"target_sha={sha2}\n"
-            "assets_only=true\n"
-            "backlog_pending_count=0\n"
-            "backlog_pending_targets=\n"
-        )
+        assert output.read_text() == f"target_sha={sha2}\nassets_only=true\n"
 
         exit_code = module.mark_released(
             argparse.Namespace(
@@ -455,59 +415,7 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
             )
         )
         assert exit_code == 0
-        assert output.read_text() == (
-            f"requested_sha={sha2}\n"
-            "selected_target_sha=\n"
-            "target_sha=\n"
-            "assets_only=false\n"
-            "backlog_pending_count=0\n"
-            "backlog_pending_targets=\n"
-        )
-
-        output = work / "select-target-released-manual.out"
-        exit_code = module.select_dispatch_target(
-            argparse.Namespace(
-                notes_ref=module.DEFAULT_NOTES_REF,
-                requested_sha=sha2,
-                allow_released_target=True,
-                github_output=str(output),
-            )
-        )
-        assert exit_code == 0
-        assert output.read_text() == (
-            f"requested_sha={sha2}\n"
-            f"selected_target_sha={sha2}\n"
-            f"target_sha={sha2}\n"
-            "assets_only=true\n"
-            "backlog_pending_count=0\n"
-            "backlog_pending_targets=\n"
-        )
-
-        run("checkout", "--detach", sha2, cwd=work)
-        run("commit", "--allow-empty", "-m", "release anchor", cwd=work)
-        anchor_sha = run("rev-parse", "HEAD", cwd=work)
-        run("tag", "-d", "v0.1.2", cwd=work)
-        run("tag", "v0.1.2", anchor_sha, cwd=work)
-        run("checkout", "main", cwd=work)
-
-        output = work / "select-target-released-anchor.out"
-        exit_code = module.select_dispatch_target(
-            argparse.Namespace(
-                notes_ref=module.DEFAULT_NOTES_REF,
-                requested_sha=sha2,
-                allow_released_target=True,
-                github_output=str(output),
-            )
-        )
-        assert exit_code == 0
-        assert output.read_text() == (
-            f"requested_sha={sha2}\n"
-            f"selected_target_sha={sha2}\n"
-            f"target_sha={sha2}\n"
-            "assets_only=true\n"
-            "backlog_pending_count=0\n"
-            "backlog_pending_targets=\n"
-        )
+        assert output.read_text() == f"target_sha={sha2}\nassets_only=true\n"
     finally:
         module.load_pr_for_commit = original_load_pr
         os.chdir(original_cwd)

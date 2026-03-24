@@ -226,7 +226,6 @@ async fn main() -> anyhow::Result<()> {
         .reconcile_startup_sessions()
         .await
         .context("failed to reconcile startup sessions")?;
-    service.start_background_workers();
 
     let auth = AuthConfig::from_options(AuthConfigOptions {
         mode: args.auth_mode,
