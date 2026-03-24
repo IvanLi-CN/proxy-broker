@@ -2526,7 +2526,12 @@ fn normalize_city_values(values: &[String]) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut normalized = Vec::new();
     for value in values {
-        let item = value.trim().to_string();
+        let trimmed = value.trim();
+        let item = trimmed
+            .split_once("::")
+            .map(|(_, city)| city.trim())
+            .unwrap_or(trimmed)
+            .to_string();
         if item.is_empty() {
             continue;
         }
@@ -4409,6 +4414,27 @@ proxies:
         assert_eq!(items[0].meta.as_deref(), Some("France (FR)"));
         assert_eq!(items[1].value, "US::Paris");
         assert_eq!(items[1].meta.as_deref(), Some("United States (US)"));
+    }
+
+    #[test]
+    fn search_session_options_ip_accepts_encoded_city_filters() {
+        let mut tokyo = sample_ip("1.1.1.1", None);
+        tokyo.city = Some("Tokyo".to_string());
+        tokyo.country_code = Some("JP".to_string());
+        tokyo.country_name = Some("Japan".to_string());
+
+        let request = SearchSessionOptionsRequest {
+            kind: SessionOptionKind::Ip,
+            query: None,
+            country_codes: vec![],
+            cities: vec!["JP::Tokyo".to_string()],
+            limit: None,
+        };
+
+        let items = search_session_options(&[tokyo], &request)
+            .expect("ip options should respect encoded city filters");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].value, "1.1.1.1");
     }
 
     #[test]
