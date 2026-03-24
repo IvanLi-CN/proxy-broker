@@ -218,7 +218,9 @@ export function OverviewPage({
                   description={t(
                     "The backend loaded the subscription, but some records still need operator attention before you keep drilling down.",
                   )}
-                  bullets={loadResponse.warnings.map((warning) => formatOperatorWarning(t, warning))}
+                  bullets={loadResponse.warnings.map((warning) =>
+                    formatOperatorWarning(t, warning),
+                  )}
                 />
               ) : null}
               {loadResponse && !loadResponse.warnings.length ? (

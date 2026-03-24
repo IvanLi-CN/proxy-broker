@@ -75,11 +75,9 @@ export function IpResultsTable({ items, isLoading }: IpResultsTableProps) {
                       t("Unknown")}
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    {
-                      [formatGeoLabel(locale, item.region_name), formatGeoLabel(locale, item.city)]
-                        .filter(Boolean)
-                        .join(" / ") || t("No city metadata")
-                    }
+                    {[formatGeoLabel(locale, item.region_name), formatGeoLabel(locale, item.city)]
+                      .filter(Boolean)
+                      .join(" / ") || t("No city metadata")}
                   </div>
                 </div>
               </TableCell>

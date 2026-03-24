@@ -8,8 +8,7 @@ export const enUS: MessageCatalog = {
   "Enter one city per line": "Enter one city per line",
   "Proxy {proxyName} DNS resolution failed; reused {count} cached IPs.":
     "Proxy {proxyName} DNS resolution failed; reused {count} cached IPs.",
-  "Proxy {proxyName} reused {count} cached IPs.":
-    "Proxy {proxyName} reused {count} cached IPs.",
+  "Proxy {proxyName} reused {count} cached IPs.": "Proxy {proxyName} reused {count} cached IPs.",
   "Targeted IPs": "Targeted IPs",
   "Probed IPs": "Probed IPs",
   "Geo records updated": "Geo records updated",

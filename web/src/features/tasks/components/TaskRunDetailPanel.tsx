@@ -7,8 +7,8 @@ import { useI18n } from "@/i18n";
 import { formatTaskErrorMessage } from "@/lib/error-messages";
 import { formatTimestamp } from "@/lib/format";
 import {
-  formatTaskEventMessage,
   formatTaskEventLevel,
+  formatTaskEventMessage,
   formatTaskKind,
   formatTaskPayloadKey,
   formatTaskProgress,

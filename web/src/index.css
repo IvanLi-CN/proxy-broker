@@ -144,34 +144,11 @@
 
   html:lang(zh-CN) {
     --font-sans:
-      "Noto Sans SC",
-      "PingFang SC",
-      "Hiragino Sans GB",
-      "Noto Sans CJK SC",
-      "Source Han Sans SC",
-      "Microsoft YaHei UI",
-      "Microsoft YaHei",
-      "Fira Sans",
-      "Geist Variable",
-      sans-serif;
+      "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC",
+      "Microsoft YaHei UI", "Microsoft YaHei", "Fira Sans", "Geist Variable", sans-serif;
     --font-mono:
-      "Fira Code",
-      "Geist Mono Variable",
-      "IBM Plex Mono",
-      "Sarasa Mono SC",
-      "Noto Sans Mono CJK SC",
-      "PingFang SC",
-      "Hiragino Sans GB",
-      "Microsoft YaHei UI",
-      monospace;
-    font-family: var(--font-sans);
-  }
-
-  html:lang(zh-CN) body,
-  html:lang(zh-CN) button,
-  html:lang(zh-CN) input,
-  html:lang(zh-CN) textarea,
-  html:lang(zh-CN) select {
+      "Fira Code", "Geist Mono Variable", "IBM Plex Mono", "Sarasa Mono SC",
+      "Noto Sans Mono CJK SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", monospace;
     font-family: var(--font-sans);
   }
 
@@ -208,6 +185,14 @@
   a,
   summary {
     cursor: pointer;
+  }
+
+  html:lang(zh-CN) body,
+  html:lang(zh-CN) button,
+  html:lang(zh-CN) input,
+  html:lang(zh-CN) textarea,
+  html:lang(zh-CN) select {
+    font-family: var(--font-sans);
   }
 
   #root {

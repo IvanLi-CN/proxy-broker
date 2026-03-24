@@ -47,9 +47,7 @@ function summarizeRequest(
   if (request.cities?.length) {
     chips.push(
       t("cities: {cities}", {
-        cities: request.cities
-          .map((city) => formatGeoLabel(locale, city) ?? city)
-          .join(", "),
+        cities: request.cities.map((city) => formatGeoLabel(locale, city) ?? city).join(", "),
       }),
     );
   }

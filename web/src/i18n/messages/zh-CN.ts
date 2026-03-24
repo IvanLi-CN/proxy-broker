@@ -8,8 +8,7 @@ export const zhCN: MessageCatalog = {
   "Enter one city per line": "每行输入一个城市",
   "Proxy {proxyName} DNS resolution failed; reused {count} cached IPs.":
     "代理 {proxyName} 的 DNS 解析失败；已复用 {count} 个缓存 IP。",
-  "Proxy {proxyName} reused {count} cached IPs.":
-    "代理 {proxyName} 已复用 {count} 个缓存 IP。",
+  "Proxy {proxyName} reused {count} cached IPs.": "代理 {proxyName} 已复用 {count} 个缓存 IP。",
   "Targeted IPs": "目标 IP 数",
   "Probed IPs": "已探测 IP 数",
   "Geo records updated": "已更新地理记录",
@@ -24,8 +23,7 @@ export const zhCN: MessageCatalog = {
   "Task run skipped.": "任务运行已跳过。",
   "Task run failed.": "任务运行失败。",
   "Task run is running.": "任务运行中。",
-  "Subscription sync finished with {count} new IPs.":
-    "订阅同步完成，新增 {count} 个 IP。",
+  "Subscription sync finished with {count} new IPs.": "订阅同步完成，新增 {count} 个 IP。",
   English: "英文",
   "Simplified Chinese": "简体中文",
   Language: "语言",
