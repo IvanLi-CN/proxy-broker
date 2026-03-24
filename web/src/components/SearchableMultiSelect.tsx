@@ -97,6 +97,7 @@ export function SearchableMultiSelect({
       values.map((value) => ({
         value,
         label: labelMap[value]?.label ?? value,
+        meta: labelMap[value]?.meta,
       })),
     [labelMap, values],
   );
@@ -217,8 +218,11 @@ export function SearchableMultiSelect({
               type="button"
               className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-2.5 py-1 text-xs text-foreground transition-colors hover:bg-muted"
               onClick={() => removeValue(item.value)}
+              title={item.meta ? `${item.label} · ${item.meta}` : item.label}
             >
-              <span className="truncate">{item.label}</span>
+              <span className="truncate">
+                {item.meta ? `${item.label} · ${item.meta}` : item.label}
+              </span>
               <XIcon className="size-3 text-muted-foreground" />
             </button>
           ))}

@@ -49,6 +49,19 @@ function parseCitySelectionToken(value: string) {
   return { countryCode, city };
 }
 
+export function filterCitySelectionsByCountry(cities: string[], countryCodes: string[]) {
+  const allowed = new Set(countryCodes.map((code) => code.trim().toUpperCase()).filter(Boolean));
+  if (allowed.size === 0) {
+    return uniqueItems(cities);
+  }
+  return uniqueItems(
+    cities.filter((value) => {
+      const parsed = parseCitySelectionToken(value);
+      return parsed ? allowed.has(parsed.countryCode) : false;
+    }),
+  );
+}
+
 export function formatTimestamp(epoch?: number | null) {
   if (!epoch) {
     return t("Never");

@@ -2544,6 +2544,29 @@ fn normalize_city_values(values: &[String]) -> Vec<String> {
     normalized
 }
 
+fn normalize_city_filters(values: &[String]) -> HashSet<(Option<String>, String)> {
+    let mut normalized = HashSet::new();
+    for value in values {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let (country_code, city) = match trimmed.split_once("::") {
+            Some((country, city)) => {
+                let city = city.trim();
+                if city.is_empty() {
+                    continue;
+                }
+                (Some(country.trim().to_ascii_uppercase()), city.to_ascii_lowercase())
+            }
+            None => (None, trimmed.to_ascii_lowercase()),
+        };
+        normalized.insert((country_code.filter(|code| !code.is_empty()), city));
+    }
+    normalized
+}
+
 fn normalize_ip_values(values: &[String]) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut normalized = Vec::new();
@@ -2645,10 +2668,7 @@ fn search_session_options(
     let country_filters: HashSet<String> = normalize_country_codes(&request.country_codes)
         .into_iter()
         .collect();
-    let city_filters: HashSet<String> = normalize_city_values(&request.cities)
-        .into_iter()
-        .map(|item| item.to_ascii_lowercase())
-        .collect();
+    let city_filters = normalize_city_filters(&request.cities);
     let limit = request.limit.unwrap_or(DEFAULT_SESSION_OPTIONS_LIMIT).min(100);
 
     let items = match request.kind {
@@ -2763,7 +2783,19 @@ fn search_session_options(
                         let Some(city) = record.city.as_ref() else {
                             return false;
                         };
-                        if !city_filters.contains(&city.to_ascii_lowercase()) {
+                        let city_name = city.trim().to_ascii_lowercase();
+                        let country_code = record
+                            .country_code
+                            .as_ref()
+                            .map(|code| code.trim().to_ascii_uppercase());
+                        let matched = city_filters.iter().any(|(country_filter, city_filter)| {
+                            city_name == *city_filter
+                                && match country_filter {
+                                    Some(code) => country_code.as_deref() == Some(code.as_str()),
+                                    None => true,
+                                }
+                        });
+                        if !matched {
                             return false;
                         }
                     }
@@ -4418,20 +4450,25 @@ proxies:
 
     #[test]
     fn search_session_options_ip_accepts_encoded_city_filters() {
-        let mut tokyo = sample_ip("1.1.1.1", None);
-        tokyo.city = Some("Tokyo".to_string());
-        tokyo.country_code = Some("JP".to_string());
-        tokyo.country_name = Some("Japan".to_string());
+        let mut fr_paris = sample_ip("1.1.1.1", None);
+        fr_paris.city = Some("Paris".to_string());
+        fr_paris.country_code = Some("FR".to_string());
+        fr_paris.country_name = Some("France".to_string());
+
+        let mut us_paris = sample_ip("2.2.2.2", None);
+        us_paris.city = Some("Paris".to_string());
+        us_paris.country_code = Some("US".to_string());
+        us_paris.country_name = Some("United States".to_string());
 
         let request = SearchSessionOptionsRequest {
             kind: SessionOptionKind::Ip,
             query: None,
             country_codes: vec![],
-            cities: vec!["JP::Tokyo".to_string()],
+            cities: vec!["FR::Paris".to_string()],
             limit: None,
         };
 
-        let items = search_session_options(&[tokyo], &request)
+        let items = search_session_options(&[fr_paris, us_paris], &request)
             .expect("ip options should respect encoded city filters");
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].value, "1.1.1.1");

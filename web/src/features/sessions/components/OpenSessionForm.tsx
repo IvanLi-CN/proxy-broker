@@ -1,5 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CableCarIcon, ChevronDownIcon } from "lucide-react";
+import { useEffect } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -17,7 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { buildOpenSessionRequest } from "@/lib/format";
+import { buildOpenSessionRequest, filterCitySelectionsByCountry } from "@/lib/format";
 import type {
   OpenSessionRequest,
   OpenSessionResponse,
@@ -136,6 +137,20 @@ export function OpenSessionForm({
   const countryCodes = form.watch("countryCodes");
   const cities = form.watch("cities");
   const selectionError = form.formState.errors.selectionMode?.message;
+
+  useEffect(() => {
+    const filteredCities = filterCitySelectionsByCountry(cities, countryCodes);
+    if (
+      filteredCities.length === cities.length &&
+      filteredCities.every((value, index) => value === cities[index])
+    ) {
+      return;
+    }
+    form.setValue("cities", filteredCities, {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+  }, [cities, countryCodes, form]);
 
   return (
     <Card className="overflow-hidden border-border/70 bg-card/96 shadow-[0_24px_70px_-44px_rgba(15,23,42,0.55)]">

@@ -1,19 +1,23 @@
 import { describe, expect, it } from "vitest";
 
-import { zhCN } from "@/i18n/messages/zh-CN";
 import {
   buildExtractRequest,
   buildOpenSessionRequest,
-  formatLatency,
-  formatTimestamp,
+  filterCitySelectionsByCountry,
   splitListInput,
 } from "@/lib/format";
-
-const t = (message: string) => zhCN[message] ?? message;
 
 describe("splitListInput", () => {
   it("accepts commas and newlines", () => {
     expect(splitListInput("JP, US\nSG")).toEqual(["JP", "US", "SG"]);
+  });
+});
+
+describe("filterCitySelectionsByCountry", () => {
+  it("drops stale city tokens when the country filter changes", () => {
+    expect(filterCitySelectionsByCountry(["JP::Tokyo", "US::San Jose", "Tokyo"], ["US"])).toEqual(
+      ["US::San Jose"],
+    );
   });
 });
 

@@ -1,5 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ChevronDownIcon, PlusIcon, Rows4Icon, Trash2Icon } from "lucide-react";
+import { useEffect } from "react";
 import { Controller, useFieldArray, useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -17,7 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { buildOpenSessionRequest } from "@/lib/format";
+import { buildOpenSessionRequest, filterCitySelectionsByCountry } from "@/lib/format";
 import type {
   OpenBatchRequest,
   OpenBatchResponse,
@@ -141,6 +142,22 @@ export function OpenBatchForm({
   });
   const fieldArray = useFieldArray({ control: form.control, name: "requests" });
   const watchedRequests = form.watch("requests");
+
+  useEffect(() => {
+    watchedRequests.forEach((row, index) => {
+      const filteredCities = filterCitySelectionsByCountry(row.cities, row.countryCodes);
+      if (
+        filteredCities.length === row.cities.length &&
+        filteredCities.every((value, cityIndex) => value === row.cities[cityIndex])
+      ) {
+        return;
+      }
+      form.setValue(`requests.${index}.cities`, filteredCities, {
+        shouldDirty: true,
+        shouldValidate: true,
+      });
+    });
+  }, [form, watchedRequests]);
 
   return (
     <Card className="overflow-hidden border-border/70 bg-card/96 shadow-[0_24px_70px_-44px_rgba(15,23,42,0.55)]">
