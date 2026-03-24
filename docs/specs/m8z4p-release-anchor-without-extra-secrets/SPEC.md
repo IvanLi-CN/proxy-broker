@@ -18,7 +18,7 @@
 
 - 保持主线 `workflow_run` 的 current-first 语义，不再回退到更早 backlog。
 - 不要求仓库新增 `RELEASE_PUBLISHER_*` secrets。
-- 对修改过 `.github/workflows/**` 的发布目标，自动改用一个 bot 生成的“锚点提交”承接 tag / GitHub Release，而不是阻塞发版。
+- 对 workflow 文件树落后于当前 `main` 的发布目标，自动改用一个 bot 生成的“锚点提交”承接 tag / GitHub Release，而不是阻塞发版。
 - 手工 `workflow_dispatch(commit_sha)` 的 backfill / assets-only 语义继续成立。
 
 ### Non-goals
@@ -34,7 +34,7 @@
 - 主线 `CI Main` 成功后触发 `Release`：
   - 固定选择当前 `workflow_run.head_sha` 对应的 immutable snapshot。
   - 若目标 commit 未修改 `.github/workflows/**`，继续直接对该 commit 发布。
-  - 若目标 commit 修改了 `.github/workflows/**`，workflow 会创建或复用 `release-anchors/<release_tag>` 分支上的合成锚点提交：主体文件树来自目标 commit，但 `.github/workflows/**` 必须回退为最新 `origin/main`。
+  - 若目标 commit 的 `.github/workflows/**` 文件树与当前 `origin/main` 不同，workflow 会创建或复用 `release-anchors/<release_tag>` 分支上的合成锚点提交：主体文件树来自目标 commit，但 `.github/workflows/**` 必须回退为最新 `origin/main`。
   - 若上述“主体文件树 + 当前 workflow 树”合成后没有产生任何内容差异，workflow 必须直接发布原始目标 commit，而不是为了走锚点路径强行制造 no-op commit。
   - 锚点提交不回写 `main`，因此不会干扰后续主线合并与 CI。
 - 手工 `workflow_dispatch(commit_sha)`：
@@ -55,7 +55,7 @@
 ## 验收标准（Acceptance Criteria）
 
 - Given 主线存在 backlog，When 新 merge commit 触发 `Release`，Then 仍发布当前 merge commit 对应版本，而不是自动补发旧 backlog。
-- Given 发布目标修改了 `.github/workflows/**` 且 workflow 树与当前 `main` 存在差异，When `Release` 发布该版本，Then workflow 不要求新增 publisher secret，且会改用 `release-anchors/<tag>` 上的合成锚点提交承接 tag / GitHub Release。
+- Given 发布目标的 `.github/workflows/**` 文件树与当前 `main` 存在差异，When `Release` 发布该版本，Then workflow 不要求新增 publisher secret，且会改用 `release-anchors/<tag>` 上的合成锚点提交承接 tag / GitHub Release。
 - Given 发布目标修改了 `.github/workflows/**` 但 workflow 树已经等于当前 `main`，When `Release` 发布该版本，Then workflow 直接发布原始目标 commit，而不是在 `git commit` 处因为 no-op 失败。
 - Given 已发布 snapshot 的 release tag 指向锚点提交而不是原始 main commit，When 手工 `workflow_dispatch(commit_sha)` 重新补资产，Then workflow 仍识别为 assets-only，不会误触发全量重发。
 - Given 历史 stable 版本通过 `workflow_dispatch(commit_sha)` 补发，When workflow 创建或复用 GitHub Release，Then 该 release 不会被标记为 latest，且最新 stable 版本继续保留 `latest`。
@@ -92,6 +92,7 @@
 - 2026-03-24: 新增 follow-up 规格，收敛为“无额外 secrets + 必要时自动锚点提交”的主线发版语义。
 - 2026-03-24: 收敛锚点细节为“目标内容树 + 当前 workflow 树”的合成提交，并在无差异时直接回退到原始目标 commit。
 - 2026-03-24: 补充历史 backfill 不得抢占 `latest` 的发布约束，GitHub Release latest 状态改由 snapshot publication tags 决定。
+- 2026-03-24: 扩大 anchor 判定条件为“目标 workflow 树与当前 main 不同”而不仅是“目标 commit 自身修改了 workflow 文件”。
 
 ## 参考（References）
 
