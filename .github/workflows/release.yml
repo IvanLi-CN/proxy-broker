@@ -64,6 +64,8 @@ jobs:
       release_tag: ${{ steps.snapshot.outputs.release_tag }}
       release_prerelease: ${{ steps.snapshot.outputs.release_prerelease }}
       tags_csv: ${{ steps.snapshot.outputs.tags_csv }}
+      target_touches_workflows: ${{ steps.release-ref-mode.outputs.target_touches_workflows }}
+      requires_release_anchor: ${{ steps.release-ref-mode.outputs.requires_release_anchor }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -212,35 +214,6 @@ jobs:
             --resolve-publication-tags \
             --github-output "$GITHUB_OUTPUT"
 
-      - name: Check publisher secrets
-        if: steps.snapshot.outputs.release_enabled == 'true'
-        shell: bash
-        env:
-          RELEASE_PUBLISHER_APP_ID: ${{ secrets.RELEASE_PUBLISHER_APP_ID }}
-          RELEASE_PUBLISHER_APP_PRIVATE_KEY: ${{ secrets.RELEASE_PUBLISHER_APP_PRIVATE_KEY }}
-        run: |
-          set -euo pipefail
-          missing=()
-          [[ -n "${RELEASE_PUBLISHER_APP_ID}" ]] || missing+=("RELEASE_PUBLISHER_APP_ID")
-          [[ -n "${RELEASE_PUBLISHER_APP_PRIVATE_KEY}" ]] || missing+=("RELEASE_PUBLISHER_APP_PRIVATE_KEY")
-          if [ "${#missing[@]}" -ne 0 ]; then
-            printf 'Missing required release publisher secret(s): %s\n' "${missing[*]}" >&2
-            exit 1
-          fi
-
-      - name: Create publisher token preflight
-        if: steps.snapshot.outputs.release_enabled == 'true'
-        id: publisher-token
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ secrets.RELEASE_PUBLISHER_APP_ID }}
-          private-key: ${{ secrets.RELEASE_PUBLISHER_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-          permission-contents: write
-          permission-metadata: read
-          permission-workflows: write
-
       - name: Resolve publication mode
         id: publication-mode
         shell: bash
@@ -254,6 +227,30 @@ jobs:
             echo "publish_container=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Inspect release ref mode
+        if: steps.release-target.outputs.target_sha != ''
+        id: release-ref-mode
+        shell: bash
+        env:
+          TARGET_SHA: ${{ steps.release-target.outputs.target_sha }}
+          RELEASE_ENABLED: ${{ steps.snapshot.outputs.release_enabled }}
+          ASSETS_ONLY: ${{ steps.release-target.outputs.assets_only }}
+        run: |
+          set -euo pipefail
+          target_touches_workflows=false
+          requires_release_anchor=false
+
+          if git diff-tree --no-commit-id --name-only -r "${TARGET_SHA}" | grep -q '^.github/workflows/'; then
+            target_touches_workflows=true
+          fi
+
+          if [ "${RELEASE_ENABLED}" = "true" ] && [ "${ASSETS_ONLY}" != "true" ] && [ "${target_touches_workflows}" = "true" ]; then
+            requires_release_anchor=true
+          fi
+
+          echo "target_touches_workflows=${target_touches_workflows}" >> "$GITHUB_OUTPUT"
+          echo "requires_release_anchor=${requires_release_anchor}" >> "$GITHUB_OUTPUT"
+
       - name: Summarize release selection
         shell: bash
         env:
@@ -265,6 +262,8 @@ jobs:
           PUBLISH_CONTAINER: ${{ steps.publication-mode.outputs.publish_container }}
           BACKLOG_PENDING_COUNT: ${{ steps.release-target.outputs.backlog_pending_count }}
           BACKLOG_PENDING_TARGETS: ${{ steps.release-target.outputs.backlog_pending_targets }}
+          TARGET_TOUCHES_WORKFLOWS: ${{ steps.release-ref-mode.outputs.target_touches_workflows }}
+          REQUIRES_RELEASE_ANCHOR: ${{ steps.release-ref-mode.outputs.requires_release_anchor }}
         run: |
           set -euo pipefail
           {
@@ -276,6 +275,8 @@ jobs:
             echo "- release_enabled: \`${RELEASE_ENABLED}\`"
             echo "- assets_only: \`${ASSETS_ONLY}\`"
             echo "- publish_container: \`${PUBLISH_CONTAINER}\`"
+            echo "- target_touches_workflows: \`${TARGET_TOUCHES_WORKFLOWS:-false}\`"
+            echo "- requires_release_anchor: \`${REQUIRES_RELEASE_ANCHOR:-false}\`"
             echo "- backlog_pending_count: \`${BACKLOG_PENDING_COUNT:-0}\`"
             if [ -n "${BACKLOG_PENDING_TARGETS}" ]; then
               echo "- backlog_pending_targets: \`${BACKLOG_PENDING_TARGETS}\`"
@@ -288,6 +289,9 @@ jobs:
             fi
             if [ "${BACKLOG_PENDING_COUNT:-0}" != "0" ]; then
               echo "> Historical backlog remains pending and requires an explicit \`workflow_dispatch(commit_sha)\` backfill."
+            fi
+            if [ "${REQUIRES_RELEASE_ANCHOR:-false}" = "true" ]; then
+              echo "> The selected target updates \`.github/workflows/**\`, so release publication will use a synthetic anchor commit on \`release-anchors/<tag>\` and still ship the latest version without extra repository secrets."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -652,51 +656,73 @@ jobs:
         )
       }}
     permissions:
-      contents: read
+      contents: write
       packages: write
     steps:
-      - name: Check publisher secrets
-        shell: bash
-        env:
-          RELEASE_PUBLISHER_APP_ID: ${{ secrets.RELEASE_PUBLISHER_APP_ID }}
-          RELEASE_PUBLISHER_APP_PRIVATE_KEY: ${{ secrets.RELEASE_PUBLISHER_APP_PRIVATE_KEY }}
-        run: |
-          set -euo pipefail
-          missing=()
-          [[ -n "${RELEASE_PUBLISHER_APP_ID}" ]] || missing+=("RELEASE_PUBLISHER_APP_ID")
-          [[ -n "${RELEASE_PUBLISHER_APP_PRIVATE_KEY}" ]] || missing+=("RELEASE_PUBLISHER_APP_PRIVATE_KEY")
-          if [ "${#missing[@]}" -ne 0 ]; then
-            printf 'Missing required release publisher secret(s): %s\n' "${missing[*]}" >&2
-            exit 1
-          fi
-
-      - name: Create publisher token
-        id: publisher-token
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ secrets.RELEASE_PUBLISHER_APP_ID }}
-          private-key: ${{ secrets.RELEASE_PUBLISHER_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-          permission-contents: write
-          permission-metadata: read
-          permission-workflows: write
-
       - name: Checkout
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.release-meta.outputs.target_sha }}
           fetch-depth: 0
-          token: ${{ steps.publisher-token.outputs.token }}
 
-      - name: Configure git identity for publisher
+      - name: Configure git identity for release bot
         shell: bash
-        env:
-          APP_SLUG: ${{ steps.publisher-token.outputs.app-slug }}
         run: |
           set -euo pipefail
-          git config user.name "${APP_SLUG:-release-publisher}[bot]"
-          git config user.email "${APP_SLUG:-release-publisher}@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Resolve release commit
+        id: release-ref
+        shell: bash
+        env:
+          TARGET_SHA: ${{ needs.release-meta.outputs.target_sha }}
+          RELEASE_TAG: ${{ needs.release-meta.outputs.release_tag }}
+          REQUIRES_RELEASE_ANCHOR: ${{ needs.release-meta.outputs.requires_release_anchor }}
+        run: |
+          set -euo pipefail
+          release_ref_sha="${TARGET_SHA}"
+          release_ref_kind="target"
+          release_anchor_branch=""
+
+          if [ "${REQUIRES_RELEASE_ANCHOR}" = "true" ]; then
+            release_anchor_branch="release-anchors/${RELEASE_TAG}"
+            remote_ref="refs/remotes/origin/${release_anchor_branch}"
+            expected_subject="chore(release): anchor ${RELEASE_TAG}"
+
+            git fetch --no-tags origin "+refs/heads/release-anchors/*:refs/remotes/origin/release-anchors/*" || true
+
+            if git show-ref --verify --quiet "${remote_ref}"; then
+              candidate_sha="$(git rev-parse "${remote_ref}")"
+              parent_sha="$(git rev-parse "${candidate_sha}^")"
+              subject="$(git log -1 --format=%s "${candidate_sha}")"
+
+              if [ "${parent_sha}" != "${TARGET_SHA}" ]; then
+                echo "Existing ${release_anchor_branch} parent ${parent_sha} does not match target ${TARGET_SHA}" >&2
+                exit 1
+              fi
+
+              if [ "${subject}" != "${expected_subject}" ]; then
+                echo "Existing ${release_anchor_branch} has unexpected subject: ${subject}" >&2
+                exit 1
+              fi
+
+              release_ref_sha="${candidate_sha}"
+              release_ref_kind="anchor"
+            else
+              git checkout --detach "${TARGET_SHA}"
+              git commit --allow-empty \
+                -m "${expected_subject}" \
+                -m "Release anchor for ${TARGET_SHA} so the workflow can publish the latest version without requiring workflows permission on the original merge commit."
+              release_ref_sha="$(git rev-parse HEAD)"
+              git push origin "HEAD:refs/heads/${release_anchor_branch}"
+              release_ref_kind="anchor"
+            fi
+          fi
+
+          echo "release_ref_sha=${release_ref_sha}" >> "$GITHUB_OUTPUT"
+          echo "release_ref_kind=${release_ref_kind}" >> "$GITHUB_OUTPUT"
+          echo "release_anchor_branch=${release_anchor_branch}" >> "$GITHUB_OUTPUT"
 
       - name: Download amd64 digest artifact
         if: needs.release-meta.outputs.publish_container == 'true'
@@ -822,15 +848,13 @@ jobs:
         env:
           APP_EFFECTIVE_VERSION: ${{ needs.release-meta.outputs.app_effective_version }}
           RELEASE_TAG: ${{ needs.release-meta.outputs.release_tag }}
-          TARGET_SHA: ${{ needs.release-meta.outputs.target_sha }}
+          RELEASE_REF_SHA: ${{ steps.release-ref.outputs.release_ref_sha }}
         run: |
           set -euo pipefail
           git fetch --tags origin
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           tag="${RELEASE_TAG}"
-          sha="${TARGET_SHA}"
+          sha="${RELEASE_REF_SHA}"
 
           if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
             existing="$(git rev-list -n 1 "${tag}")"
@@ -849,15 +873,15 @@ jobs:
         id: ensure-release
         uses: actions/github-script@v7
         env:
-          TARGET_SHA: ${{ needs.release-meta.outputs.target_sha }}
+          RELEASE_COMMITISH: ${{ steps.release-ref.outputs.release_ref_sha }}
           RELEASE_TAG: ${{ needs.release-meta.outputs.release_tag }}
           RELEASE_PRERELEASE: ${{ needs.release-meta.outputs.release_prerelease }}
         with:
-          github-token: ${{ steps.publisher-token.outputs.token }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const { owner, repo } = context.repo
             const tag = process.env.RELEASE_TAG
-            const targetSha = process.env.TARGET_SHA
+            const targetSha = process.env.RELEASE_COMMITISH
             const prerelease = process.env.RELEASE_PRERELEASE === 'true'
 
             if (!tag) {
@@ -931,7 +955,7 @@ jobs:
           RELEASE_ID: ${{ steps.ensure-release.outputs.release_id }}
           ASSET_DIR: ${{ steps.assemble-assets.outputs.asset_dir }}
         with:
-          github-token: ${{ steps.publisher-token.outputs.token }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs')
             const path = require('path')

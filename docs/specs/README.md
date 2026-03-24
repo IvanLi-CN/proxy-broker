@@ -21,4 +21,5 @@
 | kgm4c | 安装 UI UX Pro Max Codex 项目技能 | 部分完成（2/3） | `kgm4c-install-ui-ux-pro-max-codex-skill/SPEC.md` | 2026-03-13 | 项目内 Codex skill 已安装，待 PR 收敛 |
 | 6b2xu | Profile catalog 与可新建选择器 | 已完成 | `6b2xu-profile-catalog-combobox/SPEC.md` | 2026-03-19 | 为空 profile 引入持久化 catalog，并把侧栏输入框升级为 searchable combobox |
 | y5yx8 | 任务模块与自动订阅维护 | 已完成 | `y5yx8-task-module-and-auto-subscription-maintenance/SPEC.md` | 2026-03-22 | 新增自动订阅调度、任务监控中心与 SSE 实时推送，并补齐 Storybook 视觉证据 |
-| tqs62 | 发布链路去饥饿化与专用 Publisher 身份修复 | 已完成 | `tqs62-release-current-first-publisher/SPEC.md` | 2026-03-24 | 主线改为 current-first 发版，GitHub App publisher 接管 tag/release/notes 写入 |
+| tqs62 | 发布链路去饥饿化与专用 Publisher 身份修复 | 已完成 | `tqs62-release-current-first-publisher/SPEC.md` | 2026-03-24 | 主线改为 current-first 发版；后续由 `#m8z4p` 移除额外 publisher secret 依赖 |
+| m8z4p | 发布锚点与无额外 Secret 的主线发版修复 | 已完成 | `m8z4p-release-anchor-without-extra-secrets/SPEC.md` | 2026-03-24 | 对 workflow 变更目标自动生成 release anchor，继续用默认 `GITHUB_TOKEN` 发布最新版本 |

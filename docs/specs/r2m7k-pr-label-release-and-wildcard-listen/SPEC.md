@@ -103,4 +103,5 @@ deployments.
 - 2026-03-18: 初始规格，冻结 label-driven release、GHCR 发布和 wildcard bind 范围。
 - 2026-03-21: 补充 GitHub Release 原生二进制资产、SHA256 清单与 `workflow_dispatch(commit_sha)` 回填契约。
 - 2026-03-21: 明确原生资产文件名使用 release tag，但二进制内嵌版本必须与容器镜像保持一致。
-- 2026-03-24: 后续规格 `#tqs62` 将主线自动发布语义收敛为 current-first，并改用 GitHub App publisher 处理 tag/release/notes 写入。
+- 2026-03-24: 后续规格 `#tqs62` 将主线自动发布语义收敛为 current-first。
+- 2026-03-24: 后续规格 `#m8z4p` 进一步收敛为“默认 `GITHUB_TOKEN` + release anchor”发布路径，不再要求额外 publisher secrets。

@@ -197,11 +197,13 @@ release tag are backfilled in place without rebuilding or republishing GHCR
 images. Mainline post-merge releases now always publish the current merged
 commit instead of draining older pending snapshots first. Any older pending
 backlog remains visible in the release summary and must be backfilled
-explicitly with `workflow_dispatch(commit_sha)`. The release publisher path
-requires a GitHub App installation with `Contents: write`, `Workflows: write`,
-and `Metadata: read`, configured through the
-`RELEASE_PUBLISHER_APP_ID` and `RELEASE_PUBLISHER_APP_PRIVATE_KEY` secrets. For
-`v0.4.0`, use `7c60216b58dbdf5dd0eacac411876849299a1ffc`.
+explicitly with `workflow_dispatch(commit_sha)`. When the selected release
+target updates `.github/workflows/**`, the workflow automatically creates or
+reuses a synthetic `release-anchors/<tag>` branch and publishes the release tag
+from that empty anchor commit so the latest version still ships with the
+default `GITHUB_TOKEN`. Manual asset backfills continue to target the original
+merged `main` commit SHA even when the final release tag points at a release
+anchor. For `v0.4.0`, use `7c60216b58dbdf5dd0eacac411876849299a1ffc`.
 
 ## Health check
 
