@@ -316,6 +316,7 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
             argparse.Namespace(
                 notes_ref=manual_notes_ref,
                 requested_sha=sha2,
+                allow_released_target=True,
                 github_output=str(output),
             )
         )
@@ -335,6 +336,7 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
             argparse.Namespace(
                 notes_ref=module.DEFAULT_NOTES_REF,
                 requested_sha=sha2,
+                allow_released_target=True,
                 github_output=str(output),
             )
         )
@@ -353,6 +355,7 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
             argparse.Namespace(
                 notes_ref=module.DEFAULT_NOTES_REF,
                 requested_sha=sha3,
+                allow_released_target=True,
                 github_output=str(output),
             )
         )
@@ -400,6 +403,7 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
             argparse.Namespace(
                 notes_ref=module.DEFAULT_NOTES_REF,
                 requested_sha=sha4,
+                allow_released_target=True,
                 github_output=str(output),
             )
         )
@@ -418,6 +422,7 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
             argparse.Namespace(
                 notes_ref=module.DEFAULT_NOTES_REF,
                 requested_sha=sha2,
+                allow_released_target=True,
                 github_output=str(output),
             )
         )
@@ -446,6 +451,25 @@ with tempfile.TemporaryDirectory(prefix="release-snapshot-ensure-") as tmp:
             argparse.Namespace(
                 notes_ref=module.DEFAULT_NOTES_REF,
                 requested_sha=sha2,
+                github_output=str(output),
+            )
+        )
+        assert exit_code == 0
+        assert output.read_text() == (
+            f"requested_sha={sha2}\n"
+            "selected_target_sha=\n"
+            "target_sha=\n"
+            "assets_only=false\n"
+            "backlog_pending_count=0\n"
+            "backlog_pending_targets=\n"
+        )
+
+        output = work / "select-target-released-manual.out"
+        exit_code = module.select_dispatch_target(
+            argparse.Namespace(
+                notes_ref=module.DEFAULT_NOTES_REF,
+                requested_sha=sha2,
+                allow_released_target=True,
                 github_output=str(output),
             )
         )

@@ -125,6 +125,11 @@ def parse_args() -> argparse.Namespace:
     )
     select_target.add_argument("--notes-ref", default=DEFAULT_NOTES_REF)
     select_target.add_argument("--requested-sha", required=True)
+    select_target.add_argument(
+        "--allow-released-target",
+        action="store_true",
+        help="Allow selecting an already released snapshot (used for manual asset backfills).",
+    )
     select_target.add_argument("--github-output", default=os.environ.get("GITHUB_OUTPUT", ""))
 
     mark_released = subparsers.add_parser("mark-released", help="Mark a stored snapshot as released.")
@@ -757,10 +762,26 @@ def export_next_pending(args: argparse.Namespace) -> int:
 
 def select_dispatch_target(args: argparse.Namespace) -> int:
     requested_sha = normalize_sha(args.requested_sha)
+    allow_released_target = bool(getattr(args, "allow_released_target", False))
     fetch_notes_ref(args.notes_ref)
     snapshot = read_snapshot(args.notes_ref, requested_sha)
     if snapshot is None:
         raise SnapshotError(f"Missing immutable release snapshot for {requested_sha}")
+
+    if snapshot.get("status") == "released" and not allow_released_target:
+        backlog = backlog_pending_targets(args.notes_ref, requested_sha, exclude={requested_sha})
+        export_key_values(
+            {
+                "requested_sha": requested_sha,
+                "selected_target_sha": "",
+                "target_sha": "",
+                "assets_only": False,
+                "backlog_pending_count": len(backlog),
+                "backlog_pending_targets": summarize_targets(backlog),
+            },
+            args.github_output,
+        )
+        return 0
 
     selected_target_sha = requested_sha
     backlog = backlog_pending_targets(args.notes_ref, requested_sha, exclude={requested_sha})

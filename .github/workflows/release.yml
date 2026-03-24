@@ -181,13 +181,19 @@ jobs:
         shell: bash
         env:
           REQUESTED_SHA: ${{ steps.requested-target.outputs.target_sha }}
+          ALLOW_RELEASED_TARGET: ${{ github.event_name == 'workflow_dispatch' && 'true' || 'false' }}
         run: |
           set -euo pipefail
           git fetch --no-tags origin main
           git fetch --no-tags origin "+${RELEASE_SNAPSHOT_NOTES_REF}:${RELEASE_SNAPSHOT_NOTES_REF}" || true
+          extra_args=()
+          if [ "${ALLOW_RELEASED_TARGET}" = "true" ]; then
+            extra_args+=(--allow-released-target)
+          fi
           python3 .github/scripts/release_snapshot.py select-target \
             --notes-ref "${RELEASE_SNAPSHOT_NOTES_REF}" \
             --requested-sha "${REQUESTED_SHA}" \
+            "${extra_args[@]}" \
             --github-output "$GITHUB_OUTPUT"
 
       - name: Load immutable release snapshot
