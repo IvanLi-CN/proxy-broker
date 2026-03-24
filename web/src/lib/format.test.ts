@@ -39,28 +39,23 @@ describe("buildExtractRequest", () => {
 });
 
 describe("buildOpenSessionRequest", () => {
-  it("builds a direct IP request with selector details", () => {
+  it("builds a flattened ip-targeted session request", () => {
     expect(
       buildOpenSessionRequest({
-        specifiedIp: "203.0.113.10",
+        selectionMode: "ip",
         desiredPort: "10080",
-        countryCodes: "JP",
-        cities: "Tokyo",
-        selectorSpecifiedIps: "203.0.113.10",
-        blacklistIps: "",
-        limit: "1",
+        countryCodes: ["JP"],
+        cities: ["Tokyo"],
+        specifiedIps: ["203.0.113.10", "203.0.113.11"],
+        excludedIps: ["198.51.100.42"],
         sortMode: "mru",
       }),
     ).toEqual({
-      specified_ip: "203.0.113.10",
+      selection_mode: "ip",
       desired_port: 10080,
-      selector: {
-        country_codes: ["JP"],
-        cities: ["Tokyo"],
-        specified_ips: ["203.0.113.10"],
-        limit: 1,
-        sort_mode: "mru",
-      },
+      specified_ips: ["203.0.113.10", "203.0.113.11"],
+      excluded_ips: ["198.51.100.42"],
+      sort_mode: "mru",
     });
   });
 });

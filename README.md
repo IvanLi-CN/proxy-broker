@@ -280,20 +280,89 @@ Base path: `http://127.0.0.1:8080/api/v1/profiles/{profile_id}`
 
 ```json
 {
-  "selector": {
-    "country_codes": ["JP"],
-    "limit": 1,
-    "sort_mode": "lru"
-  },
+  "selection_mode": "geo",
+  "country_codes": ["JP"],
+  "cities": ["Tokyo"],
+  "excluded_ips": ["198.51.100.42"],
+  "sort_mode": "lru",
   "desired_port": 10080
 }
 ```
+
+If `desired_port` is omitted, the backend auto-selects a free listener port.
+
+You can also target IPs directly:
+
+```json
+{
+  "selection_mode": "ip",
+  "specified_ips": ["203.0.113.10", "203.0.113.88"],
+  "sort_mode": "mru"
+}
+```
+
+The `selection_mode` rules are:
+
+- `any`: no country/city/IP filters; optional `excluded_ips`, `sort_mode`, `desired_port`
+- `geo`: requires at least one country or city filter
+- `ip`: requires at least one `specified_ips` entry
 
 The response `listen` field reflects the configured session listener bind IP.
 
 ### Open sessions in batch
 
 - `POST /sessions/open-batch`
+- Request body:
+
+```json
+{
+  "requests": [
+    {
+      "selection_mode": "any",
+      "sort_mode": "lru"
+    },
+    {
+      "selection_mode": "geo",
+      "country_codes": ["JP"],
+      "cities": ["Tokyo"],
+      "desired_port": 10080
+    }
+  ]
+}
+```
+
+The batch open is transactional: if any row fails validation, allocation, or
+persistence, the whole batch rolls back.
+
+### Suggested port for Sessions UI
+
+- `GET /sessions/suggested-port`
+- Response body:
+
+```json
+{
+  "port": 10080
+}
+```
+
+The suggested port is a UI hint only; it is not reserved until a session is
+opened.
+
+### Search session target options
+
+- `POST /ips/options/search`
+- Request body:
+
+```json
+{
+  "kind": "city",
+  "query": "tok",
+  "country_codes": ["JP"],
+  "limit": 10
+}
+```
+
+The response contains `items[]` with `value`, `label`, and optional `meta`.
 
 ### List sessions
 

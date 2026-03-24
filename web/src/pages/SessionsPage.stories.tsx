@@ -25,9 +25,11 @@ const meta = {
     batchResponse: batchFixture,
     opening: false,
     batchOpening: false,
+    suggestedPort: 10080,
     closingSessionId: null,
     onOpenSession: fn(),
     onOpenBatch: fn(),
+    searchSessionOptions: fn(async () => []),
     onCloseSession: fn(),
   },
 } satisfies Meta<typeof SessionsPage>;

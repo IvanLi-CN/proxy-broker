@@ -16,6 +16,8 @@ import type {
   OpenBatchResponse,
   OpenSessionRequest,
   OpenSessionResponse,
+  SearchSessionOptionsRequest,
+  SessionOptionItem,
   SessionRecord,
 } from "@/lib/types";
 
@@ -28,9 +30,13 @@ interface SessionsPageProps {
   batchResponse?: OpenBatchResponse | null;
   opening: boolean;
   batchOpening: boolean;
+  suggestedPort?: number | null;
   closingSessionId?: string | null;
   onOpenSession: (payload: OpenSessionRequest) => void | Promise<void>;
   onOpenBatch: (payload: OpenBatchRequest) => void | Promise<void>;
+  searchSessionOptions: (
+    payload: SearchSessionOptionsRequest,
+  ) => Promise<SessionOptionItem[] | undefined>;
   onCloseSession: (sessionId: string) => void | Promise<void>;
 }
 
@@ -43,9 +49,11 @@ export function SessionsPage({
   batchResponse,
   opening,
   batchOpening,
+  suggestedPort,
   closingSessionId,
   onOpenSession,
   onOpenBatch,
+  searchSessionOptions,
   onCloseSession,
 }: SessionsPageProps) {
   const { formatNumber, t } = useI18n();
@@ -122,6 +130,8 @@ export function SessionsPage({
                 isPending={opening}
                 onSubmit={onOpenSession}
                 response={openResponse}
+                searchOptions={searchSessionOptions}
+                suggestedPort={suggestedPort}
               />
             </TabsContent>
             <TabsContent value="batch" className="mt-0">
@@ -130,6 +140,8 @@ export function SessionsPage({
                 isPending={batchOpening}
                 onSubmit={onOpenBatch}
                 response={batchResponse}
+                searchOptions={searchSessionOptions}
+                suggestedPort={suggestedPort}
               />
             </TabsContent>
           </Tabs>

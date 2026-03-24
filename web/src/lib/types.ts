@@ -1,4 +1,6 @@
 export type SortMode = "mru" | "lru";
+export type SessionSelectionMode = "any" | "geo" | "ip";
+export type SessionOptionKind = "country" | "city" | "ip";
 
 export type SubscriptionSource = { type: "url"; value: string } | { type: "file"; value: string };
 
@@ -40,8 +42,12 @@ export interface ExtractIpRequest {
 }
 
 export interface OpenSessionRequest {
-  specified_ip?: string | null;
-  selector?: ExtractIpRequest | null;
+  selection_mode: SessionSelectionMode;
+  country_codes?: string[];
+  cities?: string[];
+  specified_ips?: string[];
+  excluded_ips?: string[];
+  sort_mode?: SortMode;
   desired_port?: number | null;
 }
 
@@ -59,6 +65,28 @@ export interface OpenSessionResponse {
 
 export interface OpenBatchResponse {
   sessions: OpenSessionResponse[];
+}
+
+export interface SuggestedPortResponse {
+  port: number;
+}
+
+export interface SearchSessionOptionsRequest {
+  kind: SessionOptionKind;
+  query?: string;
+  country_codes?: string[];
+  cities?: string[];
+  limit?: number;
+}
+
+export interface SessionOptionItem {
+  value: string;
+  label: string;
+  meta?: string | null;
+}
+
+export interface SearchSessionOptionsResponse {
+  items: SessionOptionItem[];
 }
 
 export interface ExtractIpItem {

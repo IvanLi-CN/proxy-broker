@@ -1,5 +1,9 @@
-import type { Locale, Translator } from "@/i18n";
-import type { ExtractIpRequest, OpenSessionRequest, SortMode } from "@/lib/types";
+import type {
+  ExtractIpRequest,
+  OpenSessionRequest,
+  SessionSelectionMode,
+  SortMode,
+} from "@/lib/types";
 
 const zhGeoLabels: Record<string, string> = {
   Japan: "日本",
@@ -143,32 +147,36 @@ export function buildExtractRequest(values: {
 }
 
 export function buildOpenSessionRequest(values: {
-  specifiedIp: string;
+  selectionMode: SessionSelectionMode;
   desiredPort: string;
-  countryCodes: string;
-  cities: string;
-  selectorSpecifiedIps: string;
-  blacklistIps: string;
-  limit: string;
+  countryCodes: string[];
+  cities: string[];
+  specifiedIps: string[];
+  excludedIps: string[];
   sortMode: SortMode;
 }): OpenSessionRequest {
-  const selector = buildExtractRequest({
-    countryCodes: values.countryCodes,
-    cities: values.cities,
-    specifiedIps: values.selectorSpecifiedIps,
-    blacklistIps: values.blacklistIps,
-    limit: values.limit,
-    sortMode: values.sortMode,
-  });
+  const request: OpenSessionRequest = {
+    selection_mode: values.selectionMode,
+    sort_mode: values.sortMode,
+  };
 
-  const request: OpenSessionRequest = {};
-  const specifiedIp = values.specifiedIp.trim();
-  if (specifiedIp) {
-    request.specified_ip = specifiedIp;
+  if (values.selectionMode === "geo") {
+    if (values.countryCodes.length > 0) {
+      request.country_codes = values.countryCodes;
+    }
+    if (values.cities.length > 0) {
+      request.cities = values.cities;
+    }
   }
-  if (Object.keys(selector).length > 0) {
-    request.selector = selector;
+
+  if (values.selectionMode === "ip" && values.specifiedIps.length > 0) {
+    request.specified_ips = values.specifiedIps;
   }
+
+  if (values.excludedIps.length > 0) {
+    request.excluded_ips = values.excludedIps;
+  }
+
   const desiredPort = optionalNumber(values.desiredPort);
   if (desiredPort !== undefined) {
     request.desired_port = desiredPort;

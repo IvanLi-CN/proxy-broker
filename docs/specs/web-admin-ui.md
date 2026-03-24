@@ -169,25 +169,8 @@ separate Vite and Storybook workflow for local development.
 
 ![Tasks page zh-CN](assets/web-admin-ui/taskspage-zh-cn.png)
 
-- Storybook source: `Pages/TasksPage > ZhCN`
-- Confirms task summaries, filters, run tables, detail rails, and localized
-  task enums/error shells render in Simplified Chinese.
-
-### IP Extract Page (`zh-CN`)
-
-![IP extract page zh-CN](assets/web-admin-ui/ipextractpage-zh-cn.png)
-
-- Storybook source: `Pages/IpExtractPage > ZhCN`
-- Confirms filter form copy, request summaries, table labels, and locale-aware
-  timestamps/latency formatting render in Simplified Chinese.
-
-### Sessions Page (`zh-CN`)
-
-![Sessions page zh-CN](assets/web-admin-ui/sessionspage-zh-cn.png)
-
-- Storybook source: `Pages/SessionsPage > ZhCN`
-- Confirms session forms, explanatory copy, live listener controls, and date
-  formatting render in Simplified Chinese.
+- Session orchestration view with the simplified three-mode open flow, advanced
+  exclusions, and the live session table used for close actions.
 
 ## Build and Tooling
 
@@ -209,8 +192,9 @@ separate Vite and Storybook workflow for local development.
 - `cargo build --release` must fail with a clear message if
   `web/dist/index.html` is missing.
 - Runtime serving should prefer embedded assets for release builds.
-- API handlers must remain unchanged except for router composition needed to
-  mount static serving.
+- API handlers should keep the existing workspace boundaries while allowing the
+  Sessions workspace to add its suggested-port and searchable option helper
+  routes.
 
 ## Test Matrix
 
@@ -245,6 +229,8 @@ separate Vite and Storybook workflow for local development.
   the active locale's script metadata (`zh-Hans` for `zh-CN`, `en` for
   `en-US`), and localizes known backend error/task enums without changing API
   contracts.
+- The Sessions workspace uses a flattened open/open-batch payload plus helper
+  endpoints for suggested ports and searchable target options.
 - Every committed UI component/page in scope has Storybook docs and stories.
 - CI rejects missing stories or missing autodocs metadata.
 - The repo remains Bun-first for frontend workflows and Cargo-first for backend

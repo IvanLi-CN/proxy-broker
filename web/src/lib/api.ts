@@ -20,6 +20,9 @@ import type {
   OpenSessionResponse,
   RefreshRequest,
   RefreshResponse,
+  SearchSessionOptionsRequest,
+  SearchSessionOptionsResponse,
+  SuggestedPortResponse,
   TaskListQuery,
   TaskListResponse,
   TaskRunDetail,
@@ -120,6 +123,13 @@ export const api = {
     }),
   openBatch: (profileId: string, payload: OpenBatchRequest) =>
     request<OpenBatchResponse>(profilePath(profileId, "/sessions/open-batch"), {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  getSuggestedPort: (profileId: string) =>
+    request<SuggestedPortResponse>(profilePath(profileId, "/sessions/suggested-port")),
+  searchSessionOptions: (profileId: string, payload: SearchSessionOptionsRequest) =>
+    request<SearchSessionOptionsResponse>(profilePath(profileId, "/ips/options/search"), {
       method: "POST",
       body: JSON.stringify(payload),
     }),

@@ -52,6 +52,23 @@ pub enum SortMode {
     Lru,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionSelectionMode {
+    #[default]
+    Any,
+    Geo,
+    Ip,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionOptionKind {
+    Country,
+    City,
+    Ip,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ExtractIpRequest {
     #[serde(default)]
@@ -67,10 +84,21 @@ pub struct ExtractIpRequest {
     pub sort_mode: SortMode,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct OpenSessionRequest {
-    pub specified_ip: Option<String>,
-    pub selector: Option<ExtractIpRequest>,
+    #[serde(default)]
+    pub selection_mode: SessionSelectionMode,
+    #[serde(default)]
+    pub country_codes: Vec<String>,
+    #[serde(default)]
+    pub cities: Vec<String>,
+    #[serde(default)]
+    pub specified_ips: Vec<String>,
+    #[serde(default)]
+    pub excluded_ips: Vec<String>,
+    #[serde(default)]
+    pub sort_mode: SortMode,
     pub desired_port: Option<u16>,
 }
 
@@ -118,6 +146,74 @@ pub struct ListProfilesResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenBatchResponse {
     pub sessions: Vec<OpenSessionResponse>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SuggestedPortResponse {
+    pub port: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchSessionOptionsRequest {
+    pub kind: SessionOptionKind,
+    #[serde(default)]
+    pub query: Option<String>,
+    #[serde(default)]
+    pub country_codes: Vec<String>,
+    #[serde(default)]
+    pub cities: Vec<String>,
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionOptionItem {
+    pub value: String,
+    pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub meta: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchSessionOptionsResponse {
+    pub items: Vec<SessionOptionItem>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::OpenSessionRequest;
+
+    #[test]
+    fn open_session_request_rejects_legacy_single_payload_fields() {
+        let payload = serde_json::json!({
+            "specified_ip": "203.0.113.10",
+            "selector": {
+                "country_codes": ["JP"],
+                "limit": 1,
+                "sort_mode": "lru"
+            }
+        });
+
+        let err = serde_json::from_value::<OpenSessionRequest>(payload)
+            .expect_err("legacy single-open payload should be rejected");
+        assert!(err.to_string().contains("unknown field"));
+    }
+
+    #[test]
+    fn open_session_request_rejects_legacy_batch_row_fields() {
+        let payload = serde_json::json!({
+            "specified_ip": "203.0.113.10",
+            "selector": {
+                "specified_ips": ["203.0.113.10"],
+                "limit": 1
+            },
+            "desired_port": 10080
+        });
+
+        let err = serde_json::from_value::<OpenSessionRequest>(payload)
+            .expect_err("legacy batch row payload should be rejected");
+        assert!(err.to_string().contains("unknown field"));
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

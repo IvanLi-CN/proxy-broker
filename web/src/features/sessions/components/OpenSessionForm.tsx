@@ -1,10 +1,10 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { CableCarIcon } from "lucide-react";
+import { CableCarIcon, ChevronDownIcon } from "lucide-react";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 
 import { ActionResponsePanel } from "@/components/ActionResponsePanel";
-import { StringListField } from "@/components/StringListField";
+import { SearchableMultiSelect } from "@/components/SearchableMultiSelect";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,47 +17,103 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useI18n } from "@/i18n";
-import { buildOpenSessionRequest, formatSortMode } from "@/lib/format";
-import type { OpenSessionRequest, OpenSessionResponse, SortMode } from "@/lib/types";
+import { buildOpenSessionRequest } from "@/lib/format";
+import type {
+  OpenSessionRequest,
+  OpenSessionResponse,
+  SearchSessionOptionsRequest,
+  SessionOptionItem,
+  SessionSelectionMode,
+  SortMode,
+} from "@/lib/types";
+import { cn } from "@/lib/utils";
+
+const selectionModeOptions: Array<{
+  value: SessionSelectionMode;
+  title: string;
+  description: string;
+}> = [
+  {
+    value: "any",
+    title: "不限",
+    description: "从当前 profile 的全部候选里直接挑一个。",
+  },
+  {
+    value: "geo",
+    title: "国家/地区",
+    description: "先收窄到国家或城市，再按顺序挑第一条。",
+  },
+  {
+    value: "ip",
+    title: "IP",
+    description: "手动圈定一个或多个 IP，由顺序字段决定命中项。",
+  },
+];
+
+const sortModeOptions: Array<{ value: SortMode; label: string }> = [
+  { value: "lru", label: "最久未使用优先 (LRU)" },
+  { value: "mru", label: "最近使用优先 (MRU)" },
+];
 
 const schema = z.object({
-  specifiedIp: z.string(),
+  selectionMode: z.enum(["any", "geo", "ip"] satisfies SessionSelectionMode[]),
   desiredPort: z.string(),
-  countryCodes: z.string(),
-  cities: z.string(),
-  selectorSpecifiedIps: z.string(),
-  blacklistIps: z.string(),
-  limit: z.string(),
+  countryCodes: z.array(z.string()),
+  cities: z.array(z.string()),
+  specifiedIps: z.array(z.string()),
+  excludedIps: z.array(z.string()),
   sortMode: z.enum(["mru", "lru"] satisfies SortMode[]),
 });
 
 type FormValues = z.infer<typeof schema>;
 
 const defaultValues: FormValues = {
-  specifiedIp: "",
-  desiredPort: "10080",
-  countryCodes: "JP",
-  cities: "",
-  selectorSpecifiedIps: "",
-  blacklistIps: "",
-  limit: "1",
+  selectionMode: "any",
+  desiredPort: "",
+  countryCodes: [],
+  cities: [],
+  specifiedIps: [],
+  excludedIps: [],
   sortMode: "lru",
 };
 
+type SearchSessionOptionsFn = (
+  payload: SearchSessionOptionsRequest,
+) => Promise<SessionOptionItem[] | undefined>;
+
 interface OpenSessionFormProps {
   isPending: boolean;
+  suggestedPort?: number | null;
   response?: OpenSessionResponse | null;
   error?: string | null;
+  defaultAdvancedOpen?: boolean;
+  initialValues?: Partial<FormValues>;
   onSubmit: (payload: OpenSessionRequest) => void | Promise<void>;
+  searchOptions?: SearchSessionOptionsFn;
 }
 
-export function OpenSessionForm({ isPending, response, error, onSubmit }: OpenSessionFormProps) {
-  const { t } = useI18n();
+const emptySearch: SearchSessionOptionsFn = async () => [];
+
+export function OpenSessionForm({
+  isPending,
+  suggestedPort,
+  response,
+  error,
+  defaultAdvancedOpen = false,
+  initialValues,
+  onSubmit,
+  searchOptions = emptySearch,
+}: OpenSessionFormProps) {
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues,
+    defaultValues: {
+      ...defaultValues,
+      ...initialValues,
+    },
   });
+  const selectionMode = form.watch("selectionMode");
+  const countryCodes = form.watch("countryCodes");
+  const cities = form.watch("cities");
 
   return (
     <Card className="overflow-hidden border-border/70 bg-card/96 shadow-[0_24px_70px_-44px_rgba(15,23,42,0.55)]">
@@ -72,16 +128,15 @@ export function OpenSessionForm({ isPending, response, error, onSubmit }: OpenSe
               {t("Open one listener fast")}
             </CardTitle>
             <CardDescription className="text-sm leading-6 text-muted-foreground md:text-[15px]">
-              {t(
-                "Pin a specific IP when you know exactly what you want, or let the selector pick the next best edge for the active profile.",
-              )}
+              Pick one simple targeting mode, keep the port optional, and let the backend open the
+              listener from the first surviving candidate.
             </CardDescription>
           </div>
           <Badge
             variant="outline"
             className="rounded-full px-3 py-1 font-mono text-[11px] uppercase tracking-[0.16em]"
           >
-            {t("selector limit 1")}
+            optional port
           </Badge>
         </div>
       </CardHeader>
@@ -89,122 +144,227 @@ export function OpenSessionForm({ isPending, response, error, onSubmit }: OpenSe
         <form
           className="space-y-4"
           onSubmit={form.handleSubmit(async (values) => {
-            await onSubmit(buildOpenSessionRequest(values));
+            await onSubmit(
+              buildOpenSessionRequest({
+                selectionMode: values.selectionMode,
+                desiredPort: values.desiredPort,
+                countryCodes: values.countryCodes,
+                cities: values.cities,
+                specifiedIps: values.specifiedIps,
+                excludedIps: values.excludedIps,
+                sortMode: values.sortMode,
+              }),
+            );
           })}
         >
-          <div className="grid gap-4 rounded-[28px] border border-border/70 bg-background/80 p-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="specified-ip">{t("Specified IP")}</Label>
-              <Input
-                id="specified-ip"
-                {...form.register("specifiedIp")}
-                placeholder="203.0.113.10"
-                className="bg-card font-mono text-xs md:text-sm"
-              />
+          <div className="space-y-3 rounded-[28px] border border-border/70 bg-background/80 p-4">
+            <div className="space-y-1">
+              <Label>选择范围</Label>
+              <p className="text-xs text-muted-foreground">
+                三选一：不限、国家/地区、IP。先决定候选集合，再让顺序字段挑第一条。
+              </p>
             </div>
+            <Controller
+              control={form.control}
+              name="selectionMode"
+              render={({ field }) => (
+                <div className="grid gap-3 md:grid-cols-3">
+                  {selectionModeOptions.map((option) => {
+                    const active = field.value === option.value;
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className={cn(
+                          "rounded-[24px] border px-4 py-3 text-left transition-colors",
+                          active
+                            ? "border-primary bg-primary/8 shadow-sm"
+                            : "border-border/70 bg-card hover:border-primary/35 hover:bg-muted/40",
+                        )}
+                        onClick={() => field.onChange(option.value)}
+                      >
+                        <div className="text-sm font-semibold text-foreground">{option.title}</div>
+                        <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                          {option.description}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            />
+          </div>
+
+          <div className="grid gap-4 rounded-[28px] border border-border/70 bg-background/80 p-4">
+            {selectionMode === "any" ? (
+              <div className="rounded-[22px] border border-dashed border-border/70 bg-card/60 px-4 py-3 text-sm leading-6 text-muted-foreground">
+                不限模式会从当前 profile 的全部候选 IP 中，按照你设置的提取顺序直接选第
+                1 个。
+              </div>
+            ) : null}
+
+            {selectionMode === "geo" ? (
+              <>
+                <Controller
+                  control={form.control}
+                  name="countryCodes"
+                  render={({ field }) => (
+                    <SearchableMultiSelect
+                      id="session-country-codes"
+                      label="国家"
+                      helper="支持搜索与多选；城市候选会跟随这里的选择收窄。"
+                      placeholder="选择国家"
+                      searchPlaceholder="搜索国家或代码"
+                      emptyText="No matching countries"
+                      values={field.value}
+                      onChange={field.onChange}
+                      onSearch={async (query) =>
+                        (await searchOptions({
+                          kind: "country",
+                          query,
+                          limit: 20,
+                        })) ?? []
+                      }
+                    />
+                  )}
+                />
+                <Controller
+                  control={form.control}
+                  name="cities"
+                  render={({ field }) => (
+                    <SearchableMultiSelect
+                      id="session-cities"
+                      label="地区 / 城市"
+                      helper="可选；如果不填，就只按国家过滤。"
+                      placeholder="选择城市"
+                      searchPlaceholder="搜索城市"
+                      emptyText="No matching cities"
+                      values={field.value}
+                      searchKey={countryCodes.join("|")}
+                      onChange={field.onChange}
+                      onSearch={async (query) =>
+                        (await searchOptions({
+                          kind: "city",
+                          query,
+                          country_codes: countryCodes,
+                          limit: 30,
+                        })) ?? []
+                      }
+                    />
+                  )}
+                />
+              </>
+            ) : null}
+
+            {selectionMode === "ip" ? (
+              <Controller
+                control={form.control}
+                name="specifiedIps"
+                render={({ field }) => (
+                  <SearchableMultiSelect
+                    id="session-specified-ips"
+                    label="IP"
+                    helper="可多选；最终会按提取顺序从这里面挑第 1 个可用项。"
+                    placeholder="选择 IP"
+                    searchPlaceholder="搜索 IP"
+                    emptyText="No matching IPs"
+                    values={field.value}
+                    onChange={field.onChange}
+                    onSearch={async (query) =>
+                      (await searchOptions({
+                        kind: "ip",
+                        query,
+                        limit: 40,
+                      })) ?? []
+                    }
+                  />
+                )}
+              />
+            ) : null}
+          </div>
+
+          <div className="grid gap-4 rounded-[28px] border border-border/70 bg-background/80 p-4 md:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="desired-port">{t("Desired port")}</Label>
               <Input
                 id="desired-port"
                 {...form.register("desiredPort")}
                 inputMode="numeric"
-                placeholder="10080"
+                placeholder={suggestedPort?.toString() ?? "10080"}
                 className="bg-card font-mono text-xs md:text-sm"
               />
-            </div>
-          </div>
-          <div className="grid gap-4">
-            <Controller
-              control={form.control}
-              name="countryCodes"
-              render={({ field }) => (
-                <StringListField
-                  id="session-country-codes"
-                  label={t("Country codes")}
-                  helper={t("Optional selector countries.")}
-                  onChange={field.onChange}
-                  placeholder="JP, SG"
-                  value={field.value}
-                />
-              )}
-            />
-            <Controller
-              control={form.control}
-              name="cities"
-              render={({ field }) => (
-                <StringListField
-                  id="session-cities"
-                  label={t("Cities")}
-                  helper={t("Optional city shortlist.")}
-                  onChange={field.onChange}
-                  placeholder={t("Enter one city per line")}
-                  value={field.value}
-                />
-              )}
-            />
-            <Controller
-              control={form.control}
-              name="selectorSpecifiedIps"
-              render={({ field }) => (
-                <StringListField
-                  id="selector-specified-ips"
-                  label={t("Selector include list")}
-                  helper={t("IPs that remain eligible for selector mode.")}
-                  onChange={field.onChange}
-                  placeholder="203.0.113.10"
-                  value={field.value}
-                />
-              )}
-            />
-            <Controller
-              control={form.control}
-              name="blacklistIps"
-              render={({ field }) => (
-                <StringListField
-                  id="selector-blacklist-ips"
-                  label={t("Blacklist")}
-                  helper={t("IPs the selector must skip.")}
-                  onChange={field.onChange}
-                  placeholder="198.51.100.42"
-                  value={field.value}
-                />
-              )}
-            />
-          </div>
-          <div className="grid gap-4 rounded-[28px] border border-border/70 bg-background/80 p-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="selector-limit">{t("Selector limit")}</Label>
-              <Input
-                id="selector-limit"
-                {...form.register("limit")}
-                inputMode="numeric"
-                placeholder="1"
-                className="bg-card"
-              />
+              <p className="text-xs text-muted-foreground">
+                留空也能创建；placeholder 只显示当前建议端口，不会预留它。
+              </p>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="session-sort-mode">{t("Sort mode")}</Label>
+              <Label htmlFor="session-sort-mode">提取顺序</Label>
               <Controller
                 control={form.control}
                 name="sortMode"
                 render={({ field }) => (
                   <Select onValueChange={field.onChange} value={field.value}>
                     <SelectTrigger id="session-sort-mode" className="w-full bg-card">
-                      <SelectValue placeholder={t("Sort mode")} />
+                      <SelectValue placeholder="选择提取顺序" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="lru">{formatSortMode("lru", t)}</SelectItem>
-                      <SelectItem value="mru">{formatSortMode("mru", t)}</SelectItem>
+                      {sortModeOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 )}
               />
+              <p className="text-xs text-muted-foreground">
+                用它决定候选集合里的第 1 个命中项，不再显示 selector limit。
+              </p>
             </div>
-            <div className="flex items-end justify-stretch sm:col-span-2 sm:justify-end">
-              <Button disabled={isPending} type="submit" size="lg" className="min-w-40">
-                {isPending ? t("Opening...") : t("Open session")}
-              </Button>
+          </div>
+
+          <details
+            className="rounded-[28px] border border-border/70 bg-background/80"
+            open={defaultAdvancedOpen || undefined}
+          >
+            <summary className="flex list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-foreground">
+              Advanced
+              <ChevronDownIcon className="size-4 text-muted-foreground transition-transform group-open:rotate-180" />
+            </summary>
+            <div className="border-t border-border/70 px-4 py-4">
+              <Controller
+                control={form.control}
+                name="excludedIps"
+                render={({ field }) => (
+                  <SearchableMultiSelect
+                    id="session-excluded-ips"
+                    label="排除 IP"
+                    helper="可选；这些 IP 会被明确跳过。若与 IP 模式已选项冲突，后端会返回错误。"
+                    placeholder="选择要排除的 IP"
+                    searchPlaceholder="搜索要排除的 IP"
+                    emptyText="No matching IPs"
+                    values={field.value}
+                    searchKey={`${selectionMode}:${countryCodes.join("|")}:${cities.join("|")}`}
+                    onChange={field.onChange}
+                    onSearch={async (query) =>
+                      (await searchOptions({
+                        kind: "ip",
+                        query,
+                        country_codes: selectionMode === "geo" ? countryCodes : undefined,
+                        cities: selectionMode === "geo" ? cities : undefined,
+                        limit: 40,
+                      })) ?? []
+                    }
+                  />
+                )}
+              />
             </div>
+          </details>
+
+          <div className="flex items-end justify-stretch sm:justify-end">
+            <Button disabled={isPending} type="submit" size="lg" className="min-w-40">
+              {isPending ? "Opening..." : "Open session"}
+            </Button>
           </div>
         </form>
         {response ? (

@@ -2,10 +2,10 @@
 
 ## Goal
 
-Refactor the Bun + React operator console into a denser control-room interface that
-keeps the existing API contracts intact while making the three workflows
-(load/refresh, IP extraction, session orchestration) faster to scan and safer to
-operate.
+Refactor the Bun + React operator console into a denser control-room interface
+that keeps the three workflows (load/refresh, IP extraction, session
+orchestration) faster to scan and safer to operate, while allowing the sessions
+entrypoint to tighten its request model around the simplified create flow.
 
 ## Scope
 
@@ -19,9 +19,9 @@ operate.
 
 ## Non-Goals
 
-- No changes to Rust routes, JSON payloads, or operator workflow semantics.
-- No new backend endpoints or client-side persistence beyond existing local
-  preferences.
+- No redesign of the `/ips/extract` workspace around the new session flow model.
+- No changes to live session listing/closing semantics or client-side
+  persistence beyond existing local preferences.
 
 ## Acceptance Criteria
 
@@ -31,8 +31,11 @@ operate.
   warning/next-step surfaces.
 - IP Extract reads as a filter-first workspace with request summary, loading,
   empty, error, and results states that remain usable on mobile.
-- Sessions reads as a live orchestration surface with denser open controls,
-  live-listener summary, and improved close feedback.
+- Sessions reads as a live orchestration surface with a three-mode create flow
+  (`不限 / 国家地区 / IP`), searchable multi-select targeting, a suggested-port
+  hint, visible sort order, and advanced exclusions tucked behind a disclosure.
+- The sessions API exposes a flattened open/open-batch contract plus read-only
+  helper endpoints for suggested ports and searchable session option lookups.
 - Storybook and automated checks cover refreshed component/page states, and the
   smoke flow remains green.
 
@@ -45,12 +48,14 @@ operate.
 - `bun run build`
 - `bun run build-storybook`
 - `bun run test:e2e`
+- `cargo test --lib`
 
 ## Outcome
 
 - The control-room shell, overview runway, IP extract workspace, and sessions
-  workspace are implemented on the current PR branch without changing backend
-  contracts.
+  workspace are implemented on the current PR branch, and the sessions create
+  flow now uses a mode-driven request contract instead of the old nested
+  selector payload.
 - The sidebar shell now uses a compact brand strip so the active profile input
   and workspace navigation stay visible without the oversized intro card.
 - Shared field controls now use an explicit size system so large trigger,
@@ -59,6 +64,55 @@ operate.
 - Route-level UI summaries now keep successful results scoped to the profile
   that produced them, preventing stale cross-profile state from leaking into
   the operator panels.
+- The Sessions workspace now has dedicated helper APIs for suggested ports and
+  searchable country/city/IP option lists, while keeping batch-open rollback
+  behavior intact.
+
+## Visual Evidence
+
+- `source_type=storybook_canvas`
+- `target_program=mock-only`
+- `capture_scope=browser-viewport`
+- `sensitive_exclusion=N/A`
+- `submission_gate=pending-owner-approval`
+- `story_id_or_title=Features/Sessions/OpenSessionForm/GeoMode`
+- `state=single-open geo mode`
+- `evidence_note=Shows the simplified country-region path with searchable multi-select chips, optional port entry, visible sort mode, and the advanced disclosure collapsed by default.`
+
+![Sessions single open geo mode](./assets/sessions-open-geo-mode.png)
+
+- `source_type=storybook_canvas`
+- `target_program=mock-only`
+- `capture_scope=browser-viewport`
+- `sensitive_exclusion=N/A`
+- `submission_gate=pending-owner-approval`
+- `story_id_or_title=Features/Sessions/OpenSessionForm/IpMode`
+- `state=single-open ip mode`
+- `evidence_note=Shows the direct IP targeting path with multi-select IP chips and the same always-visible port plus sort controls.`
+
+![Sessions single open IP mode](./assets/sessions-open-ip-mode.png)
+
+- `source_type=storybook_canvas`
+- `target_program=mock-only`
+- `capture_scope=browser-viewport`
+- `sensitive_exclusion=N/A`
+- `submission_gate=pending-owner-approval`
+- `story_id_or_title=Features/Sessions/OpenBatchForm/AdvancedOpen`
+- `state=batch advanced expanded`
+- `evidence_note=Shows one transactional batch row using the shared three-mode model, with exclusions folded into the Advanced area instead of the primary form surface.`
+
+![Sessions batch advanced open](./assets/sessions-batch-advanced-open.png)
+
+- `source_type=storybook_canvas`
+- `target_program=mock-only`
+- `capture_scope=browser-viewport`
+- `sensitive_exclusion=N/A`
+- `submission_gate=pending-owner-approval`
+- `story_id_or_title=Features/Sessions/OpenBatchForm/AdvancedOpen`
+- `state=mobile layout`
+- `evidence_note=Shows the same batch-open flow at a narrow mobile viewport, confirming the controls stack vertically without hiding the primary submit path.`
+
+![Sessions batch mobile layout](./assets/sessions-batch-mobile.png)
 
 ## Visual Evidence (PR)
 
