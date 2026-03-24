@@ -2226,7 +2226,6 @@ impl BrokerService {
             return Err(BrokerError::ProfileNotFound);
         }
 
-        let _profile_guard = self.lock_profile(profile_id).await;
         let ip_records = self
             .store
             .list_ip_records(profile_id)
@@ -2706,7 +2705,6 @@ fn search_session_options(
                 if city_value.is_empty() {
                     continue;
                 }
-                let key = city_value.to_ascii_lowercase();
                 let country_code = record.country_code.clone().unwrap_or_default();
                 let country_name = record.country_name.clone().unwrap_or_default();
                 let meta = match (country_code.trim(), country_name.trim()) {
@@ -2715,6 +2713,12 @@ fn search_session_options(
                     (code, "") => Some(code.to_string()),
                     (code, name) => Some(format!("{name} ({code})")),
                 };
+                let value = if country_code.trim().is_empty() {
+                    city_value.clone()
+                } else {
+                    format!("{}::{}", country_code.trim().to_ascii_uppercase(), city_value)
+                };
+                let key = value.to_ascii_lowercase();
                 let haystack = format!(
                     "{} {} {}",
                     city_value.to_ascii_lowercase(),
@@ -2725,13 +2729,17 @@ fn search_session_options(
                     continue;
                 }
                 cities.entry(key).or_insert(SessionOptionItem {
-                    value: city_value.clone(),
+                    value,
                     label: city_value,
                     meta,
                 });
             }
             let mut items = cities.into_values().collect::<Vec<_>>();
-            items.sort_by(|left, right| left.label.cmp(&right.label));
+            items.sort_by(|left, right| {
+                left.label
+                    .cmp(&right.label)
+                    .then_with(|| left.value.cmp(&right.value))
+            });
             items
         }
         SessionOptionKind::Ip => {
@@ -4371,6 +4379,36 @@ proxies:
         let chosen = choose_ip_for_open(&request, &ips, &probes)
             .expect("lower latency candidate should win before recency");
         assert_eq!(chosen, "2.2.2.2");
+    }
+
+    #[test]
+    fn search_session_options_keeps_duplicate_city_names_across_countries() {
+        let mut us_paris = sample_ip("1.1.1.1", None);
+        us_paris.city = Some("Paris".to_string());
+        us_paris.country_code = Some("US".to_string());
+        us_paris.country_name = Some("United States".to_string());
+
+        let mut fr_paris = sample_ip("2.2.2.2", None);
+        fr_paris.city = Some("Paris".to_string());
+        fr_paris.country_code = Some("FR".to_string());
+        fr_paris.country_name = Some("France".to_string());
+
+        let request = SearchSessionOptionsRequest {
+            kind: SessionOptionKind::City,
+            query: Some("par".to_string()),
+            country_codes: vec![],
+            cities: vec![],
+            limit: None,
+        };
+
+        let items = search_session_options(&[us_paris, fr_paris], &request)
+            .expect("city options should be returned");
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].label, "Paris");
+        assert_eq!(items[0].value, "FR::Paris");
+        assert_eq!(items[0].meta.as_deref(), Some("France (FR)"));
+        assert_eq!(items[1].value, "US::Paris");
+        assert_eq!(items[1].meta.as_deref(), Some("United States (US)"));
     }
 
     #[test]

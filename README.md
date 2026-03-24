@@ -363,6 +363,8 @@ opened.
 ```
 
 The response contains `items[]` with `value`, `label`, and optional `meta`.
+City option `value`s are opaque selection tokens so duplicate city names can
+stay disambiguated by country.
 
 ### List sessions
 

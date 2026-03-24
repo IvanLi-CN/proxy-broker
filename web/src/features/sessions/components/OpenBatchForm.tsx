@@ -55,15 +55,36 @@ const sortModeOptions: Array<{ value: SortMode; label: string }> = [
   { value: "mru", label: "最近使用优先 (MRU)" },
 ];
 
-const rowSchema = z.object({
-  selectionMode: z.enum(["any", "geo", "ip"] satisfies SessionSelectionMode[]),
-  desiredPort: z.string(),
-  countryCodes: z.array(z.string()),
-  cities: z.array(z.string()),
-  specifiedIps: z.array(z.string()),
-  excludedIps: z.array(z.string()),
-  sortMode: z.enum(["mru", "lru"] satisfies SortMode[]),
-});
+const rowSchema = z
+  .object({
+    selectionMode: z.enum(["any", "geo", "ip"] satisfies SessionSelectionMode[]),
+    desiredPort: z.string(),
+    countryCodes: z.array(z.string()),
+    cities: z.array(z.string()),
+    specifiedIps: z.array(z.string()),
+    excludedIps: z.array(z.string()),
+    sortMode: z.enum(["mru", "lru"] satisfies SortMode[]),
+  })
+  .superRefine((value, ctx) => {
+    if (
+      value.selectionMode === "geo" &&
+      value.countryCodes.length === 0 &&
+      value.cities.length === 0
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["selectionMode"],
+        message: "至少选择 1 个国家或城市。",
+      });
+    }
+    if (value.selectionMode === "ip" && value.specifiedIps.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["selectionMode"],
+        message: "至少选择 1 个 IP。",
+      });
+    }
+  });
 
 const schema = z.object({
   requests: z.array(rowSchema).min(1),
@@ -168,6 +189,8 @@ export function OpenBatchForm({
           <div className="space-y-4">
             {fieldArray.fields.map((field, index) => {
               const row = watchedRequests[index] ?? emptyRow();
+              const rowSelectionError =
+                form.formState.errors.requests?.[index]?.selectionMode?.message;
               return (
                 <div
                   key={field.id}
@@ -232,6 +255,9 @@ export function OpenBatchForm({
                         </div>
                       )}
                     />
+                    {rowSelectionError ? (
+                      <p className="text-xs text-destructive">{rowSelectionError}</p>
+                    ) : null}
                   </div>
 
                   <div className="mt-4 grid gap-4">

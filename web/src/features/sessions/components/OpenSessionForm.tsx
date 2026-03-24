@@ -55,15 +55,36 @@ const sortModeOptions: Array<{ value: SortMode; label: string }> = [
   { value: "mru", label: "最近使用优先 (MRU)" },
 ];
 
-const schema = z.object({
-  selectionMode: z.enum(["any", "geo", "ip"] satisfies SessionSelectionMode[]),
-  desiredPort: z.string(),
-  countryCodes: z.array(z.string()),
-  cities: z.array(z.string()),
-  specifiedIps: z.array(z.string()),
-  excludedIps: z.array(z.string()),
-  sortMode: z.enum(["mru", "lru"] satisfies SortMode[]),
-});
+const schema = z
+  .object({
+    selectionMode: z.enum(["any", "geo", "ip"] satisfies SessionSelectionMode[]),
+    desiredPort: z.string(),
+    countryCodes: z.array(z.string()),
+    cities: z.array(z.string()),
+    specifiedIps: z.array(z.string()),
+    excludedIps: z.array(z.string()),
+    sortMode: z.enum(["mru", "lru"] satisfies SortMode[]),
+  })
+  .superRefine((value, ctx) => {
+    if (
+      value.selectionMode === "geo" &&
+      value.countryCodes.length === 0 &&
+      value.cities.length === 0
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["selectionMode"],
+        message: "至少选择 1 个国家或城市。",
+      });
+    }
+    if (value.selectionMode === "ip" && value.specifiedIps.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["selectionMode"],
+        message: "至少选择 1 个 IP。",
+      });
+    }
+  });
 
 type FormValues = z.infer<typeof schema>;
 
@@ -114,6 +135,7 @@ export function OpenSessionForm({
   const selectionMode = form.watch("selectionMode");
   const countryCodes = form.watch("countryCodes");
   const cities = form.watch("cities");
+  const selectionError = form.formState.errors.selectionMode?.message;
 
   return (
     <Card className="overflow-hidden border-border/70 bg-card/96 shadow-[0_24px_70px_-44px_rgba(15,23,42,0.55)]">
@@ -193,6 +215,7 @@ export function OpenSessionForm({
                 </div>
               )}
             />
+            {selectionError ? <p className="text-xs text-destructive">{selectionError}</p> : null}
           </div>
 
           <div className="grid gap-4 rounded-[28px] border border-border/70 bg-background/80 p-4">

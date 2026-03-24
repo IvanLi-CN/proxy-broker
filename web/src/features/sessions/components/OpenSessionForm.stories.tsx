@@ -20,11 +20,11 @@ const searchOptions = async ({
   if (kind === "city") {
     if (country_codes?.includes("JP")) {
       return [
-        { value: "Tokyo", label: "Tokyo", meta: "Japan (JP)" },
-        { value: "Osaka", label: "Osaka", meta: "Japan (JP)" },
+        { value: "JP::Tokyo", label: "Tokyo", meta: "Japan (JP)" },
+        { value: "JP::Osaka", label: "Osaka", meta: "Japan (JP)" },
       ];
     }
-    return [{ value: "San Jose", label: "San Jose", meta: "United States (US)" }];
+    return [{ value: "US::San Jose", label: "San Jose", meta: "United States (US)" }];
   }
   return [
     { value: "203.0.113.10", label: "203.0.113.10", meta: "JP / Chiyoda" },

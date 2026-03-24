@@ -319,7 +319,7 @@ test.beforeEach(async ({ page }) => {
       payload.kind === "country"
         ? [{ value: "JP", label: "Japan (JP)", meta: "Japan" }]
         : payload.kind === "city"
-          ? [{ value: "Tokyo", label: "Tokyo", meta: "Japan (JP)" }]
+          ? [{ value: "JP::Tokyo", label: "Tokyo", meta: "Japan (JP)" }]
           : [{ value: "203.0.113.10", label: "203.0.113.10", meta: "JP / Chiyoda" }];
 
     await route.fulfill({

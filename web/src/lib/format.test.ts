@@ -58,6 +58,25 @@ describe("buildOpenSessionRequest", () => {
       sort_mode: "mru",
     });
   });
+
+  it("derives country codes from encoded city selections", () => {
+    expect(
+      buildOpenSessionRequest({
+        selectionMode: "geo",
+        desiredPort: "",
+        countryCodes: [],
+        cities: ["JP::Tokyo", "FR::Paris", "Paris"],
+        specifiedIps: [],
+        excludedIps: [],
+        sortMode: "lru",
+      }),
+    ).toEqual({
+      selection_mode: "geo",
+      country_codes: ["JP", "FR"],
+      cities: ["Tokyo", "Paris"],
+      sort_mode: "lru",
+    });
+  });
 });
 
 describe("formatTimestamp", () => {

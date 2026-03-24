@@ -162,6 +162,8 @@
 - Success:
   - `items[]`
   - each item contains `value`, `label`, `meta?`
+  - `city` item `value`s are opaque selection tokens so duplicate city names can
+    stay disambiguated by country
   - `city` results can be filtered by `country_codes`
   - `ip` results can be filtered by `country_codes` and `cities`
 - Error:

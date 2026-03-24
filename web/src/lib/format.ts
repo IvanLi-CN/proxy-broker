@@ -31,7 +31,25 @@ export function optionalNumber(value: string) {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-export function formatTimestamp(locale: Locale, t: Translator, epoch?: number | null) {
+function uniqueItems(items: string[]) {
+  return Array.from(new Set(items.map((item) => item.trim()).filter(Boolean)));
+}
+
+function parseCitySelectionToken(value: string) {
+  const trimmed = value.trim();
+  const separatorIndex = trimmed.indexOf("::");
+  if (separatorIndex < 0) {
+    return null;
+  }
+  const countryCode = trimmed.slice(0, separatorIndex).trim().toUpperCase();
+  const city = trimmed.slice(separatorIndex + 2).trim();
+  if (!countryCode || !city) {
+    return null;
+  }
+  return { countryCode, city };
+}
+
+export function formatTimestamp(epoch?: number | null) {
   if (!epoch) {
     return t("Never");
   }
@@ -161,20 +179,36 @@ export function buildOpenSessionRequest(values: {
   };
 
   if (values.selectionMode === "geo") {
-    if (values.countryCodes.length > 0) {
-      request.country_codes = values.countryCodes;
+    const derivedCountryCodes = [...values.countryCodes];
+    const parsedCities = values.cities.map((value) => {
+      const parsed = parseCitySelectionToken(value);
+      if (parsed) {
+        derivedCountryCodes.push(parsed.countryCode);
+        return parsed.city;
+      }
+      return value;
+    });
+    const countryCodes = uniqueItems(derivedCountryCodes);
+    const cities = uniqueItems(parsedCities);
+
+    if (countryCodes.length > 0) {
+      request.country_codes = countryCodes;
     }
-    if (values.cities.length > 0) {
-      request.cities = values.cities;
+    if (cities.length > 0) {
+      request.cities = cities;
     }
   }
 
-  if (values.selectionMode === "ip" && values.specifiedIps.length > 0) {
-    request.specified_ips = values.specifiedIps;
+  if (values.selectionMode === "ip") {
+    const specifiedIps = uniqueItems(values.specifiedIps);
+    if (specifiedIps.length > 0) {
+      request.specified_ips = specifiedIps;
+    }
   }
 
-  if (values.excludedIps.length > 0) {
-    request.excluded_ips = values.excludedIps;
+  const excludedIps = uniqueItems(values.excludedIps);
+  if (excludedIps.length > 0) {
+    request.excluded_ips = excludedIps;
   }
 
   const desiredPort = optionalNumber(values.desiredPort);
