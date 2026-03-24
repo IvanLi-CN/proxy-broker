@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { useI18n } from "@/i18n";
 import { formatTimestamp } from "@/lib/format";
 import type { ApiKeySummary, CreateApiKeyResponse, CurrentUserState } from "@/lib/types";
 
@@ -33,6 +34,7 @@ export function AccessControlCard({
   onCreateApiKey,
   onRevokeApiKey,
 }: AccessControlCardProps) {
+  const { locale, t } = useI18n();
   const [keyName, setKeyName] = useState("");
   const canManageKeys =
     currentUser.status === "resolved" &&
@@ -51,12 +53,13 @@ export function AccessControlCard({
     <Card className="border-border/70 bg-card/96 shadow-[0_20px_60px_-42px_rgba(15,23,42,0.5)]">
       <CardHeader className="space-y-3 border-b border-border/70 pb-5">
         <div className="text-[11px] font-semibold uppercase tracking-[0.32em] text-primary/80">
-          Access control
+          {t("Access control")}
         </div>
-        <CardTitle className="text-xl tracking-tight">Identity and project keys</CardTitle>
+        <CardTitle className="text-xl tracking-tight">{t("Identity and project keys")}</CardTitle>
         <CardDescription className="text-sm leading-6 text-muted-foreground">
-          Forward Auth only tells the backend who the operator is. Admin checks and profile-scoped
-          machine keys are enforced here.
+          {t(
+            "Forward Auth only tells the backend who the operator is. Admin checks and profile-scoped machine keys are enforced here.",
+          )}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5 pt-6">
@@ -65,11 +68,11 @@ export function AccessControlCard({
         {latestCreatedKey ? (
           <div className="space-y-3">
             <ActionResponsePanel
-              title="New API key issued"
-              description="Copy this secret now. The backend will only reveal it once."
+              title={t("New API key issued")}
+              description={t("Copy this secret now. The backend will only reveal it once.")}
               bullets={[
-                `profile ${latestCreatedKey.api_key.profile_id}`,
-                `prefix ${latestCreatedKey.api_key.prefix}`,
+                t("profile {profileId}", { profileId: latestCreatedKey.api_key.profile_id }),
+                t("prefix {prefix}", { prefix: latestCreatedKey.api_key.prefix }),
               ]}
             />
             <pre className="overflow-x-auto rounded-2xl border border-border/70 bg-background px-4 py-3 text-xs leading-6 text-foreground">
@@ -79,15 +82,15 @@ export function AccessControlCard({
         ) : null}
 
         <div className="space-y-3">
-          <div className="text-sm font-medium text-foreground">Create a profile key</div>
+          <div className="text-sm font-medium text-foreground">{t("Create a profile key")}</div>
           {!canManageKeys ? (
             <div className="rounded-2xl border border-dashed border-border/70 px-4 py-4 text-sm text-muted-foreground">
-              Machine keys can only be issued by an admin human or the development identity.
+              {t("Machine keys can only be issued by an admin human or the development identity.")}
             </div>
           ) : null}
           <div className="flex gap-3">
             <Input
-              aria-label="API key name"
+              aria-label={t("API key name")}
               placeholder="deploy-bot"
               value={keyName}
               onChange={(event) => setKeyName(event.target.value)}
@@ -97,33 +100,33 @@ export function AccessControlCard({
               onClick={() => void handleCreate()}
               disabled={creatingApiKey || !keyName.trim() || !canManageKeys}
             >
-              Create key
+              {t("Create key")}
             </Button>
           </div>
         </div>
 
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-3">
-            <div className="text-sm font-medium text-foreground">Issued keys</div>
+            <div className="text-sm font-medium text-foreground">{t("Issued keys")}</div>
             <Badge variant="outline" className="rounded-full px-3 py-1 font-mono text-[11px]">
-              {apiKeys.length} total
+              {t("{count} total", { count: apiKeys.length })}
             </Badge>
           </div>
           {apiKeysError ? (
             <ActionResponsePanel
-              title="Key inventory unavailable"
+              title={t("Key inventory unavailable")}
               tone="error"
               description={apiKeysError}
             />
           ) : null}
           {apiKeysLoading ? (
             <div className="rounded-2xl border border-dashed border-border/70 px-4 py-6 text-sm text-muted-foreground">
-              Loading issued keys...
+              {t("Loading issued keys...")}
             </div>
           ) : null}
           {!apiKeysLoading && apiKeys.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-border/70 px-4 py-6 text-sm text-muted-foreground">
-              No machine keys have been issued for this profile yet.
+              {t("No machine keys have been issued for this profile yet.")}
             </div>
           ) : null}
           {!apiKeysLoading && apiKeys.length > 0 ? (
@@ -143,11 +146,11 @@ export function AccessControlCard({
                     <div className="flex items-center gap-2">
                       {apiKey.revoked_at ? (
                         <Badge variant="secondary" className="rounded-full">
-                          revoked
+                          {t("revoked")}
                         </Badge>
                       ) : (
                         <Badge className="rounded-full bg-sky-500/15 text-sky-700 dark:text-sky-300">
-                          active
+                          {t("active")}
                         </Badge>
                       )}
                       <Button
@@ -161,16 +164,28 @@ export function AccessControlCard({
                         onClick={() => void onRevokeApiKey(apiKey.key_id)}
                       >
                         <Trash2Icon className="size-4" />
-                        Revoke
+                        {t("Revoke")}
                       </Button>
                     </div>
                   </div>
                   <div className="grid gap-1 text-xs leading-5 text-muted-foreground">
-                    <div>Created by {apiKey.created_by}</div>
-                    <div>Created {formatTimestamp(apiKey.created_at)}</div>
-                    <div>Last used {formatTimestamp(apiKey.last_used_at)}</div>
+                    <div>{t("Created by {subject}", { subject: apiKey.created_by })}</div>
+                    <div>
+                      {t("Created {value}", {
+                        value: formatTimestamp(locale, t, apiKey.created_at),
+                      })}
+                    </div>
+                    <div>
+                      {t("Last used {value}", {
+                        value: formatTimestamp(locale, t, apiKey.last_used_at),
+                      })}
+                    </div>
                     {apiKey.revoked_at ? (
-                      <div>Revoked {formatTimestamp(apiKey.revoked_at)}</div>
+                      <div>
+                        {t("Revoked {value}", {
+                          value: formatTimestamp(locale, t, apiKey.revoked_at),
+                        })}
+                      </div>
                     ) : null}
                   </div>
                 </div>

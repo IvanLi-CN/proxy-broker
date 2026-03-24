@@ -77,6 +77,25 @@ separate Vite and Storybook workflow for local development.
 - shadcn primitives added to the repo are treated as first-class components and
   must be documented like custom components.
 
+## Localization
+
+- The operator UI ships with two supported locales:
+  - `en-US` as the baseline catalog
+  - `zh-CN` for Simplified Chinese (Mainland China)
+- Locale resolution order is fixed:
+  - persisted browser preference from `proxy-broker.locale`
+  - browser language detection (`zh*` resolves to `zh-CN`)
+  - fallback to `en-US`
+- The active locale must update:
+  - the app translation context
+  - `document.documentElement.lang`
+  - locale-aware date/time and number formatting
+- The language switcher lives in the application shell footer beside the theme
+  control and must switch immediately without a full page reload.
+- Known backend error codes, task kinds, task stages, task statuses, and task
+  triggers are localized in the frontend. Unknown backend free-text messages
+  stay visible as raw strings rather than being hidden or replaced.
+
 ## Storybook Contract
 
 - Story files are colocated with each component or page as `*.stories.tsx`.
@@ -108,8 +127,11 @@ separate Vite and Storybook workflow for local development.
   - query client
   - toast/provider context
   - a stable theme shell
+  - locale context with toolbar controls for `theme` and `locale`
 - A Bun verification script must fail CI when a covered component/page has no
   story or when a story file is missing autodocs metadata.
+- App shell and route-level page stories must expose stable `zh-CN` variants or
+  explicit `globals.locale = "zh-CN"` presets so screenshots are reproducible.
 
 ## Visual Direction
 
@@ -125,25 +147,47 @@ separate Vite and Storybook workflow for local development.
   - desktop-first split panels and data cards
   - mobile collapses into stacked sections with no hidden critical actions
 
-## Interface Snapshots
+## Visual Evidence
 
-### Overview Console
+### App Shell Locale Controls
 
-![Overview console](assets/web-admin-ui/overview-console.png)
+![App shell locale controls](assets/web-admin-ui/appshell-zh-cn.png)
 
-- Primary operator landing view with profile context, health summary, and the subscription load workflow.
+- Storybook source: `Components/AppShell > ZhCN`
+- Confirms the footer language switcher sits beside the theme control and the
+  surrounding chrome localizes to `zh-CN`.
 
-### IP Extract Workspace
+### Overview Page (`zh-CN`)
 
-![IP extract workspace](assets/web-admin-ui/ip-extract-console.png)
+![Overview page zh-CN](assets/web-admin-ui/overviewpage-zh-cn.png)
 
-- Filter-driven extraction screen showing candidate IP rows with probe and location metadata.
+- Storybook source: `Pages/OverviewPage > ZhCN`
+- Confirms the overview shell, workflow guidance, forms, alerts, and access
+  control surfaces render in Simplified Chinese.
 
-### Sessions Workspace
+### Tasks Page (`zh-CN`)
 
-![Sessions workspace](assets/web-admin-ui/sessions-console.png)
+![Tasks page zh-CN](assets/web-admin-ui/taskspage-zh-cn.png)
 
-- Session operations view with open controls and the live session table used for close actions.
+- Storybook source: `Pages/TasksPage > ZhCN`
+- Confirms task summaries, filters, run tables, detail rails, and localized
+  task enums/error shells render in Simplified Chinese.
+
+### IP Extract Page (`zh-CN`)
+
+![IP extract page zh-CN](assets/web-admin-ui/ipextractpage-zh-cn.png)
+
+- Storybook source: `Pages/IpExtractPage > ZhCN`
+- Confirms filter form copy, request summaries, table labels, and locale-aware
+  timestamps/latency formatting render in Simplified Chinese.
+
+### Sessions Page (`zh-CN`)
+
+![Sessions page zh-CN](assets/web-admin-ui/sessionspage-zh-cn.png)
+
+- Storybook source: `Pages/SessionsPage > ZhCN`
+- Confirms session forms, explanatory copy, live listener controls, and date
+  formatting render in Simplified Chinese.
 
 ## Build and Tooling
 
@@ -194,6 +238,12 @@ separate Vite and Storybook workflow for local development.
 - The built SPA is reachable from the Rust server root in production.
 - URL subscription loads work with upstream providers that gate Clash/Mihomo
   payloads on the request UA, without changing the UI payload shape.
+- The UI chooses between `en-US` and `zh-CN` using persisted preference first,
+  then browser language detection, and keeps the selected locale stable across
+  reloads and route changes.
+- The app shell exposes a language switcher, keeps `<html lang>` in sync with
+  the active locale, and localizes known backend error/task enums without
+  changing API contracts.
 - Every committed UI component/page in scope has Storybook docs and stories.
 - CI rejects missing stories or missing autodocs metadata.
 - The repo remains Bun-first for frontend workflows and Cargo-first for backend

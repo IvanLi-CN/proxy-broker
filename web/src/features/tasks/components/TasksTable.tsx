@@ -9,6 +9,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useI18n } from "@/i18n";
+import { formatTaskErrorMessage } from "@/lib/error-messages";
 import { formatTimestamp } from "@/lib/format";
 import {
   formatTaskKind,
@@ -36,12 +38,18 @@ const statusTone = {
 } as const;
 
 export function TasksTable({ runs, isLoading, selectedRunId, onSelectRun }: TasksTableProps) {
+  const { locale, t } = useI18n();
+
   if (!runs.length && !isLoading) {
     return (
       <div className="rounded-[24px] border border-dashed border-border/70 bg-muted/10 px-6 py-12 text-center">
-        <div className="text-base font-semibold text-foreground">No task runs match this view</div>
+        <div className="text-base font-semibold text-foreground">
+          {t("No task runs match this view")}
+        </div>
         <div className="mt-2 text-sm leading-6 text-muted-foreground">
-          Narrow the filters less aggressively or wait for the next scheduled subscription sync.
+          {t(
+            "Narrow the filters less aggressively or wait for the next scheduled subscription sync.",
+          )}
         </div>
       </div>
     );
@@ -51,13 +59,13 @@ export function TasksTable({ runs, isLoading, selectedRunId, onSelectRun }: Task
     <Table className="min-w-[980px]">
       <TableHeader>
         <TableRow className="border-b border-border/70 bg-muted/20">
-          <TableHead className="px-4">Profile</TableHead>
-          <TableHead>Task</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead>Stage</TableHead>
-          <TableHead>Progress</TableHead>
-          <TableHead>Latest note</TableHead>
-          <TableHead className="pr-4 text-right">Timeline</TableHead>
+          <TableHead className="px-4">{t("Profile")}</TableHead>
+          <TableHead>{t("Task")}</TableHead>
+          <TableHead>{t("Status")}</TableHead>
+          <TableHead>{t("Stage")}</TableHead>
+          <TableHead>{t("Progress")}</TableHead>
+          <TableHead>{t("Latest note")}</TableHead>
+          <TableHead className="pr-4 text-right">{t("Timeline")}</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -76,10 +84,10 @@ export function TasksTable({ runs, isLoading, selectedRunId, onSelectRun }: Task
             <TableCell>
               <div className="space-y-1">
                 <div className="text-sm font-semibold text-foreground">
-                  {formatTaskKind(run.kind)}
+                  {formatTaskKind(run.kind, t)}
                 </div>
                 <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                  {formatTaskTrigger(run.trigger)}
+                  {formatTaskTrigger(run.trigger, t)}
                 </div>
               </div>
             </TableCell>
@@ -88,26 +96,25 @@ export function TasksTable({ runs, isLoading, selectedRunId, onSelectRun }: Task
                 variant="outline"
                 className={`rounded-full px-3 py-1 text-[11px] ${statusTone[run.status]}`}
               >
-                {formatTaskStatus(run.status)}
+                {formatTaskStatus(run.status, t)}
               </Badge>
             </TableCell>
             <TableCell className="text-sm text-muted-foreground">
-              {formatTaskStage(run.stage)}
+              {formatTaskStage(run.stage, t)}
             </TableCell>
             <TableCell className="font-mono text-xs md:text-sm">
-              {formatTaskProgress(run.progress_current, run.progress_total)}
+              {formatTaskProgress(locale, t, run.progress_current, run.progress_total)}
             </TableCell>
             <TableCell className="max-w-[260px] text-sm text-muted-foreground">
-              {run.error_message ??
-                (typeof run.summary_json?.reason === "string"
-                  ? String(run.summary_json.reason)
-                  : "Open the event stream for the full run log.")}
+              {run.error_code || run.error_message || typeof run.summary_json?.reason === "string"
+                ? formatTaskErrorMessage(run, t)
+                : t("Open the event stream for the full run log.")}
             </TableCell>
             <TableCell className="pr-4 text-right">
               <div className="space-y-1 text-xs text-muted-foreground">
-                <div>{formatTimestamp(run.started_at ?? run.created_at)}</div>
+                <div>{formatTimestamp(locale, t, run.started_at ?? run.created_at)}</div>
                 <div className="inline-flex items-center gap-1 font-medium text-primary">
-                  Inspect
+                  {t("Inspect")}
                   <ArrowRightIcon className="size-3.5" />
                 </div>
               </div>

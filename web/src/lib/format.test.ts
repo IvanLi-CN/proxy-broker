@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { buildExtractRequest, buildOpenSessionRequest, splitListInput } from "@/lib/format";
+import { zhCN } from "@/i18n/messages/zh-CN";
+import {
+  buildExtractRequest,
+  buildOpenSessionRequest,
+  formatLatency,
+  formatTimestamp,
+  splitListInput,
+} from "@/lib/format";
+
+const t = (message: string) => zhCN[message] ?? message;
 
 describe("splitListInput", () => {
   it("accepts commas and newlines", () => {
@@ -53,5 +62,36 @@ describe("buildOpenSessionRequest", () => {
         sort_mode: "mru",
       },
     });
+  });
+});
+
+describe("formatTimestamp", () => {
+  it("uses the requested locale for timestamps", () => {
+    const epoch = 1_735_689_600;
+
+    expect(formatTimestamp("en-US", t, epoch)).toBe(
+      new Intl.DateTimeFormat("en-US", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(epoch * 1000),
+    );
+    expect(formatTimestamp("zh-CN", t, epoch)).toBe(
+      new Intl.DateTimeFormat("zh-CN", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(epoch * 1000),
+    );
+  });
+
+  it("falls back to a translated Never label for empty values", () => {
+    expect(formatTimestamp("zh-CN", t, null)).toBe("从未");
+  });
+});
+
+describe("formatLatency", () => {
+  it("formats latency with locale-aware numbers", () => {
+    expect(formatLatency("zh-CN", t, 12345)).toBe(
+      `${new Intl.NumberFormat("zh-CN").format(12345)} ms`,
+    );
   });
 });

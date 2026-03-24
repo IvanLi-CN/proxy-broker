@@ -3,14 +3,14 @@ import { useEffect, useRef } from "react";
 import { useOutletContext } from "react-router-dom";
 import { toast } from "sonner";
 
-import { ApiError, api } from "@/lib/api";
+import { useI18n } from "@/i18n";
+import { api } from "@/lib/api";
+import { formatApiErrorMessage } from "@/lib/error-messages";
 import { SessionsPage } from "@/pages/SessionsPage";
 import type { RootOutletContext } from "@/routes/RootRoute";
 
-const getErrorMessage = (error: unknown) =>
-  error instanceof ApiError ? `${error.code}: ${error.message}` : "Unexpected request error";
-
 export function SessionsRoute() {
+  const { t } = useI18n();
   const { profileId } = useOutletContext<RootOutletContext>();
   const previousProfileId = useRef(profileId);
   const queryClient = useQueryClient();
@@ -24,28 +24,28 @@ export function SessionsRoute() {
     mutationFn: (payload: Parameters<typeof api.openSession>[1]) =>
       api.openSession(profileId, payload),
     onSuccess: async (data) => {
-      toast.success(`Opened ${data.listen}`);
+      toast.success(t("Opened {listen}", { listen: data.listen }));
       await queryClient.invalidateQueries({ queryKey: ["sessions", profileId] });
     },
-    onError: (error) => toast.error(getErrorMessage(error)),
+    onError: (error) => toast.error(formatApiErrorMessage(error, t)),
   });
 
   const batchMutation = useMutation({
     mutationFn: (payload: Parameters<typeof api.openBatch>[1]) => api.openBatch(profileId, payload),
     onSuccess: async (data) => {
-      toast.success(`Opened ${data.sessions.length} sessions in batch`);
+      toast.success(t("Opened {count} sessions in batch", { count: data.sessions.length }));
       await queryClient.invalidateQueries({ queryKey: ["sessions", profileId] });
     },
-    onError: (error) => toast.error(getErrorMessage(error)),
+    onError: (error) => toast.error(formatApiErrorMessage(error, t)),
   });
 
   const closeMutation = useMutation({
     mutationFn: (sessionId: string) => api.closeSession(profileId, sessionId),
     onSuccess: async (_, sessionId) => {
-      toast.success(`Closed ${sessionId}`);
+      toast.success(t("Closed {sessionId}", { sessionId }));
       await queryClient.invalidateQueries({ queryKey: ["sessions", profileId] });
     },
-    onError: (error) => toast.error(getErrorMessage(error)),
+    onError: (error) => toast.error(formatApiErrorMessage(error, t)),
   });
 
   const { reset: resetOpenMutation } = openMutation;
@@ -64,7 +64,7 @@ export function SessionsRoute() {
 
   return (
     <SessionsPage
-      batchError={batchMutation.isError ? getErrorMessage(batchMutation.error) : null}
+      batchError={batchMutation.isError ? formatApiErrorMessage(batchMutation.error, t) : null}
       batchOpening={batchMutation.isPending}
       batchResponse={batchMutation.data ?? null}
       closingSessionId={closeMutation.isPending ? closeMutation.variables : null}
@@ -77,7 +77,7 @@ export function SessionsRoute() {
       onOpenSession={async (payload) => {
         await openMutation.mutateAsync(payload);
       }}
-      openError={openMutation.isError ? getErrorMessage(openMutation.error) : null}
+      openError={openMutation.isError ? formatApiErrorMessage(openMutation.error, t) : null}
       openResponse={openMutation.data ?? null}
       opening={openMutation.isPending}
       sessions={sessionsQuery.data?.sessions ?? []}

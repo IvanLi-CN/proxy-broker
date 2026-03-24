@@ -1,3 +1,4 @@
+import type { Locale, Translator } from "@/i18n";
 import type {
   TaskEventLevel,
   TaskRunKind,
@@ -6,74 +7,80 @@ import type {
   TaskRunTrigger,
 } from "@/lib/types";
 
-export function formatTaskKind(kind: TaskRunKind) {
+export function formatTaskKind(kind: TaskRunKind, t: Translator) {
   switch (kind) {
     case "subscription_sync":
-      return "Subscription sync";
+      return t("Subscription sync");
     case "metadata_refresh_incremental":
-      return "Incremental refresh";
+      return t("Incremental refresh");
     case "metadata_refresh_full":
-      return "Full refresh";
+      return t("Full refresh");
   }
 }
 
-export function formatTaskTrigger(trigger: TaskRunTrigger) {
+export function formatTaskTrigger(trigger: TaskRunTrigger, t: Translator) {
   switch (trigger) {
     case "schedule":
-      return "Scheduled";
+      return t("Scheduled");
     case "post_load":
-      return "Post-load";
+      return t("Post-load");
   }
 }
 
-export function formatTaskStatus(status: TaskRunStatus) {
+export function formatTaskStatus(status: TaskRunStatus, t: Translator) {
   switch (status) {
     case "queued":
-      return "Queued";
+      return t("Queued");
     case "running":
-      return "Running";
+      return t("Running");
     case "succeeded":
-      return "Succeeded";
+      return t("Succeeded");
     case "failed":
-      return "Failed";
+      return t("Failed");
     case "skipped":
-      return "Skipped";
+      return t("Skipped");
   }
 }
 
-export function formatTaskStage(stage: TaskRunStage) {
+export function formatTaskStage(stage: TaskRunStage, t: Translator) {
   switch (stage) {
     case "queued":
-      return "Queued";
+      return t("Queued");
     case "loading_subscription":
-      return "Loading subscription";
+      return t("Loading subscription");
     case "diffing_inventory":
-      return "Diffing inventory";
+      return t("Diffing inventory");
     case "probing":
-      return "Probing";
+      return t("Probing");
     case "geo_enrichment":
-      return "Geo enrichment";
+      return t("Geo enrichment");
     case "persisting":
-      return "Persisting";
+      return t("Persisting");
     case "completed":
-      return "Completed";
+      return t("Completed");
   }
 }
 
-export function formatTaskEventLevel(level: TaskEventLevel) {
+export function formatTaskEventLevel(level: TaskEventLevel, t: Translator) {
   switch (level) {
     case "info":
-      return "Info";
+      return t("Info");
     case "warning":
-      return "Warning";
+      return t("Warning");
     case "error":
-      return "Error";
+      return t("Error");
   }
 }
 
-export function formatTaskProgress(current?: number | null, total?: number | null) {
+export function formatTaskProgress(
+  locale: Locale,
+  t: Translator,
+  current?: number | null,
+  total?: number | null,
+) {
+  const formatter = new Intl.NumberFormat(locale);
   if (total == null) {
-    return current != null ? `${current}` : "N/A";
+    return current != null ? formatter.format(current) : t("N/A");
   }
-  return `${current ?? 0}/${total}`;
+  return `${formatter.format(current ?? 0)}/${formatter.format(total)}`;
 }

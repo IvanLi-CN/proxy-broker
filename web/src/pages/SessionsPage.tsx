@@ -10,6 +10,7 @@ import { WorkflowRail } from "@/components/WorkflowRail";
 import { OpenBatchForm } from "@/features/sessions/components/OpenBatchForm";
 import { OpenSessionForm } from "@/features/sessions/components/OpenSessionForm";
 import { SessionsTable } from "@/features/sessions/components/SessionsTable";
+import { useI18n } from "@/i18n";
 import type {
   OpenBatchRequest,
   OpenBatchResponse,
@@ -47,6 +48,7 @@ export function SessionsPage({
   onOpenBatch,
   onCloseSession,
 }: SessionsPageProps) {
+  const { formatNumber, t } = useI18n();
   const newestSession = sessions.reduce<SessionRecord | null>(
     (latest, session) => (latest && latest.created_at > session.created_at ? latest : session),
     null,
@@ -56,39 +58,45 @@ export function SessionsPage({
   return (
     <div className="space-y-8">
       <RouteHero
-        eyebrow="Sessions"
-        title="Turn shortlists into live listeners without losing the current picture."
-        description="Open one deterministic listener or stage a transactional batch, then keep the live listener deck in view so teardown decisions stay fast and low-risk."
+        eyebrow={t("Sessions")}
+        title={t("Sessions hero title")}
+        description={t("Sessions hero description")}
         badges={[
           {
-            label: `${sessions.length} live listeners`,
+            label: t("{count} live listeners", { count: formatNumber(sessions.length) }),
             tone: sessions.length > 0 ? "positive" : "neutral",
           },
           {
-            label: opening || batchOpening ? "open request active" : "open deck idle",
+            label: opening || batchOpening ? t("open request active") : t("open deck idle"),
             tone: opening || batchOpening ? "warning" : "positive",
           },
           {
-            label: closingSessionId ? `closing ${closingSessionId}` : "no close in flight",
+            label: closingSessionId
+              ? t("closing {sessionId}", { sessionId: closingSessionId })
+              : t("no close in flight"),
             tone: closingSessionId ? "warning" : "neutral",
           },
         ]}
         aside={
           <WorkflowRail
-            eyebrow="Operating rule"
-            title="Treat listeners like inventory"
+            eyebrow={t("Operating rule")}
+            title={t("Treat listeners like inventory")}
             steps={[
               {
-                title: "Open deliberately",
-                description: "Prefer one explicit listener when the target edge is already known.",
+                title: t("Open deliberately"),
+                description: t(
+                  "Prefer one explicit listener when the target edge is already known.",
+                ),
               },
               {
-                title: "Use batch when rollback matters",
-                description: "Stage multiple rows only when they form one logical operation.",
+                title: t("Use batch when rollback matters"),
+                description: t("Stage multiple rows only when they form one logical operation."),
               },
               {
-                title: "Close stale listeners quickly",
-                description: "Keep the live list small so ports and edge ownership stay obvious.",
+                title: t("Close stale listeners quickly"),
+                description: t(
+                  "Keep the live list small so ports and edge ownership stay obvious.",
+                ),
               },
             ]}
           />
@@ -101,11 +109,11 @@ export function SessionsPage({
             <TabsList className="grid w-full grid-cols-2 rounded-2xl border border-border/70 bg-card/80 p-1">
               <TabsTrigger value="single" className="gap-2 rounded-xl">
                 <BinaryIcon className="size-4" />
-                Single session
+                {t("Single session")}
               </TabsTrigger>
               <TabsTrigger value="batch" className="gap-2 rounded-xl">
                 <Rows3Icon className="size-4" />
-                Batch open
+                {t("Batch open")}
               </TabsTrigger>
             </TabsList>
             <TabsContent value="single" className="mt-0">
@@ -129,25 +137,29 @@ export function SessionsPage({
           <Card className="border-border/70 bg-card/96 shadow-[0_20px_60px_-42px_rgba(15,23,42,0.5)]">
             <CardHeader className="space-y-3 border-b border-border/70 pb-5">
               <div className="text-[11px] font-semibold uppercase tracking-[0.32em] text-primary/80">
-                Control note
+                {t("Control note")}
               </div>
-              <CardTitle className="text-xl tracking-tight">Listener hygiene matters</CardTitle>
+              <CardTitle className="text-xl tracking-tight">
+                {t("Listener hygiene matters")}
+              </CardTitle>
               <CardDescription className="text-sm leading-6 text-muted-foreground">
-                Ports and proxy edges are operational resources. The cleaner this deck stays, the
-                easier it is to understand what the profile is actually doing.
+                {t(
+                  "Ports and proxy edges are operational resources. The cleaner this deck stays, the easier it is to understand what the profile is actually doing.",
+                )}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 pt-6">
               <div className="rounded-2xl border border-border/70 bg-background/80 p-4 text-sm leading-6 text-muted-foreground">
-                Use the single-session form when you need one deterministic listener quickly. Switch
-                to batch only when several ports must succeed or fail together.
+                {t(
+                  "Use the single-session form when you need one deterministic listener quickly. Switch to batch only when several ports must succeed or fail together.",
+                )}
               </div>
               {newestListen ? (
                 <Badge
                   variant="outline"
                   className="rounded-full px-3 py-1 font-mono text-[11px] uppercase tracking-[0.16em]"
                 >
-                  newest listen {newestListen}
+                  {t("newest listen {listen}", { listen: newestListen })}
                 </Badge>
               ) : null}
             </CardContent>
@@ -156,16 +168,24 @@ export function SessionsPage({
 
         <div className="space-y-4">
           {batchError && !batchResponse ? (
-            <ActionResponsePanel title="Batch open error" description={batchError} tone="error" />
+            <ActionResponsePanel
+              title={t("Batch open error")}
+              description={batchError}
+              tone="error"
+            />
           ) : null}
           <DataTablePanel
-            eyebrow="Live listener deck"
-            title="Active listeners"
-            description="The table refreshes every five seconds while you stay on this route, so the deck mirrors the backend's current session inventory."
+            eyebrow={t("Live listener deck")}
+            title={t("Active listeners")}
+            description={t(
+              "The table refreshes every five seconds while you stay on this route, so the deck mirrors the backend's current session inventory.",
+            )}
             chips={[
-              `${sessions.length} live row${sessions.length === 1 ? "" : "s"}`,
-              sessionsLoading ? "polling now" : "polling every 5s",
-              closingSessionId ? "close action in flight" : "close deck idle",
+              t(sessions.length === 1 ? "{count} live row" : "{count} live rows", {
+                count: formatNumber(sessions.length),
+              }),
+              sessionsLoading ? t("polling now") : t("polling every 5s"),
+              closingSessionId ? t("close action in flight") : t("close deck idle"),
             ]}
             actions={
               <Badge
@@ -173,7 +193,7 @@ export function SessionsPage({
                 className="rounded-full px-3 py-1 font-mono text-[11px] uppercase tracking-[0.16em]"
               >
                 <ShieldCheckIcon className="mr-1 size-3.5" />
-                live control
+                {t("live control")}
               </Badge>
             }
           >

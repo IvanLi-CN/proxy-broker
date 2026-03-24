@@ -53,6 +53,13 @@ export const Default: Story = {
   args: {},
 };
 
+export const ZhCN: Story = {
+  args: {},
+  globals: {
+    locale: "zh-CN",
+  },
+};
+
 export const Anonymous: Story = {
   args: {
     currentUser: {

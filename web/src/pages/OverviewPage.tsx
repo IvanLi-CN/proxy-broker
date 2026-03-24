@@ -9,6 +9,7 @@ import { AccessControlCard } from "@/features/overview/components/AccessControlC
 import { HealthSummaryCard } from "@/features/overview/components/HealthSummaryCard";
 import { RefreshCard } from "@/features/overview/components/RefreshCard";
 import { SubscriptionFormCard } from "@/features/overview/components/SubscriptionFormCard";
+import { useI18n } from "@/i18n";
 import type {
   ApiKeySummary,
   CreateApiKeyResponse,
@@ -42,27 +43,6 @@ interface OverviewPageProps {
   onRevokeApiKey: (keyId: string) => void | Promise<void>;
 }
 
-const operatorChecklist = [
-  "Load a new feed whenever the upstream provider changes or rotates nodes.",
-  "Refresh probes before extracting IPs if geo labels or latency look stale.",
-  "Warnings are operator hints: review them before opening long-lived sessions.",
-];
-
-const recommendedFlow = [
-  {
-    title: "Refresh inventory",
-    description: "Load the newest upstream feed into the active profile before anything else.",
-  },
-  {
-    title: "Re-probe the edges",
-    description: "Update geo and latency metadata so the next extract is based on current facts.",
-  },
-  {
-    title: "Drill down with intent",
-    description: "Extract candidates, then open only the listeners that still look worth holding.",
-  },
-];
-
 export function OverviewPage({
   health,
   activeSessions,
@@ -84,29 +64,62 @@ export function OverviewPage({
   onCreateApiKey,
   onRevokeApiKey,
 }: OverviewPageProps) {
+  const { formatNumber, t } = useI18n();
   const hasWarnings = Boolean(loadResponse?.warnings.length);
+  const operatorChecklist = [
+    t("Load a new feed whenever the upstream provider changes or rotates nodes."),
+    t("Refresh probes before extracting IPs if geo labels or latency look stale."),
+    t("Warnings are operator hints: review them before opening long-lived sessions."),
+  ];
+  const recommendedFlow = [
+    {
+      title: t("Refresh inventory"),
+      description: t("Load the newest upstream feed into the active profile before anything else."),
+    },
+    {
+      title: t("Re-probe the edges"),
+      description: t(
+        "Update geo and latency metadata so the next extract is based on current facts.",
+      ),
+    },
+    {
+      title: t("Drill down with intent"),
+      description: t(
+        "Extract candidates, then open only the listeners that still look worth holding.",
+      ),
+    },
+  ];
 
   return (
     <div className="space-y-8">
       <RouteHero
-        eyebrow="Overview"
-        title="Run the operator plane like a control room, not a note pile."
-        description="This surface keeps the pool ingest path, health state, and next-step guidance visible at the same time so you can move from feed refresh to listener orchestration without second-guessing the basics."
+        eyebrow={t("Overview")}
+        title={t("Overview hero title")}
+        description={t("Overview hero description")}
         badges={[
           {
-            label: health.status === "ok" ? "service healthy" : "service review",
+            label: health.status === "ok" ? t("service healthy") : t("service review"),
             tone: health.status === "ok" ? "positive" : "warning",
           },
-          { label: `${activeSessions} active sessions`, tone: "neutral" },
+          {
+            label: t("{count} active sessions", { count: formatNumber(activeSessions) }),
+            tone: "neutral",
+          },
           {
             label: hasWarnings
-              ? `${loadResponse?.warnings.length ?? 0} warnings queued`
-              : "warnings clear",
+              ? t("{count} warnings queued", {
+                  count: formatNumber(loadResponse?.warnings.length ?? 0),
+                })
+              : t("warnings clear"),
             tone: hasWarnings ? "warning" : "positive",
           },
         ]}
         aside={
-          <WorkflowRail eyebrow="Run order" title="Keep the runway clean" steps={recommendedFlow} />
+          <WorkflowRail
+            eyebrow={t("Run order")}
+            title={t("Keep the runway clean")}
+            steps={recommendedFlow}
+          />
         }
       />
 
@@ -138,14 +151,15 @@ export function OverviewPage({
           <Card className="border-border/70 bg-card/96 shadow-[0_20px_60px_-42px_rgba(15,23,42,0.5)]">
             <CardHeader className="space-y-3 border-b border-border/70 pb-5">
               <div className="text-[11px] font-semibold uppercase tracking-[0.32em] text-primary/80">
-                Operator checklist
+                {t("Operator checklist")}
               </div>
               <CardTitle className="text-xl tracking-tight">
-                What to verify before touching the pool
+                {t("What to verify before touching the pool")}
               </CardTitle>
               <CardDescription className="text-sm leading-6 text-muted-foreground">
-                Keep this rail practical. It should help you decide what to do next without stealing
-                focus from the two primary actions.
+                {t(
+                  "Keep this rail practical. It should help you decide what to do next without stealing focus from the two primary actions.",
+                )}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 pt-6">
@@ -164,12 +178,13 @@ export function OverviewPage({
           <Card className="border-border/70 bg-card/96 shadow-[0_20px_60px_-42px_rgba(15,23,42,0.5)]">
             <CardHeader className="space-y-3 border-b border-border/70 pb-5">
               <div className="text-[11px] font-semibold uppercase tracking-[0.32em] text-primary/80">
-                Latest state
+                {t("Latest state")}
               </div>
-              <CardTitle className="text-xl tracking-tight">Run summary</CardTitle>
+              <CardTitle className="text-xl tracking-tight">{t("Run summary")}</CardTitle>
               <CardDescription className="text-sm leading-6 text-muted-foreground">
-                These notes help you tell whether the page is ready for extraction or still needs an
-                extra review pass.
+                {t(
+                  "These notes help you tell whether the page is ready for extraction or still needs an extra review pass.",
+                )}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 pt-6">
@@ -177,27 +192,31 @@ export function OverviewPage({
                 <div className="rounded-2xl border border-border/70 bg-background/80 p-4 shadow-sm">
                   <div className="flex items-center gap-2 text-sm font-medium text-foreground">
                     <CircleCheckBigIcon className="size-4 text-emerald-500" />
-                    Service health polling is live
+                    {t("Service health polling is live")}
                   </div>
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                    /healthz updates every 10 seconds and feeds the command strip above.
+                    {t("/healthz updates every 10 seconds and feeds the command strip above.")}
                   </p>
                 </div>
                 <div className="rounded-2xl border border-border/70 bg-background/80 p-4 shadow-sm">
                   <div className="flex items-center gap-2 text-sm font-medium text-foreground">
                     <CircleAlertIcon className="size-4 text-amber-500" />
-                    File-mode sources resolve on the host
+                    {t("File-mode sources resolve on the host")}
                   </div>
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                    Browser uploads are not involved here. Use a path visible to the Rust service.
+                    {t(
+                      "Browser uploads are not involved here. Use a path visible to the Rust service.",
+                    )}
                   </p>
                 </div>
               </div>
               {loadResponse?.warnings.length ? (
                 <ActionResponsePanel
-                  title="Subscription warnings"
+                  title={t("Subscription warnings")}
                   tone="warning"
-                  description="The backend loaded the subscription, but some records still need operator attention before you keep drilling down."
+                  description={t(
+                    "The backend loaded the subscription, but some records still need operator attention before you keep drilling down.",
+                  )}
                   bullets={loadResponse.warnings}
                 />
               ) : null}
@@ -206,7 +225,7 @@ export function OverviewPage({
                   variant="outline"
                   className="rounded-full px-3 py-1 font-mono text-[11px] uppercase tracking-[0.16em]"
                 >
-                  latest load completed without warnings
+                  {t("latest load completed without warnings")}
                 </Badge>
               ) : null}
             </CardContent>

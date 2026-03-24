@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { useI18n } from "@/i18n";
 import type { RefreshRequest, RefreshResponse } from "@/lib/types";
 
 const schema = z.object({
@@ -25,6 +26,7 @@ interface RefreshCardProps {
 }
 
 export function RefreshCard({ isPending, response, error, onSubmit }: RefreshCardProps) {
+  const { t } = useI18n();
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: { force: false },
@@ -36,22 +38,23 @@ export function RefreshCard({ isPending, response, error, onSubmit }: RefreshCar
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="space-y-2">
             <div className="text-[11px] font-semibold uppercase tracking-[0.32em] text-primary/80">
-              Probe refresh
+              {t("Probe refresh")}
             </div>
             <CardTitle className="flex items-center gap-2 text-xl tracking-tight">
               <RefreshCwIcon className="size-5 text-primary" />
-              Refresh probes and geo hints
+              {t("Refresh probes and geo hints")}
             </CardTitle>
             <CardDescription className="text-sm leading-6 text-muted-foreground md:text-[15px]">
-              Use this when latency or geo attribution feels stale. The refresh updates operator
-              hints without changing profile identity.
+              {t(
+                "Use this when latency or geo attribution feels stale. The refresh updates operator hints without changing profile identity.",
+              )}
             </CardDescription>
           </div>
           <Badge
             variant="outline"
             className="rounded-full px-3 py-1 font-mono text-[11px] uppercase tracking-[0.16em]"
           >
-            safe to repeat
+            {t("safe to repeat")}
           </Badge>
         </div>
       </CardHeader>
@@ -74,10 +77,11 @@ export function RefreshCard({ isPending, response, error, onSubmit }: RefreshCar
                   className="mt-1"
                 />
                 <div className="space-y-1.5">
-                  <Label htmlFor="force-refresh">Force refresh stale entries</Label>
+                  <Label htmlFor="force-refresh">{t("Force refresh stale entries")}</Label>
                   <p className="text-sm leading-6 text-muted-foreground">
-                    Ignore cached probe hints and attempt a full refresh for every matching IP when
-                    the current metadata looks suspiciously old.
+                    {t(
+                      "Ignore cached probe hints and attempt a full refresh for every matching IP when the current metadata looks suspiciously old.",
+                    )}
                   </p>
                 </div>
               </div>
@@ -85,10 +89,11 @@ export function RefreshCard({ isPending, response, error, onSubmit }: RefreshCar
           />
           <div className="grid gap-3 rounded-[28px] border border-border/70 bg-[linear-gradient(135deg,rgba(59,130,246,0.08),rgba(245,158,11,0.08))] p-4 md:grid-cols-[1fr_auto] md:items-center">
             <div className="space-y-1">
-              <div className="text-sm font-semibold text-foreground">Operator hint</div>
+              <div className="text-sm font-semibold text-foreground">{t("Operator hint")}</div>
               <p className="max-w-xl text-sm leading-6 text-muted-foreground">
-                If extracts suddenly return empty or geo labels look wrong, run this once before
-                assuming the feed itself is bad.
+                {t(
+                  "If extracts suddenly return empty or geo labels look wrong, run this once before assuming the feed itself is bad.",
+                )}
               </p>
             </div>
             <Button
@@ -98,18 +103,25 @@ export function RefreshCard({ isPending, response, error, onSubmit }: RefreshCar
               variant="secondary"
               className="min-w-48"
             >
-              {isPending ? "Refreshing..." : "Refresh metadata"}
+              {isPending ? t("Refreshing...") : t("Refresh metadata")}
             </Button>
           </div>
         </form>
         {response ? (
           <ActionResponsePanel
-            title="Refresh completed"
-            description={`Probed ${response.probed_ips} IPs, updated ${response.geo_updated} geo records, skipped ${response.skipped_cached} cached entries.`}
+            title={t("Refresh completed")}
+            description={t(
+              "Probed {probed} IPs, updated {geoUpdated} geo records, skipped {skipped} cached entries.",
+              {
+                probed: response.probed_ips,
+                geoUpdated: response.geo_updated,
+                skipped: response.skipped_cached,
+              },
+            )}
           />
         ) : null}
         {error ? (
-          <ActionResponsePanel title="Refresh failed" description={error} tone="error" />
+          <ActionResponsePanel title={t("Refresh failed")} description={error} tone="error" />
         ) : null}
       </CardContent>
     </Card>

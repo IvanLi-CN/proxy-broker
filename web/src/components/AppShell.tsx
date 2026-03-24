@@ -12,6 +12,7 @@ import type { ReactNode } from "react";
 import { NavLink } from "react-router-dom";
 
 import { CurrentUserSummary } from "@/components/CurrentUserSummary";
+import { LocaleSwitcher } from "@/components/LocaleSwitcher";
 import { ProfileSwitcher } from "@/components/ProfileSwitcher";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Badge } from "@/components/ui/badge";
@@ -32,6 +33,7 @@ import {
   SidebarSeparator,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
+import { useI18n } from "@/i18n";
 import type { CurrentUserState } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -49,33 +51,6 @@ interface AppShellProps {
   children?: ReactNode;
 }
 
-const navItems = [
-  {
-    to: "/",
-    label: "Overview",
-    icon: LayoutDashboardIcon,
-    meta: "Load feeds and refresh pool metadata",
-  },
-  {
-    to: "/tasks",
-    label: "Tasks",
-    icon: ClipboardListIcon,
-    meta: "Watch scheduled sync and metadata refresh runs",
-  },
-  {
-    to: "/ips",
-    label: "IP Extract",
-    icon: GlobeIcon,
-    meta: "Filter the pool down to candidate edges",
-  },
-  {
-    to: "/sessions",
-    label: "Sessions",
-    icon: RouteIcon,
-    meta: "Open, audit, and close live listeners",
-  },
-];
-
 export function AppShell({
   profileId,
   profiles,
@@ -89,7 +64,34 @@ export function AppShell({
   currentUser,
   children,
 }: AppShellProps) {
+  const { t } = useI18n();
   const isHealthy = (healthStatus ?? "").toLowerCase() === "ok";
+  const navItems = [
+    {
+      to: "/",
+      label: t("Overview"),
+      icon: LayoutDashboardIcon,
+      meta: t("Load feeds and refresh pool metadata"),
+    },
+    {
+      to: "/tasks",
+      label: t("Tasks"),
+      icon: ClipboardListIcon,
+      meta: t("Watch scheduled sync and metadata refresh runs"),
+    },
+    {
+      to: "/ips",
+      label: t("IP Extract"),
+      icon: GlobeIcon,
+      meta: t("Filter the pool down to candidate edges"),
+    },
+    {
+      to: "/sessions",
+      label: t("Sessions"),
+      icon: RouteIcon,
+      meta: t("Open, audit, and close live listeners"),
+    },
+  ];
 
   return (
     <SidebarProvider>
@@ -99,10 +101,10 @@ export function AppShell({
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <div className="text-[10px] font-semibold uppercase tracking-[0.32em] text-sidebar-foreground/62">
-                  Proxy broker
+                  {t("Proxy broker")}
                 </div>
                 <div className="mt-1 text-sm font-semibold tracking-[-0.02em] text-sidebar-foreground">
-                  Operator plane
+                  {t("Operator plane")}
                 </div>
               </div>
               <div className="rounded-xl border border-sidebar-border/80 bg-background/75 p-2.5">
@@ -123,7 +125,7 @@ export function AppShell({
         </SidebarHeader>
         <SidebarContent className="px-2 py-4">
           <SidebarGroup>
-            <SidebarGroupLabel>Workspace</SidebarGroupLabel>
+            <SidebarGroupLabel>{t("Workspace")}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
                 {navItems.map((item) => (
@@ -161,12 +163,12 @@ export function AppShell({
           </SidebarGroup>
           <SidebarSeparator />
           <SidebarGroup>
-            <SidebarGroupLabel>Runtime</SidebarGroupLabel>
+            <SidebarGroupLabel>{t("Runtime")}</SidebarGroupLabel>
             <SidebarGroupContent>
               <div className="space-y-3 rounded-[24px] border border-sidebar-border/80 bg-sidebar-accent/35 p-3 text-sidebar-foreground">
                 <div className="flex items-center gap-2 text-sm font-medium">
                   <ActivityIcon className="size-4 text-sidebar-primary" />
-                  Local API heartbeat
+                  {t("Local API heartbeat")}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge
@@ -176,26 +178,30 @@ export function AppShell({
                     {healthStatus.toUpperCase()}
                   </Badge>
                   <span className="text-xs text-sidebar-foreground/65">
-                    Refreshed from /healthz
+                    {t("Refreshed from /healthz")}
                   </span>
                 </div>
                 <div className="rounded-2xl border border-sidebar-border/80 bg-background/70 px-3 py-2 text-xs leading-5 text-sidebar-foreground/68">
-                  Use <span className="font-mono">cmd/ctrl + b</span> to collapse the sidebar when
-                  the tables need more room.
+                  {t("Use cmd/ctrl + b to collapse the sidebar when the tables need more room.")}
                 </div>
               </div>
             </SidebarGroupContent>
           </SidebarGroup>
         </SidebarContent>
         <SidebarFooter className="gap-3 rounded-[28px] border border-sidebar-border/80 bg-sidebar/96 px-3 py-4 shadow-[0_24px_60px_-40px_rgba(15,23,42,0.5)]">
-          <div className="flex items-center justify-between gap-3 rounded-2xl border border-sidebar-border/80 bg-sidebar-accent/35 px-3 py-3">
-            <div>
-              <div className="text-sm font-medium text-sidebar-foreground">Theme surface</div>
-              <div className="text-xs text-sidebar-foreground/60">
-                Light-first, still dark-safe.
+          <div className="space-y-3 rounded-2xl border border-sidebar-border/80 bg-sidebar-accent/35 px-3 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-medium text-sidebar-foreground">
+                  {t("Theme surface")}
+                </div>
+                <div className="text-xs text-sidebar-foreground/60">
+                  {t("Light-first, still dark-safe.")}
+                </div>
               </div>
+              <ThemeToggle />
             </div>
-            <ThemeToggle />
+            <LocaleSwitcher />
           </div>
           <Button
             asChild
@@ -204,7 +210,7 @@ export function AppShell({
           >
             <a href="https://ui.shadcn.com" rel="noreferrer" target="_blank">
               <RadioTowerIcon className="size-4" />
-              Inspect shadcn/ui system
+              {t("Inspect shadcn/ui system")}
             </a>
           </Button>
         </SidebarFooter>
@@ -215,10 +221,11 @@ export function AppShell({
             <SidebarTrigger className="border-border/70 bg-background/80 hover:bg-background" />
             <div>
               <div className="text-[11px] font-semibold uppercase tracking-[0.28em] text-muted-foreground">
-                Local operator plane
+                {t("Local operator plane")}
               </div>
-              <div className="text-sm font-medium text-foreground md:text-base">
-                Profile <span className="font-mono text-primary">{profileId}</span>
+              <div className="flex items-center gap-1 text-sm font-medium text-foreground md:text-base">
+                <span>{t("Profile")}</span>
+                <span className="font-mono">{profileId}</span>
               </div>
             </div>
           </div>

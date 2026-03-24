@@ -10,6 +10,7 @@ import { TaskFiltersBar } from "@/features/tasks/components/TaskFiltersBar";
 import { TaskRunDetailPanel } from "@/features/tasks/components/TaskRunDetailPanel";
 import { TaskSummaryCards } from "@/features/tasks/components/TaskSummaryCards";
 import { TasksTable } from "@/features/tasks/components/TasksTable";
+import { useI18n } from "@/i18n";
 import type {
   TaskListResponse,
   TaskRunDetail,
@@ -65,6 +66,7 @@ export function TasksPage({
   detailError,
   accessDenied = false,
 }: TasksPageProps) {
+  const { formatNumber, t } = useI18n();
   const runs = taskList?.runs ?? [];
   const summary = taskList?.summary ?? {
     total_runs: 0,
@@ -79,42 +81,46 @@ export function TasksPage({
   return (
     <div className="space-y-8">
       <RouteHero
-        eyebrow="Tasks"
-        title="Watch the subscription maintenance loop like a live board, not a blind cron."
-        description="This route turns the new automation layer into an operator-visible surface: sync cadence, metadata refresh pressure, failures, and per-run event streams all stay in one place."
+        eyebrow={t("Tasks")}
+        title={t("Tasks hero title")}
+        description={t("Tasks hero description")}
         badges={[
           {
-            label: `${summary.running_runs} running`,
+            label: t("{count} running", { count: formatNumber(summary.running_runs) }),
             tone: summary.running_runs > 0 ? "warning" : "neutral",
           },
           {
-            label: `${summary.failed_runs} failed`,
+            label: t("{count} failed", { count: formatNumber(summary.failed_runs) }),
             tone: summary.failed_runs > 0 ? "danger" : "positive",
           },
           {
-            label: scope === "current" ? `profile ${profileId}` : "all profiles",
+            label:
+              scope === "current" ? t("profile {profileId}", { profileId }) : t("all profiles"),
             tone: "neutral",
           },
         ]}
         aside={
           <WorkflowRail
-            eyebrow="Realtime loop"
-            title="How the board should be read"
+            eyebrow={t("Realtime loop")}
+            title={t("How the board should be read")}
             steps={[
               {
-                title: "Read the cadence",
-                description:
+                title: t("Read the cadence"),
+                description: t(
                   "Queued and running rows tell you whether the 10-minute sync lane is healthy.",
+                ),
               },
               {
-                title: "Inspect the stream",
-                description:
+                title: t("Inspect the stream"),
+                description: t(
                   "Open the selected run to read stage transitions and payload summaries without leaving the page.",
+                ),
               },
               {
-                title: "Treat failures as operator signals",
-                description:
+                title: t("Treat failures as operator signals"),
+                description: t(
                   "A failed run should explain whether the source fetch, probing, or geo enrichment stalled.",
+                ),
               },
             ]}
           />
@@ -123,8 +129,10 @@ export function TasksPage({
 
       {accessDenied ? (
         <ActionResponsePanel
-          title="Admin access required"
-          description="The task center is currently restricted to the admin operator plane and development principal."
+          title={t("Admin access required")}
+          description={t(
+            "The task center is currently restricted to the admin operator plane and development principal.",
+          )}
           tone="error"
         />
       ) : (
@@ -153,21 +161,25 @@ export function TasksPage({
               <RadioTowerIcon className="size-4 text-amber-600" />
               <AlertTitle>
                 {streamState === "connecting"
-                  ? "Connecting to the task stream"
-                  : "Task stream reconnecting"}
+                  ? t("Connecting to the task stream")
+                  : t("Task stream reconnecting")}
               </AlertTitle>
               <AlertDescription>
-                The page keeps the last snapshot visible while SSE catches up.
+                {t("The page keeps the last snapshot visible while SSE catches up.")}
               </AlertDescription>
             </Alert>
           ) : null}
 
           {taskError ? (
-            <ActionResponsePanel title="Task list failed" description={taskError} tone="error" />
+            <ActionResponsePanel
+              title={t("Task list failed")}
+              description={taskError}
+              tone="error"
+            />
           ) : null}
           {detailError ? (
             <ActionResponsePanel
-              title="Task detail failed"
+              title={t("Task detail failed")}
               description={detailError}
               tone="error"
             />
@@ -175,13 +187,19 @@ export function TasksPage({
 
           <section className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_420px]">
             <DataTablePanel
-              eyebrow="Run board"
-              title="Task history and current activity"
-              description="Rows are kept hot by SSE, so stage changes and result summaries land without polling."
+              eyebrow={t("Run board")}
+              title={t("Task history and current activity")}
+              description={t(
+                "Rows are kept hot by SSE, so stage changes and result summaries land without polling.",
+              )}
               chips={[
-                `${runs.length} visible run${runs.length === 1 ? "" : "s"}`,
-                runningOnly ? "running-only filter" : "history included",
-                selectedRunId ? `focused ${selectedRunId}` : "no run selected",
+                t(runs.length === 1 ? "{count} visible run" : "{count} visible runs", {
+                  count: formatNumber(runs.length),
+                }),
+                runningOnly ? t("running-only filter") : t("history included"),
+                selectedRunId
+                  ? t("focused {runId}", { runId: selectedRunId })
+                  : t("no run selected"),
               ]}
               actions={
                 <Badge
@@ -189,7 +207,11 @@ export function TasksPage({
                   className="rounded-full px-3 py-1 font-mono text-[11px] uppercase tracking-[0.16em]"
                 >
                   <Rows3Icon className="mr-1 size-3.5" />
-                  {streamState}
+                  {streamState === "live"
+                    ? t("Live stream")
+                    : streamState === "connecting"
+                      ? t("Connecting to the task stream")
+                      : t("Task stream reconnecting")}
                 </Badge>
               }
             >

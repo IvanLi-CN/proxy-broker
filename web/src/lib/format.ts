@@ -1,3 +1,4 @@
+import type { Locale, Translator } from "@/i18n";
 import type { ExtractIpRequest, OpenSessionRequest, SortMode } from "@/lib/types";
 
 export function splitListInput(value: string) {
@@ -16,26 +17,26 @@ export function optionalNumber(value: string) {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-export function formatTimestamp(epoch?: number | null) {
+export function formatTimestamp(locale: Locale, t: Translator, epoch?: number | null) {
   if (!epoch) {
-    return "Never";
+    return t("Never");
   }
-  return new Intl.DateTimeFormat("zh-CN", {
+  return new Intl.DateTimeFormat(locale, {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(epoch * 1000);
 }
 
-export function formatLatency(value?: number | null) {
+export function formatLatency(locale: Locale, t: Translator, value?: number | null) {
   if (value == null) {
-    return "N/A";
+    return t("N/A");
   }
-  return `${value} ms`;
+  return `${new Intl.NumberFormat(locale).format(value)} ms`;
 }
 
-export function formatListSummary(items: string[]) {
+export function formatListSummary(t: Translator, items: string[]) {
   if (items.length === 0) {
-    return "Not set";
+    return t("Not set");
   }
   return items.join(" / ");
 }

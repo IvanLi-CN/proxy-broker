@@ -3,15 +3,15 @@ import { useEffect, useRef, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { toast } from "sonner";
 
-import { ApiError, api } from "@/lib/api";
+import { useI18n } from "@/i18n";
+import { api } from "@/lib/api";
+import { formatApiErrorMessage } from "@/lib/error-messages";
 import type { CreateApiKeyResponse, LoadSubscriptionResponse, RefreshResponse } from "@/lib/types";
 import { OverviewPage } from "@/pages/OverviewPage";
 import type { RootOutletContext } from "@/routes/RootRoute";
 
-const getErrorMessage = (error: unknown) =>
-  error instanceof ApiError ? `${error.code}: ${error.message}` : "Unexpected request error";
-
 export function OverviewRoute() {
+  const { t } = useI18n();
   const { profileId, authMe, currentUser } = useOutletContext<RootOutletContext>();
   const previousProfileId = useRef(profileId);
   const queryClient = useQueryClient();
@@ -50,9 +50,14 @@ export function OverviewRoute() {
     }) => api.loadSubscription(requestedProfileId, payload),
     onSuccess: (data, { profileId: requestedProfileId }) => {
       setLoadResponseByProfile((current) => ({ ...current, [requestedProfileId]: data }));
-      toast.success(`Loaded ${data.loaded_proxies} proxies for ${requestedProfileId}`);
+      toast.success(
+        t("Loaded {count} proxies for {profileId}", {
+          count: data.loaded_proxies,
+          profileId: requestedProfileId,
+        }),
+      );
     },
-    onError: (error) => toast.error(getErrorMessage(error)),
+    onError: (error) => toast.error(formatApiErrorMessage(error, t)),
   });
 
   const refreshMutation = useMutation({
@@ -65,9 +70,9 @@ export function OverviewRoute() {
     }) => api.refreshProfile(requestedProfileId, payload),
     onSuccess: (data, { profileId: requestedProfileId }) => {
       setRefreshResponseByProfile((current) => ({ ...current, [requestedProfileId]: data }));
-      toast.success(`Refreshed ${data.probed_ips} probe entries`);
+      toast.success(t("Refreshed {count} probe entries", { count: data.probed_ips }));
     },
-    onError: (error) => toast.error(getErrorMessage(error)),
+    onError: (error) => toast.error(formatApiErrorMessage(error, t)),
   });
 
   const createApiKeyMutation = useMutation({
@@ -75,20 +80,20 @@ export function OverviewRoute() {
       api.createApiKey(profileId, { name }),
     onSuccess: async (data, variables) => {
       setLatestApiKeyByProfile((current) => ({ ...current, [variables.profileId]: data }));
-      toast.success(`Issued machine key ${data.api_key.name}`);
+      toast.success(t("Issued machine key {name}", { name: data.api_key.name }));
       await queryClient.invalidateQueries({ queryKey: ["api-keys", variables.profileId] });
     },
-    onError: (error) => toast.error(getErrorMessage(error)),
+    onError: (error) => toast.error(formatApiErrorMessage(error, t)),
   });
 
   const revokeApiKeyMutation = useMutation({
     mutationFn: ({ profileId, keyId }: { profileId: string; keyId: string }) =>
       api.revokeApiKey(profileId, keyId),
     onSuccess: async (_, variables) => {
-      toast.success("Revoked machine key");
+      toast.success(t("Revoked machine key"));
       await queryClient.invalidateQueries({ queryKey: ["api-keys", variables.profileId] });
     },
-    onError: (error) => toast.error(getErrorMessage(error)),
+    onError: (error) => toast.error(formatApiErrorMessage(error, t)),
   });
 
   const { reset: resetLoadMutation } = loadMutation;
@@ -107,12 +112,12 @@ export function OverviewRoute() {
     <OverviewPage
       activeSessions={sessionsQuery.data?.sessions.length ?? 0}
       apiKeys={apiKeysQuery.data?.api_keys ?? []}
-      apiKeysError={apiKeysQuery.isError ? getErrorMessage(apiKeysQuery.error) : null}
+      apiKeysError={apiKeysQuery.isError ? formatApiErrorMessage(apiKeysQuery.error, t) : null}
       apiKeysLoading={apiKeysQuery.isLoading}
       creatingApiKey={createApiKeyMutation.isPending}
       currentUser={currentUser}
       health={healthQuery.data ?? { status: "checking" }}
-      loadError={loadMutation.isError ? getErrorMessage(loadMutation.error) : null}
+      loadError={loadMutation.isError ? formatApiErrorMessage(loadMutation.error, t) : null}
       loadResponse={loadResponseByProfile[profileId] ?? null}
       loadingSubscription={loadMutation.isPending}
       latestCreatedApiKey={latestApiKeyByProfile[profileId] ?? null}
@@ -128,7 +133,9 @@ export function OverviewRoute() {
       onRevokeApiKey={async (keyId) => {
         await revokeApiKeyMutation.mutateAsync({ profileId, keyId });
       }}
-      refreshError={refreshMutation.isError ? getErrorMessage(refreshMutation.error) : null}
+      refreshError={
+        refreshMutation.isError ? formatApiErrorMessage(refreshMutation.error, t) : null
+      }
       refreshResponse={refreshResponseByProfile[profileId] ?? null}
       refreshing={refreshMutation.isPending}
       revokingApiKeyId={
