@@ -45,7 +45,7 @@ describe("LocaleSwitcher", () => {
     await user.click(screen.getByText("Simplified Chinese"));
 
     await waitFor(() => {
-      expect(document.documentElement.lang).toBe("zh-CN");
+      expect(document.documentElement.lang).toBe("zh-Hans");
     });
 
     expect(window.localStorage.getItem(localeStorageKey)).toBe("zh-CN");

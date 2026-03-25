@@ -14,6 +14,8 @@ import {
 const LOCALE_STORAGE_KEY = "proxy-broker.locale";
 const DEFAULT_LOCALE: Locale = "en-US";
 const CHINESE_LOCALE: Locale = "zh-CN";
+const DEFAULT_DOCUMENT_LANGUAGE = "en";
+const CHINESE_DOCUMENT_LANGUAGE = "zh-Hans";
 
 function normalizeLocale(value?: string | null): Locale | null {
   if (!value) {
@@ -69,6 +71,10 @@ function getCatalog(locale: Locale): MessageCatalog {
   return locale === CHINESE_LOCALE ? zhCN : enUS;
 }
 
+function localeToDocumentLanguage(locale: Locale) {
+  return locale === CHINESE_LOCALE ? CHINESE_DOCUMENT_LANGUAGE : DEFAULT_DOCUMENT_LANGUAGE;
+}
+
 function createTranslator(locale: Locale): Translator {
   const catalog = getCatalog(locale);
   return (message, values) => interpolate(catalog[message] ?? message, values);
@@ -117,7 +123,7 @@ export function I18nProvider({
       return;
     }
     window.localStorage.setItem(LOCALE_STORAGE_KEY, locale);
-    document.documentElement.lang = locale;
+    document.documentElement.lang = localeToDocumentLanguage(locale);
   }, [locale]);
 
   const value = useMemo<I18nContextValue>(() => {
