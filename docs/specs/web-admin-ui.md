@@ -88,7 +88,7 @@ separate Vite and Storybook workflow for local development.
   - fallback to `en-US`
 - The active locale must update:
   - the app translation context
-  - `document.documentElement.lang`
+  - `document.documentElement.lang` using `zh-Hans` for `zh-CN` and `en` for `en-US`
   - locale-aware date/time and number formatting
 - The language switcher lives in the application shell footer beside the theme
   control and must switch immediately without a full page reload.
@@ -242,8 +242,9 @@ separate Vite and Storybook workflow for local development.
   then browser language detection, and keeps the selected locale stable across
   reloads and route changes.
 - The app shell exposes a language switcher, keeps `<html lang>` in sync with
-  the active locale, and localizes known backend error/task enums without
-  changing API contracts.
+  the active locale's script metadata (`zh-Hans` for `zh-CN`, `en` for
+  `en-US`), and localizes known backend error/task enums without changing API
+  contracts.
 - Every committed UI component/page in scope has Storybook docs and stories.
 - CI rejects missing stories or missing autodocs metadata.
 - The repo remains Bun-first for frontend workflows and Cargo-first for backend

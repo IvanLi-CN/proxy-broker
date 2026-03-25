@@ -91,7 +91,7 @@ describe("i18n locale resolution", () => {
 
     await user.click(screen.getByRole("button", { name: "set-zh" }));
 
-    expect(document.documentElement.lang).toBe("zh-CN");
+    expect(document.documentElement.lang).toBe("zh-Hans");
     expect(window.localStorage.getItem(localeStorageKey)).toBe("zh-CN");
     expect(screen.getByText("语言")).toBeInTheDocument();
   });
