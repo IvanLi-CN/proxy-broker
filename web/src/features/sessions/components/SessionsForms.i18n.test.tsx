@@ -1,5 +1,6 @@
 import { TooltipProvider } from "@radix-ui/react-tooltip";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -84,5 +85,28 @@ describe("Sessions forms localization", () => {
     expect(screen.getByText("Port")).toBeInTheDocument();
     expect(screen.getByText("Selection order")).toBeInTheDocument();
     expect(screen.getByText("Exclude IP")).toBeInTheDocument();
+  });
+
+  it("blocks submission when the same IP is both included and excluded", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+
+    renderWithProviders(
+      <OpenSessionForm
+        isPending={false}
+        suggestedPort={10080}
+        defaultAdvancedOpen
+        initialValues={{
+          selectionMode: "ip",
+          specifiedIps: ["203.0.113.10"],
+          excludedIps: ["203.0.113.10"],
+        }}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Open session" }));
+
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 });

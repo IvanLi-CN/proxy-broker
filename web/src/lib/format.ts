@@ -36,6 +36,15 @@ function uniqueItems(items: string[]) {
   return Array.from(new Set(items.map((item) => item.trim()).filter(Boolean)));
 }
 
+function normalizeOverlapKey(value: string) {
+  return value.trim().toLowerCase();
+}
+
+export function findOverlappingValues(left: string[], right: string[]) {
+  const rightKeys = new Set(right.map((value) => normalizeOverlapKey(value)).filter(Boolean));
+  return uniqueItems(left).filter((value) => rightKeys.has(normalizeOverlapKey(value)));
+}
+
 function parseCitySelectionToken(value: string) {
   const trimmed = value.trim();
   const separatorIndex = trimmed.indexOf("::");

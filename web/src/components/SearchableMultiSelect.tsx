@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/command";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useI18n } from "@/i18n";
 import type { SessionOptionItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -45,6 +46,7 @@ export function SearchableMultiSelect({
   onChange,
   onSearch,
 }: SearchableMultiSelectProps) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
@@ -95,14 +97,14 @@ export function SearchableMultiSelect({
           return;
         }
         setOptions([]);
-        setError("Could not load options");
+        setError(t("Could not load options"));
       })
       .finally(() => {
         if (requestVersion.current === currentVersion) {
           setLoading(false);
         }
       });
-  }, [open, searchRequest]);
+  }, [open, searchRequest, t]);
 
   const selectedItems = useMemo(
     () =>
@@ -182,7 +184,7 @@ export function SearchableMultiSelect({
               {loading ? (
                 <div className="flex items-center justify-center gap-2 px-3 py-6 text-sm text-muted-foreground">
                   <LoaderCircleIcon className="size-4 animate-spin" />
-                  Loading options…
+                  {t("Loading options…")}
                 </div>
               ) : null}
               {!loading && error ? (

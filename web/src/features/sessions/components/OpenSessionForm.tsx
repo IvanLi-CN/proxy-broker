@@ -24,6 +24,7 @@ import { type Translator, useI18n } from "@/i18n";
 import {
   buildOpenSessionRequest,
   filterCitySelectionsByCountry,
+  findOverlappingValues,
   formatSortMode,
 } from "@/lib/format";
 import type {
@@ -75,6 +76,16 @@ function createSchema(t: Translator) {
           path: ["selectionMode"],
           message: t("Choose at least one IP."),
         });
+      }
+      if (value.selectionMode === "ip") {
+        const overlaps = findOverlappingValues(value.specifiedIps, value.excludedIps);
+        if (overlaps.length > 0) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["selectionMode"],
+            message: t("The same IP cannot appear in both include and exclude lists."),
+          });
+        }
       }
     });
 }

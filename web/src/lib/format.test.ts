@@ -5,6 +5,7 @@ import {
   buildExtractRequest,
   buildOpenSessionRequest,
   filterCitySelectionsByCountry,
+  findOverlappingValues,
   formatLatency,
   formatTimestamp,
   splitListInput,
@@ -44,6 +45,14 @@ describe("buildExtractRequest", () => {
       limit: 20,
       sort_mode: "lru",
     });
+  });
+});
+
+describe("findOverlappingValues", () => {
+  it("matches overlapping values case-insensitively after trimming", () => {
+    expect(
+      findOverlappingValues([" 203.0.113.10 ", "203.0.113.11"], ["203.0.113.10", " 203.0.113.12 "]),
+    ).toEqual(["203.0.113.10"]);
   });
 });
 

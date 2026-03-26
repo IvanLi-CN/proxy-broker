@@ -275,6 +275,8 @@ export const zhCN: MessageCatalog = {
   "Search and select IPs": "搜索并选择 IP",
   "Search IPs": "搜索 IP",
   "No matching IPs": "没有匹配的 IP",
+  "Loading options…": "正在加载选项…",
+  "Could not load options": "无法加载选项",
   Port: "端口",
   "Leave blank to auto-allocate; the placeholder shows only the current suggestion and does not reserve it.":
     "留空时自动分配；placeholder 只显示当前建议值，不会预留它。",
@@ -283,6 +285,8 @@ export const zhCN: MessageCatalog = {
   "Decides the first match inside the candidate set.": "决定候选集合里的第 1 个命中项。",
   "Only decides the first match for this row.": "只决定这行的第 1 个命中项。",
   "Choose a selection order": "选择提取顺序",
+  "The same IP cannot appear in both include and exclude lists.":
+    "同一个 IP 不能同时出现在包含列表和排除列表里。",
   "Exclude IP": "排除 IP",
   "Select IPs to exclude": "选择要排除的 IP",
   "Search excluded IPs": "搜索要排除的 IP",
