@@ -79,6 +79,7 @@ entrypoint to tighten its request model around the simplified create flow.
 - `state=single-open geo mode`
 - `evidence_note=Shows the simplified country-region path with a compact segmented switch, inline field rows, searchable multi-select chips, visible port plus sort controls, and the advanced disclosure collapsed by default.`
 
+PR: include
 ![Sessions single open geo mode](./assets/sessions-open-geo-mode.png)
 
 - `source_type=storybook_canvas`
@@ -101,6 +102,7 @@ entrypoint to tighten its request model around the simplified create flow.
 - `state=single-open advanced expanded`
 - `evidence_note=Shows the Advanced disclosure reusing the same inline label column as the primary form so the exclude-IP field stays compact and aligned with the main controls.`
 
+PR: include
 ![Sessions single open advanced open](./assets/sessions-open-advanced-open.png)
 
 - `source_type=storybook_canvas`
@@ -112,6 +114,7 @@ entrypoint to tighten its request model around the simplified create flow.
 - `state=batch advanced expanded`
 - `evidence_note=Shows one transactional batch row using the shared compact three-mode model, with the Advanced exclude-IP field pulled back onto the same label axis as the primary row controls.`
 
+PR: include
 ![Sessions batch advanced open](./assets/sessions-batch-advanced-open.png)
 
 - `source_type=storybook_canvas`
