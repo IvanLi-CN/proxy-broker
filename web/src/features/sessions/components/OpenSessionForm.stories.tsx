@@ -120,15 +120,23 @@ export const Interaction: Story = {
   },
   async play({ canvasElement, args }) {
     const canvas = within(canvasElement);
-    await userEvent.click(canvas.getByRole("button", { name: /ip/i }));
-    await userEvent.click(canvas.getByRole("combobox", { name: /ip/i }));
+    await userEvent.click(canvas.getByRole("tab", { name: /^ip$/i }));
+    const [ipCombobox] = canvas.getAllByRole("combobox", { name: /^ip$/i });
+    if (!ipCombobox) {
+      throw new Error("Expected an IP combobox in the interaction story.");
+    }
+    await userEvent.click(ipCombobox);
 
     const overlay = within(document.body);
     await waitFor(() => expect(overlay.getByText("203.0.113.10")).toBeVisible());
     await userEvent.click(overlay.getByText("203.0.113.10"));
 
-    await userEvent.clear(canvas.getByLabelText(/desired port|端口/i));
-    await userEvent.type(canvas.getByLabelText(/desired port|端口/i), "10088");
+    const [desiredPortInput] = canvas.getAllByLabelText(/desired port|端口/i);
+    if (!desiredPortInput) {
+      throw new Error("Expected a desired port input in the interaction story.");
+    }
+    await userEvent.clear(desiredPortInput);
+    await userEvent.type(desiredPortInput, "10088");
     await userEvent.click(canvas.getByRole("button", { name: /open session|打开会话/i }));
 
     await waitFor(() => {

@@ -108,17 +108,27 @@ export const Interaction: Story = {
     response: null,
     error: null,
     onSubmit: fn(),
+    initialRequests: [
+      {
+        selectionMode: "any",
+        desiredPort: "",
+        countryCodes: [],
+        cities: [],
+        specifiedIps: [],
+        excludedIps: [],
+        sortMode: "lru",
+      },
+    ],
   },
   async play({ canvasElement, args }) {
     const canvas = within(canvasElement);
-    await userEvent.click(canvas.getByRole("button", { name: /add request row|新增请求行/i }));
     await userEvent.click(
-      canvas.getAllByRole("button", { name: /^ip$/i })[1] ??
-        canvas.getByRole("button", { name: /^ip$/i }),
+      canvas.getAllByRole("tab", { name: /^ip$/i })[0] ??
+        canvas.getByRole("tab", { name: /^ip$/i }),
     );
     await userEvent.click(
-      canvas.getAllByRole("combobox", { name: /ip/i })[0] ??
-        canvas.getByRole("combobox", { name: /ip/i }),
+      canvas.getAllByRole("combobox", { name: /^ip$/i })[0] ??
+        canvas.getByRole("combobox", { name: /^ip$/i }),
     );
 
     const overlay = within(document.body);
