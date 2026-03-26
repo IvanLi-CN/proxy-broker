@@ -1,28 +1,7 @@
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useI18n } from "@/i18n";
 import type { SessionSelectionMode } from "@/lib/types";
 import { cn } from "@/lib/utils";
-
-export const sessionSelectionModeOptions: Array<{
-  value: SessionSelectionMode;
-  title: string;
-  description: string;
-}> = [
-  {
-    value: "any",
-    title: "不限",
-    description: "从当前候选集合里直接按提取顺序拿第 1 个。",
-  },
-  {
-    value: "geo",
-    title: "国家/地区",
-    description: "先按国家或城市收窄，再按提取顺序拿第 1 个。",
-  },
-  {
-    value: "ip",
-    title: "IP",
-    description: "手动圈定一个或多个 IP，再按提取顺序命中。",
-  },
-];
 
 interface SessionSelectionModeSwitchProps {
   value: SessionSelectionMode;
@@ -37,6 +16,29 @@ export function SessionSelectionModeSwitch({
   size = "default",
   className,
 }: SessionSelectionModeSwitchProps) {
+  const { t } = useI18n();
+  const sessionSelectionModeOptions: Array<{
+    value: SessionSelectionMode;
+    title: string;
+    description: string;
+  }> = [
+    {
+      value: "any",
+      title: t("Any"),
+      description: t("Take the first candidate from the current pool."),
+    },
+    {
+      value: "geo",
+      title: t("Country / region"),
+      description: t("Narrow by country or city, then take the first surviving candidate."),
+    },
+    {
+      value: "ip",
+      title: "IP",
+      description: t("Target one or more IPs directly, then pick the first match."),
+    },
+  ];
+
   return (
     <Tabs
       value={value}
@@ -44,7 +46,7 @@ export function SessionSelectionModeSwitch({
       className={cn("w-full gap-0", className)}
     >
       <TabsList
-        aria-label="选择范围"
+        aria-label={t("Targeting mode")}
         className={cn(
           "inline-grid w-full grid-cols-3 rounded-full border border-slate-200 bg-slate-100/90 p-0.5 text-slate-500 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]",
           size === "sm" ? "h-9 max-w-[360px]" : "h-10 max-w-[396px]",

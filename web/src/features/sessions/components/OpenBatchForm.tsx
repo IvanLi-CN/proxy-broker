@@ -1,6 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ChevronDownIcon, InfoIcon, PlusIcon, Rows4Icon, Trash2Icon } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { Controller, useFieldArray, useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { SessionSelectionModeSwitch } from "@/features/sessions/components/SessionSelectionModeSwitch";
-import { useI18n } from "@/i18n";
+import { type Translator, useI18n } from "@/i18n";
 import {
   buildOpenSessionRequest,
   filterCitySelectionsByCountry,
@@ -35,43 +35,58 @@ import type {
   SortMode,
 } from "@/lib/types";
 
-const rowSchema = z
-  .object({
-    selectionMode: z.enum(["any", "geo", "ip"] satisfies SessionSelectionMode[]),
-    desiredPort: z.string(),
-    countryCodes: z.array(z.string()),
-    cities: z.array(z.string()),
-    specifiedIps: z.array(z.string()),
-    excludedIps: z.array(z.string()),
-    sortMode: z.enum(["mru", "lru"] satisfies SortMode[]),
-  })
-  .superRefine((value, ctx) => {
-    if (
-      value.selectionMode === "geo" &&
-      value.countryCodes.length === 0 &&
-      value.cities.length === 0
-    ) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["selectionMode"],
-        message: "至少选择 1 个国家或城市。",
-      });
-    }
-    if (value.selectionMode === "ip" && value.specifiedIps.length === 0) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["selectionMode"],
-        message: "至少选择 1 个 IP。",
-      });
-    }
+type BatchRequestRow = {
+  selectionMode: SessionSelectionMode;
+  desiredPort: string;
+  countryCodes: string[];
+  cities: string[];
+  specifiedIps: string[];
+  excludedIps: string[];
+  sortMode: SortMode;
+};
+
+type FormValues = {
+  requests: BatchRequestRow[];
+};
+
+function createRowSchema(t: Translator) {
+  return z
+    .object({
+      selectionMode: z.enum(["any", "geo", "ip"] satisfies SessionSelectionMode[]),
+      desiredPort: z.string(),
+      countryCodes: z.array(z.string()),
+      cities: z.array(z.string()),
+      specifiedIps: z.array(z.string()),
+      excludedIps: z.array(z.string()),
+      sortMode: z.enum(["mru", "lru"] satisfies SortMode[]),
+    })
+    .superRefine((value, ctx) => {
+      if (
+        value.selectionMode === "geo" &&
+        value.countryCodes.length === 0 &&
+        value.cities.length === 0
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["selectionMode"],
+          message: t("Choose at least one country or city."),
+        });
+      }
+      if (value.selectionMode === "ip" && value.specifiedIps.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["selectionMode"],
+          message: t("Choose at least one IP."),
+        });
+      }
+    });
+}
+
+function createSchema(t: Translator) {
+  return z.object({
+    requests: z.array(createRowSchema(t)).min(1),
   });
-
-const schema = z.object({
-  requests: z.array(rowSchema).min(1),
-});
-
-type BatchRequestRow = z.infer<typeof rowSchema>;
-type FormValues = z.infer<typeof schema>;
+}
 
 type SearchSessionOptionsFn = (
   payload: SearchSessionOptionsRequest,
@@ -91,6 +106,7 @@ const inlineFieldClass = "grid gap-2 md:grid-cols-[88px_minmax(0,1fr)] md:items-
 const pairFieldClass = "grid gap-3 lg:grid-cols-2";
 
 function FieldLabel({ htmlFor, label, hint }: { htmlFor?: string; label: string; hint?: string }) {
+  const { t } = useI18n();
   return (
     <div className="inline-flex items-center gap-1.5">
       <Label htmlFor={htmlFor}>{label}</Label>
@@ -100,7 +116,7 @@ function FieldLabel({ htmlFor, label, hint }: { htmlFor?: string; label: string;
             <button
               type="button"
               className="inline-flex size-4 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
-              aria-label={`${label} 说明`}
+              aria-label={t("More about {label}", { label })}
             >
               <InfoIcon className="size-3.5" />
             </button>
@@ -138,6 +154,7 @@ export function OpenBatchForm({
   searchOptions = emptySearch,
 }: OpenBatchFormProps) {
   const { t } = useI18n();
+  const schema = useMemo(() => createSchema(t), [t]);
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
@@ -249,7 +266,7 @@ export function OpenBatchForm({
                   <div className="space-y-3">
                     <div className={inlineFieldClass}>
                       <div className="md:pt-1.5">
-                        <FieldLabel label="定位方式" />
+                        <FieldLabel label={t("Targeting mode")} />
                       </div>
                       <div className="space-y-2">
                         <Controller
@@ -279,12 +296,12 @@ export function OpenBatchForm({
                               render={({ field }) => (
                                 <SearchableMultiSelect
                                   id={`batch-country-codes-${index}`}
-                                  label="国家"
+                                  label={t("Country")}
                                   layout="inline"
                                   size="sm"
-                                  placeholder="搜索并选择国家"
-                                  searchPlaceholder="搜索国家或代码"
-                                  emptyText="No matching countries"
+                                  placeholder={t("Search and select countries")}
+                                  searchPlaceholder={t("Search countries or codes")}
+                                  emptyText={t("No matching countries")}
                                   values={field.value}
                                   onChange={field.onChange}
                                   onSearch={async (query) =>
@@ -303,12 +320,12 @@ export function OpenBatchForm({
                               render={({ field }) => (
                                 <SearchableMultiSelect
                                   id={`batch-cities-${index}`}
-                                  label="地区 / 城市"
+                                  label={t("Region / city")}
                                   layout="inline"
                                   size="sm"
-                                  placeholder="搜索并选择城市"
-                                  searchPlaceholder="搜索城市"
-                                  emptyText="No matching cities"
+                                  placeholder={t("Search and select cities")}
+                                  searchPlaceholder={t("Search cities")}
+                                  emptyText={t("No matching cities")}
                                   values={field.value}
                                   searchKey={row.countryCodes.join("|")}
                                   onChange={field.onChange}
@@ -336,9 +353,9 @@ export function OpenBatchForm({
                                 label="IP"
                                 layout="inline"
                                 size="sm"
-                                placeholder="搜索并选择 IP"
-                                searchPlaceholder="搜索 IP"
-                                emptyText="No matching IPs"
+                                placeholder={t("Search and select IPs")}
+                                searchPlaceholder={t("Search IPs")}
+                                emptyText={t("No matching IPs")}
                                 values={field.value}
                                 onChange={field.onChange}
                                 onSearch={async (query) =>
@@ -360,8 +377,8 @@ export function OpenBatchForm({
                         <div className="md:pt-1.5">
                           <FieldLabel
                             htmlFor={`batch-desired-port-${index}`}
-                            label="端口"
-                            hint="留空时自动分配。"
+                            label={t("Port")}
+                            hint={t("Leave blank to auto-allocate.")}
                           />
                         </div>
                         <div>
@@ -378,8 +395,8 @@ export function OpenBatchForm({
                         <div className="md:pt-1.5">
                           <FieldLabel
                             htmlFor={`batch-sort-mode-${index}`}
-                            label="提取顺序"
-                            hint="只决定这行的第 1 个命中项。"
+                            label={t("Selection order")}
+                            hint={t("Only decides the first match for this row.")}
                           />
                         </div>
                         <div>
@@ -393,7 +410,7 @@ export function OpenBatchForm({
                                   size="sm"
                                   className="w-full bg-card"
                                 >
-                                  <SelectValue placeholder="选择提取顺序" />
+                                  <SelectValue placeholder={t("Choose a selection order")} />
                                 </SelectTrigger>
                                 <SelectContent size="sm">
                                   {sortModeOptions.map((option) => (
@@ -430,12 +447,12 @@ export function OpenBatchForm({
                         render={({ field }) => (
                           <SearchableMultiSelect
                             id={`batch-excluded-ips-${index}`}
-                            label="排除 IP"
+                            label={t("Exclude IP")}
                             layout="inline"
                             size="sm"
-                            placeholder="选择要排除的 IP"
-                            searchPlaceholder="搜索要排除的 IP"
-                            emptyText="No matching IPs"
+                            placeholder={t("Select IPs to exclude")}
+                            searchPlaceholder={t("Search excluded IPs")}
+                            emptyText={t("No matching IPs")}
                             values={field.value}
                             searchKey={`${row.selectionMode}:${row.countryCodes.join("|")}:${row.cities.join("|")}`}
                             onChange={field.onChange}

@@ -32,12 +32,11 @@ use crate::{
         ExtractIpRequest, ExtractIpResponse, IpRecord, ListApiKeysResponse, ListProfilesResponse,
         ListSessionsResponse, LoadSubscriptionResponse, OpenBatchRequest, OpenBatchResponse,
         OpenSessionRequest, OpenSessionResponse, ProbeRecord, ProfileSyncConfig, ProxyNode,
-        RefreshRequest, RefreshResponse, SearchSessionOptionsRequest,
-        SearchSessionOptionsResponse, SessionOptionItem, SessionOptionKind, SessionRecord,
-        SessionSelectionMode, SubscriptionSource, SuggestedPortResponse, TaskEventLevel,
-        TaskListQuery, TaskListResponse, TaskRunDetail, TaskRunEventRecord, TaskRunKind,
-        TaskRunRecord, TaskRunScope, TaskRunStage, TaskRunStatus, TaskRunSummary,
-        TaskRunTrigger, now_epoch_sec,
+        RefreshRequest, RefreshResponse, SearchSessionOptionsRequest, SearchSessionOptionsResponse,
+        SessionOptionItem, SessionOptionKind, SessionRecord, SessionSelectionMode,
+        SubscriptionSource, SuggestedPortResponse, TaskEventLevel, TaskListQuery, TaskListResponse,
+        TaskRunDetail, TaskRunEventRecord, TaskRunKind, TaskRunRecord, TaskRunScope, TaskRunStage,
+        TaskRunStatus, TaskRunSummary, TaskRunTrigger, now_epoch_sec,
     },
     runtime::MihomoRuntime,
     store::BrokerStore,
@@ -2553,7 +2552,10 @@ fn normalize_city_filters(values: &[String]) -> HashSet<(Option<String>, String)
                 if city.is_empty() {
                     continue;
                 }
-                (Some(country.trim().to_ascii_uppercase()), city.to_ascii_lowercase())
+                (
+                    Some(country.trim().to_ascii_uppercase()),
+                    city.to_ascii_lowercase(),
+                )
             }
             None => (None, trimmed.to_ascii_lowercase()),
         };
@@ -2664,7 +2666,10 @@ fn search_session_options(
         .into_iter()
         .collect();
     let city_filters = normalize_city_filters(&request.cities);
-    let limit = request.limit.unwrap_or(DEFAULT_SESSION_OPTIONS_LIMIT).min(100);
+    let limit = request
+        .limit
+        .unwrap_or(DEFAULT_SESSION_OPTIONS_LIMIT)
+        .min(100);
 
     let items = match request.kind {
         SessionOptionKind::Country => {
@@ -2696,11 +2701,13 @@ fn search_session_options(
                 if !query.is_empty() && !haystack.contains(&query) {
                     continue;
                 }
-                countries.entry(country_code.clone()).or_insert(SessionOptionItem {
-                    value: country_code.clone(),
-                    label,
-                    meta: (!country_name.is_empty()).then_some(country_name),
-                });
+                countries
+                    .entry(country_code.clone())
+                    .or_insert(SessionOptionItem {
+                        value: country_code.clone(),
+                        label,
+                        meta: (!country_name.is_empty()).then_some(country_name),
+                    });
             }
             let mut items = countries.into_values().collect::<Vec<_>>();
             items.sort_by(|left, right| left.label.cmp(&right.label));
@@ -2736,7 +2743,11 @@ fn search_session_options(
                 let value = if country_code.trim().is_empty() {
                     city_value.clone()
                 } else {
-                    format!("{}::{}", country_code.trim().to_ascii_uppercase(), city_value)
+                    format!(
+                        "{}::{}",
+                        country_code.trim().to_ascii_uppercase(),
+                        city_value
+                    )
                 };
                 let key = value.to_ascii_lowercase();
                 let haystack = format!(
@@ -2800,9 +2811,21 @@ fn search_session_options(
                     let haystack = format!(
                         "{} {} {} {}",
                         record.ip.to_ascii_lowercase(),
-                        record.country_code.as_deref().unwrap_or_default().to_ascii_lowercase(),
-                        record.country_name.as_deref().unwrap_or_default().to_ascii_lowercase(),
-                        record.city.as_deref().unwrap_or_default().to_ascii_lowercase()
+                        record
+                            .country_code
+                            .as_deref()
+                            .unwrap_or_default()
+                            .to_ascii_lowercase(),
+                        record
+                            .country_name
+                            .as_deref()
+                            .unwrap_or_default()
+                            .to_ascii_lowercase(),
+                        record
+                            .city
+                            .as_deref()
+                            .unwrap_or_default()
+                            .to_ascii_lowercase()
                     );
                     haystack.contains(&query)
                 })

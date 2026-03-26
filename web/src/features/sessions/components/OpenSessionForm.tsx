@@ -1,6 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CableCarIcon, ChevronDownIcon, InfoIcon } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { SessionSelectionModeSwitch } from "@/features/sessions/components/SessionSelectionModeSwitch";
-import { useI18n } from "@/i18n";
+import { type Translator, useI18n } from "@/i18n";
 import {
   buildOpenSessionRequest,
   filterCitySelectionsByCountry,
@@ -36,38 +36,48 @@ import type {
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-const schema = z
-  .object({
-    selectionMode: z.enum(["any", "geo", "ip"] satisfies SessionSelectionMode[]),
-    desiredPort: z.string(),
-    countryCodes: z.array(z.string()),
-    cities: z.array(z.string()),
-    specifiedIps: z.array(z.string()),
-    excludedIps: z.array(z.string()),
-    sortMode: z.enum(["mru", "lru"] satisfies SortMode[]),
-  })
-  .superRefine((value, ctx) => {
-    if (
-      value.selectionMode === "geo" &&
-      value.countryCodes.length === 0 &&
-      value.cities.length === 0
-    ) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["selectionMode"],
-        message: "至少选择 1 个国家或城市。",
-      });
-    }
-    if (value.selectionMode === "ip" && value.specifiedIps.length === 0) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["selectionMode"],
-        message: "至少选择 1 个 IP。",
-      });
-    }
-  });
+type FormValues = {
+  selectionMode: SessionSelectionMode;
+  desiredPort: string;
+  countryCodes: string[];
+  cities: string[];
+  specifiedIps: string[];
+  excludedIps: string[];
+  sortMode: SortMode;
+};
 
-type FormValues = z.infer<typeof schema>;
+function createSchema(t: Translator) {
+  return z
+    .object({
+      selectionMode: z.enum(["any", "geo", "ip"] satisfies SessionSelectionMode[]),
+      desiredPort: z.string(),
+      countryCodes: z.array(z.string()),
+      cities: z.array(z.string()),
+      specifiedIps: z.array(z.string()),
+      excludedIps: z.array(z.string()),
+      sortMode: z.enum(["mru", "lru"] satisfies SortMode[]),
+    })
+    .superRefine((value, ctx) => {
+      if (
+        value.selectionMode === "geo" &&
+        value.countryCodes.length === 0 &&
+        value.cities.length === 0
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["selectionMode"],
+          message: t("Choose at least one country or city."),
+        });
+      }
+      if (value.selectionMode === "ip" && value.specifiedIps.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["selectionMode"],
+          message: t("Choose at least one IP."),
+        });
+      }
+    });
+}
 
 const defaultValues: FormValues = {
   selectionMode: "any",
@@ -83,6 +93,7 @@ const inlineFieldClass = "grid gap-2 md:grid-cols-[88px_minmax(0,1fr)] md:items-
 const pairFieldClass = "grid gap-3 lg:grid-cols-2";
 
 function FieldLabel({ htmlFor, label, hint }: { htmlFor?: string; label: string; hint?: string }) {
+  const { t } = useI18n();
   return (
     <div className="inline-flex items-center gap-1.5">
       <Label htmlFor={htmlFor}>{label}</Label>
@@ -92,7 +103,7 @@ function FieldLabel({ htmlFor, label, hint }: { htmlFor?: string; label: string;
             <button
               type="button"
               className="inline-flex size-4 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
-              aria-label={`${label} 说明`}
+              aria-label={t("More about {label}", { label })}
             >
               <InfoIcon className="size-3.5" />
             </button>
@@ -134,6 +145,7 @@ export function OpenSessionForm({
   searchOptions = emptySearch,
 }: OpenSessionFormProps) {
   const { t } = useI18n();
+  const schema = useMemo(() => createSchema(t), [t]);
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
@@ -210,7 +222,7 @@ export function OpenSessionForm({
           <div className="space-y-4 rounded-[24px] border border-border/70 bg-background/80 p-4">
             <div className={inlineFieldClass}>
               <div className="md:pt-2">
-                <FieldLabel label="定位方式" />
+                <FieldLabel label={t("Targeting mode")} />
               </div>
               <div className="space-y-2">
                 <Controller
@@ -240,11 +252,11 @@ export function OpenSessionForm({
                       render={({ field }) => (
                         <SearchableMultiSelect
                           id="session-country-codes"
-                          label="国家"
+                          label={t("Country")}
                           layout="inline"
-                          placeholder="搜索并选择国家"
-                          searchPlaceholder="搜索国家或代码"
-                          emptyText="No matching countries"
+                          placeholder={t("Search and select countries")}
+                          searchPlaceholder={t("Search countries or codes")}
+                          emptyText={t("No matching countries")}
                           values={field.value}
                           onChange={field.onChange}
                           onSearch={async (query) =>
@@ -263,11 +275,11 @@ export function OpenSessionForm({
                       render={({ field }) => (
                         <SearchableMultiSelect
                           id="session-cities"
-                          label="地区 / 城市"
+                          label={t("Region / city")}
                           layout="inline"
-                          placeholder="搜索并选择城市"
-                          searchPlaceholder="搜索城市"
-                          emptyText="No matching cities"
+                          placeholder={t("Search and select cities")}
+                          searchPlaceholder={t("Search cities")}
+                          emptyText={t("No matching cities")}
                           values={field.value}
                           searchKey={countryCodes.join("|")}
                           onChange={field.onChange}
@@ -294,9 +306,9 @@ export function OpenSessionForm({
                         id="session-specified-ips"
                         label="IP"
                         layout="inline"
-                        placeholder="搜索并选择 IP"
-                        searchPlaceholder="搜索 IP"
-                        emptyText="No matching IPs"
+                        placeholder={t("Search and select IPs")}
+                        searchPlaceholder={t("Search IPs")}
+                        emptyText={t("No matching IPs")}
                         values={field.value}
                         onChange={field.onChange}
                         onSearch={async (query) =>
@@ -323,8 +335,10 @@ export function OpenSessionForm({
                 <div className="md:pt-2">
                   <FieldLabel
                     htmlFor="desired-port"
-                    label="端口"
-                    hint="留空时自动分配；placeholder 只显示当前建议值，不会预留它。"
+                    label={t("Port")}
+                    hint={t(
+                      "Leave blank to auto-allocate; the placeholder shows only the current suggestion and does not reserve it.",
+                    )}
                   />
                 </div>
                 <div>
@@ -341,8 +355,8 @@ export function OpenSessionForm({
                 <div className="md:pt-2">
                   <FieldLabel
                     htmlFor="session-sort-mode"
-                    label="提取顺序"
-                    hint="决定候选集合里的第 1 个命中项。"
+                    label={t("Selection order")}
+                    hint={t("Decides the first match inside the candidate set.")}
                   />
                 </div>
                 <div>
@@ -352,7 +366,7 @@ export function OpenSessionForm({
                     render={({ field }) => (
                       <Select onValueChange={field.onChange} value={field.value}>
                         <SelectTrigger id="session-sort-mode" className="w-full bg-card">
-                          <SelectValue placeholder="选择提取顺序" />
+                          <SelectValue placeholder={t("Choose a selection order")} />
                         </SelectTrigger>
                         <SelectContent>
                           {sortModeOptions.map((option) => (
@@ -387,12 +401,12 @@ export function OpenSessionForm({
                 render={({ field }) => (
                   <SearchableMultiSelect
                     id="session-excluded-ips"
-                    label="排除 IP"
+                    label={t("Exclude IP")}
                     layout="inline"
                     size="sm"
-                    placeholder="选择要排除的 IP"
-                    searchPlaceholder="搜索要排除的 IP"
-                    emptyText="No matching IPs"
+                    placeholder={t("Select IPs to exclude")}
+                    searchPlaceholder={t("Search excluded IPs")}
+                    emptyText={t("No matching IPs")}
                     values={field.value}
                     searchKey={`${selectionMode}:${countryCodes.join("|")}:${cities.join("|")}`}
                     onChange={field.onChange}

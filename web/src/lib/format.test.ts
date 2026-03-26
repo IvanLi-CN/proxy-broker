@@ -19,10 +19,10 @@ describe("splitListInput", () => {
 });
 
 describe("filterCitySelectionsByCountry", () => {
-  it("drops stale city tokens when the country filter changes", () => {
-    expect(filterCitySelectionsByCountry(["JP::Tokyo", "US::San Jose", "Tokyo"], ["US"])).toEqual([
-      "US::San Jose",
-    ]);
+  it("drops stale encoded city tokens while preserving plain city selections", () => {
+    expect(
+      filterCitySelectionsByCountry(["JP::Tokyo", "US::San Jose", "Tokyo", "Osaka"], ["US"]),
+    ).toEqual(["US::San Jose", "Tokyo", "Osaka"]);
   });
 });
 

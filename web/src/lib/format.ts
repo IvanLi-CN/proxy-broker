@@ -58,7 +58,7 @@ export function filterCitySelectionsByCountry(cities: string[], countryCodes: st
   return uniqueItems(
     cities.filter((value) => {
       const parsed = parseCitySelectionToken(value);
-      return parsed ? allowed.has(parsed.countryCode) : false;
+      return parsed ? allowed.has(parsed.countryCode) : true;
     }),
   );
 }
