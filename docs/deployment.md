@@ -187,9 +187,11 @@ The same render step also allocates a free private `/24` subnet when you do not 
 - `/api/v1/profiles/{profile_id}/subscriptions/load`
 - `/api/v1/profiles/{profile_id}/refresh`
 - `/api/v1/profiles/{profile_id}/ips/extract`
+- `/api/v1/profiles/{profile_id}/ips/options/search`
 - `/api/v1/profiles/{profile_id}/sessions`
 - `/api/v1/profiles/{profile_id}/sessions/open`
 - `/api/v1/profiles/{profile_id}/sessions/open-batch`
+- `/api/v1/profiles/{profile_id}/sessions/suggested-port`
 - `/api/v1/profiles/{profile_id}/sessions/{session_id}`
   - admin human, development principal, or API key bound to that `profile_id`
 - `/api/v1/profiles/{profile_id}/api-keys`

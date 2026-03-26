@@ -16,7 +16,8 @@ use crate::{
     models::{
         CreateApiKeyRequest, CreateApiKeyResponse, CreateProfileRequest, CreateProfileResponse,
         HealthResponse, LoadSubscriptionRequest, OpenBatchRequest, OpenSessionRequest,
-        RefreshRequest, TaskListQuery, TaskRunDetail, TaskRunSummary, TaskStreamEnvelope,
+        RefreshRequest, SearchSessionOptionsRequest, SuggestedPortResponse, TaskListQuery,
+        TaskRunDetail, TaskRunSummary, TaskStreamEnvelope,
     },
     service::BrokerService,
     tasks::{TaskBusEvent, build_task_list_response, matches_task_query},
@@ -50,12 +51,20 @@ pub fn build_router(state: AppState) -> Router {
             post(extract_ips),
         )
         .route(
+            "/api/v1/profiles/{profile_id}/ips/options/search",
+            post(search_session_options),
+        )
+        .route(
             "/api/v1/profiles/{profile_id}/sessions/open",
             post(open_session),
         )
         .route(
             "/api/v1/profiles/{profile_id}/sessions/open-batch",
             post(open_batch),
+        )
+        .route(
+            "/api/v1/profiles/{profile_id}/sessions/suggested-port",
+            get(suggested_port),
         )
         .route("/api/v1/profiles/{profile_id}/sessions", get(list_sessions))
         .route(
@@ -347,6 +356,31 @@ async fn open_batch(
     auth.require_profile_access(&profile_id)?;
     let request = parse_json_payload(payload, "open_batch")?;
     let resp = state.service.open_batch(&profile_id, &request).await?;
+    Ok(Json(resp))
+}
+
+async fn suggested_port(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    Path(profile_id): Path<String>,
+) -> Result<Json<SuggestedPortResponse>, BrokerError> {
+    auth.require_profile_access(&profile_id)?;
+    let resp = state.service.suggested_port(&profile_id).await?;
+    Ok(Json(resp))
+}
+
+async fn search_session_options(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    Path(profile_id): Path<String>,
+    payload: Result<Json<SearchSessionOptionsRequest>, JsonRejection>,
+) -> Result<Json<crate::models::SearchSessionOptionsResponse>, BrokerError> {
+    auth.require_profile_access(&profile_id)?;
+    let request = parse_json_payload(payload, "search_session_options")?;
+    let resp = state
+        .service
+        .search_session_options(&profile_id, &request)
+        .await?;
     Ok(Json(resp))
 }
 

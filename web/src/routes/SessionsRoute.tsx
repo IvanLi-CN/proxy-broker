@@ -19,6 +19,11 @@ export function SessionsRoute() {
     queryFn: () => api.listSessions(profileId),
     refetchInterval: 5_000,
   });
+  const suggestedPortQuery = useQuery({
+    queryKey: ["suggested-port", profileId],
+    queryFn: () => api.getSuggestedPort(profileId),
+    refetchInterval: 5_000,
+  });
 
   const openMutation = useMutation({
     mutationFn: (payload: Parameters<typeof api.openSession>[1]) =>
@@ -26,6 +31,7 @@ export function SessionsRoute() {
     onSuccess: async (data) => {
       toast.success(t("Opened {listen}", { listen: data.listen }));
       await queryClient.invalidateQueries({ queryKey: ["sessions", profileId] });
+      await queryClient.invalidateQueries({ queryKey: ["suggested-port", profileId] });
     },
     onError: (error) => toast.error(formatApiErrorMessage(error, t)),
   });
@@ -35,6 +41,7 @@ export function SessionsRoute() {
     onSuccess: async (data) => {
       toast.success(t("Opened {count} sessions in batch", { count: data.sessions.length }));
       await queryClient.invalidateQueries({ queryKey: ["sessions", profileId] });
+      await queryClient.invalidateQueries({ queryKey: ["suggested-port", profileId] });
     },
     onError: (error) => toast.error(formatApiErrorMessage(error, t)),
   });
@@ -44,6 +51,7 @@ export function SessionsRoute() {
     onSuccess: async (_, sessionId) => {
       toast.success(t("Closed {sessionId}", { sessionId }));
       await queryClient.invalidateQueries({ queryKey: ["sessions", profileId] });
+      await queryClient.invalidateQueries({ queryKey: ["suggested-port", profileId] });
     },
     onError: (error) => toast.error(formatApiErrorMessage(error, t)),
   });
@@ -80,8 +88,12 @@ export function SessionsRoute() {
       openError={openMutation.isError ? formatApiErrorMessage(openMutation.error, t) : null}
       openResponse={openMutation.data ?? null}
       opening={openMutation.isPending}
+      searchSessionOptions={async (payload) =>
+        (await api.searchSessionOptions(profileId, payload)).items
+      }
       sessions={sessionsQuery.data?.sessions ?? []}
       sessionsLoading={sessionsQuery.isLoading}
+      suggestedPort={suggestedPortQuery.data?.port ?? null}
     />
   );
 }

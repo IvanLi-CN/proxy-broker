@@ -237,6 +237,9 @@ export const zhCN: MessageCatalog = {
   Unverified: "未验证",
   "Single open": "单条打开",
   "Open one listener fast": "快速打开一个监听",
+  "Pick one simple targeting mode, keep the port optional, and let the backend open the listener from the first surviving candidate.":
+    "选择一种简单的定位方式，端口可留空，然后让后端从首个可用候选里打开监听。",
+  "optional port": "端口可选",
   "Pin a specific IP when you know exactly what you want, or let the selector pick the next best edge for the active profile.":
     "当你明确知道目标 IP 时就直接指定；否则让选择器为当前配置选出下一个最优边缘。",
   "selector limit 1": "选择器上限 1",
@@ -251,6 +254,43 @@ export const zhCN: MessageCatalog = {
   "Selector limit": "选择器上限",
   "Opening...": "打开中……",
   "Open session": "打开会话",
+  Any: "不限",
+  "Country / region": "国家/地区",
+  "Targeting mode": "定位方式",
+  "Take the first candidate from the current pool.": "从当前候选集合里直接按提取顺序拿第 1 个。",
+  "Narrow by country or city, then take the first surviving candidate.":
+    "先按国家或城市收窄，再按提取顺序拿第 1 个。",
+  "Target one or more IPs directly, then pick the first match.":
+    "手动圈定一个或多个 IP，再按提取顺序命中。",
+  "Choose at least one country or city.": "至少选择 1 个国家或城市。",
+  "Choose at least one IP.": "至少选择 1 个 IP。",
+  Country: "国家",
+  "Region / city": "地区 / 城市",
+  "Search and select countries": "搜索并选择国家",
+  "Search countries or codes": "搜索国家或代码",
+  "No matching countries": "没有匹配的国家",
+  "Search and select cities": "搜索并选择城市",
+  "Search cities": "搜索城市",
+  "No matching cities": "没有匹配的城市",
+  "Search and select IPs": "搜索并选择 IP",
+  "Search IPs": "搜索 IP",
+  "No matching IPs": "没有匹配的 IP",
+  "Loading options…": "正在加载选项…",
+  "Could not load options": "无法加载选项",
+  Port: "端口",
+  "Leave blank to auto-allocate; the placeholder shows only the current suggestion and does not reserve it.":
+    "留空时自动分配；placeholder 只显示当前建议值，不会预留它。",
+  "Leave blank to auto-allocate.": "留空时自动分配。",
+  "Selection order": "提取顺序",
+  "Decides the first match inside the candidate set.": "决定候选集合里的第 1 个命中项。",
+  "Only decides the first match for this row.": "只决定这行的第 1 个命中项。",
+  "Choose a selection order": "选择提取顺序",
+  "The same IP cannot appear in both include and exclude lists.":
+    "同一个 IP 不能同时出现在包含列表和排除列表里。",
+  "Exclude IP": "排除 IP",
+  "Select IPs to exclude": "选择要排除的 IP",
+  "Search excluded IPs": "搜索要排除的 IP",
+  "More about {label}": "{label} 说明",
   "Session opened": "会话已打开",
   "Listening on {listen} via {proxyName} ({selectedIp}).":
     "已通过 {proxyName}（{selectedIp}）在 {listen} 上开始监听。",
@@ -259,10 +299,14 @@ export const zhCN: MessageCatalog = {
   "Open failed": "打开失败",
   "Batch open": "批量打开",
   "Queue a transactional batch": "排队一个事务型批次",
+  "Stage multiple open-session requests with the same simplified targeting model, then let the backend roll the whole set back if any row fails.":
+    "用同一套简化定位模型暂存多条打开请求；只要任意一行失败，就让后端把整个批次回滚。",
   "Stage multiple open-session requests and let the backend roll the whole set back if any row fails validation or allocation.":
     "准备多条打开会话请求；如果任意一行在校验或分配时失败，就让后端把整个批次回滚。",
   "rollback on failure": "失败即回滚",
   "Request #{index}": "请求 #{index}",
+  "One row, one listener; all rows still succeed or fail together.":
+    "一行对应一个监听；但整批仍然保持要么全部成功，要么全部失败。",
   "Compact selector for one listener entry.": "单个监听条目的紧凑选择器。",
   "Remove request {index}": "移除请求 {index}",
   "Optional geo scope.": "可选的地理范围。",
@@ -275,6 +319,8 @@ export const zhCN: MessageCatalog = {
   "Batch opened": "批次已打开",
   "Opened {count} sessions in one transaction.": "已在一次事务中打开 {count} 个会话。",
   "Batch failed": "批次失败",
+  Advanced: "高级选项",
+  optional: "可选",
   "Loading sessions": "正在加载会话",
   "Polling the backend for active listeners on this profile.":
     "正在轮询后端，获取这个配置的在线监听。",

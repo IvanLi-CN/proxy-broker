@@ -1,5 +1,10 @@
 import type { Locale, Translator } from "@/i18n";
-import type { ExtractIpRequest, OpenSessionRequest, SortMode } from "@/lib/types";
+import type {
+  ExtractIpRequest,
+  OpenSessionRequest,
+  SessionSelectionMode,
+  SortMode,
+} from "@/lib/types";
 
 const zhGeoLabels: Record<string, string> = {
   Japan: "日本",
@@ -25,6 +30,46 @@ export function optionalNumber(value: string) {
   }
   const parsed = Number.parseInt(trimmed, 10);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function uniqueItems(items: string[]) {
+  return Array.from(new Set(items.map((item) => item.trim()).filter(Boolean)));
+}
+
+function normalizeOverlapKey(value: string) {
+  return value.trim().toLowerCase();
+}
+
+export function findOverlappingValues(left: string[], right: string[]) {
+  const rightKeys = new Set(right.map((value) => normalizeOverlapKey(value)).filter(Boolean));
+  return uniqueItems(left).filter((value) => rightKeys.has(normalizeOverlapKey(value)));
+}
+
+function parseCitySelectionToken(value: string) {
+  const trimmed = value.trim();
+  const separatorIndex = trimmed.indexOf("::");
+  if (separatorIndex < 0) {
+    return null;
+  }
+  const countryCode = trimmed.slice(0, separatorIndex).trim().toUpperCase();
+  const city = trimmed.slice(separatorIndex + 2).trim();
+  if (!countryCode || !city) {
+    return null;
+  }
+  return { countryCode, city };
+}
+
+export function filterCitySelectionsByCountry(cities: string[], countryCodes: string[]) {
+  const allowed = new Set(countryCodes.map((code) => code.trim().toUpperCase()).filter(Boolean));
+  if (allowed.size === 0) {
+    return uniqueItems(cities);
+  }
+  return uniqueItems(
+    cities.filter((value) => {
+      const parsed = parseCitySelectionToken(value);
+      return parsed ? allowed.has(parsed.countryCode) : true;
+    }),
+  );
 }
 
 export function formatTimestamp(locale: Locale, t: Translator, epoch?: number | null) {
@@ -143,32 +188,60 @@ export function buildExtractRequest(values: {
 }
 
 export function buildOpenSessionRequest(values: {
-  specifiedIp: string;
+  selectionMode: SessionSelectionMode;
   desiredPort: string;
-  countryCodes: string;
-  cities: string;
-  selectorSpecifiedIps: string;
-  blacklistIps: string;
-  limit: string;
+  countryCodes: string[];
+  cities: string[];
+  specifiedIps: string[];
+  excludedIps: string[];
   sortMode: SortMode;
 }): OpenSessionRequest {
-  const selector = buildExtractRequest({
-    countryCodes: values.countryCodes,
-    cities: values.cities,
-    specifiedIps: values.selectorSpecifiedIps,
-    blacklistIps: values.blacklistIps,
-    limit: values.limit,
-    sortMode: values.sortMode,
-  });
+  const request: OpenSessionRequest = {
+    selection_mode: values.selectionMode,
+    sort_mode: values.sortMode,
+  };
 
-  const request: OpenSessionRequest = {};
-  const specifiedIp = values.specifiedIp.trim();
-  if (specifiedIp) {
-    request.specified_ip = specifiedIp;
+  if (values.selectionMode === "geo") {
+    const parsedCitySelections = values.cities.map((value) => ({
+      value,
+      parsed: parseCitySelectionToken(value),
+    }));
+    const tokenizedCityNames = new Set(
+      parsedCitySelections
+        .map((entry) => entry.parsed?.city.trim().toLocaleLowerCase())
+        .filter((value): value is string => Boolean(value)),
+    );
+    const tokenizedCities = parsedCitySelections
+      .map((entry) => (entry.parsed ? `${entry.parsed.countryCode}::${entry.parsed.city}` : null))
+      .filter((value): value is string => Boolean(value));
+    const plainCities = parsedCitySelections
+      .map((entry) => (entry.parsed ? null : entry.value.trim()))
+      .filter((value): value is string => Boolean(value))
+      .filter((value) => !tokenizedCityNames.has(value.toLocaleLowerCase()));
+
+    const countryCodes = uniqueItems(values.countryCodes);
+    const cities = uniqueItems([...tokenizedCities, ...plainCities]);
+
+    if (countryCodes.length > 0) {
+      request.country_codes = countryCodes;
+    }
+    if (cities.length > 0) {
+      request.cities = cities;
+    }
   }
-  if (Object.keys(selector).length > 0) {
-    request.selector = selector;
+
+  if (values.selectionMode === "ip") {
+    const specifiedIps = uniqueItems(values.specifiedIps);
+    if (specifiedIps.length > 0) {
+      request.specified_ips = specifiedIps;
+    }
   }
+
+  const excludedIps = uniqueItems(values.excludedIps);
+  if (excludedIps.length > 0) {
+    request.excluded_ips = excludedIps;
+  }
+
   const desiredPort = optionalNumber(values.desiredPort);
   if (desiredPort !== undefined) {
     request.desired_port = desiredPort;

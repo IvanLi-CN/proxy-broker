@@ -311,6 +311,32 @@ test.beforeEach(async ({ page }) => {
     });
   });
 
+  await page.route("**/api/v1/profiles/*/ips/options/search", async (route) => {
+    const payload = JSON.parse(route.request().postData() ?? "{}") as {
+      kind?: "country" | "city" | "ip";
+    };
+    const items =
+      payload.kind === "country"
+        ? [{ value: "JP", label: "Japan (JP)", meta: "Japan" }]
+        : payload.kind === "city"
+          ? [{ value: "JP::Tokyo", label: "Tokyo", meta: "Japan (JP)" }]
+          : [{ value: "203.0.113.10", label: "203.0.113.10", meta: "JP / Chiyoda" }];
+
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ items }),
+    });
+  });
+
+  await page.route("**/api/v1/profiles/*/sessions/suggested-port", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ port: 10080 }),
+    });
+  });
+
   await page.route("**/api/v1/profiles/*/sessions/open", async (route) => {
     const profileId = extractProfileId(route.request().url());
     const session = {

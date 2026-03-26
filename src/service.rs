@@ -32,10 +32,11 @@ use crate::{
         ExtractIpRequest, ExtractIpResponse, IpRecord, ListApiKeysResponse, ListProfilesResponse,
         ListSessionsResponse, LoadSubscriptionResponse, OpenBatchRequest, OpenBatchResponse,
         OpenSessionRequest, OpenSessionResponse, ProbeRecord, ProfileSyncConfig, ProxyNode,
-        RefreshRequest, RefreshResponse, SessionRecord, SubscriptionSource, TaskEventLevel,
-        TaskListQuery, TaskListResponse, TaskRunDetail, TaskRunEventRecord, TaskRunKind,
-        TaskRunRecord, TaskRunScope, TaskRunStage, TaskRunStatus, TaskRunSummary, TaskRunTrigger,
-        now_epoch_sec,
+        RefreshRequest, RefreshResponse, SearchSessionOptionsRequest, SearchSessionOptionsResponse,
+        SessionOptionItem, SessionOptionKind, SessionRecord, SessionSelectionMode,
+        SubscriptionSource, SuggestedPortResponse, TaskEventLevel, TaskListQuery, TaskListResponse,
+        TaskRunDetail, TaskRunEventRecord, TaskRunKind, TaskRunRecord, TaskRunScope, TaskRunStage,
+        TaskRunStatus, TaskRunSummary, TaskRunTrigger, now_epoch_sec,
     },
     runtime::MihomoRuntime,
     store::BrokerStore,
@@ -47,6 +48,7 @@ const DEFAULT_AUTO_SYNC_EVERY_SEC: u64 = 600;
 const DEFAULT_AUTO_FULL_REFRESH_EVERY_SEC: u64 = 86_400;
 const TASK_SCHEDULE_SCAN_SEC: u64 = 30;
 const TASK_DISPATCH_POLL_SEC: u64 = 1;
+const DEFAULT_SESSION_OPTIONS_LIMIT: usize = 25;
 
 #[derive(Debug, Clone)]
 pub struct BrokerServiceOptions {
@@ -2199,6 +2201,40 @@ impl BrokerService {
         Err(BrokerError::BatchOpenFailed)
     }
 
+    pub async fn suggested_port(&self, profile_id: &str) -> BrokerResult<SuggestedPortResponse> {
+        if !self.profile_exists(profile_id).await? {
+            return Err(BrokerError::ProfileNotFound);
+        }
+
+        let _profile_guard = self.lock_profile(profile_id).await;
+        let existing = self
+            .store
+            .list_sessions(profile_id)
+            .await
+            .map_err(BrokerError::from)?;
+        let port = allocate_port(&existing, None, self.options.session_listen_ip)?;
+        Ok(SuggestedPortResponse { port })
+    }
+
+    pub async fn search_session_options(
+        &self,
+        profile_id: &str,
+        request: &SearchSessionOptionsRequest,
+    ) -> BrokerResult<SearchSessionOptionsResponse> {
+        if !self.profile_exists(profile_id).await? {
+            return Err(BrokerError::ProfileNotFound);
+        }
+
+        let ip_records = self
+            .store
+            .list_ip_records(profile_id)
+            .await
+            .map_err(BrokerError::from)?;
+
+        let items = search_session_options(&ip_records, request)?;
+        Ok(SearchSessionOptionsResponse { items })
+    }
+
     pub async fn list_profiles(&self) -> BrokerResult<ListProfilesResponse> {
         let profiles = self
             .store
@@ -2472,6 +2508,129 @@ fn normalize_ip_text(raw: &str) -> String {
         .unwrap_or_else(|_| trimmed.to_string())
 }
 
+fn normalize_country_codes(values: &[String]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut normalized = Vec::new();
+    for value in values {
+        let item = value.trim().to_ascii_uppercase();
+        if item.is_empty() || !seen.insert(item.clone()) {
+            continue;
+        }
+        normalized.push(item);
+    }
+    normalized
+}
+
+fn normalize_city_values(values: &[String]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut normalized = Vec::new();
+    for value in values {
+        let item = value.trim().to_string();
+        if item.is_empty() {
+            continue;
+        }
+        let key = item.to_ascii_lowercase();
+        if !seen.insert(key) {
+            continue;
+        }
+        normalized.push(item);
+    }
+    normalized
+}
+
+fn normalize_city_filters(values: &[String]) -> HashSet<(Option<String>, String)> {
+    let mut normalized = HashSet::new();
+    for value in values {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let (country_code, city) = match trimmed.split_once("::") {
+            Some((country, city)) => {
+                let city = city.trim();
+                if city.is_empty() {
+                    continue;
+                }
+                (
+                    Some(country.trim().to_ascii_uppercase()),
+                    city.to_ascii_lowercase(),
+                )
+            }
+            None => (None, trimmed.to_ascii_lowercase()),
+        };
+        normalized.insert((country_code.filter(|code| !code.is_empty()), city));
+    }
+    normalized
+}
+
+fn normalize_ip_values(values: &[String]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut normalized = Vec::new();
+    for value in values {
+        let item = normalize_ip_text(value);
+        if item.is_empty() || !seen.insert(item.clone()) {
+            continue;
+        }
+        normalized.push(item);
+    }
+    normalized
+}
+
+fn build_open_selector_request(request: &OpenSessionRequest) -> BrokerResult<ExtractIpRequest> {
+    let country_codes = normalize_country_codes(&request.country_codes);
+    let cities = normalize_city_values(&request.cities);
+    let specified_ips = normalize_ip_values(&request.specified_ips);
+    let excluded_ips = normalize_ip_values(&request.excluded_ips);
+
+    match request.selection_mode {
+        SessionSelectionMode::Any => {
+            if !country_codes.is_empty() || !cities.is_empty() || !specified_ips.is_empty() {
+                return Err(BrokerError::InvalidRequest(
+                    "selection_mode=any only accepts excluded_ips, sort_mode, and desired_port"
+                        .to_string(),
+                ));
+            }
+        }
+        SessionSelectionMode::Geo => {
+            if !specified_ips.is_empty() {
+                return Err(BrokerError::InvalidRequest(
+                    "selection_mode=geo does not accept specified_ips".to_string(),
+                ));
+            }
+            if country_codes.is_empty() && cities.is_empty() {
+                return Err(BrokerError::InvalidRequest(
+                    "selection_mode=geo requires at least one country_codes or cities entry"
+                        .to_string(),
+                ));
+            }
+        }
+        SessionSelectionMode::Ip => {
+            if !country_codes.is_empty() || !cities.is_empty() {
+                return Err(BrokerError::InvalidRequest(
+                    "selection_mode=ip only accepts specified_ips and excluded_ips".to_string(),
+                ));
+            }
+            if specified_ips.is_empty() {
+                return Err(BrokerError::InvalidRequest(
+                    "selection_mode=ip requires at least one specified_ips entry".to_string(),
+                ));
+            }
+        }
+    }
+
+    let selector = ExtractIpRequest {
+        country_codes,
+        cities,
+        specified_ips,
+        blacklist_ips: excluded_ips,
+        limit: None,
+        sort_mode: request.sort_mode,
+    };
+    validate_conflict(&selector)?;
+    Ok(selector)
+}
+
 fn validate_conflict(request: &ExtractIpRequest) -> BrokerResult<()> {
     let specified: HashSet<String> = request
         .specified_ips
@@ -2491,6 +2650,205 @@ fn validate_conflict(request: &ExtractIpRequest) -> BrokerResult<()> {
         return Err(BrokerError::IpConflictBlacklist(conflicts));
     }
     Ok(())
+}
+
+fn search_session_options(
+    ip_records: &[IpRecord],
+    request: &SearchSessionOptionsRequest,
+) -> BrokerResult<Vec<SessionOptionItem>> {
+    let query = request
+        .query
+        .as_deref()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    let country_filters: HashSet<String> = normalize_country_codes(&request.country_codes)
+        .into_iter()
+        .collect();
+    let city_filters = normalize_city_filters(&request.cities);
+    let limit = request
+        .limit
+        .unwrap_or(DEFAULT_SESSION_OPTIONS_LIMIT)
+        .min(100);
+
+    let items = match request.kind {
+        SessionOptionKind::Country => {
+            let mut countries = HashMap::<String, SessionOptionItem>::new();
+            for record in ip_records {
+                let Some(code) = record.country_code.as_ref() else {
+                    continue;
+                };
+                let country_code = code.trim().to_ascii_uppercase();
+                if country_code.is_empty() {
+                    continue;
+                }
+                let country_name = record
+                    .country_name
+                    .as_deref()
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
+                let label = if country_name.is_empty() {
+                    country_code.clone()
+                } else {
+                    format!("{country_name} ({country_code})")
+                };
+                let haystack = format!(
+                    "{} {}",
+                    country_code.to_ascii_lowercase(),
+                    country_name.to_ascii_lowercase()
+                );
+                if !query.is_empty() && !haystack.contains(&query) {
+                    continue;
+                }
+                countries
+                    .entry(country_code.clone())
+                    .or_insert(SessionOptionItem {
+                        value: country_code.clone(),
+                        label,
+                        meta: (!country_name.is_empty()).then_some(country_name),
+                    });
+            }
+            let mut items = countries.into_values().collect::<Vec<_>>();
+            items.sort_by(|left, right| left.label.cmp(&right.label));
+            items
+        }
+        SessionOptionKind::City => {
+            let mut cities = HashMap::<String, SessionOptionItem>::new();
+            for record in ip_records {
+                if !country_filters.is_empty() {
+                    let Some(code) = record.country_code.as_ref() else {
+                        continue;
+                    };
+                    if !country_filters.contains(&code.to_ascii_uppercase()) {
+                        continue;
+                    }
+                }
+
+                let Some(city) = record.city.as_ref() else {
+                    continue;
+                };
+                let city_value = city.trim().to_string();
+                if city_value.is_empty() {
+                    continue;
+                }
+                let country_code = record.country_code.clone().unwrap_or_default();
+                let country_name = record.country_name.clone().unwrap_or_default();
+                let meta = match (country_code.trim(), country_name.trim()) {
+                    ("", "") => None,
+                    ("", name) => Some(name.to_string()),
+                    (code, "") => Some(code.to_string()),
+                    (code, name) => Some(format!("{name} ({code})")),
+                };
+                let value = if country_code.trim().is_empty() {
+                    city_value.clone()
+                } else {
+                    format!(
+                        "{}::{}",
+                        country_code.trim().to_ascii_uppercase(),
+                        city_value
+                    )
+                };
+                let key = value.to_ascii_lowercase();
+                let haystack = format!(
+                    "{} {} {}",
+                    city_value.to_ascii_lowercase(),
+                    country_code.to_ascii_lowercase(),
+                    country_name.to_ascii_lowercase()
+                );
+                if !query.is_empty() && !haystack.contains(&query) {
+                    continue;
+                }
+                cities.entry(key).or_insert(SessionOptionItem {
+                    value,
+                    label: city_value,
+                    meta,
+                });
+            }
+            let mut items = cities.into_values().collect::<Vec<_>>();
+            items.sort_by(|left, right| {
+                left.label
+                    .cmp(&right.label)
+                    .then_with(|| left.value.cmp(&right.value))
+            });
+            items
+        }
+        SessionOptionKind::Ip => {
+            let mut items = ip_records
+                .iter()
+                .filter(|record| {
+                    if !country_filters.is_empty() {
+                        let Some(code) = record.country_code.as_ref() else {
+                            return false;
+                        };
+                        if !country_filters.contains(&code.to_ascii_uppercase()) {
+                            return false;
+                        }
+                    }
+                    if !city_filters.is_empty() {
+                        let Some(city) = record.city.as_ref() else {
+                            return false;
+                        };
+                        let city_name = city.trim().to_ascii_lowercase();
+                        let country_code = record
+                            .country_code
+                            .as_ref()
+                            .map(|code| code.trim().to_ascii_uppercase());
+                        let matched = city_filters.iter().any(|(country_filter, city_filter)| {
+                            city_name == *city_filter
+                                && match country_filter {
+                                    Some(code) => country_code.as_deref() == Some(code.as_str()),
+                                    None => true,
+                                }
+                        });
+                        if !matched {
+                            return false;
+                        }
+                    }
+                    if query.is_empty() {
+                        return true;
+                    }
+                    let haystack = format!(
+                        "{} {} {} {}",
+                        record.ip.to_ascii_lowercase(),
+                        record
+                            .country_code
+                            .as_deref()
+                            .unwrap_or_default()
+                            .to_ascii_lowercase(),
+                        record
+                            .country_name
+                            .as_deref()
+                            .unwrap_or_default()
+                            .to_ascii_lowercase(),
+                        record
+                            .city
+                            .as_deref()
+                            .unwrap_or_default()
+                            .to_ascii_lowercase()
+                    );
+                    haystack.contains(&query)
+                })
+                .map(|record| SessionOptionItem {
+                    value: record.ip.clone(),
+                    label: record.ip.clone(),
+                    meta: {
+                        let geo = [record.country_code.clone(), record.city.clone()]
+                            .into_iter()
+                            .flatten()
+                            .filter(|value| !value.trim().is_empty())
+                            .collect::<Vec<_>>();
+                        (!geo.is_empty()).then_some(geo.join(" / "))
+                    },
+                })
+                .collect::<Vec<_>>();
+            items.sort_by(|left, right| left.value.cmp(&right.value));
+            items.dedup_by(|left, right| left.value == right.value);
+            items
+        }
+    };
+
+    Ok(items.into_iter().take(limit).collect())
 }
 
 fn filter_probe_records_by_pair(
@@ -2679,11 +3037,7 @@ fn filter_ip_records(
         .iter()
         .map(|c| c.to_ascii_uppercase())
         .collect();
-    let city_set: HashSet<String> = request
-        .cities
-        .iter()
-        .map(|c| c.to_ascii_lowercase())
-        .collect();
+    let city_filters = normalize_city_filters(&request.cities);
 
     for record in ip_records {
         let record_ip_key = normalize_ip_text(&record.ip);
@@ -2704,14 +3058,24 @@ fn filter_ip_records(
                     .map(|c| country_set.contains(&c.to_ascii_uppercase()))
                     .unwrap_or(false)
             };
-            let city_pass = if city_set.is_empty() {
+            let city_pass = if city_filters.is_empty() {
                 true
             } else {
-                record
-                    .city
+                let Some(city) = record.city.as_ref() else {
+                    continue;
+                };
+                let city_name = city.trim().to_ascii_lowercase();
+                let country_code = record
+                    .country_code
                     .as_ref()
-                    .map(|c| city_set.contains(&c.to_ascii_lowercase()))
-                    .unwrap_or(false)
+                    .map(|code| code.trim().to_ascii_uppercase());
+                city_filters.iter().any(|(country_filter, city_filter)| {
+                    city_name == *city_filter
+                        && match country_filter {
+                            Some(code) => country_code.as_deref() == Some(code.as_str()),
+                            None => true,
+                        }
+                })
             };
             country_pass && city_pass
         };
@@ -2766,49 +3130,21 @@ fn choose_ip_for_open(
     ip_records: &[IpRecord],
     probes: &[ProbeRecord],
 ) -> BrokerResult<String> {
-    let using_custom_selector = request.selector.is_some();
-
-    if let Some(ip) = &request.specified_ip {
-        let normalized_ip = normalize_ip_text(ip);
-        if let Some(selector) = &request.selector {
-            let mut req = selector.clone();
-            req.specified_ips = vec![normalized_ip.clone()];
-            let mut items = filter_ip_records(ip_records.to_vec(), probes, &req)?;
-            if let Some(limit) = req.limit {
-                items.truncate(limit);
-            }
-            if items.is_empty() {
-                return Err(BrokerError::IpNotFound);
-            }
-            return Ok(items[0].ip.clone());
-        }
-
-        if let Some(record) = ip_records
-            .iter()
-            .find(|record| normalize_ip_text(&record.ip) == normalized_ip)
-        {
-            return Ok(record.ip.clone());
-        }
-        return Err(BrokerError::IpNotFound);
-    }
-
-    let selector = request.selector.clone().unwrap_or_default();
-    validate_conflict(&selector)?;
+    let selector = build_open_selector_request(request)?;
     let mut items = filter_ip_records(ip_records.to_vec(), probes, &selector)?;
-    if let Some(limit) = selector.limit {
-        items.truncate(limit);
-    }
-    if items.is_empty() {
-        return Err(BrokerError::IpNotFound);
-    }
 
-    if !using_custom_selector {
-        // Default auto-pick policy: health first + low latency + LRU.
+    if matches!(request.selection_mode, SessionSelectionMode::Any) {
+        // Preserve the legacy auto-pick quality bar for the unrestricted path:
+        // healthy, low-latency candidates win before recency breaks ties.
         items.sort_by(|a, b| {
+            let recency = match request.sort_mode {
+                crate::models::SortMode::Mru => b.last_used_at.cmp(&a.last_used_at),
+                crate::models::SortMode::Lru => a.last_used_at.cmp(&b.last_used_at),
+            };
             b.probe_ok
                 .cmp(&a.probe_ok)
                 .then_with(|| a.best_latency_ms.cmp(&b.best_latency_ms))
-                .then_with(|| a.last_used_at.cmp(&b.last_used_at))
+                .then_with(|| recency)
                 .then_with(|| a.ip.cmp(&b.ip))
         });
     }
@@ -3747,9 +4083,8 @@ proxies:
                 profile_id,
                 &OpenBatchRequest {
                     requests: vec![OpenSessionRequest {
-                        specified_ip: Some("1.1.1.1".to_string()),
-                        selector: None,
                         desired_port: Some(0),
+                        ..Default::default()
                     }],
                 },
             )
@@ -4025,9 +4360,10 @@ proxies:
     #[test]
     fn batch_stage_failure_returns_underlying_error() {
         let requests = vec![OpenSessionRequest {
-            specified_ip: Some("9.9.9.9".to_string()),
-            selector: None,
+            selection_mode: SessionSelectionMode::Ip,
+            specified_ips: vec!["9.9.9.9".to_string()],
             desired_port: None,
+            ..Default::default()
         }];
         let nodes = vec![sample_node("proxy-a", "1.1.1.1")];
         let ips = vec![sample_ip("1.1.1.1", None)];
@@ -4044,14 +4380,12 @@ proxies:
     }
 
     #[test]
-    fn choose_ip_honors_selector_sort_mode_when_selector_provided() {
+    fn choose_ip_honors_sort_mode_for_any_selection() {
         let request = OpenSessionRequest {
-            specified_ip: None,
-            selector: Some(ExtractIpRequest {
-                sort_mode: SortMode::Mru,
-                ..Default::default()
-            }),
+            selection_mode: SessionSelectionMode::Any,
+            sort_mode: SortMode::Mru,
             desired_port: None,
+            ..Default::default()
         };
         let ips = vec![
             sample_ip("1.1.1.1", Some(100)),
@@ -4062,19 +4396,144 @@ proxies:
     }
 
     #[test]
-    fn choose_ip_respects_selector_limit() {
+    fn choose_ip_for_any_selection_prefers_healthy_candidates() {
         let request = OpenSessionRequest {
-            specified_ip: None,
-            selector: Some(ExtractIpRequest {
-                limit: Some(0),
-                ..Default::default()
-            }),
+            selection_mode: SessionSelectionMode::Any,
+            sort_mode: SortMode::Mru,
             desired_port: None,
+            ..Default::default()
+        };
+        let ips = vec![
+            sample_ip("1.1.1.1", Some(100)),
+            sample_ip("2.2.2.2", Some(10)),
+        ];
+        let probes = vec![sample_probe("proxy-b", "2.2.2.2")];
+
+        let chosen =
+            choose_ip_for_open(&request, &ips, &probes).expect("healthy candidate should win");
+        assert_eq!(chosen, "2.2.2.2");
+    }
+
+    #[test]
+    fn choose_ip_for_any_selection_prefers_lower_latency_before_recency() {
+        let request = OpenSessionRequest {
+            selection_mode: SessionSelectionMode::Any,
+            sort_mode: SortMode::Mru,
+            desired_port: None,
+            ..Default::default()
+        };
+        let ips = vec![
+            sample_ip("1.1.1.1", Some(100)),
+            sample_ip("2.2.2.2", Some(10)),
+        ];
+        let probes = vec![
+            ProbeRecord {
+                latency_ms: Some(250),
+                ..sample_probe("proxy-a", "1.1.1.1")
+            },
+            ProbeRecord {
+                latency_ms: Some(40),
+                ..sample_probe("proxy-b", "2.2.2.2")
+            },
+        ];
+
+        let chosen = choose_ip_for_open(&request, &ips, &probes)
+            .expect("lower latency candidate should win before recency");
+        assert_eq!(chosen, "2.2.2.2");
+    }
+
+    #[test]
+    fn search_session_options_keeps_duplicate_city_names_across_countries() {
+        let mut us_paris = sample_ip("1.1.1.1", None);
+        us_paris.city = Some("Paris".to_string());
+        us_paris.country_code = Some("US".to_string());
+        us_paris.country_name = Some("United States".to_string());
+
+        let mut fr_paris = sample_ip("2.2.2.2", None);
+        fr_paris.city = Some("Paris".to_string());
+        fr_paris.country_code = Some("FR".to_string());
+        fr_paris.country_name = Some("France".to_string());
+
+        let request = SearchSessionOptionsRequest {
+            kind: SessionOptionKind::City,
+            query: Some("par".to_string()),
+            country_codes: vec![],
+            cities: vec![],
+            limit: None,
+        };
+
+        let items = search_session_options(&[us_paris, fr_paris], &request)
+            .expect("city options should be returned");
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].label, "Paris");
+        assert_eq!(items[0].value, "FR::Paris");
+        assert_eq!(items[0].meta.as_deref(), Some("France (FR)"));
+        assert_eq!(items[1].value, "US::Paris");
+        assert_eq!(items[1].meta.as_deref(), Some("United States (US)"));
+    }
+
+    #[test]
+    fn search_session_options_ip_accepts_encoded_city_filters() {
+        let mut fr_paris = sample_ip("1.1.1.1", None);
+        fr_paris.city = Some("Paris".to_string());
+        fr_paris.country_code = Some("FR".to_string());
+        fr_paris.country_name = Some("France".to_string());
+
+        let mut us_paris = sample_ip("2.2.2.2", None);
+        us_paris.city = Some("Paris".to_string());
+        us_paris.country_code = Some("US".to_string());
+        us_paris.country_name = Some("United States".to_string());
+
+        let request = SearchSessionOptionsRequest {
+            kind: SessionOptionKind::Ip,
+            query: None,
+            country_codes: vec![],
+            cities: vec!["FR::Paris".to_string()],
+            limit: None,
+        };
+
+        let items = search_session_options(&[fr_paris, us_paris], &request)
+            .expect("ip options should respect encoded city filters");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].value, "1.1.1.1");
+    }
+
+    #[test]
+    fn choose_ip_for_geo_selection_preserves_city_country_pairings() {
+        let mut fr_paris = sample_ip("1.1.1.1", Some(100));
+        fr_paris.city = Some("Paris".to_string());
+        fr_paris.country_code = Some("FR".to_string());
+        fr_paris.country_name = Some("France".to_string());
+
+        let mut us_paris = sample_ip("2.2.2.2", Some(10));
+        us_paris.city = Some("Paris".to_string());
+        us_paris.country_code = Some("US".to_string());
+        us_paris.country_name = Some("United States".to_string());
+
+        let request = OpenSessionRequest {
+            selection_mode: SessionSelectionMode::Geo,
+            country_codes: vec!["FR".to_string(), "US".to_string()],
+            cities: vec!["FR::Paris".to_string()],
+            desired_port: None,
+            ..Default::default()
+        };
+
+        let chosen = choose_ip_for_open(&request, &[fr_paris, us_paris], &[])
+            .expect("geo selection should preserve city-country pairings");
+        assert_eq!(chosen, "1.1.1.1");
+    }
+
+    #[test]
+    fn choose_ip_rejects_ip_mode_without_specified_ips() {
+        let request = OpenSessionRequest {
+            selection_mode: SessionSelectionMode::Ip,
+            desired_port: None,
+            ..Default::default()
         };
         let ips = vec![sample_ip("1.1.1.1", Some(100))];
         let err = choose_ip_for_open(&request, &ips, &[])
-            .expect_err("selector limit=0 should produce no candidate");
-        assert!(matches!(err, BrokerError::IpNotFound));
+            .expect_err("ip mode without specified_ips should be rejected");
+        assert!(matches!(err, BrokerError::InvalidRequest(_)));
     }
 
     #[test]
@@ -4101,9 +4560,10 @@ proxies:
     #[test]
     fn prepare_session_uses_configured_listen_ip() {
         let request = OpenSessionRequest {
-            specified_ip: Some("1.1.1.1".to_string()),
-            selector: None,
+            selection_mode: SessionSelectionMode::Ip,
+            specified_ips: vec!["1.1.1.1".to_string()],
             desired_port: None,
+            ..Default::default()
         };
         let nodes = vec![sample_node("proxy-a", "1.1.1.1")];
         let ips = vec![sample_ip("1.1.1.1", None)];

@@ -4,6 +4,8 @@ import { zhCN } from "@/i18n/messages/zh-CN";
 import {
   buildExtractRequest,
   buildOpenSessionRequest,
+  filterCitySelectionsByCountry,
+  findOverlappingValues,
   formatLatency,
   formatTimestamp,
   splitListInput,
@@ -14,6 +16,14 @@ const t = (message: string) => zhCN[message] ?? message;
 describe("splitListInput", () => {
   it("accepts commas and newlines", () => {
     expect(splitListInput("JP, US\nSG")).toEqual(["JP", "US", "SG"]);
+  });
+});
+
+describe("filterCitySelectionsByCountry", () => {
+  it("drops stale encoded city tokens while preserving plain city selections", () => {
+    expect(
+      filterCitySelectionsByCountry(["JP::Tokyo", "US::San Jose", "Tokyo", "Osaka"], ["US"]),
+    ).toEqual(["US::San Jose", "Tokyo", "Osaka"]);
   });
 });
 
@@ -38,29 +48,88 @@ describe("buildExtractRequest", () => {
   });
 });
 
+describe("findOverlappingValues", () => {
+  it("matches overlapping values case-insensitively after trimming", () => {
+    expect(
+      findOverlappingValues([" 203.0.113.10 ", "203.0.113.11"], ["203.0.113.10", " 203.0.113.12 "]),
+    ).toEqual(["203.0.113.10"]);
+  });
+});
+
 describe("buildOpenSessionRequest", () => {
-  it("builds a direct IP request with selector details", () => {
+  it("builds a flattened ip-targeted session request", () => {
     expect(
       buildOpenSessionRequest({
-        specifiedIp: "203.0.113.10",
+        selectionMode: "ip",
         desiredPort: "10080",
-        countryCodes: "JP",
-        cities: "Tokyo",
-        selectorSpecifiedIps: "203.0.113.10",
-        blacklistIps: "",
-        limit: "1",
+        countryCodes: ["JP"],
+        cities: ["Tokyo"],
+        specifiedIps: ["203.0.113.10", "203.0.113.11"],
+        excludedIps: ["198.51.100.42"],
         sortMode: "mru",
       }),
     ).toEqual({
-      specified_ip: "203.0.113.10",
+      selection_mode: "ip",
       desired_port: 10080,
-      selector: {
-        country_codes: ["JP"],
-        cities: ["Tokyo"],
-        specified_ips: ["203.0.113.10"],
-        limit: 1,
-        sort_mode: "mru",
-      },
+      specified_ips: ["203.0.113.10", "203.0.113.11"],
+      excluded_ips: ["198.51.100.42"],
+      sort_mode: "mru",
+    });
+  });
+
+  it("keeps encoded city selections opaque", () => {
+    expect(
+      buildOpenSessionRequest({
+        selectionMode: "geo",
+        desiredPort: "",
+        countryCodes: [],
+        cities: ["JP::Tokyo", "FR::Paris", "Paris"],
+        specifiedIps: [],
+        excludedIps: [],
+        sortMode: "lru",
+      }),
+    ).toEqual({
+      selection_mode: "geo",
+      cities: ["JP::Tokyo", "FR::Paris"],
+      sort_mode: "lru",
+    });
+  });
+
+  it("preserves plain cities when mixed with encoded selections for other cities", () => {
+    expect(
+      buildOpenSessionRequest({
+        selectionMode: "geo",
+        desiredPort: "",
+        countryCodes: ["JP"],
+        cities: ["Osaka", "JP::Tokyo"],
+        specifiedIps: [],
+        excludedIps: [],
+        sortMode: "lru",
+      }),
+    ).toEqual({
+      selection_mode: "geo",
+      country_codes: ["JP"],
+      cities: ["JP::Tokyo", "Osaka"],
+      sort_mode: "lru",
+    });
+  });
+
+  it("drops plain duplicates once an encoded city for the same label exists", () => {
+    expect(
+      buildOpenSessionRequest({
+        selectionMode: "geo",
+        desiredPort: "",
+        countryCodes: ["JP"],
+        cities: ["Osaka", "JP::Osaka"],
+        specifiedIps: [],
+        excludedIps: [],
+        sortMode: "lru",
+      }),
+    ).toEqual({
+      selection_mode: "geo",
+      country_codes: ["JP"],
+      cities: ["JP::Osaka"],
+      sort_mode: "lru",
     });
   });
 });

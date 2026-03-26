@@ -147,6 +147,33 @@
   - `invalid_request` (400) when JSON body is malformed
   - `ip_conflict_blacklist` (400)
 
+## POST /api/v1/profiles/{profile_id}/ips/options/search
+
+- Change: New
+- Auth:
+  - admin human or development principal
+  - API key bound to `{profile_id}`
+- Body:
+  - `kind`: `country|city|ip`
+  - `query`: `string?`
+  - `country_codes`: `string[]`
+  - `cities`: `string[]`
+  - `limit`: `u32?` (defaults to `25`, capped at `100`)
+- Success:
+  - `items[]`
+  - each item contains `value`, `label`, `meta?`
+  - `city` item `value`s are opaque selection tokens so duplicate city names can
+    stay disambiguated by country
+  - `city` results can be filtered by `country_codes`
+  - `ip` results can be filtered by `country_codes` and `cities`
+- Error:
+  - `authentication_required` (401)
+  - `admin_required` (403) for non-admin human callers
+  - `api_key_invalid` (401)
+  - `api_key_revoked` (401)
+  - `profile_access_denied` (403)
+  - `invalid_request` (400) when JSON body is malformed
+
 ## POST /api/v1/profiles/{profile_id}/sessions/open
 
 - Change: New
@@ -154,9 +181,19 @@
   - admin human or development principal
   - API key bound to `{profile_id}`
 - Body:
-  - `specified_ip`: `string?`
-  - `selector`: same shape as extract request
+  - `selection_mode`: `any|geo|ip` (defaults to `any`)
+  - `country_codes`: `string[]`
+  - `cities`: `string[]`
+  - `specified_ips`: `string[]`
+  - `excluded_ips`: `string[]`
+  - `sort_mode`: `mru|lru` (defaults to `lru`)
   - `desired_port`: `u16?`
+- Constraints:
+  - `selection_mode=any` only accepts `excluded_ips`, `sort_mode`, and `desired_port`
+  - `selection_mode=geo` requires at least one `country_codes` or `cities` entry
+  - `selection_mode=ip` requires at least one `specified_ips` entry and rejects geo fields
+  - `specified_ips` and `excluded_ips` must not intersect
+  - omitting `desired_port` lets the backend auto-allocate a free listener port
 - Success:
   - `session_id`, `listen`, `port`, `selected_ip`, `proxy_name`
   - `listen` echoes the configured session listener bind IP (`127.0.0.1` for
@@ -168,6 +205,9 @@
   - `api_key_revoked` (401)
   - `profile_access_denied` (403)
   - `invalid_request` (400) when JSON body is malformed
+  - `invalid_port` (400)
+  - `ip_not_found` (404)
+  - `ip_conflict_blacklist` (400)
 
 ## POST /api/v1/profiles/{profile_id}/sessions/open-batch
 
@@ -176,7 +216,7 @@
   - admin human or development principal
   - API key bound to `{profile_id}`
 - Body:
-  - `requests[]`: `OpenSessionRequest`
+  - `requests[]`: same shape and constraints as `POST /sessions/open`
 - Success:
   - `sessions[]` (empty `requests` returns `sessions=[]` as no-op)
 - Error:
@@ -190,6 +230,25 @@
   - `ip_not_found` (404)
   - `ip_conflict_blacklist` (400)
   - `batch_open_failed` (409), strict rollback for runtime/persist stage failures
+
+## GET /api/v1/profiles/{profile_id}/sessions/suggested-port
+
+- Change: New
+- Auth:
+  - admin human or development principal
+  - API key bound to `{profile_id}`
+- Success:
+  - `port`
+- Notes:
+  - returns the next available listener port suggestion for the profile
+  - the port is not reserved; callers must still omit `desired_port` or submit
+    a real value when opening the session
+- Error:
+  - `authentication_required` (401)
+  - `admin_required` (403) for non-admin human callers
+  - `api_key_invalid` (401)
+  - `api_key_revoked` (401)
+  - `profile_access_denied` (403)
 
 ## GET /api/v1/profiles/{profile_id}/sessions
 
