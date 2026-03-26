@@ -1,5 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ChevronDownIcon, PlusIcon, Rows4Icon, Trash2Icon } from "lucide-react";
+import { ChevronDownIcon, InfoIcon, PlusIcon, Rows4Icon, Trash2Icon } from "lucide-react";
 import { useEffect } from "react";
 import { Controller, useFieldArray, useForm } from "react-hook-form";
 import { z } from "zod";
@@ -18,7 +18,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { buildOpenSessionRequest, filterCitySelectionsByCountry } from "@/lib/format";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { SessionSelectionModeSwitch } from "@/features/sessions/components/SessionSelectionModeSwitch";
+import { useI18n } from "@/i18n";
+import {
+  buildOpenSessionRequest,
+  filterCitySelectionsByCountry,
+  formatSortMode,
+} from "@/lib/format";
 import type {
   OpenBatchRequest,
   OpenBatchResponse,
@@ -27,34 +34,6 @@ import type {
   SessionSelectionMode,
   SortMode,
 } from "@/lib/types";
-import { cn } from "@/lib/utils";
-
-const selectionModeOptions: Array<{
-  value: SessionSelectionMode;
-  title: string;
-  description: string;
-}> = [
-  {
-    value: "any",
-    title: "不限",
-    description: "全部候选里按顺序挑第一条。",
-  },
-  {
-    value: "geo",
-    title: "国家/地区",
-    description: "收窄到国家或城市。",
-  },
-  {
-    value: "ip",
-    title: "IP",
-    description: "直接圈定一个或多个 IP。",
-  },
-];
-
-const sortModeOptions: Array<{ value: SortMode; label: string }> = [
-  { value: "lru", label: "最久未使用优先 (LRU)" },
-  { value: "mru", label: "最近使用优先 (MRU)" },
-];
 
 const rowSchema = z
   .object({
@@ -108,6 +87,33 @@ const emptyRow = (): BatchRequestRow => ({
   sortMode: "lru",
 });
 
+const inlineFieldClass = "grid gap-2 md:grid-cols-[88px_minmax(0,1fr)] md:items-start md:gap-3";
+const pairFieldClass = "grid gap-3 lg:grid-cols-2";
+
+function FieldLabel({ htmlFor, label, hint }: { htmlFor?: string; label: string; hint?: string }) {
+  return (
+    <div className="inline-flex items-center gap-1.5">
+      <Label htmlFor={htmlFor}>{label}</Label>
+      {hint ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              className="inline-flex size-4 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
+              aria-label={`${label} 说明`}
+            >
+              <InfoIcon className="size-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top" align="start" sideOffset={6}>
+            {hint}
+          </TooltipContent>
+        </Tooltip>
+      ) : null}
+    </div>
+  );
+}
+
 interface OpenBatchFormProps {
   isPending: boolean;
   suggestedPort?: number | null;
@@ -131,6 +137,7 @@ export function OpenBatchForm({
   onSubmit,
   searchOptions = emptySearch,
 }: OpenBatchFormProps) {
+  const { t } = useI18n();
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
@@ -142,6 +149,10 @@ export function OpenBatchForm({
   });
   const fieldArray = useFieldArray({ control: form.control, name: "requests" });
   const watchedRequests = form.watch("requests");
+  const sortModeOptions: Array<{ value: SortMode; label: string }> = [
+    { value: "lru", label: `${formatSortMode("lru", t)} (LRU)` },
+    { value: "mru", label: `${formatSortMode("mru", t)} (MRU)` },
+  ];
 
   useEffect(() => {
     watchedRequests.forEach((row, index) => {
@@ -172,8 +183,9 @@ export function OpenBatchForm({
               {t("Queue a transactional batch")}
             </CardTitle>
             <CardDescription className="text-sm leading-6 text-muted-foreground md:text-[15px]">
-              Stage multiple open-session requests with the same simplified targeting model, then
-              let the backend roll the whole set back if any row fails.
+              {t(
+                "Stage multiple open-session requests with the same simplified targeting model, then let the backend roll the whole set back if any row fails.",
+              )}
             </CardDescription>
           </div>
           <Badge
@@ -216,10 +228,10 @@ export function OpenBatchForm({
                   <div className="mb-4 flex items-center justify-between gap-3">
                     <div>
                       <div className="text-sm font-semibold text-foreground">
-                        Request #{index + 1}
+                        {t("Request #{index}", { index: index + 1 })}
                       </div>
                       <div className="text-xs text-muted-foreground">
-                        One row, one listener; all rows still succeed or fail together.
+                        {t("One row, one listener; all rows still succeed or fail together.")}
                       </div>
                     </div>
                     <Button
@@ -228,190 +240,190 @@ export function OpenBatchForm({
                       size="icon-sm"
                       onClick={() => fieldArray.remove(index)}
                       disabled={fieldArray.fields.length === 1}
-                      aria-label={`Remove request ${index + 1}`}
+                      aria-label={t("Remove request {index}", { index: index + 1 })}
                     >
                       <Trash2Icon />
                     </Button>
                   </div>
 
-                  <div className="space-y-3 rounded-[24px] border border-border/70 bg-card/50 p-4">
-                    <div className="space-y-1">
-                      <Label>选择范围</Label>
-                      <p className="text-xs text-muted-foreground">
-                        先选这一行的候选来源，再决定是否指定端口。
-                      </p>
+                  <div className="space-y-3">
+                    <div className={inlineFieldClass}>
+                      <div className="md:pt-1.5">
+                        <FieldLabel label="定位方式" />
+                      </div>
+                      <div className="space-y-2">
+                        <Controller
+                          control={form.control}
+                          name={`requests.${index}.selectionMode`}
+                          render={({ field }) => (
+                            <SessionSelectionModeSwitch
+                              value={field.value}
+                              onChange={field.onChange}
+                              size="sm"
+                            />
+                          )}
+                        />
+                        {rowSelectionError ? (
+                          <p className="text-xs text-destructive">{rowSelectionError}</p>
+                        ) : null}
+                      </div>
                     </div>
-                    <Controller
-                      control={form.control}
-                      name={`requests.${index}.selectionMode`}
-                      render={({ field }) => (
-                        <div className="grid gap-3 md:grid-cols-3">
-                          {selectionModeOptions.map((option) => {
-                            const active = field.value === option.value;
-                            return (
-                              <button
-                                key={option.value}
-                                type="button"
-                                className={cn(
-                                  "rounded-[22px] border px-4 py-3 text-left transition-colors",
-                                  active
-                                    ? "border-primary bg-primary/8 shadow-sm"
-                                    : "border-border/70 bg-background hover:border-primary/35 hover:bg-muted/40",
-                                )}
-                                onClick={() => field.onChange(option.value)}
-                              >
-                                <div className="text-sm font-semibold text-foreground">
-                                  {option.title}
-                                </div>
-                                <div className="mt-1 text-xs leading-5 text-muted-foreground">
-                                  {option.description}
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-                    />
-                    {rowSelectionError ? (
-                      <p className="text-xs text-destructive">{rowSelectionError}</p>
-                    ) : null}
-                  </div>
 
-                  <div className="mt-4 grid gap-4">
-                    {row.selectionMode === "any" ? (
-                      <div className="rounded-[22px] border border-dashed border-border/70 bg-card/60 px-4 py-3 text-sm leading-6 text-muted-foreground">
-                        不限模式会直接从这行当前 profile 的全部候选里，按照提取顺序选第 1 个。
+                    {row.selectionMode !== "any" ? (
+                      <div className="space-y-3 border-t border-border/70 pt-3">
+                        {row.selectionMode === "geo" ? (
+                          <>
+                            <Controller
+                              control={form.control}
+                              name={`requests.${index}.countryCodes`}
+                              render={({ field }) => (
+                                <SearchableMultiSelect
+                                  id={`batch-country-codes-${index}`}
+                                  label="国家"
+                                  layout="inline"
+                                  size="sm"
+                                  placeholder="搜索并选择国家"
+                                  searchPlaceholder="搜索国家或代码"
+                                  emptyText="No matching countries"
+                                  values={field.value}
+                                  onChange={field.onChange}
+                                  onSearch={async (query) =>
+                                    (await searchOptions({
+                                      kind: "country",
+                                      query,
+                                      limit: 20,
+                                    })) ?? []
+                                  }
+                                />
+                              )}
+                            />
+                            <Controller
+                              control={form.control}
+                              name={`requests.${index}.cities`}
+                              render={({ field }) => (
+                                <SearchableMultiSelect
+                                  id={`batch-cities-${index}`}
+                                  label="地区 / 城市"
+                                  layout="inline"
+                                  size="sm"
+                                  placeholder="搜索并选择城市"
+                                  searchPlaceholder="搜索城市"
+                                  emptyText="No matching cities"
+                                  values={field.value}
+                                  searchKey={row.countryCodes.join("|")}
+                                  onChange={field.onChange}
+                                  onSearch={async (query) =>
+                                    (await searchOptions({
+                                      kind: "city",
+                                      query,
+                                      country_codes: row.countryCodes,
+                                      limit: 30,
+                                    })) ?? []
+                                  }
+                                />
+                              )}
+                            />
+                          </>
+                        ) : null}
+
+                        {row.selectionMode === "ip" ? (
+                          <Controller
+                            control={form.control}
+                            name={`requests.${index}.specifiedIps`}
+                            render={({ field }) => (
+                              <SearchableMultiSelect
+                                id={`batch-specified-ips-${index}`}
+                                label="IP"
+                                layout="inline"
+                                size="sm"
+                                placeholder="搜索并选择 IP"
+                                searchPlaceholder="搜索 IP"
+                                emptyText="No matching IPs"
+                                values={field.value}
+                                onChange={field.onChange}
+                                onSearch={async (query) =>
+                                  (await searchOptions({
+                                    kind: "ip",
+                                    query,
+                                    limit: 40,
+                                  })) ?? []
+                                }
+                              />
+                            )}
+                          />
+                        ) : null}
                       </div>
                     ) : null}
 
-                    {row.selectionMode === "geo" ? (
-                      <>
-                        <Controller
-                          control={form.control}
-                          name={`requests.${index}.countryCodes`}
-                          render={({ field }) => (
-                            <SearchableMultiSelect
-                              id={`batch-country-codes-${index}`}
-                              label="国家"
-                              helper="可多选；城市搜索会按这里的结果收窄。"
-                              placeholder="选择国家"
-                              searchPlaceholder="搜索国家或代码"
-                              emptyText="No matching countries"
-                              values={field.value}
-                              onChange={field.onChange}
-                              onSearch={async (query) =>
-                                (await searchOptions({
-                                  kind: "country",
-                                  query,
-                                  limit: 20,
-                                })) ?? []
-                              }
-                            />
-                          )}
-                        />
-                        <Controller
-                          control={form.control}
-                          name={`requests.${index}.cities`}
-                          render={({ field }) => (
-                            <SearchableMultiSelect
-                              id={`batch-cities-${index}`}
-                              label="地区 / 城市"
-                              helper="可选；不填就只按国家过滤。"
-                              placeholder="选择城市"
-                              searchPlaceholder="搜索城市"
-                              emptyText="No matching cities"
-                              values={field.value}
-                              searchKey={row.countryCodes.join("|")}
-                              onChange={field.onChange}
-                              onSearch={async (query) =>
-                                (await searchOptions({
-                                  kind: "city",
-                                  query,
-                                  country_codes: row.countryCodes,
-                                  limit: 30,
-                                })) ?? []
-                              }
-                            />
-                          )}
-                        />
-                      </>
-                    ) : null}
-
-                    {row.selectionMode === "ip" ? (
-                      <Controller
-                        control={form.control}
-                        name={`requests.${index}.specifiedIps`}
-                        render={({ field }) => (
-                          <SearchableMultiSelect
-                            id={`batch-specified-ips-${index}`}
-                            label="IP"
-                            helper="可多选；最终会按提取顺序从这些 IP 里挑第 1 个。"
-                            placeholder="选择 IP"
-                            searchPlaceholder="搜索 IP"
-                            emptyText="No matching IPs"
-                            values={field.value}
-                            onChange={field.onChange}
-                            onSearch={async (query) =>
-                              (await searchOptions({
-                                kind: "ip",
-                                query,
-                                limit: 40,
-                              })) ?? []
-                            }
+                    <div className={`${pairFieldClass} border-t border-border/70 pt-3`}>
+                      <div className={inlineFieldClass}>
+                        <div className="md:pt-1.5">
+                          <FieldLabel
+                            htmlFor={`batch-desired-port-${index}`}
+                            label="端口"
+                            hint="留空时自动分配。"
                           />
-                        )}
-                      />
-                    ) : null}
-                  </div>
-
-                  <div className="mt-4 grid gap-4 rounded-[24px] border border-border/70 bg-card/50 p-4 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label htmlFor={`batch-desired-port-${index}`}>Desired port</Label>
-                      <Input
-                        id={`batch-desired-port-${index}`}
-                        {...form.register(`requests.${index}.desiredPort`)}
-                        placeholder={suggestedPort?.toString() ?? "10080"}
-                        className="bg-card font-mono text-xs md:text-sm"
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        留空时这一行也会自动分配端口。
-                      </p>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor={`batch-sort-mode-${index}`}>提取顺序</Label>
-                      <Controller
-                        control={form.control}
-                        name={`requests.${index}.sortMode`}
-                        render={({ field }) => (
-                          <Select onValueChange={field.onChange} value={field.value}>
-                            <SelectTrigger id={`batch-sort-mode-${index}`} className="w-full bg-card">
-                              <SelectValue placeholder="选择提取顺序" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {sortModeOptions.map((option) => (
-                                <SelectItem key={option.value} value={option.value}>
-                                  {option.label}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        )}
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        只决定这行候选集合里的第 1 个命中项。
-                      </p>
+                        </div>
+                        <div>
+                          <Input
+                            id={`batch-desired-port-${index}`}
+                            {...form.register(`requests.${index}.desiredPort`)}
+                            size="sm"
+                            placeholder={suggestedPort?.toString() ?? "10080"}
+                            className="bg-card font-mono text-xs"
+                          />
+                        </div>
+                      </div>
+                      <div className={inlineFieldClass}>
+                        <div className="md:pt-1.5">
+                          <FieldLabel
+                            htmlFor={`batch-sort-mode-${index}`}
+                            label="提取顺序"
+                            hint="只决定这行的第 1 个命中项。"
+                          />
+                        </div>
+                        <div>
+                          <Controller
+                            control={form.control}
+                            name={`requests.${index}.sortMode`}
+                            render={({ field }) => (
+                              <Select onValueChange={field.onChange} value={field.value}>
+                                <SelectTrigger
+                                  id={`batch-sort-mode-${index}`}
+                                  size="sm"
+                                  className="w-full bg-card"
+                                >
+                                  <SelectValue placeholder="选择提取顺序" />
+                                </SelectTrigger>
+                                <SelectContent size="sm">
+                                  {sortModeOptions.map((option) => (
+                                    <SelectItem key={option.value} value={option.value} size="sm">
+                                      {option.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            )}
+                          />
+                        </div>
+                      </div>
                     </div>
                   </div>
 
                   <details
-                    className="mt-4 rounded-[24px] border border-border/70 bg-card/40"
+                    className="group mt-3 overflow-hidden rounded-[20px] border border-dashed border-border/70 bg-muted/6"
                     open={defaultAdvancedOpen || undefined}
                   >
-                    <summary className="flex list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-foreground">
-                      Advanced
-                      <ChevronDownIcon className="size-4 text-muted-foreground" />
+                    <summary className="flex list-none items-center justify-between gap-3 px-4 py-2 text-sm font-semibold text-foreground">
+                      <span className="inline-flex items-center gap-2">
+                        <span>{t("Advanced")}</span>
+                        <span className="text-xs font-medium text-muted-foreground">
+                          {t("optional")}
+                        </span>
+                      </span>
+                      <ChevronDownIcon className="size-4 text-muted-foreground transition-transform group-open:rotate-180" />
                     </summary>
-                    <div className="border-t border-border/70 px-4 py-4">
+                    <div className="border-t border-border/70 px-0 py-2.5">
                       <Controller
                         control={form.control}
                         name={`requests.${index}.excludedIps`}
@@ -419,7 +431,8 @@ export function OpenBatchForm({
                           <SearchableMultiSelect
                             id={`batch-excluded-ips-${index}`}
                             label="排除 IP"
-                            helper="可选；这些 IP 会被这一行明确跳过。"
+                            layout="inline"
+                            size="sm"
                             placeholder="选择要排除的 IP"
                             searchPlaceholder="搜索要排除的 IP"
                             emptyText="No matching IPs"

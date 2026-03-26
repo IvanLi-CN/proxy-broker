@@ -72,43 +72,54 @@ entrypoint to tighten its request model around the simplified create flow.
 
 - `source_type=storybook_canvas`
 - `target_program=mock-only`
-- `capture_scope=browser-viewport`
+- `capture_scope=element`
 - `sensitive_exclusion=N/A`
 - `submission_gate=pending-owner-approval`
-- `story_id_or_title=Features/Sessions/OpenSessionForm/GeoMode`
+- `story_id_or_title=Features/Sessions/OpenSessionForm/Geo Mode`
 - `state=single-open geo mode`
-- `evidence_note=Shows the simplified country-region path with searchable multi-select chips, optional port entry, visible sort mode, and the advanced disclosure collapsed by default.`
+- `evidence_note=Shows the simplified country-region path with a compact segmented switch, inline field rows, searchable multi-select chips, visible port plus sort controls, and the advanced disclosure collapsed by default.`
 
 ![Sessions single open geo mode](./assets/sessions-open-geo-mode.png)
 
 - `source_type=storybook_canvas`
 - `target_program=mock-only`
-- `capture_scope=browser-viewport`
+- `capture_scope=element`
 - `sensitive_exclusion=N/A`
 - `submission_gate=pending-owner-approval`
-- `story_id_or_title=Features/Sessions/OpenSessionForm/IpMode`
+- `story_id_or_title=Features/Sessions/OpenSessionForm/Ip Mode`
 - `state=single-open ip mode`
-- `evidence_note=Shows the direct IP targeting path with multi-select IP chips and the same always-visible port plus sort controls.`
+- `evidence_note=Shows the direct IP targeting path with the same compact segmented switch, inline field rows, and multi-select IP chips.`
 
 ![Sessions single open IP mode](./assets/sessions-open-ip-mode.png)
 
 - `source_type=storybook_canvas`
 - `target_program=mock-only`
-- `capture_scope=browser-viewport`
+- `capture_scope=element`
 - `sensitive_exclusion=N/A`
 - `submission_gate=pending-owner-approval`
-- `story_id_or_title=Features/Sessions/OpenBatchForm/AdvancedOpen`
+- `story_id_or_title=Features/Sessions/OpenSessionForm/Advanced Open`
+- `state=single-open advanced expanded`
+- `evidence_note=Shows the Advanced disclosure reusing the same inline label column as the primary form so the exclude-IP field stays compact and aligned with the main controls.`
+
+![Sessions single open advanced open](./assets/sessions-open-advanced-open.png)
+
+- `source_type=storybook_canvas`
+- `target_program=mock-only`
+- `capture_scope=element`
+- `sensitive_exclusion=N/A`
+- `submission_gate=pending-owner-approval`
+- `story_id_or_title=Features/Sessions/OpenBatchForm/Advanced Open`
 - `state=batch advanced expanded`
-- `evidence_note=Shows one transactional batch row using the shared three-mode model, with exclusions folded into the Advanced area instead of the primary form surface.`
+- `evidence_note=Shows one transactional batch row using the shared compact three-mode model, with the Advanced exclude-IP field pulled back onto the same label axis as the primary row controls.`
 
 ![Sessions batch advanced open](./assets/sessions-batch-advanced-open.png)
 
 - `source_type=storybook_canvas`
 - `target_program=mock-only`
-- `capture_scope=browser-viewport`
+- `capture_scope=element`
 - `sensitive_exclusion=N/A`
 - `submission_gate=pending-owner-approval`
-- `story_id_or_title=Features/Sessions/OpenBatchForm/AdvancedOpen`
+- `story_id_or_title=Features/Sessions/OpenBatchForm/Advanced Open`
 - `state=mobile layout`
 - `evidence_note=Shows the same batch-open flow at a narrow mobile viewport, confirming the controls stack vertically without hiding the primary submit path.`
 

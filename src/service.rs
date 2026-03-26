@@ -2526,12 +2526,7 @@ fn normalize_city_values(values: &[String]) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut normalized = Vec::new();
     for value in values {
-        let trimmed = value.trim();
-        let item = trimmed
-            .split_once("::")
-            .map(|(_, city)| city.trim())
-            .unwrap_or(trimmed)
-            .to_string();
+        let item = value.trim().to_string();
         if item.is_empty() {
             continue;
         }
@@ -3019,11 +3014,7 @@ fn filter_ip_records(
         .iter()
         .map(|c| c.to_ascii_uppercase())
         .collect();
-    let city_set: HashSet<String> = request
-        .cities
-        .iter()
-        .map(|c| c.to_ascii_lowercase())
-        .collect();
+    let city_filters = normalize_city_filters(&request.cities);
 
     for record in ip_records {
         let record_ip_key = normalize_ip_text(&record.ip);
@@ -3044,14 +3035,24 @@ fn filter_ip_records(
                     .map(|c| country_set.contains(&c.to_ascii_uppercase()))
                     .unwrap_or(false)
             };
-            let city_pass = if city_set.is_empty() {
+            let city_pass = if city_filters.is_empty() {
                 true
             } else {
-                record
-                    .city
+                let Some(city) = record.city.as_ref() else {
+                    continue;
+                };
+                let city_name = city.trim().to_ascii_lowercase();
+                let country_code = record
+                    .country_code
                     .as_ref()
-                    .map(|c| city_set.contains(&c.to_ascii_lowercase()))
-                    .unwrap_or(false)
+                    .map(|code| code.trim().to_ascii_uppercase());
+                city_filters.iter().any(|(country_filter, city_filter)| {
+                    city_name == *city_filter
+                        && match country_filter {
+                            Some(code) => country_code.as_deref() == Some(code.as_str()),
+                            None => true,
+                        }
+                })
             };
             country_pass && city_pass
         };
@@ -4472,6 +4473,31 @@ proxies:
             .expect("ip options should respect encoded city filters");
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].value, "1.1.1.1");
+    }
+
+    #[test]
+    fn choose_ip_for_geo_selection_preserves_city_country_pairings() {
+        let mut fr_paris = sample_ip("1.1.1.1", Some(100));
+        fr_paris.city = Some("Paris".to_string());
+        fr_paris.country_code = Some("FR".to_string());
+        fr_paris.country_name = Some("France".to_string());
+
+        let mut us_paris = sample_ip("2.2.2.2", Some(10));
+        us_paris.city = Some("Paris".to_string());
+        us_paris.country_code = Some("US".to_string());
+        us_paris.country_name = Some("United States".to_string());
+
+        let request = OpenSessionRequest {
+            selection_mode: SessionSelectionMode::Geo,
+            country_codes: vec!["FR".to_string(), "US".to_string()],
+            cities: vec!["FR::Paris".to_string()],
+            desired_port: None,
+            ..Default::default()
+        };
+
+        let chosen = choose_ip_for_open(&request, &[fr_paris, us_paris], &[])
+            .expect("geo selection should preserve city-country pairings");
+        assert_eq!(chosen, "1.1.1.1");
     }
 
     #[test]

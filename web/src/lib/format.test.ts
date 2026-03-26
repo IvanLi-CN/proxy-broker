@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 
+import { zhCN } from "@/i18n/messages/zh-CN";
 import {
   buildExtractRequest,
   buildOpenSessionRequest,
   filterCitySelectionsByCountry,
+  formatLatency,
+  formatTimestamp,
   splitListInput,
 } from "@/lib/format";
+
+const t = (message: string) => zhCN[message] ?? message;
 
 describe("splitListInput", () => {
   it("accepts commas and newlines", () => {
@@ -15,9 +20,9 @@ describe("splitListInput", () => {
 
 describe("filterCitySelectionsByCountry", () => {
   it("drops stale city tokens when the country filter changes", () => {
-    expect(filterCitySelectionsByCountry(["JP::Tokyo", "US::San Jose", "Tokyo"], ["US"])).toEqual(
-      ["US::San Jose"],
-    );
+    expect(filterCitySelectionsByCountry(["JP::Tokyo", "US::San Jose", "Tokyo"], ["US"])).toEqual([
+      "US::San Jose",
+    ]);
   });
 });
 
@@ -63,7 +68,7 @@ describe("buildOpenSessionRequest", () => {
     });
   });
 
-  it("derives country codes from encoded city selections", () => {
+  it("keeps encoded city selections opaque", () => {
     expect(
       buildOpenSessionRequest({
         selectionMode: "geo",
@@ -76,8 +81,45 @@ describe("buildOpenSessionRequest", () => {
       }),
     ).toEqual({
       selection_mode: "geo",
-      country_codes: ["JP", "FR"],
-      cities: ["Tokyo", "Paris"],
+      cities: ["JP::Tokyo", "FR::Paris"],
+      sort_mode: "lru",
+    });
+  });
+
+  it("preserves plain cities when mixed with encoded selections for other cities", () => {
+    expect(
+      buildOpenSessionRequest({
+        selectionMode: "geo",
+        desiredPort: "",
+        countryCodes: ["JP"],
+        cities: ["Osaka", "JP::Tokyo"],
+        specifiedIps: [],
+        excludedIps: [],
+        sortMode: "lru",
+      }),
+    ).toEqual({
+      selection_mode: "geo",
+      country_codes: ["JP"],
+      cities: ["JP::Tokyo", "Osaka"],
+      sort_mode: "lru",
+    });
+  });
+
+  it("drops plain duplicates once an encoded city for the same label exists", () => {
+    expect(
+      buildOpenSessionRequest({
+        selectionMode: "geo",
+        desiredPort: "",
+        countryCodes: ["JP"],
+        cities: ["Osaka", "JP::Osaka"],
+        specifiedIps: [],
+        excludedIps: [],
+        sortMode: "lru",
+      }),
+    ).toEqual({
+      selection_mode: "geo",
+      country_codes: ["JP"],
+      cities: ["JP::Osaka"],
       sort_mode: "lru",
     });
   });

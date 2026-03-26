@@ -22,6 +22,7 @@ export function SessionsRoute() {
   const suggestedPortQuery = useQuery({
     queryKey: ["suggested-port", profileId],
     queryFn: () => api.getSuggestedPort(profileId),
+    refetchInterval: 5_000,
   });
 
   const openMutation = useMutation({

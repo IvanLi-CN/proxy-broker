@@ -13,20 +13,20 @@ const searchOptions = async ({
 }) => {
   if (kind === "country") {
     return [
-      { value: "JP", label: "Japan (JP)", meta: "Japan" },
-      { value: "US", label: "United States (US)", meta: "United States" },
+      { value: "JP", label: "日本 (JP)", meta: "日本" },
+      { value: "US", label: "美国 (US)", meta: "美国" },
     ];
   }
   if (kind === "city") {
     if (country_codes?.includes("JP")) {
-      return [{ value: "JP::Tokyo", label: "Tokyo", meta: "Japan (JP)" }];
+      return [{ value: "JP::Tokyo", label: "东京", meta: "日本 (JP)" }];
     }
-    return [{ value: "US::San Jose", label: "San Jose", meta: "United States (US)" }];
+    return [{ value: "US::San Jose", label: "圣何塞", meta: "美国 (US)" }];
   }
   return [
-    { value: "203.0.113.10", label: "203.0.113.10", meta: "JP / Chiyoda" },
-    { value: "203.0.113.88", label: "203.0.113.88", meta: "JP / Osaka" },
-    { value: "198.51.100.42", label: "198.51.100.42", meta: "US / San Jose" },
+    { value: "203.0.113.10", label: "203.0.113.10", meta: "日本 / 千代田" },
+    { value: "203.0.113.88", label: "203.0.113.88", meta: "日本 / 大阪" },
+    { value: "198.51.100.42", label: "198.51.100.42", meta: "美国 / 圣何塞" },
   ];
 };
 
@@ -35,6 +35,7 @@ const meta = {
   component: OpenBatchForm,
   tags: ["autodocs"],
   parameters: {
+    layout: "fullscreen",
     docs: {
       description: {
         component:
@@ -42,6 +43,16 @@ const meta = {
       },
     },
   },
+  globals: {
+    locale: "zh-CN",
+  },
+  decorators: [
+    (Story) => (
+      <div className="mx-auto w-full max-w-[860px] p-6">
+        <Story />
+      </div>
+    ),
+  ],
   args: {
     isPending: false,
     onSubmit: fn(),
@@ -100,14 +111,20 @@ export const Interaction: Story = {
   },
   async play({ canvasElement, args }) {
     const canvas = within(canvasElement);
-    await userEvent.click(canvas.getByRole("button", { name: /add request row/i }));
-    await userEvent.click(canvas.getAllByRole("button", { name: /^ip$/i })[1] ?? canvas.getByRole("button", { name: /^ip$/i }));
-    await userEvent.click(canvas.getAllByRole("combobox", { name: /ip/i })[0] ?? canvas.getByRole("combobox", { name: /ip/i }));
+    await userEvent.click(canvas.getByRole("button", { name: /add request row|新增请求行/i }));
+    await userEvent.click(
+      canvas.getAllByRole("button", { name: /^ip$/i })[1] ??
+        canvas.getByRole("button", { name: /^ip$/i }),
+    );
+    await userEvent.click(
+      canvas.getAllByRole("combobox", { name: /ip/i })[0] ??
+        canvas.getByRole("combobox", { name: /ip/i }),
+    );
 
     const overlay = within(document.body);
     await waitFor(() => expect(overlay.getByText("203.0.113.10")).toBeVisible());
     await userEvent.click(overlay.getByText("203.0.113.10"));
-    await userEvent.click(canvas.getByRole("button", { name: /open batch/i }));
+    await userEvent.click(canvas.getByRole("button", { name: /open batch|打开批次/i }));
 
     await waitFor(() => {
       expect(args.onSubmit).toHaveBeenCalled();

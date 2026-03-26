@@ -18,6 +18,8 @@ interface SearchableMultiSelectProps {
   id: string;
   label: string;
   helper?: string;
+  layout?: "stacked" | "inline";
+  size?: "default" | "sm";
   placeholder: string;
   searchPlaceholder: string;
   emptyText: string;
@@ -32,6 +34,8 @@ export function SearchableMultiSelect({
   id,
   label,
   helper,
+  layout = "stacked",
+  size = "default",
   placeholder,
   searchPlaceholder,
   emptyText,
@@ -50,6 +54,13 @@ export function SearchableMultiSelect({
   const [labelMap, setLabelMap] = useState<Record<string, SessionOptionItem>>({});
   const requestVersion = useRef(0);
   const onSearchRef = useRef(onSearch);
+  const searchRequest = useMemo(
+    () => ({
+      key: searchKey,
+      query: deferredQuery.trim(),
+    }),
+    [deferredQuery, searchKey],
+  );
 
   useEffect(() => {
     onSearchRef.current = onSearch;
@@ -64,7 +75,8 @@ export function SearchableMultiSelect({
     setLoading(true);
     setError(null);
 
-    void onSearchRef.current(deferredQuery.trim())
+    void onSearchRef
+      .current(searchRequest.query)
       .then((items) => {
         if (requestVersion.current !== currentVersion) {
           return;
@@ -90,7 +102,7 @@ export function SearchableMultiSelect({
           setLoading(false);
         }
       });
-  }, [deferredQuery, open, searchKey]);
+  }, [open, searchRequest]);
 
   const selectedItems = useMemo(
     () =>
@@ -135,22 +147,22 @@ export function SearchableMultiSelect({
     }
   };
 
-  return (
-    <div className="space-y-2">
-      <div className="space-y-1">
-        <Label htmlFor={id}>{label}</Label>
-        {helper ? <p className="text-xs text-muted-foreground">{helper}</p> : null}
-      </div>
+  const labelBlock = <Label htmlFor={id}>{label}</Label>;
+
+  const controlBlock = (
+    <div className="min-w-0 space-y-2">
       <Popover open={open} onOpenChange={handleOpenChange}>
         <PopoverTrigger asChild>
           <Button
             id={id}
             type="button"
             variant="outline"
+            size={size === "sm" ? "sm" : "default"}
             role="combobox"
             aria-expanded={open}
             className={cn(
-              "h-auto w-full justify-between rounded-2xl px-3 py-3 text-left",
+              "h-auto w-full justify-between text-left shadow-none",
+              layout === "inline" ? "rounded-lg" : "rounded-xl px-3 py-3",
               selectedItems.length === 0 ? "text-muted-foreground" : "text-foreground",
             )}
             disabled={disabled}
@@ -165,11 +177,7 @@ export function SearchableMultiSelect({
         </PopoverTrigger>
         <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-72 overflow-hidden p-0">
           <Command shouldFilter={false}>
-            <CommandInput
-              placeholder={searchPlaceholder}
-              value={query}
-              onValueChange={setQuery}
-            />
+            <CommandInput placeholder={searchPlaceholder} value={query} onValueChange={setQuery} />
             <CommandList>
               {loading ? (
                 <div className="flex items-center justify-center gap-2 px-3 py-6 text-sm text-muted-foreground">
@@ -180,7 +188,9 @@ export function SearchableMultiSelect({
               {!loading && error ? (
                 <div className="px-3 py-4 text-sm text-destructive">{error}</div>
               ) : null}
-              {!loading && !error && options.length === 0 ? <CommandEmpty>{emptyText}</CommandEmpty> : null}
+              {!loading && !error && options.length === 0 ? (
+                <CommandEmpty>{emptyText}</CommandEmpty>
+              ) : null}
               {!loading && !error
                 ? options.map((item) => {
                     const selected = values.includes(item.value);
@@ -199,7 +209,9 @@ export function SearchableMultiSelect({
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-sm">{item.label}</div>
                           {item.meta ? (
-                            <div className="truncate text-xs text-muted-foreground">{item.meta}</div>
+                            <div className="truncate text-xs text-muted-foreground">
+                              {item.meta}
+                            </div>
                           ) : null}
                         </div>
                       </CommandItem>
@@ -216,7 +228,10 @@ export function SearchableMultiSelect({
             <button
               key={item.value}
               type="button"
-              className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-2.5 py-1 text-xs text-foreground transition-colors hover:bg-muted"
+              className={cn(
+                "inline-flex items-center gap-1 rounded-full border border-border bg-background text-foreground transition-colors hover:bg-muted",
+                size === "sm" ? "px-2 py-0.5 text-[11px]" : "px-2.5 py-1 text-xs",
+              )}
               onClick={() => removeValue(item.value)}
               title={item.meta ? `${item.label} · ${item.meta}` : item.label}
             >
@@ -228,6 +243,24 @@ export function SearchableMultiSelect({
           ))}
         </div>
       ) : null}
+      {helper && layout === "inline" ? (
+        <p className="text-xs leading-5 text-muted-foreground">{helper}</p>
+      ) : null}
+    </div>
+  );
+
+  return layout === "inline" ? (
+    <div className="grid gap-2 md:grid-cols-[88px_minmax(0,1fr)] md:items-start md:gap-3">
+      <div className={cn(size === "sm" ? "md:pt-1.5" : "md:pt-2")}>{labelBlock}</div>
+      {controlBlock}
+    </div>
+  ) : (
+    <div className="space-y-2">
+      <div className="space-y-1">
+        {labelBlock}
+        {helper ? <p className="text-xs leading-5 text-muted-foreground">{helper}</p> : null}
+      </div>
+      {controlBlock}
     </div>
   );
 }

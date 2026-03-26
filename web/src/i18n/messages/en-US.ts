@@ -40,6 +40,15 @@ export const enUS: MessageCatalog = {
     "Turn the shortlist into live listeners without losing the wider operational view.",
   "Sessions hero description":
     "Open one deterministic listener or stage a transactional batch while keeping the live deck in sight so teardown decisions stay fast and low risk.",
+  "Pick one simple targeting mode, keep the port optional, and let the backend open the listener from the first surviving candidate.":
+    "Pick one simple targeting mode, keep the port optional, and let the backend open the listener from the first surviving candidate.",
+  "optional port": "optional port",
+  "Stage multiple open-session requests with the same simplified targeting model, then let the backend roll the whole set back if any row fails.":
+    "Stage multiple open-session requests with the same simplified targeting model, then let the backend roll the whole set back if any row fails.",
+  "One row, one listener; all rows still succeed or fail together.":
+    "One row, one listener; all rows still succeed or fail together.",
+  Advanced: "Advanced",
+  optional: "optional",
   "validation.source_value_required": "Source value is required.",
   "error.api.with_code": "{code}: {message}",
   "error.api.subscription_invalid": "Subscription payload is invalid.",

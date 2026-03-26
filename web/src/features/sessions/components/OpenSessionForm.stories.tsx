@@ -13,23 +13,23 @@ const searchOptions = async ({
 }) => {
   if (kind === "country") {
     return [
-      { value: "JP", label: "Japan (JP)", meta: "Japan" },
-      { value: "US", label: "United States (US)", meta: "United States" },
+      { value: "JP", label: "日本 (JP)", meta: "日本" },
+      { value: "US", label: "美国 (US)", meta: "美国" },
     ];
   }
   if (kind === "city") {
     if (country_codes?.includes("JP")) {
       return [
-        { value: "JP::Tokyo", label: "Tokyo", meta: "Japan (JP)" },
-        { value: "JP::Osaka", label: "Osaka", meta: "Japan (JP)" },
+        { value: "JP::Tokyo", label: "东京", meta: "日本 (JP)" },
+        { value: "JP::Osaka", label: "大阪", meta: "日本 (JP)" },
       ];
     }
-    return [{ value: "US::San Jose", label: "San Jose", meta: "United States (US)" }];
+    return [{ value: "US::San Jose", label: "圣何塞", meta: "美国 (US)" }];
   }
   return [
-    { value: "203.0.113.10", label: "203.0.113.10", meta: "JP / Chiyoda" },
-    { value: "203.0.113.88", label: "203.0.113.88", meta: "JP / Osaka" },
-    { value: "198.51.100.42", label: "198.51.100.42", meta: "US / San Jose" },
+    { value: "203.0.113.10", label: "203.0.113.10", meta: "日本 / 千代田" },
+    { value: "203.0.113.88", label: "203.0.113.88", meta: "日本 / 大阪" },
+    { value: "198.51.100.42", label: "198.51.100.42", meta: "美国 / 圣何塞" },
   ];
 };
 
@@ -38,6 +38,7 @@ const meta = {
   component: OpenSessionForm,
   tags: ["autodocs"],
   parameters: {
+    layout: "fullscreen",
     docs: {
       description: {
         component:
@@ -45,6 +46,16 @@ const meta = {
       },
     },
   },
+  globals: {
+    locale: "zh-CN",
+  },
+  decorators: [
+    (Story) => (
+      <div className="mx-auto w-full max-w-[840px] p-6">
+        <Story />
+      </div>
+    ),
+  ],
   args: {
     isPending: false,
     onSubmit: fn(),
@@ -96,7 +107,8 @@ export const AdvancedOpen: Story = {
 export const ErrorState: Story = {
   args: {
     response: null,
-    error: "invalid_request: selection_mode=geo requires at least one country_codes or cities entry",
+    error:
+      "invalid_request: selection_mode=geo requires at least one country_codes or cities entry",
   },
 };
 
@@ -115,9 +127,9 @@ export const Interaction: Story = {
     await waitFor(() => expect(overlay.getByText("203.0.113.10")).toBeVisible());
     await userEvent.click(overlay.getByText("203.0.113.10"));
 
-    await userEvent.clear(canvas.getByLabelText("Desired port"));
-    await userEvent.type(canvas.getByLabelText("Desired port"), "10088");
-    await userEvent.click(canvas.getByRole("button", { name: /open session/i }));
+    await userEvent.clear(canvas.getByLabelText(/desired port|端口/i));
+    await userEvent.type(canvas.getByLabelText(/desired port|端口/i), "10088");
+    await userEvent.click(canvas.getByRole("button", { name: /open session|打开会话/i }));
 
     await waitFor(() => {
       expect(args.onSubmit).toHaveBeenCalled();

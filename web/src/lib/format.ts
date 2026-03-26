@@ -1,3 +1,4 @@
+import type { Locale, Translator } from "@/i18n";
 import type {
   ExtractIpRequest,
   OpenSessionRequest,
@@ -62,7 +63,7 @@ export function filterCitySelectionsByCountry(cities: string[], countryCodes: st
   );
 }
 
-export function formatTimestamp(epoch?: number | null) {
+export function formatTimestamp(locale: Locale, t: Translator, epoch?: number | null) {
   if (!epoch) {
     return t("Never");
   }
@@ -192,17 +193,25 @@ export function buildOpenSessionRequest(values: {
   };
 
   if (values.selectionMode === "geo") {
-    const derivedCountryCodes = [...values.countryCodes];
-    const parsedCities = values.cities.map((value) => {
-      const parsed = parseCitySelectionToken(value);
-      if (parsed) {
-        derivedCountryCodes.push(parsed.countryCode);
-        return parsed.city;
-      }
-      return value;
-    });
-    const countryCodes = uniqueItems(derivedCountryCodes);
-    const cities = uniqueItems(parsedCities);
+    const parsedCitySelections = values.cities.map((value) => ({
+      value,
+      parsed: parseCitySelectionToken(value),
+    }));
+    const tokenizedCityNames = new Set(
+      parsedCitySelections
+        .map((entry) => entry.parsed?.city.trim().toLocaleLowerCase())
+        .filter((value): value is string => Boolean(value)),
+    );
+    const tokenizedCities = parsedCitySelections
+      .map((entry) => (entry.parsed ? `${entry.parsed.countryCode}::${entry.parsed.city}` : null))
+      .filter((value): value is string => Boolean(value));
+    const plainCities = parsedCitySelections
+      .map((entry) => (entry.parsed ? null : entry.value.trim()))
+      .filter((value): value is string => Boolean(value))
+      .filter((value) => !tokenizedCityNames.has(value.toLocaleLowerCase()));
+
+    const countryCodes = uniqueItems(values.countryCodes);
+    const cities = uniqueItems([...tokenizedCities, ...plainCities]);
 
     if (countryCodes.length > 0) {
       request.country_codes = countryCodes;
