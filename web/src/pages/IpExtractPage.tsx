@@ -2,10 +2,8 @@ import { RadarIcon, ScanSearchIcon } from "lucide-react";
 
 import { ActionResponsePanel } from "@/components/ActionResponsePanel";
 import { DataTablePanel } from "@/components/DataTablePanel";
-import { RouteHero } from "@/components/RouteHero";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { WorkflowRail } from "@/components/WorkflowRail";
 import { IpFiltersForm } from "@/features/ips/components/IpFiltersForm";
 import { IpResultsTable } from "@/features/ips/components/IpResultsTable";
 import { useI18n } from "@/i18n";
@@ -76,49 +74,9 @@ export function IpExtractPage({
 
   return (
     <div className="space-y-8">
-      <RouteHero
-        eyebrow={t("IP Extract")}
-        title={t("IP Extract hero title")}
-        description={t("IP Extract hero description")}
-        badges={[
-          {
-            label: t("{count} candidate rows", { count: formatNumber(resultCount) }),
-            tone: resultCount > 0 ? "positive" : "neutral",
-          },
-          {
-            label: isPending ? t("extract running") : t("ready for request"),
-            tone: isPending ? "warning" : "positive",
-          },
-          {
-            label: error ? t("request error") : t("no active error"),
-            tone: error ? "danger" : "neutral",
-          },
-        ]}
-        aside={
-          <WorkflowRail
-            eyebrow={t("Filter loop")}
-            title={t("Use a narrow feedback cycle")}
-            steps={[
-              {
-                title: t("Start broad"),
-                description: t("Set countries or cities before you start hand-picking IPs."),
-              },
-              {
-                title: t("Read the metadata"),
-                description: t(
-                  "Probe and recency columns usually tell you whether to tighten or widen the filter.",
-                ),
-              },
-              {
-                title: t("Promote only the good rows"),
-                description: t(
-                  "Carry the shortlist into Sessions once the candidate deck looks credible.",
-                ),
-              },
-            ]}
-          />
-        }
-      />
+      <header>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">{t("IP Extract")}</h1>
+      </header>
 
       <section className="grid gap-6 xl:grid-cols-[420px_minmax(0,1fr)]">
         <div className="space-y-6">

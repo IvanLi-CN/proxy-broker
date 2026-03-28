@@ -1,10 +1,8 @@
 import { CircleAlertIcon, CircleCheckBigIcon, SparklesIcon } from "lucide-react";
 
 import { ActionResponsePanel } from "@/components/ActionResponsePanel";
-import { RouteHero } from "@/components/RouteHero";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { WorkflowRail } from "@/components/WorkflowRail";
 import { AccessControlCard } from "@/features/overview/components/AccessControlCard";
 import { HealthSummaryCard } from "@/features/overview/components/HealthSummaryCard";
 import { RefreshCard } from "@/features/overview/components/RefreshCard";
@@ -65,64 +63,19 @@ export function OverviewPage({
   onCreateApiKey,
   onRevokeApiKey,
 }: OverviewPageProps) {
-  const { formatNumber, t } = useI18n();
+  const { t } = useI18n();
   const hasWarnings = Boolean(loadResponse?.warnings.length);
   const operatorChecklist = [
     t("Load a new feed whenever the upstream provider changes or rotates nodes."),
     t("Refresh probes before extracting IPs if geo labels or latency look stale."),
     t("Warnings are operator hints: review them before opening long-lived sessions."),
   ];
-  const recommendedFlow = [
-    {
-      title: t("Refresh inventory"),
-      description: t("Load the newest upstream feed into the active profile before anything else."),
-    },
-    {
-      title: t("Re-probe the edges"),
-      description: t(
-        "Update geo and latency metadata so the next extract is based on current facts.",
-      ),
-    },
-    {
-      title: t("Drill down with intent"),
-      description: t(
-        "Extract candidates, then open only the listeners that still look worth holding.",
-      ),
-    },
-  ];
 
   return (
     <div className="space-y-8">
-      <RouteHero
-        eyebrow={t("Overview")}
-        title={t("Overview hero title")}
-        description={t("Overview hero description")}
-        badges={[
-          {
-            label: health.status === "ok" ? t("service healthy") : t("service review"),
-            tone: health.status === "ok" ? "positive" : "warning",
-          },
-          {
-            label: t("{count} active sessions", { count: formatNumber(activeSessions) }),
-            tone: "neutral",
-          },
-          {
-            label: hasWarnings
-              ? t("{count} warnings queued", {
-                  count: formatNumber(loadResponse?.warnings.length ?? 0),
-                })
-              : t("warnings clear"),
-            tone: hasWarnings ? "warning" : "positive",
-          },
-        ]}
-        aside={
-          <WorkflowRail
-            eyebrow={t("Run order")}
-            title={t("Keep the runway clean")}
-            steps={recommendedFlow}
-          />
-        }
-      />
+      <header>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">{t("Overview")}</h1>
+      </header>
 
       <HealthSummaryCard
         status={health.status}

@@ -19,7 +19,7 @@ const meta = {
     docs: {
       description: {
         component:
-          "Full overview route preview inside the real app shell. This is the closest Storybook equivalent of the shipped operator page, including the compact current-user badge in the top bar and the detailed identity panel inside access control.",
+          "Full overview route preview inside the real app shell. This is the closest Storybook equivalent of the shipped operator page, with the route now opening directly on the health summary and primary operator cards.",
       },
     },
   },

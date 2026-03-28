@@ -25,21 +25,6 @@ export const enUS: MessageCatalog = {
   "Task run is running.": "Task run is running.",
   "Subscription sync finished with {count} new IPs.":
     "Subscription sync finished with {count} new IPs.",
-  "Overview hero title":
-    "Run the operator plane like a control room instead of a stack of scattered notes.",
-  "Overview hero description":
-    "This surface keeps subscription loading, health signals, and next-step guidance in one place so you can move from feed refresh to listener orchestration without rechecking the basics.",
-  "Tasks hero title":
-    "Treat the subscription maintenance loop like a live board instead of an invisible cron.",
-  "Tasks hero description":
-    "This route turns the automation layer into an operator-facing surface: sync cadence, metadata refresh pressure, failure context, and per-run event streams all stay visible here.",
-  "IP Extract hero title": "Cut the pool down to a shortlist you can actually trust.",
-  "IP Extract hero description":
-    "Use the filter builder to move from broad geography hints to a tighter candidate deck with clear probe, latency, and recency signals. The goal is not more rows, but better rows.",
-  "Sessions hero title":
-    "Turn the shortlist into live listeners without losing the wider operational view.",
-  "Sessions hero description":
-    "Open one deterministic listener or stage a transactional batch while keeping the live deck in sight so teardown decisions stay fast and low risk.",
   "Pick one simple targeting mode, keep the port optional, and let the backend open the listener from the first surviving candidate.":
     "Pick one simple targeting mode, keep the port optional, and let the backend open the listener from the first surviving candidate.",
   "optional port": "optional port",

@@ -4,7 +4,7 @@
 
 - Status: 已完成
 - Created: 2026-03-22
-- Last: 2026-03-22
+- Last: 2026-03-28
 
 ## 背景 / 问题陈述
 
@@ -93,7 +93,7 @@
 
 - 顶层导航新增 `Tasks`。
 - 页面结构：
-  - 顶部 `RouteHero` + 实时健康摘要。
+  - 首屏直接进入实时摘要卡与任务筛选条。
   - 筛选条：`profile`、`kind`、`status`、`trigger`、`running_only`。
   - 左侧高密度任务表。
   - 右侧运行详情抽屉/事件流。
@@ -187,16 +187,16 @@
 - In-plan references: `![...](./assets/<file>.png)`
 - PR visual evidence source: maintain `## Visual Evidence (PR)` when PR screenshots are needed.
 
-## Visual Evidence (PR)
+## Visual Evidence
 
 - source_type: storybook_canvas
   target_program: mock-only
-  capture_scope: element
+  capture_scope: browser-viewport
   sensitive_exclusion: N/A
-  submission_gate: approved
-  story_id_or_title: Pages/TasksPage/Default
-  state: live
-  evidence_note: 验证任务中心默认实时视图已同时呈现摘要卡、筛选条、运行表和右侧事件详情流。
+  submission_gate: pending-owner-approval
+  story_id_or_title: Pages/TasksPage/ZhCN
+  state: live content-first layout
+  evidence_note: 验证任务中心已取消顶部 RouteHero，页面首屏直接呈现摘要卡、筛选条、运行表和右侧事件详情流。
   image:
   ![Tasks page live board](./assets/tasks-page-live.png)
 

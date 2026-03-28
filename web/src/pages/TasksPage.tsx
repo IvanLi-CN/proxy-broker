@@ -2,10 +2,8 @@ import { RadioTowerIcon, Rows3Icon } from "lucide-react";
 
 import { ActionResponsePanel } from "@/components/ActionResponsePanel";
 import { DataTablePanel } from "@/components/DataTablePanel";
-import { RouteHero } from "@/components/RouteHero";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { WorkflowRail } from "@/components/WorkflowRail";
 import { TaskFiltersBar } from "@/features/tasks/components/TaskFiltersBar";
 import { TaskRunDetailPanel } from "@/features/tasks/components/TaskRunDetailPanel";
 import { TaskSummaryCards } from "@/features/tasks/components/TaskSummaryCards";
@@ -44,7 +42,7 @@ interface TasksPageProps {
 }
 
 export function TasksPage({
-  profileId,
+  profileId: _profileId,
   scope,
   kind,
   status,
@@ -80,52 +78,9 @@ export function TasksPage({
 
   return (
     <div className="space-y-8">
-      <RouteHero
-        eyebrow={t("Tasks")}
-        title={t("Tasks hero title")}
-        description={t("Tasks hero description")}
-        badges={[
-          {
-            label: t("{count} running", { count: formatNumber(summary.running_runs) }),
-            tone: summary.running_runs > 0 ? "warning" : "neutral",
-          },
-          {
-            label: t("{count} failed", { count: formatNumber(summary.failed_runs) }),
-            tone: summary.failed_runs > 0 ? "danger" : "positive",
-          },
-          {
-            label:
-              scope === "current" ? t("profile {profileId}", { profileId }) : t("all profiles"),
-            tone: "neutral",
-          },
-        ]}
-        aside={
-          <WorkflowRail
-            eyebrow={t("Realtime loop")}
-            title={t("How the board should be read")}
-            steps={[
-              {
-                title: t("Read the cadence"),
-                description: t(
-                  "Queued and running rows tell you whether the 10-minute sync lane is healthy.",
-                ),
-              },
-              {
-                title: t("Inspect the stream"),
-                description: t(
-                  "Open the selected run to read stage transitions and payload summaries without leaving the page.",
-                ),
-              },
-              {
-                title: t("Treat failures as operator signals"),
-                description: t(
-                  "A failed run should explain whether the source fetch, probing, or geo enrichment stalled.",
-                ),
-              },
-            ]}
-          />
-        }
-      />
+      <header>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">{t("Tasks")}</h1>
+      </header>
 
       {accessDenied ? (
         <ActionResponsePanel

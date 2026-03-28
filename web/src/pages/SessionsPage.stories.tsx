@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn } from "storybook/test";
 
+import { AppShell } from "@/components/AppShell";
 import { batchFixture, sessionFixture, sessionsFixture } from "@/mocks/fixtures";
 import { SessionsPage } from "@/pages/SessionsPage";
 
@@ -9,13 +10,41 @@ const meta = {
   component: SessionsPage,
   tags: ["autodocs"],
   parameters: {
+    layout: "fullscreen",
+    initialEntries: ["/sessions"],
     docs: {
       description: {
         component:
-          "Session route that combines single-open, batch-open, and a live listener deck inside the control-room layout.",
+          "Session route inside the real app shell, opening directly on the single/batch forms and live listener deck without a route hero.",
       },
     },
   },
+  render: (args) => (
+    <AppShell
+      profileId="default"
+      profiles={["default", "edge-jp", "lab-us"]}
+      profilesLoading={false}
+      profilesCreating={false}
+      profilesError={null}
+      healthStatus="ok"
+      currentUser={{
+        status: "resolved",
+        identity: {
+          authenticated: true,
+          principal_type: "human",
+          subject: "admin@example.com",
+          email: "admin@example.com",
+          groups: ["admins", "ops"],
+          is_admin: true,
+        },
+      }}
+      onProfileIdChange={() => undefined}
+      onCreateProfile={async (value: string) => value}
+      onRetryProfiles={() => undefined}
+    >
+      <SessionsPage {...args} />
+    </AppShell>
+  ),
   args: {
     sessions: sessionsFixture.sessions,
     sessionsLoading: false,

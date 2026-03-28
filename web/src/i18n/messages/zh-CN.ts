@@ -393,25 +393,6 @@ export const zhCN: MessageCatalog = {
   "Watch scheduled sync and metadata refresh runs": "查看定时同步与元数据刷新运行",
   "Filter the pool down to candidate edges": "把池子筛成候选边缘节点",
   "Open, audit, and close live listeners": "打开、审计并关闭在线监听",
-  "Overview hero title": "像操作控制室一样管理运维平面，而不是把它当成一堆零散笔记。",
-  "Overview hero description":
-    "这个页面会同时展示订阅导入链路、健康状态和下一步建议，让你能从刷新订阅一路推进到监听编排，而不用反复确认基础状态。",
-  "service healthy": "服务健康",
-  "service review": "服务待检查",
-  "{count} active sessions": "{count} 个活动会话",
-  "{count} warnings queued": "排队中的警告 {count} 条",
-  "warnings clear": "警告已清空",
-  "Run order": "运行顺序",
-  "Keep the runway clean": "保持跑道整洁",
-  "Refresh inventory": "刷新库存",
-  "Load the newest upstream feed into the active profile before anything else.":
-    "在做其他事之前，先把最新上游订阅加载到当前配置。",
-  "Re-probe the edges": "重新探测边缘节点",
-  "Update geo and latency metadata so the next extract is based on current facts.":
-    "更新地理与延迟元数据，让下一次提取基于最新事实。",
-  "Drill down with intent": "带着目标逐步收窄",
-  "Extract candidates, then open only the listeners that still look worth holding.":
-    "先提取候选，再只打开那些仍然值得保留的监听。",
   "Operator checklist": "操作检查清单",
   "What to verify before touching the pool": "动池子之前要确认什么",
   "Keep this rail practical. It should help you decide what to do next without stealing focus from the two primary actions.":
@@ -436,23 +417,6 @@ export const zhCN: MessageCatalog = {
   "The backend loaded the subscription, but some records still need operator attention before you keep drilling down.":
     "后端已经加载订阅，但在继续深入操作前，仍有部分记录需要运维确认。",
   "latest load completed without warnings": "最近一次加载没有警告",
-  "Tasks hero title": "把订阅维护循环当成实时看板来看，而不是看不见的定时任务。",
-  "Tasks hero description":
-    "这个路由把新的自动化层变成对运维可见的表面：同步节奏、元数据刷新压力、失败信息和单次运行事件流都集中在这里。",
-  "{count} running": "运行中 {count} 个",
-  "{count} failed": "失败 {count} 个",
-  "all profiles": "所有配置",
-  "Realtime loop": "实时循环",
-  "How the board should be read": "这块看板应该怎么读",
-  "Read the cadence": "先看节奏",
-  "Queued and running rows tell you whether the 10-minute sync lane is healthy.":
-    "排队和运行中的行会告诉你 10 分钟同步通道是否健康。",
-  "Inspect the stream": "再看事件流",
-  "Open the selected run to read stage transitions and payload summaries without leaving the page.":
-    "打开选中的运行项，不离开页面就能查看阶段变化和负载摘要。",
-  "Treat failures as operator signals": "把失败当成运维信号",
-  "A failed run should explain whether the source fetch, probing, or geo enrichment stalled.":
-    "失败的运行应该解释清楚究竟是订阅抓取、探测还是地理补全卡住了。",
   "Admin access required": "需要管理员权限",
   "The task center is currently restricted to the admin operator plane and development principal.":
     "任务中心目前仅对管理员运维平面和开发模式主体开放。",
@@ -513,25 +477,6 @@ export const zhCN: MessageCatalog = {
   Connecting: "连接中",
   Live: "在线",
   Reconnecting: "重连中",
-  "IP Extract hero title": "把池子切成一份真正值得信任的短名单。",
-  "IP Extract hero description":
-    "使用筛选构建器，从宽泛的地理提示逐步收敛到具备明确探测、延迟和时效信号的候选牌组。目标不是更多行，而是更好的行。",
-  "{count} candidate rows": "候选行 {count} 条",
-  "extract running": "提取进行中",
-  "ready for request": "可发起请求",
-  "request error": "请求出错",
-  "no active error": "当前无错误",
-  "Filter loop": "筛选循环",
-  "Use a narrow feedback cycle": "用一条窄而快的反馈回路",
-  "Start broad": "先宽筛",
-  "Set countries or cities before you start hand-picking IPs.":
-    "在手动挑 IP 之前，先设置国家或城市范围。",
-  "Read the metadata": "读懂元数据",
-  "Probe and recency columns usually tell you whether to tighten or widen the filter.":
-    "探测与最近使用两列通常能告诉你该收紧还是放宽筛选条件。",
-  "Promote only the good rows": "只提升优质结果",
-  "Carry the shortlist into Sessions once the candidate deck looks credible.":
-    "等候选牌组可信之后，再把短名单带到会话页。",
   "Best practice": "最佳实践",
   "Filter-first, then judge the edges": "先筛选，再判断边缘节点",
   "IP extraction works best when the request stays readable. Keep the request shape clear enough that you can explain why each row survived.":
@@ -547,25 +492,6 @@ export const zhCN: MessageCatalog = {
   running: "运行中",
   idle: "空闲",
   "Candidate table": "候选表格",
-  "Sessions hero title": "把短名单转成在线监听，同时不丢掉当前全局视图。",
-  "Sessions hero description":
-    "你可以打开一个确定性的监听，或准备一个事务型批次；同时把在线监听牌组留在眼前，让拆除决策保持快速且低风险。",
-  "{count} live listeners": "在线监听 {count} 个",
-  "open request active": "有打开请求进行中",
-  "open deck idle": "打开面板空闲",
-  "closing {sessionId}": "正在关闭 {sessionId}",
-  "no close in flight": "当前没有关闭操作",
-  "Operating rule": "操作准则",
-  "Treat listeners like inventory": "把监听当作库存来管理",
-  "Open deliberately": "有意识地打开",
-  "Prefer one explicit listener when the target edge is already known.":
-    "如果目标边缘节点已经明确，优先打开一个明确的监听。",
-  "Use batch when rollback matters": "需要回滚时再用批量",
-  "Stage multiple rows only when they form one logical operation.":
-    "只有在多行属于同一个逻辑操作时，才去准备批量请求。",
-  "Close stale listeners quickly": "尽快关闭陈旧监听",
-  "Keep the live list small so ports and edge ownership stay obvious.":
-    "让在线列表保持精简，端口和边缘归属才会清楚。",
   "Single session": "单个会话",
   "Control note": "控制提示",
   "Listener hygiene matters": "监听卫生很重要",
