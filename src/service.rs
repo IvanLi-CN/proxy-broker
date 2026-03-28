@@ -3236,13 +3236,13 @@ fn allocate_port(
         if port == 0 {
             return Err(BrokerError::InvalidPort);
         }
-        if let Some(range) = port_range {
-            if !port_range_contains(range, port) {
-                return Err(BrokerError::InvalidRequest(format!(
-                    "desired_port must fall within configured session port range {}-{}",
-                    range.0, range.1
-                )));
-            }
+        if let Some(range) = port_range
+            && !port_range_contains(range, port)
+        {
+            return Err(BrokerError::InvalidRequest(format!(
+                "desired_port must fall within configured session port range {}-{}",
+                range.0, range.1
+            )));
         }
         if used.contains(&port) {
             return Err(BrokerError::PortInUse);
