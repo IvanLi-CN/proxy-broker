@@ -4,7 +4,7 @@
 
 - Status: 已完成
 - Created: 2026-03-18
-- Last: 2026-03-24
+- Last: 2026-03-28
 
 ## Goal
 
@@ -97,6 +97,9 @@ deployments.
   publishing instead of a single serial emulated build.
 - Local CLI workflows still retain explicit localhost binds when operators want
   private-only sessions.
+- Deployments that only expose a fixed listener port pool can now constrain
+  automatic session allocation to that pool, and wildcard listeners explicitly
+  enable LAN access so non-loopback clients can actually use those listeners.
 
 ## 变更记录（Change log）
 
@@ -105,3 +108,4 @@ deployments.
 - 2026-03-21: 明确原生资产文件名使用 release tag，但二进制内嵌版本必须与容器镜像保持一致。
 - 2026-03-24: 后续规格 `#tqs62` 将主线自动发布语义收敛为 current-first。
 - 2026-03-24: 后续规格 `#m8z4p` 进一步收敛为“默认 `GITHUB_TOKEN` + release anchor”发布路径，不再要求额外 publisher secrets。
+- 2026-03-28: 补充 session 端口池约束与 wildcard listener 的 `allow-lan` 契约，修复“UI 显示 session 已创建但实际对外不可用”的部署陷阱。

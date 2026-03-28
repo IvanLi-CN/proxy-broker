@@ -194,6 +194,8 @@
   - `selection_mode=ip` requires at least one `specified_ips` entry and rejects geo fields
   - `specified_ips` and `excluded_ips` must not intersect
   - omitting `desired_port` lets the backend auto-allocate a free listener port
+  - when `PROXY_BROKER_SESSION_PORT_RANGE` is configured, both auto-allocation
+    and explicit `desired_port` must stay inside that inclusive range
 - Success:
   - `session_id`, `listen`, `port`, `selected_ip`, `proxy_name`
   - `listen` echoes the configured session listener bind IP (`127.0.0.1` for

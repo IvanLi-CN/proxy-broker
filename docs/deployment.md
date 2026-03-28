@@ -133,6 +133,10 @@ The rendered Traefik topology exposes four hosts on a shared test domain:
   - machine-facing route with no proxy-side human auth so profile API keys can
     reach `proxy-broker` directly
 
+Session listeners are separate raw TCP entrypoints. They do not ride through the
+HTTPS web domain and should be reached through the broker host/IP that exposes
+the listener port range.
+
 The reusable scripts are:
 
 - `scripts/forward-auth/render-stack.sh`
@@ -217,5 +221,13 @@ Header example:
 curl http://127.0.0.1:8080/api/v1/profiles/default/sessions \
   -H "X-API-Key: pbk_<key_id>_<secret>"
 ```
+
+## Session Port Pool
+
+- `PROXY_BROKER_SESSION_PORT_RANGE`
+  - optional inclusive `start-end` range that constrains both suggested ports
+    and automatic session listener allocation
+  - use this when the deployment only exposes a fixed host port pool such as
+    `20000-20999`
 
 Profile API keys are limited to their bound `profile_id`. Using a valid key against another profile returns `403 profile_access_denied`.
