@@ -62,6 +62,7 @@ pub struct BrokerServiceOptions {
     pub mmdb_url: String,
     pub data_dir: PathBuf,
     pub session_listen_ip: IpAddr,
+    pub session_port_range: Option<(u16, u16)>,
 }
 
 impl Default for BrokerServiceOptions {
@@ -79,6 +80,7 @@ impl Default for BrokerServiceOptions {
             session_listen_ip: DEFAULT_SESSION_LISTEN_IP
                 .parse()
                 .unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST)),
+            session_port_range: None,
         }
     }
 }
@@ -1983,6 +1985,7 @@ impl BrokerService {
                 &probe_records,
                 &existing,
                 self.options.session_listen_ip,
+                self.options.session_port_range,
             ) {
                 Ok(prepared) => prepared,
                 Err(err)
@@ -2114,6 +2117,7 @@ impl BrokerService {
                 &probe_records,
                 &existing,
                 self.options.session_listen_ip,
+                self.options.session_port_range,
             ) {
                 Ok(staged) => staged,
                 Err(err)
@@ -2212,7 +2216,12 @@ impl BrokerService {
             .list_sessions(profile_id)
             .await
             .map_err(BrokerError::from)?;
-        let port = allocate_port(&existing, None, self.options.session_listen_ip)?;
+        let port = allocate_port(
+            &existing,
+            None,
+            self.options.session_listen_ip,
+            self.options.session_port_range,
+        )?;
         Ok(SuggestedPortResponse { port })
     }
 
@@ -3220,11 +3229,20 @@ fn allocate_port(
     existing: &[SessionRecord],
     desired: Option<u16>,
     listen_ip: IpAddr,
+    port_range: Option<(u16, u16)>,
 ) -> BrokerResult<u16> {
     let used: HashSet<u16> = existing.iter().map(|s| s.port).collect();
     if let Some(port) = desired {
         if port == 0 {
             return Err(BrokerError::InvalidPort);
+        }
+        if let Some(range) = port_range {
+            if !port_range_contains(range, port) {
+                return Err(BrokerError::InvalidRequest(format!(
+                    "desired_port must fall within configured session port range {}-{}",
+                    range.0, range.1
+                )));
+            }
         }
         if used.contains(&port) {
             return Err(BrokerError::PortInUse);
@@ -3233,6 +3251,19 @@ fn allocate_port(
             return Err(BrokerError::PortInUse);
         }
         return Ok(port);
+    }
+
+    if let Some((start, end)) = port_range {
+        for port in start..=end {
+            if used.contains(&port) {
+                continue;
+            }
+            if let Ok(socket) = std::net::TcpListener::bind((listen_ip, port)) {
+                drop(socket);
+                return Ok(port);
+            }
+        }
+        return Err(BrokerError::PortInUse);
     }
 
     for _ in 0..32 {
@@ -3249,6 +3280,10 @@ fn allocate_port(
     Err(BrokerError::PortInUse)
 }
 
+fn port_range_contains(range: (u16, u16), port: u16) -> bool {
+    range.0 <= port && port <= range.1
+}
+
 fn prepare_session(
     request: &OpenSessionRequest,
     nodes: &[ProxyNode],
@@ -3256,10 +3291,11 @@ fn prepare_session(
     probes: &[ProbeRecord],
     existing: &[SessionRecord],
     listen_ip: IpAddr,
+    port_range: Option<(u16, u16)>,
 ) -> BrokerResult<SessionRecord> {
     let ip = choose_ip_for_open(request, ip_records, probes)?;
     let proxy_name = choose_proxy_for_ip(&ip, nodes, probes)?;
-    let port = allocate_port(existing, request.desired_port, listen_ip)?;
+    let port = allocate_port(existing, request.desired_port, listen_ip, port_range)?;
     let now = now_epoch_sec();
 
     Ok(SessionRecord {
@@ -3279,6 +3315,7 @@ fn stage_batch_sessions(
     probe_records: &[ProbeRecord],
     existing: &[SessionRecord],
     listen_ip: IpAddr,
+    port_range: Option<(u16, u16)>,
 ) -> BrokerResult<Vec<SessionRecord>> {
     let mut staged = Vec::new();
     for request in requests {
@@ -3291,6 +3328,7 @@ fn stage_batch_sessions(
             probe_records,
             &all_sessions,
             listen_ip,
+            port_range,
         )?;
         staged.push(prepared);
     }
@@ -4374,6 +4412,7 @@ proxies:
             &[],
             &[],
             Ipv4Addr::LOCALHOST.into(),
+            None,
         )
         .expect_err("non-existent specified ip should fail");
         assert!(matches!(err, BrokerError::IpNotFound));
@@ -4538,7 +4577,7 @@ proxies:
 
     #[test]
     fn desired_port_zero_is_invalid() {
-        let err = allocate_port(&[], Some(0), Ipv4Addr::LOCALHOST.into())
+        let err = allocate_port(&[], Some(0), Ipv4Addr::LOCALHOST.into(), None)
             .expect_err("port 0 should be rejected");
         assert!(matches!(err, BrokerError::InvalidPort));
     }
@@ -4552,9 +4591,28 @@ proxies:
             .expect("listener should expose local addr")
             .port();
 
-        let err = allocate_port(&[], Some(occupied_port), Ipv4Addr::UNSPECIFIED.into())
+        let err = allocate_port(&[], Some(occupied_port), Ipv4Addr::UNSPECIFIED.into(), None)
             .expect_err("occupied wildcard port should be rejected");
         assert!(matches!(err, BrokerError::PortInUse));
+    }
+
+    #[test]
+    fn allocate_port_auto_assignment_stays_within_configured_range() {
+        let port = allocate_port(&[], None, Ipv4Addr::LOCALHOST.into(), Some((20000, 20002)))
+            .expect("range-constrained auto assignment should succeed");
+        assert!((20000..=20002).contains(&port));
+    }
+
+    #[test]
+    fn allocate_port_rejects_desired_port_outside_configured_range() {
+        let err = allocate_port(
+            &[],
+            Some(25000),
+            Ipv4Addr::LOCALHOST.into(),
+            Some((20000, 20999)),
+        )
+        .expect_err("out-of-range desired port should be rejected");
+        assert!(matches!(err, BrokerError::InvalidRequest(_)));
     }
 
     #[test]
@@ -4575,6 +4633,7 @@ proxies:
             &[],
             &[],
             Ipv4Addr::UNSPECIFIED.into(),
+            None,
         )
         .expect("session should be prepared");
 

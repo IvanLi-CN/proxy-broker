@@ -35,6 +35,9 @@ struct Cli {
     )]
     session_listen_ip: IpAddr,
 
+    #[arg(long, env = "PROXY_BROKER_SESSION_PORT_RANGE")]
+    session_port_range: Option<String>,
+
     #[arg(long, env = "PROXY_BROKER_STORE", default_value = "sqlite")]
     store: String,
 
@@ -175,6 +178,7 @@ struct Cli {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Cli::parse();
+    let session_port_range = parse_session_port_range(args.session_port_range.as_deref())?;
 
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     if args.log_json {
@@ -219,6 +223,7 @@ async fn main() -> anyhow::Result<()> {
         online_geo_base: args.online_geo_base,
         mmdb_url: args.mmdb_url,
         session_listen_ip: args.session_listen_ip,
+        session_port_range,
         ..BrokerServiceOptions::default()
     };
     let service = Arc::new(BrokerService::new(store, runtime, service_opts));
@@ -258,4 +263,29 @@ async fn main() -> anyhow::Result<()> {
     .context("axum server stopped with error")?;
 
     Ok(())
+}
+
+fn parse_session_port_range(raw: Option<&str>) -> anyhow::Result<Option<(u16, u16)>> {
+    let Some(raw) = raw.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+
+    let (start, end) = raw
+        .split_once('-')
+        .context("PROXY_BROKER_SESSION_PORT_RANGE must use `start-end`")?;
+    let start = start
+        .trim()
+        .parse::<u16>()
+        .context("failed to parse session port range start")?;
+    let end = end
+        .trim()
+        .parse::<u16>()
+        .context("failed to parse session port range end")?;
+    anyhow::ensure!(start > 0, "session port range start must be greater than 0");
+    anyhow::ensure!(end > 0, "session port range end must be greater than 0");
+    anyhow::ensure!(
+        start <= end,
+        "session port range start must be less than or equal to end"
+    );
+    Ok(Some((start, end)))
 }
