@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn } from "storybook/test";
 
+import { AppShell } from "@/components/AppShell";
 import { taskDetailFixture, tasksFixture } from "@/mocks/fixtures";
 import { TasksPage } from "@/pages/TasksPage";
 
@@ -9,13 +10,41 @@ const meta = {
   component: TasksPage,
   tags: ["autodocs"],
   parameters: {
+    layout: "fullscreen",
+    initialEntries: ["/tasks"],
     docs: {
       description: {
         component:
-          "Task center surface for scheduled subscription sync and metadata refresh monitoring, including SSE-backed list and detail states.",
+          "Task center surface inside the real app shell, opening directly on the summary cards, filters, and SSE-backed list/detail split without a route hero.",
       },
     },
   },
+  render: (args) => (
+    <AppShell
+      profileId={args.profileId}
+      profiles={["default", "edge-jp", "lab-us"]}
+      profilesLoading={false}
+      profilesCreating={false}
+      profilesError={null}
+      healthStatus="ok"
+      currentUser={{
+        status: "resolved",
+        identity: {
+          authenticated: true,
+          principal_type: "human",
+          subject: "admin@example.com",
+          email: "admin@example.com",
+          groups: ["admins", "ops"],
+          is_admin: true,
+        },
+      }}
+      onProfileIdChange={() => undefined}
+      onCreateProfile={async (value: string) => value}
+      onRetryProfiles={() => undefined}
+    >
+      <TasksPage {...args} />
+    </AppShell>
+  ),
   args: {
     profileId: "default",
     scope: "current",

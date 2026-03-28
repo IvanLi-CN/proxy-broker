@@ -13,7 +13,7 @@ entrypoint to tighten its request model around the simplified create flow.
   dashboard language with stronger hierarchy, compact data surfaces, and clearer
   keyboard/mouse feedback.
 - Rework the main shell plus `/`, `/ips`, and `/sessions` into a control-room
-  layout with route heroes, summary rails, denser tables, and explicit state
+  layout with direct-entry content surfaces, denser tables, and explicit state
   panels.
 - Update stories, tests, and smoke coverage for the refreshed UI states.
 
@@ -58,6 +58,9 @@ entrypoint to tighten its request model around the simplified create flow.
   selector payload.
 - The sidebar shell now uses a compact brand strip so the active profile input
   and workspace navigation stay visible without the oversized intro card.
+- The primary route workspaces now begin directly on their operator content
+  blocks instead of spending a full viewport on a large route hero and side
+  rail.
 - Shared field controls now use an explicit size system so large trigger,
   content, and item surfaces stay visually consistent across the real app and
   Storybook.
@@ -128,13 +131,46 @@ PR: include
 
 ![Sessions batch mobile layout](./assets/sessions-batch-mobile.png)
 
-## Visual Evidence (PR)
+- `source_type=storybook_canvas`
+- `target_program=mock-only`
+- `capture_scope=browser-viewport`
+- `sensitive_exclusion=N/A`
+- `submission_gate=pending-owner-approval`
+- `story_id_or_title=Pages/OverviewPage/ZhCN`
+- `state=overview content-first layout`
+- `evidence_note=Shows the Overview workspace starting directly on the command strip, health summary, and operator cards after removing the oversized route hero.`
+
+![Overview content-first layout](./assets/overview-content-first.png)
 
 - `source_type=storybook_canvas`
 - `target_program=mock-only`
 - `capture_scope=browser-viewport`
-- `story_id_or_title=Components/AppShell/Default`
-- `state=compact sidebar brand strip`
-- `evidence_note=Shows the compressed sidebar header after removing the large intro copy and duplicate host/health pills while keeping profile access and navigation context visible.`
+- `sensitive_exclusion=N/A`
+- `submission_gate=pending-owner-approval`
+- `story_id_or_title=Pages/TasksPage/ZhCN`
+- `state=tasks content-first layout`
+- `evidence_note=Shows the Tasks workspace entering directly on summary cards, filters, and the live board without a hero block consuming the first viewport.`
 
-![Compact sidebar brand strip](./assets/compact-sidebar-brand-strip.png)
+![Tasks content-first layout](./assets/tasks-content-first.png)
+
+- `source_type=storybook_canvas`
+- `target_program=mock-only`
+- `capture_scope=browser-viewport`
+- `sensitive_exclusion=N/A`
+- `submission_gate=pending-owner-approval`
+- `story_id_or_title=Pages/IpExtractPage/ZhCN`
+- `state=ip extract content-first layout`
+- `evidence_note=Shows the IP Extract workspace opening directly on the filter form and result deck, leaving the shortlist tools visible above the fold.`
+
+![IP Extract content-first layout](./assets/ip-extract-content-first.png)
+
+- `source_type=storybook_canvas`
+- `target_program=mock-only`
+- `capture_scope=browser-viewport`
+- `sensitive_exclusion=N/A`
+- `submission_gate=pending-owner-approval`
+- `story_id_or_title=Pages/SessionsPage/ZhCN`
+- `state=sessions content-first layout`
+- `evidence_note=Shows the Sessions workspace entering directly on the single/batch controls and live listener deck after removing the shared hero and rule rail.`
+
+![Sessions content-first layout](./assets/sessions-content-first.png)

@@ -2,11 +2,9 @@ import { BinaryIcon, Rows3Icon, ShieldCheckIcon } from "lucide-react";
 
 import { ActionResponsePanel } from "@/components/ActionResponsePanel";
 import { DataTablePanel } from "@/components/DataTablePanel";
-import { RouteHero } from "@/components/RouteHero";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { WorkflowRail } from "@/components/WorkflowRail";
 import { OpenBatchForm } from "@/features/sessions/components/OpenBatchForm";
 import { OpenSessionForm } from "@/features/sessions/components/OpenSessionForm";
 import { SessionsTable } from "@/features/sessions/components/SessionsTable";
@@ -65,51 +63,9 @@ export function SessionsPage({
 
   return (
     <div className="space-y-8">
-      <RouteHero
-        eyebrow={t("Sessions")}
-        title={t("Sessions hero title")}
-        description={t("Sessions hero description")}
-        badges={[
-          {
-            label: t("{count} live listeners", { count: formatNumber(sessions.length) }),
-            tone: sessions.length > 0 ? "positive" : "neutral",
-          },
-          {
-            label: opening || batchOpening ? t("open request active") : t("open deck idle"),
-            tone: opening || batchOpening ? "warning" : "positive",
-          },
-          {
-            label: closingSessionId
-              ? t("closing {sessionId}", { sessionId: closingSessionId })
-              : t("no close in flight"),
-            tone: closingSessionId ? "warning" : "neutral",
-          },
-        ]}
-        aside={
-          <WorkflowRail
-            eyebrow={t("Operating rule")}
-            title={t("Treat listeners like inventory")}
-            steps={[
-              {
-                title: t("Open deliberately"),
-                description: t(
-                  "Prefer one explicit listener when the target edge is already known.",
-                ),
-              },
-              {
-                title: t("Use batch when rollback matters"),
-                description: t("Stage multiple rows only when they form one logical operation."),
-              },
-              {
-                title: t("Close stale listeners quickly"),
-                description: t(
-                  "Keep the live list small so ports and edge ownership stay obvious.",
-                ),
-              },
-            ]}
-          />
-        }
-      />
+      <header>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">{t("Sessions")}</h1>
+      </header>
 
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1.02fr)_minmax(0,0.98fr)]">
         <div className="space-y-6">

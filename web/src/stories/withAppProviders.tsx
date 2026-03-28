@@ -12,6 +12,10 @@ export const withAppProviders: Decorator = (Story, context) => {
   const queryClient = createQueryClient();
   const theme = context.globals.theme === "dark" ? "dark" : "light";
   const locale = context.globals.locale === "zh-CN" ? ("zh-CN" as Locale) : ("en-US" as Locale);
+  const initialEntries =
+    Array.isArray(context.parameters.initialEntries) && context.parameters.initialEntries.length > 0
+      ? context.parameters.initialEntries
+      : ["/"];
   document.documentElement.classList.toggle("dark", theme === "dark");
   document.documentElement.style.colorScheme = theme;
 
@@ -20,7 +24,7 @@ export const withAppProviders: Decorator = (Story, context) => {
       <ThemeProvider attribute="class" forcedTheme={theme}>
         <QueryClientProvider client={queryClient}>
           <TooltipProvider delayDuration={0}>
-            <MemoryRouter initialEntries={["/"]}>
+            <MemoryRouter initialEntries={initialEntries}>
               <Story />
             </MemoryRouter>
             <Toaster richColors position="top-right" />
