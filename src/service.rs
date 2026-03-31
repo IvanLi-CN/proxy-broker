@@ -1972,7 +1972,7 @@ impl BrokerService {
             &inventory.sessions,
             inventory.sync_config.as_ref(),
         );
-        Ok(build_node_list_response(items, request)?)
+        build_node_list_response(items, request)
     }
 
     pub async fn export_nodes(
