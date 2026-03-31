@@ -16,9 +16,7 @@ export function NotFoundPage() {
         <div className="text-xs font-semibold uppercase tracking-[0.3em] text-primary">404</div>
         <h1 className="text-3xl font-semibold tracking-tight">{t("Nothing on this route yet")}</h1>
         <p className="max-w-xl text-sm text-muted-foreground md:text-base">
-          {t(
-            "The control surface only exposes Overview, Tasks, IP Extract, and Sessions right now.",
-          )}
+          {t("The control surface only exposes Overview, Tasks, Nodes, and Sessions right now.")}
         </p>
       </div>
       <Button asChild>

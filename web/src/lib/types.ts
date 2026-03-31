@@ -1,6 +1,22 @@
 export type SortMode = "mru" | "lru";
 export type SessionSelectionMode = "any" | "geo" | "ip";
 export type SessionOptionKind = "country" | "city" | "ip";
+export type NodeProbeStatusFilter = "any" | "reachable" | "unreachable" | "unprobed";
+export type NodeSessionPresenceFilter = "any" | "with_sessions" | "without_sessions";
+export type NodeIpFamilyFilter = "any" | "ipv4" | "ipv6" | "dual_stack";
+export type NodeSortField =
+  | "proxy_name"
+  | "proxy_type"
+  | "preferred_ip"
+  | "region"
+  | "latency"
+  | "last_used_at"
+  | "session_count";
+export type SortOrder = "asc" | "desc";
+export type NodeProbeStatus = "reachable" | "unreachable" | "unprobed";
+export type NodeViewMode = "flat" | "group_by_ip" | "group_by_region" | "group_by_subscription";
+export type IpFamilyPriority = "ipv4_first";
+export type NodeExportFormat = "csv" | "link_lines";
 
 export type SubscriptionSource = { type: "url"; value: string } | { type: "file"; value: string };
 
@@ -102,6 +118,73 @@ export interface ExtractIpItem {
 
 export interface ExtractIpResponse {
   items: ExtractIpItem[];
+}
+
+export interface NodeListQuery {
+  query?: string;
+  proxy_types?: string[];
+  country_codes?: string[];
+  regions?: string[];
+  cities?: string[];
+  probe_status?: NodeProbeStatusFilter;
+  session_presence?: NodeSessionPresenceFilter;
+  ip_family?: NodeIpFamilyFilter;
+  sort_by?: NodeSortField;
+  sort_order?: SortOrder;
+  page?: number;
+  page_size?: number;
+}
+
+export interface NodeListItem {
+  node_id: string;
+  proxy_name: string;
+  proxy_type: string;
+  server: string;
+  preferred_ip?: string | null;
+  ipv4?: string | null;
+  ipv6?: string | null;
+  country_code?: string | null;
+  country_name?: string | null;
+  region_name?: string | null;
+  city?: string | null;
+  probe_status: NodeProbeStatus;
+  best_latency_ms?: number | null;
+  last_used_at?: number | null;
+  session_count: number;
+  subscription_type: string;
+  subscription_value: string;
+}
+
+export interface NodeListResponse {
+  items: NodeListItem[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface NodeExportRequest {
+  node_ids?: string[];
+  all_filtered?: boolean;
+  query?: NodeListQuery;
+  format?: NodeExportFormat;
+}
+
+export interface NodeOpenSessionsRequest {
+  node_ids?: string[];
+  all_filtered?: boolean;
+  query?: NodeListQuery;
+  ip_family_priority?: IpFamilyPriority;
+}
+
+export interface NodeOpenSessionFailure {
+  node_id: string;
+  code: string;
+  message: string;
+}
+
+export interface NodeOpenSessionsResponse {
+  sessions: OpenSessionResponse[];
+  failures: NodeOpenSessionFailure[];
 }
 
 export interface SessionRecord {

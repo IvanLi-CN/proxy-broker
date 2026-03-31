@@ -38,6 +38,9 @@
   - `create_profile(profile_id)`
   - `load_subscription(profile_id, source)`
   - `refresh(profile_id, request)`
+  - `query_nodes(profile_id, request)`
+  - `export_nodes(profile_id, request)` // supports `csv` and `link_lines`
+  - `open_node_sessions(profile_id, request)`
   - `extract_ips(profile_id, request)`
   - `open_session(profile_id, request)`
   - `open_batch(profile_id, request)`

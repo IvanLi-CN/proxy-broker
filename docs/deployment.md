@@ -190,6 +190,9 @@ The same render step also allocates a free private `/24` subnet when you do not 
   - admin human or development principal only
 - `/api/v1/profiles/{profile_id}/subscriptions/load`
 - `/api/v1/profiles/{profile_id}/refresh`
+- `/api/v1/profiles/{profile_id}/nodes/query`
+- `/api/v1/profiles/{profile_id}/nodes/export`
+- `/api/v1/profiles/{profile_id}/nodes/open-sessions`
 - `/api/v1/profiles/{profile_id}/ips/extract`
 - `/api/v1/profiles/{profile_id}/ips/options/search`
 - `/api/v1/profiles/{profile_id}/sessions`

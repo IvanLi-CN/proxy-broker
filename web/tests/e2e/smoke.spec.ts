@@ -329,6 +329,127 @@ test.beforeEach(async ({ page }) => {
     });
   });
 
+  await page.route("**/api/v1/profiles/*/nodes/query", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        total: 3,
+        page: 1,
+        page_size: 25,
+        items: [
+          {
+            node_id: "JP-Tokyo-Entry",
+            proxy_name: "JP-Tokyo-Entry",
+            proxy_type: "vmess",
+            server: "tokyo-a.example.com",
+            preferred_ip: "203.0.113.10",
+            ipv4: "203.0.113.10",
+            ipv6: "2001:db8::10",
+            country_code: "JP",
+            country_name: "Japan",
+            region_name: "Tokyo",
+            city: "Chiyoda",
+            probe_status: "reachable",
+            best_latency_ms: 92,
+            last_used_at: 1741748460,
+            session_count: 1,
+            subscription_type: "url",
+            subscription_value: "https://example.com/subscription.yaml",
+          },
+          {
+            node_id: "JP-Osaka-Edge",
+            proxy_name: "JP-Osaka-Edge",
+            proxy_type: "trojan",
+            server: "osaka-b.example.com",
+            preferred_ip: "203.0.113.88",
+            ipv4: "203.0.113.88",
+            ipv6: null,
+            country_code: "JP",
+            country_name: "Japan",
+            region_name: "Osaka",
+            city: "Osaka",
+            probe_status: "unreachable",
+            best_latency_ms: null,
+            last_used_at: null,
+            session_count: 0,
+            subscription_type: "url",
+            subscription_value: "https://example.com/subscription.yaml",
+          },
+          {
+            node_id: "US-SanJose-Fallback",
+            proxy_name: "US-SanJose-Fallback",
+            proxy_type: "shadowsocks",
+            server: "sjc-fallback.example.com",
+            preferred_ip: "198.51.100.42",
+            ipv4: "198.51.100.42",
+            ipv6: null,
+            country_code: "US",
+            country_name: "United States",
+            region_name: "California",
+            city: "San Jose",
+            probe_status: "unprobed",
+            best_latency_ms: null,
+            last_used_at: null,
+            session_count: 0,
+            subscription_type: "url",
+            subscription_value: "https://example.com/subscription.yaml",
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.route("**/api/v1/profiles/*/nodes/export", async (route) => {
+    const payload = (route.request().postDataJSON() ?? {}) as { format?: "csv" | "link_lines" };
+    const isCsv = payload.format !== "link_lines";
+    await route.fulfill({
+      status: 200,
+      contentType: isCsv ? "text/csv" : "text/plain",
+      body: isCsv
+        ? "node_id,proxy_name\nJP-Tokyo-Entry,JP-Tokyo-Entry\n"
+        : "vmess://ZXhhbXBsZQ==\n",
+    });
+  });
+
+  await page.route("**/api/v1/profiles/*/nodes/open-sessions", async (route) => {
+    const profileId = extractProfileId(route.request().url());
+    const payload = (route.request().postDataJSON() ?? {}) as {
+      node_ids?: string[];
+      all_filtered?: boolean;
+    };
+    const availableSessions = [
+      {
+        session_id: `sess_${profileId}_01`,
+        listen: "127.0.0.1:10080",
+        port: 10080,
+        selected_ip: "203.0.113.10",
+        proxy_name: "JP-Tokyo-Entry",
+        created_at: 1741748460,
+      },
+      {
+        session_id: `sess_${profileId}_02`,
+        listen: "127.0.0.1:10081",
+        port: 10081,
+        selected_ip: "198.51.100.42",
+        proxy_name: "US-SanJose-Fallback",
+        created_at: 1741748461,
+      },
+    ];
+    const selectedSessions = payload.all_filtered
+      ? availableSessions
+      : availableSessions.filter((session) => payload.node_ids?.includes(session.proxy_name));
+    sessionsByProfile[profileId] = selectedSessions;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        sessions: selectedSessions.map(({ created_at: _createdAt, ...session }) => session),
+        failures: [],
+      }),
+    });
+  });
+
   await page.route("**/api/v1/profiles/*/sessions/suggested-port", async (route) => {
     await route.fulfill({
       status: 200,
@@ -444,15 +565,29 @@ test("operator can drive the main workflows", async ({ page }) => {
   await expect(page.getByRole("table").getByText("Subscription sync")).toBeVisible();
   await expect(page.getByText("Refreshing probe metadata.")).toBeVisible();
 
-  await page.getByRole("link", { name: /IP Extract/i }).click();
-  await page.getByRole("button", { name: /extract ips/i }).click();
-  await expect(page.getByText("203.0.113.10")).toBeVisible();
+  await page.getByRole("link", { name: /Nodes/i }).click();
+  await expect(page.getByRole("heading", { name: "Nodes", level: 1 })).toBeVisible();
+  await page.getByRole("tab", { name: /By region/i }).click();
+  await expect(page.getByText("JP-Tokyo-Entry")).toBeVisible();
+  await page
+    .getByRole("combobox")
+    .filter({ hasText: /Selected nodes/i })
+    .click();
+  await page.getByRole("option", { name: /All filtered nodes/i }).click();
+  await page.getByRole("button", { name: /^Export$/i }).click();
+  await page.getByRole("button", { name: /Node links \(.txt, one per line\)/i }).click();
+  await expect(page.getByText("Exported node links as TXT")).toBeVisible();
+  await page.getByRole("checkbox").nth(1).click();
+  await page
+    .getByRole("combobox")
+    .filter({ hasText: /All filtered nodes/i })
+    .click();
+  await page.getByRole("option", { name: /Selected nodes/i }).click();
+  await page.getByRole("button", { name: /Create sessions/i }).click();
+  await expect(page.getByText("Created 1 sessions")).toBeVisible();
 
   await page.getByRole("link", { name: /Sessions/i }).click();
-  await page.getByRole("button", { name: /open session/i }).click();
-  await expect(
-    page.getByText("Listening on 127.0.0.1:10080 via JP-Tokyo-Entry (203.0.113.10)."),
-  ).toBeVisible();
+  await expect(page.getByText("JP-Tokyo-Entry")).toBeVisible();
 
   await page.getByRole("tab", { name: /batch open/i }).click();
   await page.getByRole("button", { name: /open batch/i }).click();

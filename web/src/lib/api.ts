@@ -14,6 +14,11 @@ import type {
   ListSessionsResponse,
   LoadSubscriptionRequest,
   LoadSubscriptionResponse,
+  NodeExportRequest,
+  NodeListQuery,
+  NodeListResponse,
+  NodeOpenSessionsRequest,
+  NodeOpenSessionsResponse,
   OpenBatchRequest,
   OpenBatchResponse,
   OpenSessionRequest,
@@ -71,6 +76,31 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+async function requestText(path: string, init?: RequestInit): Promise<string> {
+  const response = await fetch(path, {
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers ?? {}),
+    },
+    ...init,
+  });
+
+  if (!response.ok) {
+    let payload: ErrorResponse = {
+      code: `http_${response.status}`,
+      message: response.statusText || "Request failed",
+    };
+    try {
+      payload = (await response.json()) as ErrorResponse;
+    } catch {
+      // fallback to default payload
+    }
+    throw new ApiError(response.status, payload);
+  }
+
+  return await response.text();
+}
+
 const profilePath = (profileId: string, suffix: string) =>
   `/api/v1/profiles/${encodeURIComponent(profileId)}${suffix}`;
 
@@ -113,6 +143,21 @@ export const api = {
     }),
   extractIps: (profileId: string, payload: ExtractIpRequest) =>
     request<ExtractIpResponse>(profilePath(profileId, "/ips/extract"), {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  queryNodes: (profileId: string, payload: NodeListQuery) =>
+    request<NodeListResponse>(profilePath(profileId, "/nodes/query"), {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  exportNodes: (profileId: string, payload: NodeExportRequest) =>
+    requestText(profilePath(profileId, "/nodes/export"), {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  openNodeSessions: (profileId: string, payload: NodeOpenSessionsRequest) =>
+    request<NodeOpenSessionsResponse>(profilePath(profileId, "/nodes/open-sessions"), {
       method: "POST",
       body: JSON.stringify(payload),
     }),

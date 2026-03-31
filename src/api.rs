@@ -4,9 +4,12 @@ use axum::{
     Json, Router,
     body::Bytes,
     extract::{Path, Query, State, rejection::JsonRejection},
-    http::StatusCode,
+    http::{HeaderValue, StatusCode, header},
     middleware,
-    response::sse::{Event, KeepAlive, Sse},
+    response::{
+        IntoResponse,
+        sse::{Event, KeepAlive, Sse},
+    },
     routing::{delete, get, post},
 };
 
@@ -15,7 +18,8 @@ use crate::{
     error::BrokerError,
     models::{
         CreateApiKeyRequest, CreateApiKeyResponse, CreateProfileRequest, CreateProfileResponse,
-        HealthResponse, LoadSubscriptionRequest, OpenBatchRequest, OpenSessionRequest,
+        HealthResponse, LoadSubscriptionRequest, NodeExportFormat, NodeExportRequest,
+        NodeListQuery, NodeOpenSessionsRequest, OpenBatchRequest, OpenSessionRequest,
         RefreshRequest, SearchSessionOptionsRequest, SuggestedPortResponse, TaskListQuery,
         TaskRunDetail, TaskRunSummary, TaskStreamEnvelope,
     },
@@ -53,6 +57,18 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/v1/profiles/{profile_id}/ips/options/search",
             post(search_session_options),
+        )
+        .route(
+            "/api/v1/profiles/{profile_id}/nodes/query",
+            post(query_nodes),
+        )
+        .route(
+            "/api/v1/profiles/{profile_id}/nodes/export",
+            post(export_nodes),
+        )
+        .route(
+            "/api/v1/profiles/{profile_id}/nodes/open-sessions",
+            post(open_node_sessions),
         )
         .route(
             "/api/v1/profiles/{profile_id}/sessions/open",
@@ -384,6 +400,58 @@ async fn search_session_options(
     Ok(Json(resp))
 }
 
+async fn query_nodes(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    Path(profile_id): Path<String>,
+    payload: Result<Json<NodeListQuery>, JsonRejection>,
+) -> Result<Json<crate::models::NodeListResponse>, BrokerError> {
+    auth.require_profile_access(&profile_id)?;
+    let request = parse_json_payload(payload, "query_nodes")?;
+    let resp = state.service.query_nodes(&profile_id, &request).await?;
+    Ok(Json(resp))
+}
+
+async fn export_nodes(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    Path(profile_id): Path<String>,
+    payload: Result<Json<NodeExportRequest>, JsonRejection>,
+) -> Result<impl IntoResponse, BrokerError> {
+    auth.require_profile_access(&profile_id)?;
+    let request = parse_json_payload(payload, "export_nodes")?;
+    let body = state.service.export_nodes(&profile_id, &request).await?;
+    let (content_type, filename) = match request.format {
+        NodeExportFormat::Csv => ("text/csv; charset=utf-8", "proxy-broker-nodes.csv"),
+        NodeExportFormat::LinkLines => ("text/plain; charset=utf-8", "proxy-broker-node-links.txt"),
+    };
+    let content_disposition =
+        HeaderValue::from_str(&format!("attachment; filename=\"{filename}\""))
+            .map_err(|err| BrokerError::Internal(err.to_string()))?;
+    Ok((
+        [
+            (header::CONTENT_TYPE, HeaderValue::from_static(content_type)),
+            (header::CONTENT_DISPOSITION, content_disposition),
+        ],
+        body,
+    ))
+}
+
+async fn open_node_sessions(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    Path(profile_id): Path<String>,
+    payload: Result<Json<NodeOpenSessionsRequest>, JsonRejection>,
+) -> Result<Json<crate::models::NodeOpenSessionsResponse>, BrokerError> {
+    auth.require_profile_access(&profile_id)?;
+    let request = parse_json_payload(payload, "open_node_sessions")?;
+    let resp = state
+        .service
+        .open_node_sessions(&profile_id, &request)
+        .await?;
+    Ok(Json(resp))
+}
+
 async fn list_sessions(
     auth: AuthContext,
     State(state): State<AppState>,
@@ -451,7 +519,11 @@ mod tests {
     };
 
     use async_trait::async_trait;
-    use axum::{body::Body, extract::ConnectInfo, http::Request};
+    use axum::{
+        body::{Body, to_bytes},
+        extract::ConnectInfo,
+        http::{Method, Request},
+    };
     use tower::ServiceExt;
 
     use super::{
@@ -523,11 +595,123 @@ mod tests {
         .expect("development auth config should build")
     }
 
+    fn enforce_auth() -> AuthConfig {
+        AuthConfig::from_options(AuthConfigOptions {
+            mode: "enforce".to_string(),
+            subject_headers: "x-auth-user".to_string(),
+            email_headers: "x-auth-email".to_string(),
+            groups_headers: "x-auth-groups".to_string(),
+            trusted_proxies: "127.0.0.1/32".to_string(),
+            admin_users: "admin".to_string(),
+            admin_groups: "proxy-broker-admins".to_string(),
+            dev_user: "dev-admin".to_string(),
+            dev_email: "dev@example.com".to_string(),
+            dev_groups: "proxy-broker-admins".to_string(),
+        })
+        .expect("enforce auth config should build")
+    }
+
     fn trusted_request(mut request: Request<Body>) -> Request<Body> {
         request
             .extensions_mut()
             .insert(ConnectInfo(SocketAddr::from((Ipv4Addr::LOCALHOST, 40123))));
         request
+    }
+
+    async fn seed_nodes_profile(store: &MemoryStore, profile_id: &str) {
+        store
+            .replace_subscription(
+                profile_id,
+                &[crate::models::ProxyNode {
+                    proxy_name: "edge-a".to_string(),
+                    proxy_type: "socks5".to_string(),
+                    server: "edge.example".to_string(),
+                    resolved_ips: vec!["2001:db8::5".to_string(), "5.5.5.5".to_string()],
+                    raw_proxy: serde_json::json!({
+                        "name": "edge-a",
+                        "type": "socks5",
+                        "server": "edge.example",
+                        "port": 1080
+                    }),
+                }],
+            )
+            .await
+            .expect("seed subscription should succeed");
+        store
+            .replace_ip_records(
+                profile_id,
+                &[
+                    crate::models::IpRecord {
+                        ip: "5.5.5.5".to_string(),
+                        country_code: Some("US".to_string()),
+                        country_name: Some("United States".to_string()),
+                        region_name: Some("California".to_string()),
+                        city: Some("San Jose".to_string()),
+                        geo_source: Some("test".to_string()),
+                        probe_updated_at: None,
+                        geo_updated_at: None,
+                        last_used_at: Some(10),
+                    },
+                    crate::models::IpRecord {
+                        ip: "2001:db8::5".to_string(),
+                        country_code: Some("DE".to_string()),
+                        country_name: Some("Germany".to_string()),
+                        region_name: Some("Berlin".to_string()),
+                        city: Some("Berlin".to_string()),
+                        geo_source: Some("test".to_string()),
+                        probe_updated_at: None,
+                        geo_updated_at: None,
+                        last_used_at: Some(8),
+                    },
+                ],
+            )
+            .await
+            .expect("seed ip records should succeed");
+        store
+            .replace_probe_records(
+                profile_id,
+                &[crate::models::ProbeRecord {
+                    proxy_name: "edge-a".to_string(),
+                    ip: "5.5.5.5".to_string(),
+                    target_url: "https://www.gstatic.com/generate_204".to_string(),
+                    ok: true,
+                    latency_ms: Some(12),
+                    updated_at: 1,
+                }],
+            )
+            .await
+            .expect("seed probe records should succeed");
+        store
+            .insert_session(
+                profile_id,
+                &crate::models::SessionRecord {
+                    session_id: "seed-session".to_string(),
+                    listen: "127.0.0.1".to_string(),
+                    port: 18080,
+                    selected_ip: "5.5.5.5".to_string(),
+                    proxy_name: "edge-a".to_string(),
+                    created_at: 1,
+                },
+            )
+            .await
+            .expect("seed session should succeed");
+        store
+            .upsert_profile_sync_config(&ProfileSyncConfig {
+                profile_id: profile_id.to_string(),
+                source: SubscriptionSource::Url("https://example.com/subscription".to_string()),
+                enabled: true,
+                sync_every_sec: 600,
+                full_refresh_every_sec: 86_400,
+                last_sync_due_at: Some(now_epoch_sec() + 600),
+                last_sync_started_at: None,
+                last_sync_finished_at: None,
+                last_full_refresh_due_at: Some(now_epoch_sec() + 86_400),
+                last_full_refresh_started_at: None,
+                last_full_refresh_finished_at: None,
+                updated_at: now_epoch_sec(),
+            })
+            .await
+            .expect("sync config seed should succeed");
     }
 
     #[test]
@@ -801,5 +985,226 @@ mod tests {
         upsert_stream_matching_runs(&mut matching_runs, &query, &updated_run);
 
         assert!(matching_runs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn query_nodes_endpoint_returns_node_rows() {
+        let profile_id = "default";
+        let store = Arc::new(MemoryStore::new());
+        seed_nodes_profile(&store, profile_id).await;
+
+        let service = Arc::new(BrokerService::new(
+            store,
+            Arc::new(ApiTestRuntime),
+            BrokerServiceOptions::default(),
+        ));
+        let app = build_router(AppState {
+            service,
+            auth: Arc::new(dev_auth()),
+        });
+
+        let response = app
+            .oneshot(trusted_request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!("/api/v1/profiles/{profile_id}/nodes/query"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"page":1,"page_size":25}"#))
+                    .unwrap(),
+            ))
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should be readable");
+        let payload: serde_json::Value =
+            serde_json::from_slice(&body).expect("body should be json");
+        assert_eq!(payload["total"], 1);
+        assert_eq!(payload["items"][0]["node_id"], "edge-a");
+        assert_eq!(payload["items"][0]["preferred_ip"], "5.5.5.5");
+        assert_eq!(payload["items"][0]["session_count"], 1);
+    }
+
+    #[tokio::test]
+    async fn export_nodes_endpoint_returns_csv_attachment() {
+        let profile_id = "default";
+        let store = Arc::new(MemoryStore::new());
+        seed_nodes_profile(&store, profile_id).await;
+
+        let service = Arc::new(BrokerService::new(
+            store,
+            Arc::new(ApiTestRuntime),
+            BrokerServiceOptions::default(),
+        ));
+        let app = build_router(AppState {
+            service,
+            auth: Arc::new(dev_auth()),
+        });
+
+        let response = app
+            .oneshot(trusted_request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!("/api/v1/profiles/{profile_id}/nodes/export"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"node_ids":["edge-a"]}"#))
+                    .unwrap(),
+            ))
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get(axum::http::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok()),
+            Some("text/csv; charset=utf-8")
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get(axum::http::header::CONTENT_DISPOSITION)
+                .and_then(|value| value.to_str().ok()),
+            Some("attachment; filename=\"proxy-broker-nodes.csv\"")
+        );
+
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should be readable");
+        let csv = String::from_utf8(body.to_vec()).expect("csv body should be utf-8");
+        assert!(csv.starts_with("node_id,proxy_name,proxy_type"));
+        assert!(csv.contains("edge-a"));
+    }
+
+    #[tokio::test]
+    async fn export_nodes_endpoint_returns_link_lines_attachment() {
+        let profile_id = "default";
+        let store = Arc::new(MemoryStore::new());
+        seed_nodes_profile(&store, profile_id).await;
+
+        let service = Arc::new(BrokerService::new(
+            store,
+            Arc::new(ApiTestRuntime),
+            BrokerServiceOptions::default(),
+        ));
+        let app = build_router(AppState {
+            service,
+            auth: Arc::new(dev_auth()),
+        });
+
+        let response = app
+            .oneshot(trusted_request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!("/api/v1/profiles/{profile_id}/nodes/export"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"node_ids":["edge-a"],"format":"link_lines"}"#,
+                    ))
+                    .unwrap(),
+            ))
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get(axum::http::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok()),
+            Some("text/plain; charset=utf-8")
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get(axum::http::header::CONTENT_DISPOSITION)
+                .and_then(|value| value.to_str().ok()),
+            Some("attachment; filename=\"proxy-broker-node-links.txt\"")
+        );
+
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should be readable");
+        let links = String::from_utf8(body.to_vec()).expect("body should be utf-8");
+        assert_eq!(links, "socks5://edge.example:1080#edge-a");
+    }
+
+    #[tokio::test]
+    async fn open_node_sessions_endpoint_returns_partial_failures() {
+        let profile_id = "default";
+        let store = Arc::new(MemoryStore::new());
+        seed_nodes_profile(&store, profile_id).await;
+
+        let service = Arc::new(BrokerService::new(
+            store,
+            Arc::new(ApiTestRuntime),
+            BrokerServiceOptions::default(),
+        ));
+        let app = build_router(AppState {
+            service,
+            auth: Arc::new(dev_auth()),
+        });
+
+        let response = app
+            .oneshot(trusted_request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!("/api/v1/profiles/{profile_id}/nodes/open-sessions"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"node_ids":["edge-a","missing"],"ip_family_priority":"ipv4_first"}"#,
+                    ))
+                    .unwrap(),
+            ))
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should be readable");
+        let payload: serde_json::Value =
+            serde_json::from_slice(&body).expect("body should be json");
+        assert_eq!(payload["sessions"].as_array().map(Vec::len), Some(1));
+        assert_eq!(payload["sessions"][0]["selected_ip"], "5.5.5.5");
+        assert_eq!(payload["failures"].as_array().map(Vec::len), Some(1));
+        assert_eq!(payload["failures"][0]["node_id"], "missing");
+        assert_eq!(payload["failures"][0]["code"], "ip_not_found");
+    }
+
+    #[tokio::test]
+    async fn query_nodes_endpoint_requires_auth_when_enforced() {
+        let service = Arc::new(BrokerService::new(
+            Arc::new(MemoryStore::new()),
+            Arc::new(ApiTestRuntime),
+            BrokerServiceOptions::default(),
+        ));
+        let app = build_router(AppState {
+            service,
+            auth: Arc::new(enforce_auth()),
+        });
+
+        let response = app
+            .oneshot(trusted_request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/profiles/default/nodes/query")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"page":1,"page_size":25}"#))
+                    .unwrap(),
+            ))
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(response.status(), axum::http::StatusCode::UNAUTHORIZED);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should be readable");
+        let payload: serde_json::Value =
+            serde_json::from_slice(&body).expect("body should be json");
+        assert_eq!(payload["code"], "authentication_required");
     }
 }

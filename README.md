@@ -257,7 +257,64 @@ Base path: `http://127.0.0.1:8080/api/v1/profiles/{profile_id}`
 }
 ```
 
-### Extract IPs
+### Query nodes for the Nodes workspace
+
+- `POST /nodes/query`
+- Request body:
+
+```json
+{
+  "query": "tokyo",
+  "country_codes": ["JP"],
+  "probe_status": "reachable",
+  "session_presence": "with_sessions",
+  "ip_family": "ipv4",
+  "sort_by": "session_count",
+  "sort_order": "desc",
+  "page": 1,
+  "page_size": 25
+}
+```
+
+The response returns paginated node rows with preferred IP, geo, probe
+metadata, and `session_count`.
+
+### Export nodes
+
+- `POST /nodes/export`
+- Request body:
+
+```json
+{
+  "all_filtered": true,
+  "query": {
+    "country_codes": ["JP"],
+    "probe_status": "reachable"
+  },
+  "format": "link_lines"
+}
+```
+
+Supported export formats:
+
+- `csv`: inventory metadata as a spreadsheet-friendly attachment
+- `link_lines`: plain-text node links, one per line, as a `.txt` attachment
+
+### Open node sessions in batch
+
+- `POST /nodes/open-sessions`
+- Request body:
+
+```json
+{
+  "node_ids": ["jp-edge-a", "jp-edge-b"],
+  "ip_family_priority": "ipv4_first"
+}
+```
+
+The response returns `sessions[]` plus per-node `failures[]`.
+
+### Extract IPs (legacy contract)
 
 - `POST /ips/extract`
 - Request body:
