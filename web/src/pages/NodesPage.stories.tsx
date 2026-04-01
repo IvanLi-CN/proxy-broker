@@ -3,7 +3,12 @@ import { type ComponentProps, useEffect, useMemo, useState } from "react";
 import { expect, fn, userEvent, within } from "storybook/test";
 
 import { AppShell } from "@/components/AppShell";
-import { defaultNodeFilterState, type NodeFilterState, splitFilterInput } from "@/lib/nodes-view";
+import {
+  defaultNodeFilterState,
+  type NodeFilterState,
+  shouldClearNodeSelectionForFilterPatch,
+  splitFilterInput,
+} from "@/lib/nodes-view";
 import type { NodeExportFormat, NodeListItem, NodeListResponse, NodeViewMode } from "@/lib/types";
 import { nodesFixture } from "@/mocks/fixtures";
 import { NodesPage } from "@/pages/NodesPage";
@@ -151,12 +156,16 @@ function InteractiveNodesPageStory(args: ComponentProps<typeof NodesPage>) {
   }, [args.data, filterState, sourceItems]);
 
   const handleFilterChange = (patch: Partial<NodeFilterState>) => {
+    if (shouldClearNodeSelectionForFilterPatch(patch)) {
+      setSelectedIds([]);
+    }
     setFilterState((current) => ({ ...current, ...patch }));
     args.onFilterChange(patch);
   };
 
   const handleResetFilters = () => {
     setFilterState(initialFilterState);
+    setSelectedIds([]);
     args.onResetFilters();
   };
 

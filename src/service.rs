@@ -2554,6 +2554,10 @@ impl BrokerService {
     }
 
     async fn load_node_inventory(&self, profile_id: &str) -> BrokerResult<NodeInventory> {
+        if !self.profile_exists(profile_id).await? {
+            return Err(BrokerError::ProfileNotFound);
+        }
+
         Ok(NodeInventory {
             nodes: self
                 .store

@@ -6,6 +6,7 @@ import {
   buildNodeOpenSessionsRequest,
   defaultNodeFilterState,
   groupNodeItems,
+  shouldClearNodeSelectionForFilterPatch,
 } from "@/lib/nodes-view";
 import { nodesFixture } from "@/mocks/fixtures";
 
@@ -77,5 +78,13 @@ describe("nodes-view helpers", () => {
       },
       ip_family_priority: "ipv4_first",
     });
+  });
+
+  it("clears explicit selection only for semantic filter changes", () => {
+    expect(shouldClearNodeSelectionForFilterPatch({ query: "tokyo" })).toBe(true);
+    expect(shouldClearNodeSelectionForFilterPatch({ countryCodes: "JP" })).toBe(true);
+    expect(shouldClearNodeSelectionForFilterPatch({ page: 2 })).toBe(false);
+    expect(shouldClearNodeSelectionForFilterPatch({ pageSize: 50 })).toBe(false);
+    expect(shouldClearNodeSelectionForFilterPatch({ sortBy: "latency" })).toBe(false);
   });
 });

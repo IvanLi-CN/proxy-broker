@@ -122,6 +122,21 @@ export function buildNodeOpenSessionsRequest(
     : { node_ids: selectedIds, ip_family_priority: "ipv4_first" };
 }
 
+const selectionResetKeys: Array<keyof NodeFilterState> = [
+  "query",
+  "proxyTypes",
+  "countryCodes",
+  "regions",
+  "cities",
+  "probeStatus",
+  "sessionPresence",
+  "ipFamily",
+];
+
+export function shouldClearNodeSelectionForFilterPatch(patch: Partial<NodeFilterState>) {
+  return selectionResetKeys.some((key) => Object.hasOwn(patch, key));
+}
+
 export function areAllPageNodesSelected(items: NodeListItem[], selectedIds: string[]) {
   return items.length > 0 && items.every((item) => selectedIds.includes(item.node_id));
 }

@@ -12,6 +12,7 @@ import {
   buildNodeOpenSessionsRequest,
   defaultNodeFilterState,
   type NodeFilterState,
+  shouldClearNodeSelectionForFilterPatch,
 } from "@/lib/nodes-view";
 import type { NodeExportFormat, NodeViewMode } from "@/lib/types";
 import { NodesPage } from "@/pages/NodesPage";
@@ -50,8 +51,10 @@ export function NodesRoute() {
       link.download = isCsv
         ? `proxy-broker-nodes-${profileId}.csv`
         : `proxy-broker-node-links-${profileId}.txt`;
+      document.body.append(link);
       link.click();
-      URL.revokeObjectURL(url);
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
       return format;
     },
     onSuccess: (format) =>
@@ -111,12 +114,18 @@ export function NodesRoute() {
         await exportMutation.mutateAsync(format);
       }}
       onFilterChange={(patch) => {
+        if (shouldClearNodeSelectionForFilterPatch(patch)) {
+          setSelectedIds([]);
+        }
         setFilterState((current) => ({ ...current, ...patch }));
       }}
       onOpenSessions={async () => {
         await openMutation.mutateAsync();
       }}
-      onResetFilters={() => setFilterState(defaultNodeFilterState)}
+      onResetFilters={() => {
+        setSelectedIds([]);
+        setFilterState(defaultNodeFilterState);
+      }}
       onToggleSelect={(nodeId, checked) => {
         setSelectedIds((current) =>
           checked

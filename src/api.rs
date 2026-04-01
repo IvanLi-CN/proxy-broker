@@ -1207,4 +1207,103 @@ mod tests {
             serde_json::from_slice(&body).expect("body should be json");
         assert_eq!(payload["code"], "authentication_required");
     }
+
+    #[tokio::test]
+    async fn query_nodes_endpoint_returns_profile_not_found() {
+        let service = Arc::new(BrokerService::new(
+            Arc::new(MemoryStore::new()),
+            Arc::new(ApiTestRuntime),
+            BrokerServiceOptions::default(),
+        ));
+        let app = build_router(AppState {
+            service,
+            auth: Arc::new(dev_auth()),
+        });
+
+        let response = app
+            .oneshot(trusted_request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/profiles/missing/nodes/query")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"page":1,"page_size":25}"#))
+                    .unwrap(),
+            ))
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should be readable");
+        let payload: serde_json::Value =
+            serde_json::from_slice(&body).expect("body should be json");
+        assert_eq!(payload["code"], "profile_not_found");
+    }
+
+    #[tokio::test]
+    async fn export_nodes_endpoint_returns_profile_not_found() {
+        let service = Arc::new(BrokerService::new(
+            Arc::new(MemoryStore::new()),
+            Arc::new(ApiTestRuntime),
+            BrokerServiceOptions::default(),
+        ));
+        let app = build_router(AppState {
+            service,
+            auth: Arc::new(dev_auth()),
+        });
+
+        let response = app
+            .oneshot(trusted_request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/profiles/missing/nodes/export")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"node_ids":["edge-a"]}"#))
+                    .unwrap(),
+            ))
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should be readable");
+        let payload: serde_json::Value =
+            serde_json::from_slice(&body).expect("body should be json");
+        assert_eq!(payload["code"], "profile_not_found");
+    }
+
+    #[tokio::test]
+    async fn open_node_sessions_endpoint_returns_profile_not_found() {
+        let service = Arc::new(BrokerService::new(
+            Arc::new(MemoryStore::new()),
+            Arc::new(ApiTestRuntime),
+            BrokerServiceOptions::default(),
+        ));
+        let app = build_router(AppState {
+            service,
+            auth: Arc::new(dev_auth()),
+        });
+
+        let response = app
+            .oneshot(trusted_request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/profiles/missing/nodes/open-sessions")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"node_ids":["edge-a"]}"#))
+                    .unwrap(),
+            ))
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should be readable");
+        let payload: serde_json::Value =
+            serde_json::from_slice(&body).expect("body should be json");
+        assert_eq!(payload["code"], "profile_not_found");
+    }
 }
