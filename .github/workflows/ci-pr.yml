@@ -35,12 +35,12 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
-      - name: Install Playwright browsers
-        run: bunx playwright install --with-deps
-        working-directory: web
-
       - name: Install web dependencies
         run: bun install --frozen-lockfile
+        working-directory: web
+
+      - name: Install Playwright headless shell
+        run: bunx playwright install --with-deps --only-shell
         working-directory: web
 
       - name: Biome check
