@@ -129,7 +129,7 @@ export function AppShell({
           <SidebarGroup>
             <SidebarGroupLabel>{t("Workspace")}</SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu>
+              <SidebarMenu className="gap-3 group-data-[collapsible=icon]:gap-2">
                 {navItems.map((item) => (
                   <SidebarMenuItem key={item.to}>
                     <SidebarMenuButton asChild tooltip={item.label} className="h-auto">
