@@ -3393,6 +3393,12 @@ struct NodeProbeAggregate {
     best_latency_ms: Option<u64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct NodeProbeKey {
+    proxy_name: String,
+    ip: String,
+}
+
 fn build_node_items(
     nodes: &[ProxyNode],
     ip_records: &[IpRecord],
@@ -3404,7 +3410,7 @@ fn build_node_items(
         .iter()
         .map(|record| (record.ip.as_str(), record))
         .collect();
-    let probe_by_ip = node_probe_summary(probe_records);
+    let probe_by_node_ip = node_probe_summary(probe_records);
     let session_count_by_proxy =
         sessions
             .iter()
@@ -3428,7 +3434,8 @@ fn build_node_items(
                 &node.resolved_ips,
                 &ip_records_by_ip,
             );
-            let probe = summarize_node_probe(&node.resolved_ips, &probe_by_ip);
+            let probe =
+                summarize_node_probe(&node.proxy_name, &node.resolved_ips, &probe_by_node_ip);
             let last_used_at = node
                 .resolved_ips
                 .iter()
@@ -3468,10 +3475,15 @@ fn build_node_items(
     items
 }
 
-fn node_probe_summary(probe_records: &[ProbeRecord]) -> HashMap<String, NodeProbeAggregate> {
-    let mut summary = HashMap::<String, NodeProbeAggregate>::new();
+fn node_probe_summary(probe_records: &[ProbeRecord]) -> HashMap<NodeProbeKey, NodeProbeAggregate> {
+    let mut summary = HashMap::<NodeProbeKey, NodeProbeAggregate>::new();
     for probe in probe_records {
-        let entry = summary.entry(probe.ip.clone()).or_default();
+        let entry = summary
+            .entry(NodeProbeKey {
+                proxy_name: probe.proxy_name.clone(),
+                ip: probe.ip.clone(),
+            })
+            .or_default();
         entry.has_probe = true;
         if probe.ok {
             entry.reachable = true;
@@ -3486,12 +3498,16 @@ fn node_probe_summary(probe_records: &[ProbeRecord]) -> HashMap<String, NodeProb
 }
 
 fn summarize_node_probe(
+    proxy_name: &str,
     resolved_ips: &[String],
-    probe_by_ip: &HashMap<String, NodeProbeAggregate>,
+    probe_by_node_ip: &HashMap<NodeProbeKey, NodeProbeAggregate>,
 ) -> NodeProbeAggregate {
     let mut aggregate = NodeProbeAggregate::default();
     for ip in resolved_ips {
-        let Some(probe) = probe_by_ip.get(ip) else {
+        let Some(probe) = probe_by_node_ip.get(&NodeProbeKey {
+            proxy_name: proxy_name.to_string(),
+            ip: ip.clone(),
+        }) else {
             continue;
         };
         aggregate.has_probe = true;
@@ -5807,6 +5823,43 @@ proxies:
             },
         ];
         assert!(has_complete_probe_records(&nodes, &targets, &probes));
+    }
+
+    #[test]
+    fn build_node_items_keeps_probe_state_scoped_to_each_node_when_ips_are_shared() {
+        let nodes = vec![
+            sample_node_with_ips("alpha", "vmess", "shared.example", &["1.1.1.1"]),
+            sample_node_with_ips("beta", "trojan", "shared.example", &["1.1.1.1"]),
+        ];
+        let ip_records = vec![sample_ip("1.1.1.1", Some(10))];
+        let probe_records = vec![
+            ProbeRecord {
+                ok: true,
+                latency_ms: Some(30),
+                ..sample_probe("alpha", "1.1.1.1")
+            },
+            ProbeRecord {
+                ok: false,
+                latency_ms: None,
+                ..sample_probe("beta", "1.1.1.1")
+            },
+        ];
+
+        let items = build_node_items(&nodes, &ip_records, &probe_records, &[], None);
+
+        let alpha = items
+            .iter()
+            .find(|item| item.node_id == "alpha")
+            .expect("alpha node should exist");
+        assert_eq!(alpha.probe_status, NodeProbeStatus::Reachable);
+        assert_eq!(alpha.best_latency_ms, Some(30));
+
+        let beta = items
+            .iter()
+            .find(|item| item.node_id == "beta")
+            .expect("beta node should exist");
+        assert_eq!(beta.probe_status, NodeProbeStatus::Unreachable);
+        assert_eq!(beta.best_latency_ms, None);
     }
 
     #[test]
