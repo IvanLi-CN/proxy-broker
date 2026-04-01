@@ -542,6 +542,8 @@ export const zhCN: MessageCatalog = {
   "Preferred IP": "首选 IP",
   Region: "地区",
   "Session count": "关联会话数",
+  Ascending: "升序",
+  Descending: "降序",
   "Node inventory": "节点库存",
   "Subscription nodes": "订阅节点",
   "Filters, sorting, and pagination come from the backend; the current page can then be regrouped locally by IP, region, or subscription source.":

@@ -3746,14 +3746,16 @@ fn sort_node_items(items: &mut [NodeListItem], sort_by: NodeSortField, sort_orde
                     })
                     .then_with(|| left.proxy_name.cmp(&right.proxy_name))
             }
-            NodeSortField::Latency => left
-                .best_latency_ms
-                .cmp(&right.best_latency_ms)
-                .then_with(|| left.proxy_name.cmp(&right.proxy_name)),
-            NodeSortField::LastUsedAt => left
-                .last_used_at
-                .cmp(&right.last_used_at)
-                .then_with(|| left.proxy_name.cmp(&right.proxy_name)),
+            NodeSortField::Latency => compare_optional_ord_none_last(
+                &left.best_latency_ms,
+                &right.best_latency_ms,
+                sort_order,
+            )
+            .then_with(|| left.proxy_name.cmp(&right.proxy_name)),
+            NodeSortField::LastUsedAt => {
+                compare_optional_ord_none_last(&left.last_used_at, &right.last_used_at, sort_order)
+                    .then_with(|| left.proxy_name.cmp(&right.proxy_name))
+            }
             NodeSortField::SessionCount => left
                 .session_count
                 .cmp(&right.session_count)
@@ -3761,7 +3763,17 @@ fn sort_node_items(items: &mut [NodeListItem], sort_by: NodeSortField, sort_orde
         };
 
         match sort_order {
+            SortOrder::Asc
+                if matches!(sort_by, NodeSortField::Latency | NodeSortField::LastUsedAt) =>
+            {
+                ordering
+            }
             SortOrder::Asc => ordering,
+            SortOrder::Desc
+                if matches!(sort_by, NodeSortField::Latency | NodeSortField::LastUsedAt) =>
+            {
+                ordering
+            }
             SortOrder::Desc => ordering.reverse(),
         }
     });
@@ -3770,6 +3782,22 @@ fn sort_node_items(items: &mut [NodeListItem], sort_by: NodeSortField, sort_orde
 fn compare_optional_text(left: Option<&str>, right: Option<&str>) -> CmpOrdering {
     match (left, right) {
         (Some(left), Some(right)) => left.to_ascii_lowercase().cmp(&right.to_ascii_lowercase()),
+        (Some(_), None) => CmpOrdering::Less,
+        (None, Some(_)) => CmpOrdering::Greater,
+        (None, None) => CmpOrdering::Equal,
+    }
+}
+
+fn compare_optional_ord_none_last<T: Ord>(
+    left: &Option<T>,
+    right: &Option<T>,
+    sort_order: SortOrder,
+) -> CmpOrdering {
+    match (left, right) {
+        (Some(left), Some(right)) => match sort_order {
+            SortOrder::Asc => left.cmp(right),
+            SortOrder::Desc => right.cmp(left),
+        },
         (Some(_), None) => CmpOrdering::Less,
         (None, Some(_)) => CmpOrdering::Greater,
         (None, None) => CmpOrdering::Equal,
@@ -5558,6 +5586,33 @@ proxies:
         }
     }
 
+    fn sample_node_list_item(
+        node_id: &str,
+        proxy_name: &str,
+        best_latency_ms: Option<u64>,
+        last_used_at: Option<i64>,
+    ) -> NodeListItem {
+        NodeListItem {
+            node_id: node_id.to_string(),
+            proxy_name: proxy_name.to_string(),
+            proxy_type: "socks5".to_string(),
+            server: format!("{proxy_name}.example"),
+            preferred_ip: None,
+            ipv4: None,
+            ipv6: None,
+            country_code: None,
+            country_name: None,
+            region_name: None,
+            city: None,
+            probe_status: NodeProbeStatus::Unprobed,
+            best_latency_ms,
+            last_used_at,
+            session_count: 0,
+            subscription_type: "subscription".to_string(),
+            subscription_value: "https://example.com/sub".to_string(),
+        }
+    }
+
     #[test]
     fn conflict_detected() {
         let req = ExtractIpRequest {
@@ -5616,6 +5671,34 @@ proxies:
         let result = filter_ip_records(ips, &probes, &req).expect("should filter");
         let ordered: Vec<String> = result.into_iter().map(|x| x.ip).collect();
         assert_eq!(ordered, vec!["1.1.1.1", "3.3.3.3", "2.2.2.2"]);
+    }
+
+    #[test]
+    fn sort_node_items_keeps_missing_latency_last_in_descending_order() {
+        let mut items = vec![
+            sample_node_list_item("missing", "missing", None, Some(10)),
+            sample_node_list_item("slow", "slow", Some(80), Some(20)),
+            sample_node_list_item("fast", "fast", Some(15), Some(30)),
+        ];
+
+        sort_node_items(&mut items, NodeSortField::Latency, SortOrder::Desc);
+
+        let ordered_ids: Vec<&str> = items.iter().map(|item| item.node_id.as_str()).collect();
+        assert_eq!(ordered_ids, vec!["slow", "fast", "missing"]);
+    }
+
+    #[test]
+    fn sort_node_items_keeps_missing_last_used_last_in_descending_order() {
+        let mut items = vec![
+            sample_node_list_item("never", "never", Some(30), None),
+            sample_node_list_item("recent", "recent", Some(20), Some(40)),
+            sample_node_list_item("older", "older", Some(10), Some(10)),
+        ];
+
+        sort_node_items(&mut items, NodeSortField::LastUsedAt, SortOrder::Desc);
+
+        let ordered_ids: Vec<&str> = items.iter().map(|item| item.node_id.as_str()).collect();
+        assert_eq!(ordered_ids, vec!["recent", "older", "never"]);
     }
 
     #[test]

@@ -98,6 +98,8 @@ export const enUS: MessageCatalog = {
   Latency: "Latency",
   "Last used": "Last used",
   "Session count": "Session count",
+  Ascending: "Ascending",
+  Descending: "Descending",
   "Node inventory": "Node inventory",
   "Subscription nodes": "Subscription nodes",
   "Filters, sorting, and pagination come from the backend; the current page can then be regrouped locally by IP, region, or subscription source.":
