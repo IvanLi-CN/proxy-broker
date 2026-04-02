@@ -3,6 +3,8 @@ import type {
   HealthResponse,
   ListSessionsResponse,
   LoadSubscriptionResponse,
+  NodeListResponse,
+  NodeOpenSessionsResponse,
   OpenBatchResponse,
   OpenSessionResponse,
   RefreshResponse,
@@ -53,6 +55,71 @@ export const ipResultsFixture: ExtractIpResponse = {
   ],
 };
 
+export const nodesFixture: NodeListResponse = {
+  total: 3,
+  page: 1,
+  page_size: 25,
+  items: [
+    {
+      node_id: "JP-Tokyo-Entry",
+      proxy_name: "JP-Tokyo-Entry",
+      proxy_type: "vmess",
+      server: "tokyo-a.example.com",
+      preferred_ip: "203.0.113.10",
+      ipv4: "203.0.113.10",
+      ipv6: "2001:db8::10",
+      country_code: "JP",
+      country_name: "Japan",
+      region_name: "Tokyo",
+      city: "Chiyoda",
+      probe_status: "reachable",
+      best_latency_ms: 92,
+      last_used_at: 1_741_748_400,
+      session_count: 2,
+      subscription_type: "url",
+      subscription_value: "https://example.com/subscription.yaml",
+    },
+    {
+      node_id: "JP-Osaka-Edge",
+      proxy_name: "JP-Osaka-Edge",
+      proxy_type: "trojan",
+      server: "osaka-b.example.com",
+      preferred_ip: "203.0.113.88",
+      ipv4: "203.0.113.88",
+      ipv6: null,
+      country_code: "JP",
+      country_name: "Japan",
+      region_name: "Osaka",
+      city: "Osaka",
+      probe_status: "unreachable",
+      best_latency_ms: null,
+      last_used_at: null,
+      session_count: 0,
+      subscription_type: "url",
+      subscription_value: "https://example.com/subscription.yaml",
+    },
+    {
+      node_id: "US-SanJose-Fallback",
+      proxy_name: "US-SanJose-Fallback",
+      proxy_type: "shadowsocks",
+      server: "sjc-fallback.example.com",
+      preferred_ip: "198.51.100.42",
+      ipv4: "198.51.100.42",
+      ipv6: null,
+      country_code: "US",
+      country_name: "United States",
+      region_name: "California",
+      city: "San Jose",
+      probe_status: "unprobed",
+      best_latency_ms: null,
+      last_used_at: null,
+      session_count: 1,
+      subscription_type: "url",
+      subscription_value: "https://example.com/subscription.yaml",
+    },
+  ],
+};
+
 export const sessionFixture: OpenSessionResponse = {
   session_id: "sess_tokyo_01",
   listen: "127.0.0.1:10080",
@@ -70,6 +137,26 @@ export const batchFixture: OpenBatchResponse = {
       port: 10081,
       selected_ip: "203.0.113.88",
       proxy_name: "JP-Osaka-Edge",
+    },
+  ],
+};
+
+export const nodeOpenSessionsFixture: NodeOpenSessionsResponse = {
+  sessions: [
+    sessionFixture,
+    {
+      session_id: "sess_sanjose_03",
+      listen: "127.0.0.1:10082",
+      port: 10082,
+      selected_ip: "198.51.100.42",
+      proxy_name: "US-SanJose-Fallback",
+    },
+  ],
+  failures: [
+    {
+      node_id: "JP-Osaka-Edge",
+      code: "mihomo_unavailable",
+      message: "mihomo runtime unavailable: reload timeout",
     },
   ],
 };

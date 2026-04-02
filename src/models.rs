@@ -133,6 +133,180 @@ pub struct ExtractIpResponse {
     pub items: Vec<ExtractIpItem>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeProbeStatusFilter {
+    #[default]
+    Any,
+    Reachable,
+    Unreachable,
+    Unprobed,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeSessionPresenceFilter {
+    #[default]
+    Any,
+    WithSessions,
+    WithoutSessions,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeIpFamilyFilter {
+    #[default]
+    Any,
+    Ipv4,
+    Ipv6,
+    DualStack,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeSortField {
+    #[default]
+    ProxyName,
+    ProxyType,
+    PreferredIp,
+    Region,
+    Latency,
+    LastUsedAt,
+    SessionCount,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SortOrder {
+    #[default]
+    Asc,
+    Desc,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeProbeStatus {
+    Reachable,
+    Unreachable,
+    Unprobed,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct NodeListQuery {
+    #[serde(default)]
+    pub query: Option<String>,
+    #[serde(default)]
+    pub proxy_types: Vec<String>,
+    #[serde(default)]
+    pub country_codes: Vec<String>,
+    #[serde(default)]
+    pub regions: Vec<String>,
+    #[serde(default)]
+    pub cities: Vec<String>,
+    #[serde(default)]
+    pub probe_status: NodeProbeStatusFilter,
+    #[serde(default)]
+    pub session_presence: NodeSessionPresenceFilter,
+    #[serde(default)]
+    pub ip_family: NodeIpFamilyFilter,
+    #[serde(default)]
+    pub sort_by: NodeSortField,
+    #[serde(default)]
+    pub sort_order: SortOrder,
+    pub page: Option<usize>,
+    pub page_size: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeListItem {
+    pub node_id: String,
+    pub proxy_name: String,
+    pub proxy_type: String,
+    pub server: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preferred_ip: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ipv4: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ipv6: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub country_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub country_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub region_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub city: Option<String>,
+    pub probe_status: NodeProbeStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub best_latency_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<i64>,
+    pub session_count: usize,
+    pub subscription_type: String,
+    pub subscription_value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeListResponse {
+    pub items: Vec<NodeListItem>,
+    pub total: usize,
+    pub page: usize,
+    pub page_size: usize,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeExportFormat {
+    #[default]
+    Csv,
+    LinkLines,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct NodeExportRequest {
+    #[serde(default)]
+    pub node_ids: Vec<String>,
+    #[serde(default)]
+    pub all_filtered: bool,
+    #[serde(default)]
+    pub query: Option<NodeListQuery>,
+    #[serde(default)]
+    pub format: NodeExportFormat,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum IpFamilyPriority {
+    #[default]
+    Ipv4First,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct NodeOpenSessionsRequest {
+    #[serde(default)]
+    pub node_ids: Vec<String>,
+    #[serde(default)]
+    pub all_filtered: bool,
+    #[serde(default)]
+    pub query: Option<NodeListQuery>,
+    #[serde(default)]
+    pub ip_family_priority: IpFamilyPriority,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeOpenSessionFailure {
+    pub node_id: String,
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeOpenSessionsResponse {
+    pub sessions: Vec<OpenSessionResponse>,
+    pub failures: Vec<NodeOpenSessionFailure>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListSessionsResponse {
     pub sessions: Vec<SessionRecord>,

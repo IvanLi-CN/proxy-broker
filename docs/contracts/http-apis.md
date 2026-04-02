@@ -123,6 +123,100 @@
   - `profile_access_denied` (403)
   - `invalid_request` (400) when JSON body is malformed
 
+## POST /api/v1/profiles/{profile_id}/nodes/query
+
+- Change: New
+- Auth:
+  - admin human or development principal
+  - API key bound to `{profile_id}`
+- Body:
+  - `query`: `string?`
+  - `proxy_types`: `string[]`
+  - `country_codes`: `string[]`
+  - `regions`: `string[]`
+  - `cities`: `string[]`
+  - `probe_status`: `any|reachable|unreachable|unprobed`
+  - `session_presence`: `any|with_sessions|without_sessions`
+  - `ip_family`: `any|ipv4|ipv6|dual_stack`
+  - `sort_by`: `proxy_name|proxy_type|preferred_ip|region|latency|last_used_at|session_count`
+  - `sort_order`: `asc|desc`
+  - `page`: `usize?` (defaults to `1`)
+  - `page_size`: `usize?` (defaults to `25`, capped at `200`)
+- Success:
+  - `items[]` with node metadata, preferred IP, IP family columns, geo, probe status, last-used timestamp, session count, and subscription source fields
+  - `total`
+  - `page`
+  - `page_size`
+- Notes:
+  - pagination is applied to node rows
+  - UI grouping modes are frontend-only transforms over the current page results
+- Error:
+  - `authentication_required` (401)
+  - `admin_required` (403) for non-admin human callers
+  - `api_key_invalid` (401)
+  - `api_key_revoked` (401)
+  - `profile_access_denied` (403)
+  - `invalid_request` (400) when JSON body is malformed or pagination is invalid
+
+## POST /api/v1/profiles/{profile_id}/nodes/export
+
+- Change: New
+- Auth:
+  - admin human or development principal
+  - API key bound to `{profile_id}`
+- Body:
+  - `node_ids`: `string[]`
+  - `all_filtered`: `bool`
+  - `query`: `NodeListQuery?`
+  - `format`: `csv | link_lines`
+- Constraints:
+  - provide explicit `node_ids` or set `all_filtered=true`
+  - `node_ids` and `all_filtered=true` cannot be combined
+  - when `all_filtered=true`, backend ignores incoming `page` and `page_size` and exports the full filtered result set
+- Success:
+  - when `format=csv`:
+    - returns `text/csv; charset=utf-8`
+    - `Content-Disposition: attachment; filename="proxy-broker-nodes.csv"`
+  - when `format=link_lines`:
+    - returns `text/plain; charset=utf-8`
+    - `Content-Disposition: attachment; filename="proxy-broker-node-links.txt"`
+- Error:
+  - `authentication_required` (401)
+  - `admin_required` (403) for non-admin human callers
+  - `api_key_invalid` (401)
+  - `api_key_revoked` (401)
+  - `profile_access_denied` (403)
+  - `invalid_request` (400) when JSON body is malformed, selection scope is invalid, one or more requested `node_ids` are missing, or the selected nodes contain an unsupported proxy type for `link_lines`
+
+## POST /api/v1/profiles/{profile_id}/nodes/open-sessions
+
+- Change: New
+- Auth:
+  - admin human or development principal
+  - API key bound to `{profile_id}`
+- Body:
+  - `node_ids`: `string[]`
+  - `all_filtered`: `bool`
+  - `query`: `NodeListQuery?`
+  - `ip_family_priority`: `ipv4_first`
+- Constraints:
+  - provide explicit `node_ids` or set `all_filtered=true`
+  - `node_ids` and `all_filtered=true` cannot be combined
+  - when `all_filtered=true`, backend ignores incoming `page` and `page_size` and opens sessions for the full filtered result set
+  - target IP selection uses `IPv4` first and falls back to `IPv6`
+- Success:
+  - `sessions[]`
+  - `failures[]` with per-node `node_id`, `code`, and `message`
+- Notes:
+  - batch semantics are best-effort, not transactional rollback; one node failure does not cancel sibling opens
+- Error:
+  - `authentication_required` (401)
+  - `admin_required` (403) for non-admin human callers
+  - `api_key_invalid` (401)
+  - `api_key_revoked` (401)
+  - `profile_access_denied` (403)
+  - `invalid_request` (400) when JSON body is malformed or selection scope is invalid
+
 ## POST /api/v1/profiles/{profile_id}/ips/extract
 
 - Change: New
@@ -138,6 +232,8 @@
   - `sort_mode`: `mru|lru`
 - Success:
   - `items[]` with ip, geo, probe, last_used_at
+- Notes:
+  - retained as a backend contract for legacy workflows; the primary web workspace now queries nodes through `/nodes/query`
 - Error:
   - `authentication_required` (401)
   - `admin_required` (403) for non-admin human callers

@@ -10,7 +10,7 @@ separate Vite and Storybook workflow for local development.
 ## Runtime Shape
 
 - Backend remains the source of truth for subscription loading, refresh, IP
-  extraction, and session lifecycle.
+  extraction, node inventory, and session lifecycle.
 - Frontend lives in `web/` and is built with `Bun + Vite + React + TypeScript`.
 - Production serving model:
   - `GET /` returns the SPA shell.
@@ -43,9 +43,12 @@ separate Vite and Storybook workflow for local development.
   - profile selector
   - subscription load form (`url` or server-side file path)
   - refresh card and latest refresh summary
+- `/nodes`
+  - server-driven node filters, sorting, and pagination
+  - view toggle for flat, IP-grouped, region-grouped, and subscription-grouped presentations
+  - batch export and batch session creation actions
 - `/ips`
-  - extract filter form
-  - extracted IP table with geo/probe metadata
+  - compatibility route that redirects to `/nodes`
 - `/sessions`
   - single open form
   - batch open form
@@ -56,7 +59,7 @@ separate Vite and Storybook workflow for local development.
 - The browser stores only UI-local preferences:
   - last used `profile_id`
   - last selected source type
-  - last used extract presets if implemented as convenience state
+  - last used nodes workspace filters/view mode if implemented as convenience state
 - No client-side authoritative data cache beyond TanStack Query.
 - URL subscription downloads remain server-side and use a compatibility UA
   fallback set (`Clash.Meta/1.18.3`, `mihomo/1.18.3`, `Clash Verge/1.7.7`);
@@ -72,7 +75,7 @@ separate Vite and Storybook workflow for local development.
   - metric cards
   - API state banners
   - filter chips / badges
-  - tables
+  - tables and grouped list sections
   - form sections and field groups
 - shadcn primitives added to the repo are treated as first-class components and
   must be documented like custom components.
@@ -193,8 +196,8 @@ separate Vite and Storybook workflow for local development.
   `web/dist/index.html` is missing.
 - Runtime serving should prefer embedded assets for release builds.
 - API handlers should keep the existing workspace boundaries while allowing the
-  Sessions workspace to add its suggested-port and searchable option helper
-  routes.
+  Nodes workspace to add node query/export/open-session routes and the Sessions
+  workspace to keep its suggested-port and searchable option helper routes.
 
 ## Test Matrix
 
@@ -216,7 +219,8 @@ separate Vite and Storybook workflow for local development.
 - A local operator can use the browser UI to:
   - load a subscription from URL or server-side file path
   - refresh profile metadata
-  - extract IPs with the existing filters
+  - inspect subscription nodes with server-driven filters, sorting, pagination,
+    grouping, export, and batch session actions
   - open single or batch sessions
   - list and close sessions
 - The built SPA is reachable from the Rust server root in production.
@@ -229,6 +233,8 @@ separate Vite and Storybook workflow for local development.
   the active locale's script metadata (`zh-Hans` for `zh-CN`, `en` for
   `en-US`), and localizes known backend error/task enums without changing API
   contracts.
+- The Nodes workspace uses backend-driven node query/export/open-session
+  endpoints while preserving `/ips` as a compatibility redirect to `/nodes`.
 - The Sessions workspace uses a flattened open/open-batch payload plus helper
   endpoints for suggested ports and searchable target options.
 - Every committed UI component/page in scope has Storybook docs and stories.

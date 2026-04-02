@@ -82,10 +82,10 @@ export function AppShell({
       meta: t("Watch scheduled sync and metadata refresh runs"),
     },
     {
-      to: "/ips",
-      label: t("IP Extract"),
+      to: "/nodes",
+      label: t("Nodes"),
       icon: GlobeIcon,
-      meta: t("Filter the pool down to candidate edges"),
+      meta: t("Filter, group, and batch-operate on subscription nodes"),
     },
     {
       to: "/sessions",

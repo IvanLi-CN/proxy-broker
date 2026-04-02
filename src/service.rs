@@ -13,10 +13,13 @@ use std::{
 };
 
 use anyhow::{Context, anyhow};
+use base64::Engine;
 use futures_util::{StreamExt, TryStreamExt, stream};
 use maxminddb::{Reader, geoip2};
 use serde::Deserialize;
+use serde_json::Value as JsonValue;
 use tokio::sync::{Mutex as TokioMutex, broadcast};
+use urlencoding::encode;
 
 use crate::{
     auth::{Principal, constant_time_eq, hash_secret, issue_api_key, parse_api_key_secret},
@@ -29,14 +32,18 @@ use crate::{
     error::{BrokerError, BrokerResult},
     models::{
         CreateApiKeyRequest, CreateApiKeyResponse, CreateProfileResponse, ExtractIpItem,
-        ExtractIpRequest, ExtractIpResponse, IpRecord, ListApiKeysResponse, ListProfilesResponse,
-        ListSessionsResponse, LoadSubscriptionResponse, OpenBatchRequest, OpenBatchResponse,
-        OpenSessionRequest, OpenSessionResponse, ProbeRecord, ProfileSyncConfig, ProxyNode,
-        RefreshRequest, RefreshResponse, SearchSessionOptionsRequest, SearchSessionOptionsResponse,
-        SessionOptionItem, SessionOptionKind, SessionRecord, SessionSelectionMode,
-        SubscriptionSource, SuggestedPortResponse, TaskEventLevel, TaskListQuery, TaskListResponse,
-        TaskRunDetail, TaskRunEventRecord, TaskRunKind, TaskRunRecord, TaskRunScope, TaskRunStage,
-        TaskRunStatus, TaskRunSummary, TaskRunTrigger, now_epoch_sec,
+        ExtractIpRequest, ExtractIpResponse, IpFamilyPriority, IpRecord, ListApiKeysResponse,
+        ListProfilesResponse, ListSessionsResponse, LoadSubscriptionResponse, NodeExportFormat,
+        NodeExportRequest, NodeIpFamilyFilter, NodeListItem, NodeListQuery, NodeListResponse,
+        NodeOpenSessionFailure, NodeOpenSessionsRequest, NodeOpenSessionsResponse, NodeProbeStatus,
+        NodeProbeStatusFilter, NodeSessionPresenceFilter, NodeSortField, OpenBatchRequest,
+        OpenBatchResponse, OpenSessionRequest, OpenSessionResponse, ProbeRecord, ProfileSyncConfig,
+        ProxyNode, RefreshRequest, RefreshResponse, SearchSessionOptionsRequest,
+        SearchSessionOptionsResponse, SessionOptionItem, SessionOptionKind, SessionRecord,
+        SessionSelectionMode, SortOrder, SubscriptionSource, SuggestedPortResponse, TaskEventLevel,
+        TaskListQuery, TaskListResponse, TaskRunDetail, TaskRunEventRecord, TaskRunKind,
+        TaskRunRecord, TaskRunScope, TaskRunStage, TaskRunStatus, TaskRunSummary, TaskRunTrigger,
+        now_epoch_sec,
     },
     runtime::MihomoRuntime,
     store::BrokerStore,
@@ -101,6 +108,15 @@ pub struct BrokerService {
 struct LoadSubscriptionOutcome {
     response: LoadSubscriptionResponse,
     new_ips: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct NodeInventory {
+    nodes: Vec<ProxyNode>,
+    ip_records: Vec<IpRecord>,
+    probe_records: Vec<ProbeRecord>,
+    sessions: Vec<SessionRecord>,
+    sync_config: Option<ProfileSyncConfig>,
 }
 
 impl BrokerService {
@@ -1942,6 +1958,208 @@ impl BrokerService {
         Ok(ExtractIpResponse { items })
     }
 
+    pub async fn query_nodes(
+        &self,
+        profile_id: &str,
+        request: &NodeListQuery,
+    ) -> BrokerResult<NodeListResponse> {
+        let _profile_guard = self.lock_profile(profile_id).await;
+        let inventory = self.load_node_inventory(profile_id).await?;
+        let items = build_node_items(
+            &inventory.nodes,
+            &inventory.ip_records,
+            &inventory.probe_records,
+            &inventory.sessions,
+            inventory.sync_config.as_ref(),
+        );
+        build_node_list_response(items, request)
+    }
+
+    pub async fn export_nodes(
+        &self,
+        profile_id: &str,
+        request: &NodeExportRequest,
+    ) -> BrokerResult<String> {
+        let _profile_guard = self.lock_profile(profile_id).await;
+        let inventory = self.load_node_inventory(profile_id).await?;
+        let items = build_node_items(
+            &inventory.nodes,
+            &inventory.ip_records,
+            &inventory.probe_records,
+            &inventory.sessions,
+            inventory.sync_config.as_ref(),
+        );
+        let targeted = select_target_nodes(
+            items,
+            &request.node_ids,
+            request.all_filtered,
+            request.query.as_ref(),
+        )?;
+        match request.format {
+            NodeExportFormat::Csv => Ok(render_nodes_csv(&targeted)),
+            NodeExportFormat::LinkLines => {
+                let node_by_id = inventory
+                    .nodes
+                    .iter()
+                    .map(|node| (node.proxy_name.as_str(), node))
+                    .collect::<HashMap<_, _>>();
+                render_node_link_lines(&targeted, &node_by_id)
+            }
+        }
+    }
+
+    pub async fn open_node_sessions(
+        &self,
+        profile_id: &str,
+        request: &NodeOpenSessionsRequest,
+    ) -> BrokerResult<NodeOpenSessionsResponse> {
+        let _profile_guard = self.lock_profile(profile_id).await;
+        let inventory = self.load_node_inventory(profile_id).await?;
+        let items = build_node_items(
+            &inventory.nodes,
+            &inventory.ip_records,
+            &inventory.probe_records,
+            &inventory.sessions,
+            inventory.sync_config.as_ref(),
+        );
+        let (targets, mut failures) = select_target_nodes_with_failures(
+            items,
+            &request.node_ids,
+            request.all_filtered,
+            request.query.as_ref(),
+        )?;
+
+        let mut opened = Vec::new();
+        let mut sessions = inventory.sessions.clone();
+        let node_index: HashMap<&str, &ProxyNode> = inventory
+            .nodes
+            .iter()
+            .map(|node| (node.proxy_name.as_str(), node))
+            .collect();
+
+        for item in targets {
+            let Some(node) = node_index.get(item.node_id.as_str()) else {
+                failures.push(NodeOpenSessionFailure {
+                    node_id: item.node_id.clone(),
+                    code: BrokerError::IpNotFound.code().to_string(),
+                    message: "node no longer exists in the current subscription snapshot"
+                        .to_string(),
+                });
+                continue;
+            };
+
+            let Some(selected_ip) = choose_node_target_ip(&item, request.ip_family_priority) else {
+                failures.push(NodeOpenSessionFailure {
+                    node_id: item.node_id.clone(),
+                    code: BrokerError::IpNotFound.code().to_string(),
+                    message: "node has no selectable IP for the requested family priority"
+                        .to_string(),
+                });
+                continue;
+            };
+
+            let prepared = match prepare_session_for_node(
+                node,
+                &selected_ip,
+                &sessions,
+                self.options.session_listen_ip,
+                self.options.session_port_range,
+            ) {
+                Ok(prepared) => prepared,
+                Err(err) => {
+                    failures.push(NodeOpenSessionFailure {
+                        node_id: item.node_id.clone(),
+                        code: err.code().to_string(),
+                        message: err.to_string(),
+                    });
+                    continue;
+                }
+            };
+
+            let previous_sessions = sessions.clone();
+            let mut merged = previous_sessions.clone();
+            merged.push(prepared.clone());
+
+            if let Err(err) = self
+                .apply_sessions_config(profile_id, &inventory.nodes, &merged)
+                .await
+            {
+                tracing::warn!(
+                    profile_id,
+                    node_id = %item.node_id,
+                    error = %err,
+                    "node batch open apply config failed"
+                );
+                if let Err(rollback_err) = self
+                    .rollback_runtime_sessions(profile_id, &inventory.nodes, &previous_sessions)
+                    .await
+                {
+                    tracing::error!(
+                        profile_id,
+                        node_id = %item.node_id,
+                        error = %rollback_err,
+                        "node batch open rollback failed after apply error"
+                    );
+                    self.recover_runtime_desync(profile_id, &inventory.nodes, &previous_sessions)
+                        .await;
+                }
+                failures.push(NodeOpenSessionFailure {
+                    node_id: item.node_id.clone(),
+                    code: err.code().to_string(),
+                    message: err.to_string(),
+                });
+                continue;
+            }
+
+            let now = now_epoch_sec();
+            if let Err(err) = self
+                .store
+                .insert_sessions_with_touch(profile_id, std::slice::from_ref(&prepared), now)
+                .await
+            {
+                tracing::error!(
+                    profile_id,
+                    node_id = %item.node_id,
+                    error = %err,
+                    "node batch open persist failed after runtime apply"
+                );
+                if let Err(rollback_err) = self
+                    .rollback_runtime_sessions(profile_id, &inventory.nodes, &previous_sessions)
+                    .await
+                {
+                    tracing::error!(
+                        profile_id,
+                        node_id = %item.node_id,
+                        error = %rollback_err,
+                        "node batch open rollback failed after persist error"
+                    );
+                    self.recover_runtime_desync(profile_id, &inventory.nodes, &previous_sessions)
+                        .await;
+                }
+                failures.push(NodeOpenSessionFailure {
+                    node_id: item.node_id.clone(),
+                    code: BrokerError::Internal(err.to_string()).code().to_string(),
+                    message: err.to_string(),
+                });
+                continue;
+            }
+
+            sessions.push(prepared.clone());
+            opened.push(OpenSessionResponse {
+                session_id: prepared.session_id,
+                listen: prepared.listen,
+                port: prepared.port,
+                selected_ip: prepared.selected_ip,
+                proxy_name: prepared.proxy_name,
+            });
+        }
+
+        Ok(NodeOpenSessionsResponse {
+            sessions: opened,
+            failures,
+        })
+    }
+
     pub async fn open_session(
         &self,
         profile_id: &str,
@@ -2333,6 +2551,40 @@ impl BrokerService {
 
     pub fn subscribe_task_events(&self) -> broadcast::Receiver<TaskBusEvent> {
         self.task_events.subscribe()
+    }
+
+    async fn load_node_inventory(&self, profile_id: &str) -> BrokerResult<NodeInventory> {
+        if !self.profile_exists(profile_id).await? {
+            return Err(BrokerError::ProfileNotFound);
+        }
+
+        Ok(NodeInventory {
+            nodes: self
+                .store
+                .list_subscription(profile_id)
+                .await
+                .map_err(BrokerError::from)?,
+            ip_records: self
+                .store
+                .list_ip_records(profile_id)
+                .await
+                .map_err(BrokerError::from)?,
+            probe_records: self
+                .store
+                .list_probe_records(profile_id)
+                .await
+                .map_err(BrokerError::from)?,
+            sessions: self
+                .store
+                .list_sessions(profile_id)
+                .await
+                .map_err(BrokerError::from)?,
+            sync_config: self
+                .store
+                .get_profile_sync_config(profile_id)
+                .await
+                .map_err(BrokerError::from)?,
+        })
     }
 
     pub async fn list_api_keys(&self, profile_id: &str) -> BrokerResult<ListApiKeysResponse> {
@@ -3134,6 +3386,1095 @@ fn filter_ip_records(
     Ok(items)
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct NodeProbeAggregate {
+    has_probe: bool,
+    reachable: bool,
+    best_latency_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct NodeProbeKey {
+    proxy_name: String,
+    ip: String,
+}
+
+fn build_node_items(
+    nodes: &[ProxyNode],
+    ip_records: &[IpRecord],
+    probe_records: &[ProbeRecord],
+    sessions: &[SessionRecord],
+    sync_config: Option<&ProfileSyncConfig>,
+) -> Vec<NodeListItem> {
+    let ip_records_by_ip: HashMap<&str, &IpRecord> = ip_records
+        .iter()
+        .map(|record| (record.ip.as_str(), record))
+        .collect();
+    let probe_by_node_ip = node_probe_summary(probe_records);
+    let session_count_by_proxy =
+        sessions
+            .iter()
+            .fold(HashMap::<&str, usize>::new(), |mut counts, session| {
+                *counts.entry(session.proxy_name.as_str()).or_default() += 1;
+                counts
+            });
+    let (subscription_type, subscription_value) = sync_config
+        .map(|config| {
+            let (source_type, source_value) = config.source.parts();
+            (source_type.to_string(), source_value.to_string())
+        })
+        .unwrap_or_else(|| ("unknown".to_string(), "".to_string()));
+
+    let mut items = nodes
+        .iter()
+        .map(|node| {
+            let (ipv4, ipv6, preferred_ip) = pick_node_ips(&node.resolved_ips);
+            let preferred_record = pick_node_geo_record(
+                preferred_ip.as_deref(),
+                &node.resolved_ips,
+                &ip_records_by_ip,
+            );
+            let probe =
+                summarize_node_probe(&node.proxy_name, &node.resolved_ips, &probe_by_node_ip);
+            let last_used_at = node
+                .resolved_ips
+                .iter()
+                .filter_map(|ip| {
+                    ip_records_by_ip
+                        .get(ip.as_str())
+                        .and_then(|record| record.last_used_at)
+                })
+                .max();
+
+            NodeListItem {
+                node_id: node.proxy_name.clone(),
+                proxy_name: node.proxy_name.clone(),
+                proxy_type: node.proxy_type.clone(),
+                server: node.server.clone(),
+                preferred_ip,
+                ipv4,
+                ipv6,
+                country_code: preferred_record.and_then(|record| record.country_code.clone()),
+                country_name: preferred_record.and_then(|record| record.country_name.clone()),
+                region_name: preferred_record.and_then(|record| record.region_name.clone()),
+                city: preferred_record.and_then(|record| record.city.clone()),
+                probe_status: classify_node_probe(probe),
+                best_latency_ms: probe.best_latency_ms,
+                last_used_at,
+                session_count: session_count_by_proxy
+                    .get(node.proxy_name.as_str())
+                    .copied()
+                    .unwrap_or(0),
+                subscription_type: subscription_type.clone(),
+                subscription_value: subscription_value.clone(),
+            }
+        })
+        .collect::<Vec<_>>();
+
+    items.sort_by(|left, right| left.proxy_name.cmp(&right.proxy_name));
+    items
+}
+
+fn node_probe_summary(probe_records: &[ProbeRecord]) -> HashMap<NodeProbeKey, NodeProbeAggregate> {
+    let mut summary = HashMap::<NodeProbeKey, NodeProbeAggregate>::new();
+    for probe in probe_records {
+        let entry = summary
+            .entry(NodeProbeKey {
+                proxy_name: probe.proxy_name.clone(),
+                ip: probe.ip.clone(),
+            })
+            .or_default();
+        entry.has_probe = true;
+        if probe.ok {
+            entry.reachable = true;
+            match (entry.best_latency_ms, probe.latency_ms) {
+                (Some(current), Some(next)) if next < current => entry.best_latency_ms = Some(next),
+                (None, Some(next)) => entry.best_latency_ms = Some(next),
+                _ => {}
+            }
+        }
+    }
+    summary
+}
+
+fn summarize_node_probe(
+    proxy_name: &str,
+    resolved_ips: &[String],
+    probe_by_node_ip: &HashMap<NodeProbeKey, NodeProbeAggregate>,
+) -> NodeProbeAggregate {
+    let mut aggregate = NodeProbeAggregate::default();
+    for ip in resolved_ips {
+        let Some(probe) = probe_by_node_ip.get(&NodeProbeKey {
+            proxy_name: proxy_name.to_string(),
+            ip: ip.clone(),
+        }) else {
+            continue;
+        };
+        aggregate.has_probe = true;
+        if probe.reachable {
+            aggregate.reachable = true;
+            match (aggregate.best_latency_ms, probe.best_latency_ms) {
+                (Some(current), Some(next)) if next < current => {
+                    aggregate.best_latency_ms = Some(next)
+                }
+                (None, Some(next)) => aggregate.best_latency_ms = Some(next),
+                _ => {}
+            }
+        }
+    }
+    aggregate
+}
+
+fn classify_node_probe(aggregate: NodeProbeAggregate) -> NodeProbeStatus {
+    if aggregate.reachable {
+        NodeProbeStatus::Reachable
+    } else if aggregate.has_probe {
+        NodeProbeStatus::Unreachable
+    } else {
+        NodeProbeStatus::Unprobed
+    }
+}
+
+fn pick_node_ips(resolved_ips: &[String]) -> (Option<String>, Option<String>, Option<String>) {
+    let mut ipv4 = None;
+    let mut ipv6 = None;
+    let mut first = None;
+
+    for ip in resolved_ips {
+        let trimmed = ip.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if first.is_none() {
+            first = Some(trimmed.to_string());
+        }
+        match IpAddr::from_str(trimmed) {
+            Ok(IpAddr::V4(_)) if ipv4.is_none() => ipv4 = Some(trimmed.to_string()),
+            Ok(IpAddr::V6(_)) if ipv6.is_none() => ipv6 = Some(trimmed.to_string()),
+            _ => {}
+        }
+    }
+
+    let preferred = ipv4.clone().or_else(|| ipv6.clone()).or(first);
+    (ipv4, ipv6, preferred)
+}
+
+fn pick_node_geo_record<'a>(
+    preferred_ip: Option<&str>,
+    resolved_ips: &[String],
+    ip_records_by_ip: &HashMap<&'a str, &'a IpRecord>,
+) -> Option<&'a IpRecord> {
+    let preferred_record = preferred_ip
+        .and_then(|ip| ip_records_by_ip.get(ip))
+        .copied();
+    if preferred_record.is_some_and(ip_record_has_geo) {
+        return preferred_record;
+    }
+
+    resolved_ips
+        .iter()
+        .filter_map(|ip| ip_records_by_ip.get(ip.as_str()).copied())
+        .find(|record| ip_record_has_geo(record))
+        .or(preferred_record)
+}
+
+fn ip_record_has_geo(record: &IpRecord) -> bool {
+    record.country_code.is_some()
+        || record.country_name.is_some()
+        || record.region_name.is_some()
+        || record.city.is_some()
+}
+
+fn build_node_list_response(
+    items: Vec<NodeListItem>,
+    request: &NodeListQuery,
+) -> BrokerResult<NodeListResponse> {
+    let filtered = filter_and_sort_node_items(items, request);
+    let total = filtered.len();
+    let (requested_page, page_size) = normalize_node_pagination(request)?;
+    let max_page = total.max(1).div_ceil(page_size);
+    let page = requested_page.min(max_page.max(1));
+    let start = (page - 1) * page_size;
+    let page_items = filtered.into_iter().skip(start).take(page_size).collect();
+
+    Ok(NodeListResponse {
+        items: page_items,
+        total,
+        page,
+        page_size,
+    })
+}
+
+fn filter_and_sort_node_items(
+    mut items: Vec<NodeListItem>,
+    request: &NodeListQuery,
+) -> Vec<NodeListItem> {
+    let query = request
+        .query
+        .as_deref()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    let proxy_types: HashSet<String> = request
+        .proxy_types
+        .iter()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .collect();
+    let country_codes: HashSet<String> = request
+        .country_codes
+        .iter()
+        .map(|value| value.trim().to_ascii_uppercase())
+        .filter(|value| !value.is_empty())
+        .collect();
+    let regions: HashSet<String> = request
+        .regions
+        .iter()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .collect();
+    let cities: HashSet<String> = request
+        .cities
+        .iter()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .collect();
+
+    items.retain(|item| {
+        if !query.is_empty() {
+            let haystack = [
+                Some(item.proxy_name.as_str()),
+                Some(item.proxy_type.as_str()),
+                Some(item.server.as_str()),
+                item.preferred_ip.as_deref(),
+                item.ipv4.as_deref(),
+                item.ipv6.as_deref(),
+                item.country_code.as_deref(),
+                item.country_name.as_deref(),
+                item.region_name.as_deref(),
+                item.city.as_deref(),
+                Some(item.subscription_type.as_str()),
+                Some(item.subscription_value.as_str()),
+            ]
+            .into_iter()
+            .flatten()
+            .map(|value| value.to_ascii_lowercase())
+            .collect::<Vec<_>>()
+            .join(" ");
+            if !haystack.contains(&query) {
+                return false;
+            }
+        }
+
+        if !proxy_types.is_empty()
+            && !proxy_types.contains(&item.proxy_type.trim().to_ascii_lowercase())
+        {
+            return false;
+        }
+
+        if !country_codes.is_empty()
+            && item
+                .country_code
+                .as_deref()
+                .map(|value| country_codes.contains(&value.trim().to_ascii_uppercase()))
+                != Some(true)
+        {
+            return false;
+        }
+
+        if !regions.is_empty()
+            && item
+                .region_name
+                .as_deref()
+                .map(|value| regions.contains(&value.trim().to_ascii_lowercase()))
+                != Some(true)
+        {
+            return false;
+        }
+
+        if !cities.is_empty()
+            && item
+                .city
+                .as_deref()
+                .map(|value| cities.contains(&value.trim().to_ascii_lowercase()))
+                != Some(true)
+        {
+            return false;
+        }
+
+        if !matches_node_probe_status(item.probe_status, request.probe_status) {
+            return false;
+        }
+
+        if !matches_node_session_presence(item.session_count, request.session_presence) {
+            return false;
+        }
+
+        matches_node_ip_family(item, request.ip_family)
+    });
+
+    sort_node_items(&mut items, request.sort_by, request.sort_order);
+    items
+}
+
+fn matches_node_probe_status(status: NodeProbeStatus, filter: NodeProbeStatusFilter) -> bool {
+    match filter {
+        NodeProbeStatusFilter::Any => true,
+        NodeProbeStatusFilter::Reachable => matches!(status, NodeProbeStatus::Reachable),
+        NodeProbeStatusFilter::Unreachable => matches!(status, NodeProbeStatus::Unreachable),
+        NodeProbeStatusFilter::Unprobed => matches!(status, NodeProbeStatus::Unprobed),
+    }
+}
+
+fn matches_node_session_presence(count: usize, filter: NodeSessionPresenceFilter) -> bool {
+    match filter {
+        NodeSessionPresenceFilter::Any => true,
+        NodeSessionPresenceFilter::WithSessions => count > 0,
+        NodeSessionPresenceFilter::WithoutSessions => count == 0,
+    }
+}
+
+fn matches_node_ip_family(item: &NodeListItem, filter: NodeIpFamilyFilter) -> bool {
+    match filter {
+        NodeIpFamilyFilter::Any => true,
+        NodeIpFamilyFilter::Ipv4 => item.ipv4.is_some(),
+        NodeIpFamilyFilter::Ipv6 => item.ipv6.is_some(),
+        NodeIpFamilyFilter::DualStack => item.ipv4.is_some() && item.ipv6.is_some(),
+    }
+}
+
+fn sort_node_items(items: &mut [NodeListItem], sort_by: NodeSortField, sort_order: SortOrder) {
+    items.sort_by(|left, right| {
+        let ordering = match sort_by {
+            NodeSortField::ProxyName => left.proxy_name.cmp(&right.proxy_name),
+            NodeSortField::ProxyType => left
+                .proxy_type
+                .cmp(&right.proxy_type)
+                .then_with(|| left.proxy_name.cmp(&right.proxy_name)),
+            NodeSortField::PreferredIp => {
+                compare_optional_text(left.preferred_ip.as_deref(), right.preferred_ip.as_deref())
+                    .then_with(|| left.proxy_name.cmp(&right.proxy_name))
+            }
+            NodeSortField::Region => {
+                compare_optional_text(left.region_name.as_deref(), right.region_name.as_deref())
+                    .then_with(|| {
+                        compare_optional_text(left.city.as_deref(), right.city.as_deref())
+                    })
+                    .then_with(|| left.proxy_name.cmp(&right.proxy_name))
+            }
+            NodeSortField::Latency => compare_optional_ord_none_last(
+                &left.best_latency_ms,
+                &right.best_latency_ms,
+                sort_order,
+            )
+            .then_with(|| left.proxy_name.cmp(&right.proxy_name)),
+            NodeSortField::LastUsedAt => {
+                compare_optional_ord_none_last(&left.last_used_at, &right.last_used_at, sort_order)
+                    .then_with(|| left.proxy_name.cmp(&right.proxy_name))
+            }
+            NodeSortField::SessionCount => left
+                .session_count
+                .cmp(&right.session_count)
+                .then_with(|| left.proxy_name.cmp(&right.proxy_name)),
+        };
+
+        match sort_order {
+            SortOrder::Asc
+                if matches!(sort_by, NodeSortField::Latency | NodeSortField::LastUsedAt) =>
+            {
+                ordering
+            }
+            SortOrder::Asc => ordering,
+            SortOrder::Desc
+                if matches!(sort_by, NodeSortField::Latency | NodeSortField::LastUsedAt) =>
+            {
+                ordering
+            }
+            SortOrder::Desc => ordering.reverse(),
+        }
+    });
+}
+
+fn compare_optional_text(left: Option<&str>, right: Option<&str>) -> CmpOrdering {
+    match (left, right) {
+        (Some(left), Some(right)) => left.to_ascii_lowercase().cmp(&right.to_ascii_lowercase()),
+        (Some(_), None) => CmpOrdering::Less,
+        (None, Some(_)) => CmpOrdering::Greater,
+        (None, None) => CmpOrdering::Equal,
+    }
+}
+
+fn compare_optional_ord_none_last<T: Ord>(
+    left: &Option<T>,
+    right: &Option<T>,
+    sort_order: SortOrder,
+) -> CmpOrdering {
+    match (left, right) {
+        (Some(left), Some(right)) => match sort_order {
+            SortOrder::Asc => left.cmp(right),
+            SortOrder::Desc => right.cmp(left),
+        },
+        (Some(_), None) => CmpOrdering::Less,
+        (None, Some(_)) => CmpOrdering::Greater,
+        (None, None) => CmpOrdering::Equal,
+    }
+}
+
+fn normalize_node_pagination(request: &NodeListQuery) -> BrokerResult<(usize, usize)> {
+    let page = request.page.unwrap_or(1);
+    let page_size = request.page_size.unwrap_or(25).min(200);
+    if page == 0 {
+        return Err(BrokerError::InvalidRequest("page must be >= 1".to_string()));
+    }
+    if page_size == 0 {
+        return Err(BrokerError::InvalidRequest(
+            "page_size must be >= 1".to_string(),
+        ));
+    }
+    Ok((page, page_size))
+}
+
+fn select_target_nodes(
+    items: Vec<NodeListItem>,
+    node_ids: &[String],
+    all_filtered: bool,
+    query: Option<&NodeListQuery>,
+) -> BrokerResult<Vec<NodeListItem>> {
+    let (items, failures) =
+        select_target_nodes_with_failures(items, node_ids, all_filtered, query)?;
+    if failures.is_empty() {
+        Ok(items)
+    } else {
+        Err(BrokerError::InvalidRequest(
+            "one or more requested node_ids do not exist in the current snapshot".to_string(),
+        ))
+    }
+}
+
+fn select_target_nodes_with_failures(
+    items: Vec<NodeListItem>,
+    node_ids: &[String],
+    all_filtered: bool,
+    query: Option<&NodeListQuery>,
+) -> BrokerResult<(Vec<NodeListItem>, Vec<NodeOpenSessionFailure>)> {
+    if !node_ids.is_empty() && all_filtered {
+        return Err(BrokerError::InvalidRequest(
+            "node_ids and all_filtered cannot be combined".to_string(),
+        ));
+    }
+
+    if node_ids.is_empty() && !all_filtered {
+        return Err(BrokerError::InvalidRequest(
+            "provide node_ids or set all_filtered=true".to_string(),
+        ));
+    }
+
+    if all_filtered {
+        let mut query = query.cloned().unwrap_or_default();
+        query.page = None;
+        query.page_size = None;
+        return Ok((filter_and_sort_node_items(items, &query), Vec::new()));
+    }
+
+    let mut item_map = items
+        .into_iter()
+        .map(|item| (item.node_id.clone(), item))
+        .collect::<HashMap<_, _>>();
+    let mut selected = Vec::new();
+    let mut failures = Vec::new();
+    let mut seen = HashSet::new();
+
+    for node_id in node_ids {
+        let trimmed = node_id.trim();
+        if trimmed.is_empty() || !seen.insert(trimmed.to_string()) {
+            continue;
+        }
+        if let Some(item) = item_map.remove(trimmed) {
+            selected.push(item);
+        } else {
+            failures.push(NodeOpenSessionFailure {
+                node_id: trimmed.to_string(),
+                code: BrokerError::IpNotFound.code().to_string(),
+                message: "node_id not found in current snapshot".to_string(),
+            });
+        }
+    }
+
+    Ok((selected, failures))
+}
+
+fn choose_node_target_ip(item: &NodeListItem, priority: IpFamilyPriority) -> Option<String> {
+    match priority {
+        IpFamilyPriority::Ipv4First => item
+            .ipv4
+            .clone()
+            .or_else(|| item.ipv6.clone())
+            .or_else(|| item.preferred_ip.clone()),
+    }
+}
+
+fn render_nodes_csv(items: &[NodeListItem]) -> String {
+    let mut lines = vec![
+        "node_id,proxy_name,proxy_type,server,preferred_ip,ipv4,ipv6,country_code,country_name,region_name,city,probe_status,best_latency_ms,last_used_at,session_count,subscription_type,subscription_value".to_string(),
+    ];
+
+    for item in items {
+        lines.push(
+            [
+                item.node_id.as_str(),
+                item.proxy_name.as_str(),
+                item.proxy_type.as_str(),
+                item.server.as_str(),
+                item.preferred_ip.as_deref().unwrap_or_default(),
+                item.ipv4.as_deref().unwrap_or_default(),
+                item.ipv6.as_deref().unwrap_or_default(),
+                item.country_code.as_deref().unwrap_or_default(),
+                item.country_name.as_deref().unwrap_or_default(),
+                item.region_name.as_deref().unwrap_or_default(),
+                item.city.as_deref().unwrap_or_default(),
+                node_probe_status_label(item.probe_status),
+                &item
+                    .best_latency_ms
+                    .map(|value| value.to_string())
+                    .unwrap_or_default(),
+                &item
+                    .last_used_at
+                    .map(|value| value.to_string())
+                    .unwrap_or_default(),
+                &item.session_count.to_string(),
+                item.subscription_type.as_str(),
+                item.subscription_value.as_str(),
+            ]
+            .into_iter()
+            .map(csv_escape)
+            .collect::<Vec<_>>()
+            .join(","),
+        );
+    }
+
+    lines.join("\n")
+}
+
+fn render_node_link_lines(
+    items: &[NodeListItem],
+    node_by_id: &HashMap<&str, &ProxyNode>,
+) -> BrokerResult<String> {
+    let mut lines = Vec::with_capacity(items.len());
+
+    for item in items {
+        let node = node_by_id
+            .get(item.node_id.as_str())
+            .copied()
+            .ok_or_else(|| {
+                BrokerError::Internal(format!(
+                    "node metadata missing for `{}` during export",
+                    item.node_id
+                ))
+            })?;
+        lines.push(render_node_link(node)?);
+    }
+
+    Ok(lines.join("\n"))
+}
+
+fn render_node_link(node: &ProxyNode) -> BrokerResult<String> {
+    match node.proxy_type.trim().to_ascii_lowercase().as_str() {
+        "vmess" => render_vmess_link(node),
+        "vless" => render_vless_link(node),
+        "trojan" => render_trojan_link(node),
+        "shadowsocks" | "ss" => render_shadowsocks_link(node),
+        "hysteria2" | "hy2" => render_hysteria2_link(node),
+        "socks5" => render_basic_auth_link(node, "socks5"),
+        "http" => render_basic_auth_link(node, "http"),
+        other => Err(BrokerError::InvalidRequest(format!(
+            "node link export does not support proxy type `{other}` for node `{}`",
+            node.proxy_name
+        ))),
+    }
+}
+
+fn render_vmess_link(node: &ProxyNode) -> BrokerResult<String> {
+    let server = json_string(&node.raw_proxy, "server")
+        .unwrap_or(node.server.as_str())
+        .to_string();
+    let port = json_u16(&node.raw_proxy, "port").ok_or_else(|| {
+        BrokerError::InvalidRequest(format!(
+            "vmess node `{}` is missing `port`",
+            node.proxy_name
+        ))
+    })?;
+    let uuid = json_string_any(&node.raw_proxy, &["uuid", "id"]).ok_or_else(|| {
+        BrokerError::InvalidRequest(format!(
+            "vmess node `{}` is missing `uuid`",
+            node.proxy_name
+        ))
+    })?;
+    let network = json_string(&node.raw_proxy, "network").unwrap_or("tcp");
+    let mut payload = serde_json::Map::new();
+    payload.insert("v".to_string(), JsonValue::String("2".to_string()));
+    payload.insert("ps".to_string(), JsonValue::String(node.proxy_name.clone()));
+    payload.insert("add".to_string(), JsonValue::String(server));
+    payload.insert("port".to_string(), JsonValue::String(port.to_string()));
+    payload.insert("id".to_string(), JsonValue::String(uuid.to_string()));
+    payload.insert(
+        "aid".to_string(),
+        JsonValue::String(
+            json_string_any(&node.raw_proxy, &["alterId", "alter-id"])
+                .map(ToString::to_string)
+                .unwrap_or_else(|| "0".to_string()),
+        ),
+    );
+    payload.insert(
+        "scy".to_string(),
+        JsonValue::String(
+            json_string(&node.raw_proxy, "cipher")
+                .map(ToString::to_string)
+                .unwrap_or_else(|| "auto".to_string()),
+        ),
+    );
+    payload.insert("net".to_string(), JsonValue::String(network.to_string()));
+    payload.insert(
+        "type".to_string(),
+        JsonValue::String(
+            json_string_any(&node.raw_proxy, &["header-type", "header_type"])
+                .map(ToString::to_string)
+                .unwrap_or_else(|| "none".to_string()),
+        ),
+    );
+
+    if let Some(host) = extract_transport_host(&node.raw_proxy, network) {
+        payload.insert("host".to_string(), JsonValue::String(host));
+    }
+    if let Some(path) = extract_transport_path(&node.raw_proxy, network) {
+        payload.insert("path".to_string(), JsonValue::String(path));
+    }
+    if let Some(security) = extract_security(&node.raw_proxy) {
+        payload.insert(
+            "tls".to_string(),
+            JsonValue::String(if security == "none" {
+                "".to_string()
+            } else {
+                security
+            }),
+        );
+    }
+    if let Some(sni) = extract_sni(&node.raw_proxy) {
+        payload.insert("sni".to_string(), JsonValue::String(sni));
+    }
+    if let Some(alpn) = extract_alpn(&node.raw_proxy) {
+        payload.insert("alpn".to_string(), JsonValue::String(alpn));
+    }
+    if let Some(fp) = json_string_any(&node.raw_proxy, &["client-fingerprint", "fp"]) {
+        payload.insert("fp".to_string(), JsonValue::String(fp.to_string()));
+    }
+
+    let encoded = base64::engine::general_purpose::STANDARD.encode(
+        serde_json::to_string(&JsonValue::Object(payload))
+            .map_err(|err| BrokerError::Internal(err.to_string()))?,
+    );
+    Ok(format!("vmess://{encoded}"))
+}
+
+fn render_vless_link(node: &ProxyNode) -> BrokerResult<String> {
+    let uuid = json_string_any(&node.raw_proxy, &["uuid", "id"]).ok_or_else(|| {
+        BrokerError::InvalidRequest(format!(
+            "vless node `{}` is missing `uuid`",
+            node.proxy_name
+        ))
+    })?;
+    let server = json_string(&node.raw_proxy, "server")
+        .unwrap_or(node.server.as_str())
+        .to_string();
+    let port = json_u16(&node.raw_proxy, "port").ok_or_else(|| {
+        BrokerError::InvalidRequest(format!(
+            "vless node `{}` is missing `port`",
+            node.proxy_name
+        ))
+    })?;
+    let network = json_string(&node.raw_proxy, "network").unwrap_or("tcp");
+    let mut query = vec![("encryption".to_string(), "none".to_string())];
+    push_transport_query_params(&mut query, &node.raw_proxy, network);
+    push_common_tls_query_params(&mut query, &node.raw_proxy, true);
+
+    if let Some(flow) = json_string(&node.raw_proxy, "flow") {
+        query.push(("flow".to_string(), flow.to_string()));
+    }
+    if let Some(public_key) = json_nested_string(&node.raw_proxy, &["reality-opts", "public-key"])
+        .or_else(|| json_nested_string(&node.raw_proxy, &["reality-opts", "public_key"]))
+    {
+        query.push(("pbk".to_string(), public_key.to_string()));
+    }
+    if let Some(short_id) = json_nested_string(&node.raw_proxy, &["reality-opts", "short-id"])
+        .or_else(|| json_nested_string(&node.raw_proxy, &["reality-opts", "short_id"]))
+    {
+        query.push(("sid".to_string(), short_id.to_string()));
+    }
+
+    Ok(format!(
+        "vless://{}@{}:{}{}#{}",
+        encode(uuid),
+        render_host(&server),
+        port,
+        render_query_suffix(&query),
+        encode(&node.proxy_name),
+    ))
+}
+
+fn render_trojan_link(node: &ProxyNode) -> BrokerResult<String> {
+    let password = json_string(&node.raw_proxy, "password").ok_or_else(|| {
+        BrokerError::InvalidRequest(format!(
+            "trojan node `{}` is missing `password`",
+            node.proxy_name
+        ))
+    })?;
+    let server = json_string(&node.raw_proxy, "server")
+        .unwrap_or(node.server.as_str())
+        .to_string();
+    let port = json_u16(&node.raw_proxy, "port").ok_or_else(|| {
+        BrokerError::InvalidRequest(format!(
+            "trojan node `{}` is missing `port`",
+            node.proxy_name
+        ))
+    })?;
+    let network = json_string(&node.raw_proxy, "network").unwrap_or("tcp");
+    let mut query = Vec::new();
+    push_transport_query_params(&mut query, &node.raw_proxy, network);
+    push_common_tls_query_params(&mut query, &node.raw_proxy, false);
+
+    Ok(format!(
+        "trojan://{}@{}:{}{}#{}",
+        encode(password),
+        render_host(&server),
+        port,
+        render_query_suffix(&query),
+        encode(&node.proxy_name),
+    ))
+}
+
+fn render_shadowsocks_link(node: &ProxyNode) -> BrokerResult<String> {
+    let cipher = json_string(&node.raw_proxy, "cipher").ok_or_else(|| {
+        BrokerError::InvalidRequest(format!(
+            "shadowsocks node `{}` is missing `cipher`",
+            node.proxy_name
+        ))
+    })?;
+    let password = json_string(&node.raw_proxy, "password").ok_or_else(|| {
+        BrokerError::InvalidRequest(format!(
+            "shadowsocks node `{}` is missing `password`",
+            node.proxy_name
+        ))
+    })?;
+    let server = json_string(&node.raw_proxy, "server")
+        .unwrap_or(node.server.as_str())
+        .to_string();
+    let port = json_u16(&node.raw_proxy, "port").ok_or_else(|| {
+        BrokerError::InvalidRequest(format!(
+            "shadowsocks node `{}` is missing `port`",
+            node.proxy_name
+        ))
+    })?;
+    let credentials = format!("{cipher}:{password}");
+    let userinfo = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(credentials);
+    let mut query = Vec::new();
+
+    if let Some(plugin) = json_string(&node.raw_proxy, "plugin") {
+        let plugin_value = if let Some(opts) = json_object(&node.raw_proxy, "plugin-opts") {
+            let mut parts = vec![plugin.to_string()];
+            let mut keys = opts.keys().cloned().collect::<Vec<_>>();
+            keys.sort();
+            for key in keys {
+                let Some(value) = opts.get(&key) else {
+                    continue;
+                };
+                let rendered = match value {
+                    JsonValue::String(value) => value.clone(),
+                    JsonValue::Number(value) => value.to_string(),
+                    JsonValue::Bool(value) => value.to_string(),
+                    _ => continue,
+                };
+                parts.push(format!("{key}={rendered}"));
+            }
+            parts.join(";")
+        } else {
+            plugin.to_string()
+        };
+        query.push(("plugin".to_string(), plugin_value));
+    }
+
+    Ok(format!(
+        "ss://{}@{}:{}{}#{}",
+        userinfo,
+        render_host(&server),
+        port,
+        render_query_suffix(&query),
+        encode(&node.proxy_name),
+    ))
+}
+
+fn render_hysteria2_link(node: &ProxyNode) -> BrokerResult<String> {
+    let password = json_string(&node.raw_proxy, "password").ok_or_else(|| {
+        BrokerError::InvalidRequest(format!(
+            "hysteria2 node `{}` is missing `password`",
+            node.proxy_name
+        ))
+    })?;
+    let server = json_string(&node.raw_proxy, "server")
+        .unwrap_or(node.server.as_str())
+        .to_string();
+    let port = json_u16(&node.raw_proxy, "port").ok_or_else(|| {
+        BrokerError::InvalidRequest(format!(
+            "hysteria2 node `{}` is missing `port`",
+            node.proxy_name
+        ))
+    })?;
+    let mut query = Vec::new();
+
+    if let Some(sni) = extract_sni(&node.raw_proxy) {
+        query.push(("sni".to_string(), sni));
+    }
+    if let Some(insecure) = json_bool_any(&node.raw_proxy, &["skip-cert-verify", "insecure"]) {
+        query.push(("insecure".to_string(), insecure.to_string()));
+    }
+    if let Some(obfs) = json_string(&node.raw_proxy, "obfs") {
+        query.push(("obfs".to_string(), obfs.to_string()));
+    }
+    if let Some(obfs_password) =
+        json_string_any(&node.raw_proxy, &["obfs-password", "obfs_password"])
+    {
+        query.push(("obfs-password".to_string(), obfs_password.to_string()));
+    }
+
+    Ok(format!(
+        "hysteria2://{}@{}:{}{}#{}",
+        encode(password),
+        render_host(&server),
+        port,
+        render_query_suffix(&query),
+        encode(&node.proxy_name),
+    ))
+}
+
+fn render_basic_auth_link(node: &ProxyNode, scheme: &str) -> BrokerResult<String> {
+    let server = json_string(&node.raw_proxy, "server")
+        .unwrap_or(node.server.as_str())
+        .to_string();
+    let port = json_u16(&node.raw_proxy, "port").ok_or_else(|| {
+        BrokerError::InvalidRequest(format!(
+            "{scheme} node `{}` is missing `port`",
+            node.proxy_name
+        ))
+    })?;
+    let username = json_string_any(&node.raw_proxy, &["username", "user"]);
+    let password = json_string(&node.raw_proxy, "password");
+    let credentials = match (username, password) {
+        (Some(username), Some(password)) => format!("{}:{}@", encode(username), encode(password)),
+        (Some(username), None) => format!("{}@", encode(username)),
+        _ => String::new(),
+    };
+
+    Ok(format!(
+        "{scheme}://{credentials}{}:{}#{}",
+        render_host(&server),
+        port,
+        encode(&node.proxy_name),
+    ))
+}
+
+fn push_transport_query_params(
+    query: &mut Vec<(String, String)>,
+    proxy: &JsonValue,
+    network: &str,
+) {
+    if !network.is_empty() && network != "tcp" {
+        query.push(("type".to_string(), network.to_string()));
+    }
+    if let Some(host) = extract_transport_host(proxy, network) {
+        query.push(("host".to_string(), host));
+    }
+    if let Some(path) = extract_transport_path(proxy, network) {
+        query.push(("path".to_string(), path));
+    }
+    if let Some(service_name) = extract_grpc_service_name(proxy) {
+        query.push(("serviceName".to_string(), service_name));
+    }
+}
+
+fn push_common_tls_query_params(
+    query: &mut Vec<(String, String)>,
+    proxy: &JsonValue,
+    include_none_security: bool,
+) {
+    if let Some(security) = extract_security(proxy) {
+        if include_none_security || security != "none" {
+            query.push(("security".to_string(), security));
+        }
+    } else if include_none_security {
+        query.push(("security".to_string(), "none".to_string()));
+    }
+
+    if let Some(sni) = extract_sni(proxy) {
+        query.push(("sni".to_string(), sni));
+    }
+    if let Some(alpn) = extract_alpn(proxy) {
+        query.push(("alpn".to_string(), alpn));
+    }
+    if let Some(fp) = json_string_any(proxy, &["client-fingerprint", "fp"]) {
+        query.push(("fp".to_string(), fp.to_string()));
+    }
+    if let Some(insecure) = json_bool_any(proxy, &["skip-cert-verify", "insecure"]) {
+        query.push(("allowInsecure".to_string(), insecure.to_string()));
+    }
+}
+
+fn extract_security(proxy: &JsonValue) -> Option<String> {
+    json_string(proxy, "security")
+        .map(ToString::to_string)
+        .or_else(|| {
+            if json_object(proxy, "reality-opts").is_some() {
+                Some("reality".to_string())
+            } else if json_bool(proxy, "tls") == Some(true) {
+                Some("tls".to_string())
+            } else {
+                None
+            }
+        })
+}
+
+fn extract_sni(proxy: &JsonValue) -> Option<String> {
+    json_string_any(proxy, &["servername", "server_name", "sni"]).map(ToString::to_string)
+}
+
+fn extract_alpn(proxy: &JsonValue) -> Option<String> {
+    match proxy.get("alpn") {
+        Some(JsonValue::Array(items)) => {
+            let joined = items
+                .iter()
+                .filter_map(JsonValue::as_str)
+                .collect::<Vec<_>>()
+                .join(",");
+            (!joined.is_empty()).then_some(joined)
+        }
+        Some(JsonValue::String(value)) if !value.is_empty() => Some(value.clone()),
+        _ => None,
+    }
+}
+
+fn extract_transport_host(proxy: &JsonValue, network: &str) -> Option<String> {
+    match network {
+        "ws" => json_nested_string(proxy, &["ws-opts", "headers", "Host"])
+            .or_else(|| json_nested_string(proxy, &["ws-opts", "headers", "host"]))
+            .or_else(|| json_nested_string(proxy, &["ws-opts", "host"]))
+            .map(ToString::to_string),
+        "http" | "h2" | "http2" => json_nested_string(proxy, &["h2-opts", "host"])
+            .or_else(|| json_nested_string(proxy, &["h2-opts", "hosts", "0"]))
+            .map(ToString::to_string),
+        _ => None,
+    }
+}
+
+fn extract_transport_path(proxy: &JsonValue, network: &str) -> Option<String> {
+    match network {
+        "ws" => json_nested_string(proxy, &["ws-opts", "path"]).map(ToString::to_string),
+        "http" | "h2" | "http2" => {
+            json_nested_string(proxy, &["h2-opts", "path"]).map(ToString::to_string)
+        }
+        "grpc" => extract_grpc_service_name(proxy),
+        _ => None,
+    }
+}
+
+fn extract_grpc_service_name(proxy: &JsonValue) -> Option<String> {
+    json_nested_string(proxy, &["grpc-opts", "grpc-service-name"])
+        .or_else(|| json_nested_string(proxy, &["grpc-opts", "service-name"]))
+        .or_else(|| json_nested_string(proxy, &["grpc-opts", "serviceName"]))
+        .map(ToString::to_string)
+}
+
+fn json_string<'a>(value: &'a JsonValue, key: &str) -> Option<&'a str> {
+    value
+        .get(key)
+        .and_then(JsonValue::as_str)
+        .filter(|value| !value.is_empty())
+}
+
+fn json_string_any<'a>(value: &'a JsonValue, keys: &[&str]) -> Option<&'a str> {
+    keys.iter().find_map(|key| json_string(value, key))
+}
+
+fn json_nested_string<'a>(value: &'a JsonValue, path: &[&str]) -> Option<&'a str> {
+    let mut current = value;
+    for segment in path {
+        current = if let Ok(index) = segment.parse::<usize>() {
+            current.get(index)?
+        } else {
+            current.get(*segment)?
+        };
+    }
+    current.as_str().filter(|value| !value.is_empty())
+}
+
+fn json_u16(value: &JsonValue, key: &str) -> Option<u16> {
+    value.get(key).and_then(|value| match value {
+        JsonValue::Number(value) => value.as_u64().and_then(|value| u16::try_from(value).ok()),
+        JsonValue::String(value) => value.parse::<u16>().ok(),
+        _ => None,
+    })
+}
+
+fn json_bool(value: &JsonValue, key: &str) -> Option<bool> {
+    value.get(key).and_then(JsonValue::as_bool)
+}
+
+fn json_bool_any(value: &JsonValue, keys: &[&str]) -> Option<bool> {
+    keys.iter().find_map(|key| json_bool(value, key))
+}
+
+fn json_object<'a>(
+    value: &'a JsonValue,
+    key: &str,
+) -> Option<&'a serde_json::Map<String, JsonValue>> {
+    value.get(key).and_then(JsonValue::as_object)
+}
+
+fn render_host(host: &str) -> String {
+    if host.contains(':') && !host.starts_with('[') {
+        format!("[{host}]")
+    } else {
+        host.to_string()
+    }
+}
+
+fn render_query_suffix(query: &[(String, String)]) -> String {
+    if query.is_empty() {
+        return String::new();
+    }
+
+    format!(
+        "?{}",
+        query
+            .iter()
+            .map(|(key, value)| format!("{key}={}", encode(value)))
+            .collect::<Vec<_>>()
+            .join("&")
+    )
+}
+
+fn csv_escape(value: &str) -> String {
+    if value.contains([',', '"', '\n']) {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_string()
+    }
+}
+
+fn node_probe_status_label(status: NodeProbeStatus) -> &'static str {
+    match status {
+        NodeProbeStatus::Reachable => "reachable",
+        NodeProbeStatus::Unreachable => "unreachable",
+        NodeProbeStatus::Unprobed => "unprobed",
+    }
+}
+
 fn choose_ip_for_open(
     request: &OpenSessionRequest,
     ip_records: &[IpRecord],
@@ -3308,6 +4649,33 @@ fn prepare_session(
     })
 }
 
+fn prepare_session_for_node(
+    node: &ProxyNode,
+    selected_ip: &str,
+    existing: &[SessionRecord],
+    listen_ip: IpAddr,
+    port_range: Option<(u16, u16)>,
+) -> BrokerResult<SessionRecord> {
+    if !node.resolved_ips.iter().any(|ip| ip == selected_ip) {
+        return Err(BrokerError::InvalidRequest(format!(
+            "node `{}` does not contain ip `{selected_ip}`",
+            node.proxy_name
+        )));
+    }
+
+    let port = allocate_port(existing, None, listen_ip, port_range)?;
+    let now = now_epoch_sec();
+
+    Ok(SessionRecord {
+        session_id: uuid::Uuid::new_v4().to_string(),
+        listen: listen_ip.to_string(),
+        port,
+        selected_ip: selected_ip.to_string(),
+        proxy_name: node.proxy_name.clone(),
+        created_at: now,
+    })
+}
+
 fn stage_batch_sessions(
     requests: &[OpenSessionRequest],
     nodes: &[ProxyNode],
@@ -3394,8 +4762,9 @@ mod tests {
     use super::*;
     use crate::{
         models::{
-            ApiKeyRecord, IpRecord, ProbeRecord, ProfileSyncConfig, SessionRecord, SortMode,
-            SubscriptionSource, TaskListQuery, TaskRunEventRecord, TaskRunRecord,
+            ApiKeyRecord, IpRecord, NodeExportFormat, ProbeRecord, ProfileSyncConfig,
+            SessionRecord, SortMode, SubscriptionSource, TaskListQuery, TaskRunEventRecord,
+            TaskRunRecord,
         },
         runtime::MihomoRuntime,
         store::{BrokerStore, MemoryStore},
@@ -3728,7 +5097,8 @@ mod tests {
             raw_proxy: serde_json::json!({
                 "name": proxy_name,
                 "type": "socks5",
-                "server": ip
+                "server": ip,
+                "port": 1080
             }),
         }
     }
@@ -4212,6 +5582,53 @@ proxies:
         }
     }
 
+    fn sample_node_with_ips(
+        proxy_name: &str,
+        proxy_type: &str,
+        server: &str,
+        ips: &[&str],
+    ) -> ProxyNode {
+        ProxyNode {
+            proxy_name: proxy_name.to_string(),
+            proxy_type: proxy_type.to_string(),
+            server: server.to_string(),
+            resolved_ips: ips.iter().map(|ip| (*ip).to_string()).collect(),
+            raw_proxy: serde_json::json!({
+                "name": proxy_name,
+                "type": proxy_type,
+                "server": server,
+                "port": 1080
+            }),
+        }
+    }
+
+    fn sample_node_list_item(
+        node_id: &str,
+        proxy_name: &str,
+        best_latency_ms: Option<u64>,
+        last_used_at: Option<i64>,
+    ) -> NodeListItem {
+        NodeListItem {
+            node_id: node_id.to_string(),
+            proxy_name: proxy_name.to_string(),
+            proxy_type: "socks5".to_string(),
+            server: format!("{proxy_name}.example"),
+            preferred_ip: None,
+            ipv4: None,
+            ipv6: None,
+            country_code: None,
+            country_name: None,
+            region_name: None,
+            city: None,
+            probe_status: NodeProbeStatus::Unprobed,
+            best_latency_ms,
+            last_used_at,
+            session_count: 0,
+            subscription_type: "subscription".to_string(),
+            subscription_value: "https://example.com/sub".to_string(),
+        }
+    }
+
     #[test]
     fn conflict_detected() {
         let req = ExtractIpRequest {
@@ -4270,6 +5687,34 @@ proxies:
         let result = filter_ip_records(ips, &probes, &req).expect("should filter");
         let ordered: Vec<String> = result.into_iter().map(|x| x.ip).collect();
         assert_eq!(ordered, vec!["1.1.1.1", "3.3.3.3", "2.2.2.2"]);
+    }
+
+    #[test]
+    fn sort_node_items_keeps_missing_latency_last_in_descending_order() {
+        let mut items = vec![
+            sample_node_list_item("missing", "missing", None, Some(10)),
+            sample_node_list_item("slow", "slow", Some(80), Some(20)),
+            sample_node_list_item("fast", "fast", Some(15), Some(30)),
+        ];
+
+        sort_node_items(&mut items, NodeSortField::Latency, SortOrder::Desc);
+
+        let ordered_ids: Vec<&str> = items.iter().map(|item| item.node_id.as_str()).collect();
+        assert_eq!(ordered_ids, vec!["slow", "fast", "missing"]);
+    }
+
+    #[test]
+    fn sort_node_items_keeps_missing_last_used_last_in_descending_order() {
+        let mut items = vec![
+            sample_node_list_item("never", "never", Some(30), None),
+            sample_node_list_item("recent", "recent", Some(20), Some(40)),
+            sample_node_list_item("older", "older", Some(10), Some(10)),
+        ];
+
+        sort_node_items(&mut items, NodeSortField::LastUsedAt, SortOrder::Desc);
+
+        let ordered_ids: Vec<&str> = items.iter().map(|item| item.node_id.as_str()).collect();
+        assert_eq!(ordered_ids, vec!["recent", "older", "never"]);
     }
 
     #[test]
@@ -4378,6 +5823,43 @@ proxies:
             },
         ];
         assert!(has_complete_probe_records(&nodes, &targets, &probes));
+    }
+
+    #[test]
+    fn build_node_items_keeps_probe_state_scoped_to_each_node_when_ips_are_shared() {
+        let nodes = vec![
+            sample_node_with_ips("alpha", "vmess", "shared.example", &["1.1.1.1"]),
+            sample_node_with_ips("beta", "trojan", "shared.example", &["1.1.1.1"]),
+        ];
+        let ip_records = vec![sample_ip("1.1.1.1", Some(10))];
+        let probe_records = vec![
+            ProbeRecord {
+                ok: true,
+                latency_ms: Some(30),
+                ..sample_probe("alpha", "1.1.1.1")
+            },
+            ProbeRecord {
+                ok: false,
+                latency_ms: None,
+                ..sample_probe("beta", "1.1.1.1")
+            },
+        ];
+
+        let items = build_node_items(&nodes, &ip_records, &probe_records, &[], None);
+
+        let alpha = items
+            .iter()
+            .find(|item| item.node_id == "alpha")
+            .expect("alpha node should exist");
+        assert_eq!(alpha.probe_status, NodeProbeStatus::Reachable);
+        assert_eq!(alpha.best_latency_ms, Some(30));
+
+        let beta = items
+            .iter()
+            .find(|item| item.node_id == "beta")
+            .expect("beta node should exist");
+        assert_eq!(beta.probe_status, NodeProbeStatus::Unreachable);
+        assert_eq!(beta.best_latency_ms, None);
     }
 
     #[test]
@@ -5377,5 +6859,500 @@ proxies:
             .await
             .expect("probe record query should succeed");
         assert!(probe_records.is_empty());
+    }
+
+    #[tokio::test]
+    async fn query_nodes_aggregates_sessions_and_prefers_ipv4() {
+        let profile_id = "p-node-aggregate";
+        let store = Arc::new(MemoryStore::new());
+        store
+            .replace_subscription(
+                profile_id,
+                &[sample_node_with_ips(
+                    "dual-node",
+                    "vmess",
+                    "edge.example",
+                    &["2001:db8::1", "1.1.1.1"],
+                )],
+            )
+            .await
+            .expect("seed subscription should succeed");
+
+        let mut ipv4 = sample_ip("1.1.1.1", Some(10));
+        ipv4.country_code = Some("JP".to_string());
+        ipv4.country_name = Some("Japan".to_string());
+        ipv4.region_name = Some("Tokyo".to_string());
+        ipv4.city = Some("Shinjuku".to_string());
+
+        let mut ipv6 = sample_ip("2001:db8::1", Some(99));
+        ipv6.country_code = Some("DE".to_string());
+        ipv6.country_name = Some("Germany".to_string());
+        ipv6.region_name = Some("Berlin".to_string());
+        ipv6.city = Some("Berlin".to_string());
+
+        store
+            .replace_ip_records(profile_id, &[ipv4, ipv6])
+            .await
+            .expect("seed ip records should succeed");
+        store
+            .replace_probe_records(
+                profile_id,
+                &[
+                    ProbeRecord {
+                        latency_ms: Some(80),
+                        ..sample_probe("dual-node", "2001:db8::1")
+                    },
+                    ProbeRecord {
+                        latency_ms: Some(25),
+                        ..sample_probe("dual-node", "1.1.1.1")
+                    },
+                ],
+            )
+            .await
+            .expect("seed probe records should succeed");
+        store
+            .insert_session(profile_id, &make_session("s-1", "dual-node", "1.1.1.1", 1))
+            .await
+            .expect("seed session should succeed");
+        store
+            .insert_session(
+                profile_id,
+                &make_session("s-2", "dual-node", "2001:db8::1", 2),
+            )
+            .await
+            .expect("seed session should succeed");
+        store
+            .upsert_profile_sync_config(&ProfileSyncConfig {
+                profile_id: profile_id.to_string(),
+                source: SubscriptionSource::Url("https://example.com/subscription".to_string()),
+                enabled: true,
+                sync_every_sec: DEFAULT_AUTO_SYNC_EVERY_SEC,
+                full_refresh_every_sec: DEFAULT_AUTO_FULL_REFRESH_EVERY_SEC,
+                last_sync_due_at: None,
+                last_sync_started_at: None,
+                last_sync_finished_at: None,
+                last_full_refresh_due_at: None,
+                last_full_refresh_started_at: None,
+                last_full_refresh_finished_at: None,
+                updated_at: now_epoch_sec(),
+            })
+            .await
+            .expect("sync config seed should succeed");
+
+        let service = BrokerService::new(
+            store,
+            Arc::new(TestRuntime::default()),
+            BrokerServiceOptions::default(),
+        );
+
+        let response = service
+            .query_nodes(profile_id, &NodeListQuery::default())
+            .await
+            .expect("node query should succeed");
+
+        assert_eq!(response.total, 1);
+        let item = &response.items[0];
+        assert_eq!(item.node_id, "dual-node");
+        assert_eq!(item.proxy_type, "vmess");
+        assert_eq!(item.server, "edge.example");
+        assert_eq!(item.preferred_ip.as_deref(), Some("1.1.1.1"));
+        assert_eq!(item.ipv4.as_deref(), Some("1.1.1.1"));
+        assert_eq!(item.ipv6.as_deref(), Some("2001:db8::1"));
+        assert_eq!(item.country_code.as_deref(), Some("JP"));
+        assert_eq!(item.region_name.as_deref(), Some("Tokyo"));
+        assert_eq!(item.city.as_deref(), Some("Shinjuku"));
+        assert_eq!(item.probe_status, NodeProbeStatus::Reachable);
+        assert_eq!(item.best_latency_ms, Some(25));
+        assert_eq!(item.last_used_at, Some(99));
+        assert_eq!(item.session_count, 2);
+        assert_eq!(item.subscription_type, "url");
+        assert_eq!(item.subscription_value, "https://example.com/subscription");
+    }
+
+    #[tokio::test]
+    async fn query_nodes_filters_sorts_and_paginates() {
+        let profile_id = "p-node-filters";
+        let store = Arc::new(MemoryStore::new());
+        store
+            .replace_subscription(
+                profile_id,
+                &[
+                    sample_node_with_ips("alpha", "socks5", "alpha.example", &["1.1.1.1"]),
+                    sample_node_with_ips("beta", "socks5", "beta.example", &["2.2.2.2"]),
+                    sample_node_with_ips("gamma", "trojan", "gamma.example", &["2001:db8::3"]),
+                ],
+            )
+            .await
+            .expect("seed subscription should succeed");
+
+        let mut alpha_ip = sample_ip("1.1.1.1", Some(10));
+        alpha_ip.region_name = Some("California".to_string());
+        alpha_ip.city = Some("San Jose".to_string());
+
+        let mut beta_ip = sample_ip("2.2.2.2", Some(20));
+        beta_ip.region_name = Some("New York".to_string());
+        beta_ip.city = Some("New York".to_string());
+
+        let mut gamma_ip = sample_ip("2001:db8::3", None);
+        gamma_ip.country_code = Some("FR".to_string());
+        gamma_ip.country_name = Some("France".to_string());
+        gamma_ip.region_name = Some("Ile-de-France".to_string());
+        gamma_ip.city = Some("Paris".to_string());
+
+        store
+            .replace_ip_records(profile_id, &[alpha_ip, beta_ip, gamma_ip])
+            .await
+            .expect("seed ip records should succeed");
+        store
+            .replace_probe_records(
+                profile_id,
+                &[
+                    ProbeRecord {
+                        latency_ms: Some(60),
+                        ..sample_probe("alpha", "1.1.1.1")
+                    },
+                    ProbeRecord {
+                        latency_ms: Some(15),
+                        ..sample_probe("beta", "2.2.2.2")
+                    },
+                ],
+            )
+            .await
+            .expect("seed probe records should succeed");
+        store
+            .insert_session(profile_id, &make_session("s-1", "alpha", "1.1.1.1", 1))
+            .await
+            .expect("seed session should succeed");
+        store
+            .insert_session(profile_id, &make_session("s-2", "beta", "2.2.2.2", 2))
+            .await
+            .expect("seed session should succeed");
+        store
+            .insert_session(profile_id, &make_session("s-3", "beta", "2.2.2.2", 3))
+            .await
+            .expect("seed session should succeed");
+
+        let service = BrokerService::new(
+            store,
+            Arc::new(TestRuntime::default()),
+            BrokerServiceOptions::default(),
+        );
+
+        let request = NodeListQuery {
+            country_codes: vec!["US".to_string()],
+            probe_status: NodeProbeStatusFilter::Reachable,
+            session_presence: NodeSessionPresenceFilter::WithSessions,
+            ip_family: NodeIpFamilyFilter::Ipv4,
+            sort_by: NodeSortField::SessionCount,
+            sort_order: SortOrder::Desc,
+            page: Some(1),
+            page_size: Some(1),
+            ..Default::default()
+        };
+
+        let first_page = service
+            .query_nodes(profile_id, &request)
+            .await
+            .expect("node query should succeed");
+        assert_eq!(first_page.total, 2);
+        assert_eq!(first_page.page, 1);
+        assert_eq!(first_page.page_size, 1);
+        assert_eq!(first_page.items.len(), 1);
+        assert_eq!(first_page.items[0].node_id, "beta");
+        assert_eq!(first_page.items[0].session_count, 2);
+
+        let second_page = service
+            .query_nodes(
+                profile_id,
+                &NodeListQuery {
+                    page: Some(2),
+                    ..request.clone()
+                },
+            )
+            .await
+            .expect("second page should succeed");
+        assert_eq!(second_page.items.len(), 1);
+        assert_eq!(second_page.items[0].node_id, "alpha");
+    }
+
+    #[tokio::test]
+    async fn query_nodes_falls_back_to_any_geo_enabled_ip() {
+        let profile_id = "p-node-geo-fallback";
+        let store = Arc::new(MemoryStore::new());
+        store
+            .replace_subscription(
+                profile_id,
+                &[sample_node_with_ips(
+                    "dual-node",
+                    "vmess",
+                    "edge.example",
+                    &["2001:db8::9", "9.9.9.9"],
+                )],
+            )
+            .await
+            .expect("seed subscription should succeed");
+
+        let ipv4 = IpRecord {
+            ip: "9.9.9.9".to_string(),
+            country_code: None,
+            country_name: None,
+            region_name: None,
+            city: None,
+            geo_source: Some("test".to_string()),
+            probe_updated_at: None,
+            geo_updated_at: None,
+            last_used_at: Some(10),
+        };
+        let mut ipv6 = sample_ip("2001:db8::9", Some(8));
+        ipv6.country_code = Some("JP".to_string());
+        ipv6.country_name = Some("Japan".to_string());
+        ipv6.region_name = Some("Tokyo".to_string());
+        ipv6.city = Some("Chiyoda".to_string());
+
+        store
+            .replace_ip_records(profile_id, &[ipv4, ipv6])
+            .await
+            .expect("seed ip records should succeed");
+
+        let service = BrokerService::new(
+            store,
+            Arc::new(TestRuntime::default()),
+            BrokerServiceOptions::default(),
+        );
+
+        let response = service
+            .query_nodes(profile_id, &NodeListQuery::default())
+            .await
+            .expect("node query should succeed");
+
+        assert_eq!(response.items[0].preferred_ip.as_deref(), Some("9.9.9.9"));
+        assert_eq!(response.items[0].country_code.as_deref(), Some("JP"));
+        assert_eq!(response.items[0].region_name.as_deref(), Some("Tokyo"));
+        assert_eq!(response.items[0].city.as_deref(), Some("Chiyoda"));
+    }
+
+    #[tokio::test]
+    async fn query_nodes_clamps_out_of_range_pages() {
+        let profile_id = "p-node-page-clamp";
+        let store = Arc::new(MemoryStore::new());
+        store
+            .replace_subscription(
+                profile_id,
+                &[
+                    sample_node_with_ips("alpha", "socks5", "alpha.example", &["1.1.1.1"]),
+                    sample_node_with_ips("beta", "socks5", "beta.example", &["2.2.2.2"]),
+                ],
+            )
+            .await
+            .expect("seed subscription should succeed");
+        store
+            .replace_ip_records(
+                profile_id,
+                &[sample_ip("1.1.1.1", None), sample_ip("2.2.2.2", None)],
+            )
+            .await
+            .expect("seed ip records should succeed");
+
+        let service = BrokerService::new(
+            store,
+            Arc::new(TestRuntime::default()),
+            BrokerServiceOptions::default(),
+        );
+
+        let response = service
+            .query_nodes(
+                profile_id,
+                &NodeListQuery {
+                    page: Some(9),
+                    page_size: Some(1),
+                    sort_by: NodeSortField::ProxyName,
+                    sort_order: SortOrder::Asc,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("node query should succeed");
+
+        assert_eq!(response.total, 2);
+        assert_eq!(response.page, 2);
+        assert_eq!(response.items.len(), 1);
+        assert_eq!(response.items[0].node_id, "beta");
+    }
+
+    #[tokio::test]
+    async fn export_nodes_renders_csv_for_selected_nodes() {
+        let profile_id = "p-node-export";
+        let store = Arc::new(MemoryStore::new());
+        store
+            .replace_subscription(
+                profile_id,
+                &[sample_node_with_ips(
+                    "export-me",
+                    "socks5",
+                    "edge.example",
+                    &["1.1.1.1"],
+                )],
+            )
+            .await
+            .expect("seed subscription should succeed");
+        store
+            .replace_ip_records(profile_id, &[sample_ip("1.1.1.1", Some(7))])
+            .await
+            .expect("seed ip records should succeed");
+        store
+            .upsert_profile_sync_config(&ProfileSyncConfig {
+                profile_id: profile_id.to_string(),
+                source: SubscriptionSource::Url("https://example.com/sub.csv".to_string()),
+                enabled: true,
+                sync_every_sec: DEFAULT_AUTO_SYNC_EVERY_SEC,
+                full_refresh_every_sec: DEFAULT_AUTO_FULL_REFRESH_EVERY_SEC,
+                last_sync_due_at: None,
+                last_sync_started_at: None,
+                last_sync_finished_at: None,
+                last_full_refresh_due_at: None,
+                last_full_refresh_started_at: None,
+                last_full_refresh_finished_at: None,
+                updated_at: now_epoch_sec(),
+            })
+            .await
+            .expect("sync config seed should succeed");
+
+        let service = BrokerService::new(
+            store,
+            Arc::new(TestRuntime::default()),
+            BrokerServiceOptions::default(),
+        );
+
+        let csv = service
+            .export_nodes(
+                profile_id,
+                &NodeExportRequest {
+                    node_ids: vec!["export-me".to_string()],
+                    all_filtered: false,
+                    query: None,
+                    format: NodeExportFormat::Csv,
+                },
+            )
+            .await
+            .expect("node export should succeed");
+
+        assert!(csv.starts_with("node_id,proxy_name,proxy_type"));
+        assert!(csv.contains("export-me"));
+        assert!(csv.contains("https://example.com/sub.csv"));
+        assert_eq!(csv.lines().count(), 2);
+    }
+
+    #[tokio::test]
+    async fn export_nodes_renders_link_lines_for_selected_nodes() {
+        let profile_id = "p-node-export-links";
+        let store = Arc::new(MemoryStore::new());
+        store
+            .replace_subscription(
+                profile_id,
+                &[sample_node_with_ips(
+                    "edge-link",
+                    "socks5",
+                    "edge.example",
+                    &["1.1.1.1"],
+                )],
+            )
+            .await
+            .expect("seed subscription should succeed");
+        store
+            .upsert_profile_sync_config(&ProfileSyncConfig {
+                profile_id: profile_id.to_string(),
+                source: SubscriptionSource::Url("https://example.com/sub.txt".to_string()),
+                enabled: true,
+                sync_every_sec: DEFAULT_AUTO_SYNC_EVERY_SEC,
+                full_refresh_every_sec: DEFAULT_AUTO_FULL_REFRESH_EVERY_SEC,
+                last_sync_due_at: None,
+                last_sync_started_at: None,
+                last_sync_finished_at: None,
+                last_full_refresh_due_at: None,
+                last_full_refresh_started_at: None,
+                last_full_refresh_finished_at: None,
+                updated_at: now_epoch_sec(),
+            })
+            .await
+            .expect("sync config seed should succeed");
+
+        let service = BrokerService::new(
+            store,
+            Arc::new(TestRuntime::default()),
+            BrokerServiceOptions::default(),
+        );
+
+        let links = service
+            .export_nodes(
+                profile_id,
+                &NodeExportRequest {
+                    node_ids: vec!["edge-link".to_string()],
+                    all_filtered: false,
+                    query: None,
+                    format: NodeExportFormat::LinkLines,
+                },
+            )
+            .await
+            .expect("node link export should succeed");
+
+        assert_eq!(links, "socks5://edge.example:1080#edge-link");
+    }
+
+    #[tokio::test]
+    async fn open_node_sessions_prefers_ipv4_and_reports_missing_nodes() {
+        let profile_id = "p-node-open";
+        let store = Arc::new(MemoryStore::new());
+        store
+            .replace_subscription(
+                profile_id,
+                &[sample_node_with_ips(
+                    "dual-node",
+                    "socks5",
+                    "edge.example",
+                    &["2001:db8::8", "8.8.8.8"],
+                )],
+            )
+            .await
+            .expect("seed subscription should succeed");
+        store
+            .replace_ip_records(
+                profile_id,
+                &[sample_ip("8.8.8.8", None), sample_ip("2001:db8::8", None)],
+            )
+            .await
+            .expect("seed ip records should succeed");
+
+        let service = BrokerService::new(
+            store.clone(),
+            Arc::new(TestRuntime::default()),
+            BrokerServiceOptions::default(),
+        );
+
+        let response = service
+            .open_node_sessions(
+                profile_id,
+                &NodeOpenSessionsRequest {
+                    node_ids: vec!["dual-node".to_string(), "missing".to_string()],
+                    all_filtered: false,
+                    query: None,
+                    ip_family_priority: IpFamilyPriority::Ipv4First,
+                },
+            )
+            .await
+            .expect("open node sessions should succeed");
+
+        assert_eq!(response.sessions.len(), 1);
+        assert_eq!(response.sessions[0].proxy_name, "dual-node");
+        assert_eq!(response.sessions[0].selected_ip, "8.8.8.8");
+        assert_eq!(response.failures.len(), 1);
+        assert_eq!(response.failures[0].node_id, "missing");
+        assert_eq!(response.failures[0].code, "ip_not_found");
+
+        let sessions = store
+            .list_sessions(profile_id)
+            .await
+            .expect("list sessions should succeed");
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].selected_ip, "8.8.8.8");
     }
 }
