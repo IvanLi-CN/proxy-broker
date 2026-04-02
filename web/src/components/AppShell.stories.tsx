@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { expect, within } from "storybook/test";
 
 import { AppShell } from "@/components/AppShell";
 
@@ -57,6 +58,24 @@ export const ZhCN: Story = {
   args: {},
   globals: {
     locale: "zh-CN",
+  },
+  async play({ canvasElement }) {
+    const canvas = within(canvasElement);
+    const links = [
+      canvas.getByRole("link", { name: /总览/i }),
+      canvas.getByRole("link", { name: /任务/i }),
+      canvas.getByRole("link", { name: /IP 提取/i }),
+      canvas.getByRole("link", { name: /会话/i }),
+    ];
+
+    for (const link of links) {
+      await expect(link).toBeVisible();
+    }
+
+    const rects = links.map((link) => link.getBoundingClientRect());
+    for (let index = 1; index < rects.length; index += 1) {
+      expect(rects[index].top - rects[index - 1].bottom).toBeGreaterThan(0);
+    }
   },
 };
 

@@ -43,8 +43,8 @@ jobs:
         run: bun install --frozen-lockfile
         working-directory: web
 
-      - name: Install Playwright browsers
-        run: bunx playwright install --with-deps
+      - name: Install Playwright headless shell
+        run: bunx playwright install --with-deps --only-shell
         working-directory: web
 
       - name: Biome check
