@@ -3,7 +3,6 @@ import { BinaryIcon, Rows3Icon, ShieldCheckIcon } from "lucide-react";
 import { ActionResponsePanel } from "@/components/ActionResponsePanel";
 import { DataTablePanel } from "@/components/DataTablePanel";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { OpenBatchForm } from "@/features/sessions/components/OpenBatchForm";
 import { OpenSessionForm } from "@/features/sessions/components/OpenSessionForm";
@@ -55,11 +54,6 @@ export function SessionsPage({
   onCloseSession,
 }: SessionsPageProps) {
   const { formatNumber, t } = useI18n();
-  const newestSession = sessions.reduce<SessionRecord | null>(
-    (latest, session) => (latest && latest.created_at > session.created_at ? latest : session),
-    null,
-  );
-  const newestListen = newestSession?.listen ?? null;
 
   return (
     <div className="space-y-8">
@@ -101,37 +95,6 @@ export function SessionsPage({
               />
             </TabsContent>
           </Tabs>
-
-          <Card className="border-border/70 bg-card/96 shadow-[0_20px_60px_-42px_rgba(15,23,42,0.5)]">
-            <CardHeader className="space-y-3 border-b border-border/70 pb-5">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.32em] text-primary/80">
-                {t("Control note")}
-              </div>
-              <CardTitle className="text-xl tracking-tight">
-                {t("Listener hygiene matters")}
-              </CardTitle>
-              <CardDescription className="text-sm leading-6 text-muted-foreground">
-                {t(
-                  "Ports and proxy edges are operational resources. The cleaner this deck stays, the easier it is to understand what the profile is actually doing.",
-                )}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4 pt-6">
-              <div className="rounded-2xl border border-border/70 bg-background/80 p-4 text-sm leading-6 text-muted-foreground">
-                {t(
-                  "Use the single-session form when you need one deterministic listener quickly. Switch to batch only when several ports must succeed or fail together.",
-                )}
-              </div>
-              {newestListen ? (
-                <Badge
-                  variant="outline"
-                  className="rounded-full px-3 py-1 font-mono text-[11px] uppercase tracking-[0.16em]"
-                >
-                  {t("newest listen {listen}", { listen: newestListen })}
-                </Badge>
-              ) : null}
-            </CardContent>
-          </Card>
         </div>
 
         <div className="space-y-4">

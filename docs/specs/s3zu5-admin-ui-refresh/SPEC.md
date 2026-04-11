@@ -61,6 +61,9 @@ entrypoint to tighten its request model around the simplified create flow.
 - The primary route workspaces now begin directly on their operator content
   blocks instead of spending a full viewport on a large route hero and side
   rail.
+- The Overview, Sessions, and IP Extract routes now drop the extra page-level
+  guidance cards that were competing with the main operator controls, while
+  keeping the primary forms, result surfaces, and access-control rail intact.
 - Shared field controls now use an explicit size system so large trigger,
   content, and item surfaces stay visually consistent across the real app and
   Storybook.
@@ -133,12 +136,12 @@ PR: include
 
 - `source_type=storybook_canvas`
 - `target_program=mock-only`
-- `capture_scope=browser-viewport`
+- `capture_scope=element`
 - `sensitive_exclusion=N/A`
 - `submission_gate=pending-owner-approval`
 - `story_id_or_title=Pages/OverviewPage/ZhCN`
-- `state=overview content-first layout`
-- `evidence_note=Shows the Overview workspace starting directly on the command strip, health summary, and operator cards after removing the oversized route hero.`
+- `state=overview without auxiliary side cards`
+- `evidence_note=Shows the Overview workspace with the checklist and run-summary cards removed from the secondary rail, leaving the health summary, primary actions, and access-control card as the only visible operator surfaces.`
 
 ![Overview content-first layout](./assets/overview-content-first.png)
 
@@ -155,22 +158,22 @@ PR: include
 
 - `source_type=storybook_canvas`
 - `target_program=mock-only`
-- `capture_scope=browser-viewport`
+- `capture_scope=element`
 - `sensitive_exclusion=N/A`
 - `submission_gate=pending-owner-approval`
 - `story_id_or_title=Pages/IpExtractPage/ZhCN`
-- `state=ip extract content-first layout`
-- `evidence_note=Shows the IP Extract workspace opening directly on the filter form and result deck, leaving the shortlist tools visible above the fold.`
+- `state=ip extract without best-practice card`
+- `evidence_note=Shows the IP Extract workspace with only the filter form and result deck visible after removing the extra best-practice card below the form.`
 
 ![IP Extract content-first layout](./assets/ip-extract-content-first.png)
 
 - `source_type=storybook_canvas`
 - `target_program=mock-only`
-- `capture_scope=browser-viewport`
+- `capture_scope=element`
 - `sensitive_exclusion=N/A`
 - `submission_gate=pending-owner-approval`
 - `story_id_or_title=Pages/SessionsPage/ZhCN`
-- `state=sessions content-first layout`
-- `evidence_note=Shows the Sessions workspace entering directly on the single/batch controls and live listener deck after removing the shared hero and rule rail.`
+- `state=sessions without control-note card`
+- `evidence_note=Shows the Sessions workspace with the bottom control-note card removed, leaving the create controls and live listener deck as the only page-level panels.`
 
 ![Sessions content-first layout](./assets/sessions-content-first.png)
