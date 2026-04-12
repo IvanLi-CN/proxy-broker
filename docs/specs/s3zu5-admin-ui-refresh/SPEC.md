@@ -138,11 +138,12 @@ PR: include
 - `target_program=mock-only`
 - `capture_scope=element`
 - `sensitive_exclusion=N/A`
-- `submission_gate=pending-owner-approval`
+- `submission_gate=approved`
 - `story_id_or_title=Pages/OverviewPage/ZhCN`
 - `state=overview without auxiliary side cards`
 - `evidence_note=Shows the Overview workspace with the checklist and run-summary cards removed from the secondary rail, leaving the health summary, primary actions, and access-control card as the only visible operator surfaces.`
 
+PR: include
 ![Overview content-first layout](./assets/overview-content-first.png)
 
 - `source_type=storybook_canvas`
@@ -160,20 +161,22 @@ PR: include
 - `target_program=mock-only`
 - `capture_scope=element`
 - `sensitive_exclusion=N/A`
-- `submission_gate=pending-owner-approval`
+- `submission_gate=approved`
 - `story_id_or_title=Pages/IpExtractPage/ZhCN`
 - `state=ip extract without best-practice card`
 - `evidence_note=Shows the IP Extract workspace with only the filter form and result deck visible after removing the extra best-practice card below the form.`
 
+PR: include
 ![IP Extract content-first layout](./assets/ip-extract-content-first.png)
 
 - `source_type=storybook_canvas`
 - `target_program=mock-only`
 - `capture_scope=element`
 - `sensitive_exclusion=N/A`
-- `submission_gate=pending-owner-approval`
+- `submission_gate=approved`
 - `story_id_or_title=Pages/SessionsPage/ZhCN`
 - `state=sessions without control-note card`
 - `evidence_note=Shows the Sessions workspace with the bottom control-note card removed, leaving the create controls and live listener deck as the only page-level panels.`
 
+PR: include
 ![Sessions content-first layout](./assets/sessions-content-first.png)
