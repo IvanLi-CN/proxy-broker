@@ -393,30 +393,6 @@ export const zhCN: MessageCatalog = {
   "Watch scheduled sync and metadata refresh runs": "查看定时同步与元数据刷新运行",
   "Filter the pool down to candidate edges": "把池子筛成候选边缘节点",
   "Open, audit, and close live listeners": "打开、审计并关闭在线监听",
-  "Operator checklist": "操作检查清单",
-  "What to verify before touching the pool": "动池子之前要确认什么",
-  "Keep this rail practical. It should help you decide what to do next without stealing focus from the two primary actions.":
-    "让这条侧轨保持实用。它应该帮助你判断下一步该做什么，而不是抢走两项主操作的注意力。",
-  "Load a new feed whenever the upstream provider changes or rotates nodes.":
-    "只要上游提供方变更或轮换节点，就重新加载一次订阅。",
-  "Refresh probes before extracting IPs if geo labels or latency look stale.":
-    "如果地理标签或延迟看起来过时，先刷新探测，再提取 IP。",
-  "Warnings are operator hints: review them before opening long-lived sessions.":
-    "警告是给运维的提示：在打开长期会话前先检查它们。",
-  "Latest state": "最新状态",
-  "Run summary": "运行摘要",
-  "These notes help you tell whether the page is ready for extraction or still needs an extra review pass.":
-    "这些说明能帮你判断页面是已经可以进入提取阶段，还是还需要再检查一轮。",
-  "Service health polling is live": "服务健康轮询已开启",
-  "/healthz updates every 10 seconds and feeds the command strip above.":
-    "/healthz 每 10 秒更新一次，并驱动上方的命令条。",
-  "File-mode sources resolve on the host": "文件模式来源在主机侧解析",
-  "Browser uploads are not involved here. Use a path visible to the Rust service.":
-    "这里不涉及浏览器上传；请使用后端服务在主机上可见的路径。",
-  "Subscription warnings": "订阅警告",
-  "The backend loaded the subscription, but some records still need operator attention before you keep drilling down.":
-    "后端已经加载订阅，但在继续深入操作前，仍有部分记录需要运维确认。",
-  "latest load completed without warnings": "最近一次加载没有警告",
   "Admin access required": "需要管理员权限",
   "The task center is currently restricted to the admin operator plane and development principal.":
     "任务中心目前仅对管理员运维平面和开发模式主体开放。",
@@ -477,13 +453,6 @@ export const zhCN: MessageCatalog = {
   Connecting: "连接中",
   Live: "在线",
   Reconnecting: "重连中",
-  "Best practice": "最佳实践",
-  "Filter-first, then judge the edges": "先筛选，再判断边缘节点",
-  "IP extraction works best when the request stays readable. Keep the request shape clear enough that you can explain why each row survived.":
-    "IP 提取在请求保持可读时效果最好。让请求结构足够清晰，清楚解释每一行为什么会留下。",
-  "Start broad with country codes, then tighten with cities or specified IPs once probe latency tells you where the fast edges are.":
-    "先用国家代码做宽筛；等探测延迟告诉你哪些边缘更快，再用城市或指定 IP 收紧结果。",
-  "mobile tables scroll horizontally": "移动端表格支持横向滚动",
   "Extraction failed": "提取失败",
   "Result deck": "结果牌组",
   "Extracted candidates": "提取出的候选项",
@@ -493,13 +462,6 @@ export const zhCN: MessageCatalog = {
   idle: "空闲",
   "Candidate table": "候选表格",
   "Single session": "单个会话",
-  "Control note": "控制提示",
-  "Listener hygiene matters": "监听卫生很重要",
-  "Ports and proxy edges are operational resources. The cleaner this deck stays, the easier it is to understand what the profile is actually doing.":
-    "端口和代理边缘都是运维资源。这个牌组越干净，你就越容易理解当前配置真正在做什么。",
-  "Use the single-session form when you need one deterministic listener quickly. Switch to batch only when several ports must succeed or fail together.":
-    "当你需要快速拿到一个确定性的监听时，用单会话表单；只有在多个端口必须共同成功或失败时，才切到批量模式。",
-  "newest listen {listen}": "最新监听 {listen}",
   "Batch open error": "批量打开错误",
   "Live listener deck": "在线监听牌组",
   "Active listeners": "活动监听",

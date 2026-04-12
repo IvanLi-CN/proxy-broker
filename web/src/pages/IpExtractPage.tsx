@@ -3,7 +3,6 @@ import { RadarIcon, ScanSearchIcon } from "lucide-react";
 import { ActionResponsePanel } from "@/components/ActionResponsePanel";
 import { DataTablePanel } from "@/components/DataTablePanel";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { IpFiltersForm } from "@/features/ips/components/IpFiltersForm";
 import { IpResultsTable } from "@/features/ips/components/IpResultsTable";
 import { useI18n } from "@/i18n";
@@ -79,36 +78,8 @@ export function IpExtractPage({
       </header>
 
       <section className="grid gap-6 xl:grid-cols-[420px_minmax(0,1fr)]">
-        <div className="space-y-6">
+        <div>
           <IpFiltersForm isPending={isPending} onSubmit={onSubmit} />
-          <Card className="border-border/70 bg-card/96 shadow-[0_20px_60px_-42px_rgba(15,23,42,0.5)]">
-            <CardHeader className="space-y-3 border-b border-border/70 pb-5">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.32em] text-primary/80">
-                {t("Best practice")}
-              </div>
-              <CardTitle className="text-xl tracking-tight">
-                {t("Filter-first, then judge the edges")}
-              </CardTitle>
-              <CardDescription className="text-sm leading-6 text-muted-foreground">
-                {t(
-                  "IP extraction works best when the request stays readable. Keep the request shape clear enough that you can explain why each row survived.",
-                )}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4 pt-6">
-              <div className="rounded-2xl border border-border/70 bg-background/80 p-4 text-sm leading-6 text-muted-foreground">
-                {t(
-                  "Start broad with country codes, then tighten with cities or specified IPs once probe latency tells you where the fast edges are.",
-                )}
-              </div>
-              <Badge
-                variant="outline"
-                className="rounded-full px-3 py-1 font-mono text-[11px] uppercase tracking-[0.16em]"
-              >
-                {t("mobile tables scroll horizontally")}
-              </Badge>
-            </CardContent>
-          </Card>
         </div>
 
         <div className="space-y-4">
