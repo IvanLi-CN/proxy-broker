@@ -14,6 +14,7 @@
 ## Index（固定表格）
 
 | ID   | Title | Status | Spec | Last | Notes |
+| zdmrs | Release 失败 Telegram 告警接入 | 待实现 | `zdmrs-release-failure-telegram-alerts/SPEC.md` | 2026-04-12 | release notifier wrapper、SHA 标记、Telegram smoke test |
 |-----:|-------|--------|------|------|-------|
 | h2w7p | Forward Auth 身份识别、管理员授权与 Profile API Key | 已完成 | `h2w7p-forward-auth-admin-and-profile-keys/SPEC.md` | 2026-03-20 | 新增 Forward Auth 身份解析、管理员白名单、开发模式与 Profile 级 API Key 管理 |
 | r2m7k | PR Label 发版与通配监听 | 已完成 | `r2m7k-pr-label-release-and-wildcard-listen/SPEC.md` | 2026-03-28 | 新增 session 端口池约束与 wildcard listener 的 LAN 暴露契约，避免已创建 session 落到未对外开放的端口 |
