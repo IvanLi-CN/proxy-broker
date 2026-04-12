@@ -64,8 +64,12 @@ export const enUS: MessageCatalog = {
   "error.task.summary_reason_prefix": "Summary reason: {reason}",
   "The control surface only exposes Overview, Tasks, Proxies, IP Extract, and Sessions right now.":
     "The control surface only exposes Overview, Tasks, Proxies, IP Extract, and Sessions right now.",
+  Global: "Global",
+  "Profile workspace": "Profile workspace",
   "error.api.proxy_inventory_node_not_found": "The imported proxy node could not be found.",
   Proxies: "Proxies",
+  "Global proxies": "Global proxies",
+  "Shared pool and cross-profile allocations": "Shared pool and cross-profile allocations",
   "Manage the global pool, profile imports, and allocations":
     "Manage the global pool, profile imports, and allocations",
   "Manage the global pool and cross-profile allocations":
@@ -81,11 +85,15 @@ export const enUS: MessageCatalog = {
   "Keep the global pool in its own workspace, then manage local imports and policy separately for the current profile.":
     "Keep the global pool in its own workspace, then manage local imports and policy separately for the current profile.",
   "Global workspace": "Global workspace",
+  "Global entry": "Global entry",
   "Current profile workspace": "Current profile workspace",
   "Shared proxy administration": "Shared proxy administration",
   "Global pool and cross-profile allocations live here.":
     "Global pool and cross-profile allocations live here.",
+  "Enter from the left nav. This page does not follow the current profile.":
+    "Enter from the left nav. This page does not follow the current profile.",
   "Global operator plane": "Global operator plane",
+  "Shared global pool": "Shared global pool",
   "Global scope": "Global scope",
   "Applies to every profile that keeps global pool enabled.":
     "Applies to every profile that keeps global pool enabled.",

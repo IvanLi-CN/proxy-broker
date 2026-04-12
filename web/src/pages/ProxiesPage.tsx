@@ -114,7 +114,9 @@ export function ProxiesPage({
     return (
       <div className="space-y-5">
         <header>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">{t("Proxies")}</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+            {t("Global proxies")}
+          </h1>
         </header>
         <ActionResponsePanel
           title={t("Current user unavailable")}
@@ -129,7 +131,9 @@ export function ProxiesPage({
     return (
       <div className="space-y-5">
         <header>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">{t("Proxies")}</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+            {t("Global proxies")}
+          </h1>
         </header>
         <ActionResponsePanel
           title={t("Admin access required")}
@@ -145,7 +149,9 @@ export function ProxiesPage({
   return (
     <div className="space-y-5">
       <header className="space-y-1.5">
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">{t("Proxies")}</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+          {t("Global proxies")}
+        </h1>
         <p className="max-w-3xl text-sm leading-5 text-muted-foreground">
           {t(
             "Manage the shared global pool and cross-profile allocations from one place. Profile-local imports and usage stay inside each profile overview.",
@@ -156,7 +162,7 @@ export function ProxiesPage({
       <section className="space-y-3">
         <div className="space-y-1">
           <div className="text-[11px] font-semibold uppercase tracking-[0.28em] text-primary/80">
-            {t("Global workspace")}
+            {t("Shared global pool")}
           </div>
           <p className="text-sm leading-5 text-muted-foreground">
             {t("Applies across all profiles.")}

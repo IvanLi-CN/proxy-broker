@@ -13,7 +13,7 @@
 
 ## Scope
 
-- 新增管理员工作区 `/proxies`，并在 AppShell 导航中暴露 `Proxies`。
+- 新增管理员工作区 `/proxies`，并在 AppShell 里通过独立的 `全局代理` 导航入口暴露出来。
 - `/proxies` 必须使用独立的全局壳层，不显示 profile selector，也不承载任何 profile-local 配置入口。
 - 当前 profile 的本地导入与 `use_global_proxies` 开关必须保留在该 profile 的 `Overview` 页面内。
 - 后端新增 inventory layer：导入节点同时记录 `source_scope` 与 `allocation_scope`。
@@ -107,7 +107,7 @@
 - 全局 inventory table：展示所有导入节点、来源作用域、当前分配作用域、生效 profile，并提供改分配与删除动作。
 - 管理员访问控制与错误态。
 
-这个页面不得出现当前 profile selector，不得出现 profile-local 导入卡片，也不得出现 `use_global_proxies` 开关。
+这个页面必须从侧边栏独立的 `全局 > 全局代理` 入口进入；它不得出现当前 profile selector，不得出现 profile-local 导入卡片，也不得出现 `use_global_proxies` 开关。
 
 ### Overview workspace
 
@@ -153,7 +153,7 @@
 - `submission_gate=pending-owner-approval`
 - `story_id_or_title=Pages/ProxiesPage/ZhCN`
 - `state=全局代理工作区（zh-CN）`
-- `evidence_note=展示 /proxies 已切到独立的全局壳层，不再显示 profile selector，并且只承载全局池导入与跨 profile inventory 分配。`
+- `evidence_note=展示 /proxies 已切到独立的全局壳层，并通过左侧 `全局 > 全局代理` 导航入口进入，不再显示 profile selector，且只承载全局池导入与跨 profile inventory 分配。`
 
 ![Proxies global workspace](./assets/proxies-global-workspace-zh-cn.png)
 

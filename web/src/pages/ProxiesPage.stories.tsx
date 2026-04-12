@@ -119,7 +119,7 @@ type Story = StoryObj<typeof meta>;
 export const Default: Story = {
   async play({ canvasElement }) {
     const canvas = within(canvasElement);
-    await expect(canvas.getByRole("heading", { name: /proxies/i })).toBeVisible();
+    await expect(canvas.getByRole("heading", { name: /global proxies/i })).toBeVisible();
     await expect(canvas.getByRole("heading", { name: /import global proxy pool/i })).toBeVisible();
     await expect(
       canvas.getByRole("heading", { name: /global inventory and allocations/i }),

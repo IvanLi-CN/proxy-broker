@@ -506,7 +506,11 @@ export const zhCN: MessageCatalog = {
   "error.api.with_reason": "{message} 原因：{reason}",
   "error.task.fallback": "任务运行失败。",
   "error.task.summary_reason_prefix": "摘要原因：{reason}",
+  Global: "全局",
+  "Profile workspace": "配置工作区",
   Proxies: "代理",
+  "Global proxies": "全局代理",
+  "Shared pool and cross-profile allocations": "共享池与跨配置分配",
   "Manage the global pool, profile imports, and allocations": "管理全局池、配置导入与节点分配",
   "Manage the global pool and cross-profile allocations": "管理全局池与跨配置分配",
   "The proxies workspace is restricted to the admin operator plane because it can change global pool allocation.":
@@ -520,10 +524,14 @@ export const zhCN: MessageCatalog = {
   "Keep the global pool in its own workspace, then manage local imports and policy separately for the current profile.":
     "把全局池放在独立工作区里，再单独管理当前配置的本地导入和策略。",
   "Global workspace": "全局工作区",
+  "Global entry": "全局入口",
   "Current profile workspace": "当前配置工作区",
   "Shared proxy administration": "共享代理管理",
   "Global pool and cross-profile allocations live here.": "这里承载全局池和跨配置分配。",
+  "Enter from the left nav. This page does not follow the current profile.":
+    "从左侧“全局代理”进入；这个页面不跟随当前配置。",
   "Global operator plane": "全局运维控制台",
+  "Shared global pool": "共享全局池",
   "Global scope": "全局作用域",
   "Applies to every profile that keeps global pool enabled.": "会作用于所有保持启用全局池的配置。",
   "Applies across all profiles.": "作用于所有配置。",
