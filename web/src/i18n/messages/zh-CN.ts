@@ -512,7 +512,13 @@ export const zhCN: MessageCatalog = {
     "代理工作区可以改动全局池分配，因此目前仅对管理员运维平面开放。",
   "Manage the global pool, the current profile's local imports, and where each imported node is allocated.":
     "统一管理全局池、当前配置的本地导入，以及每个导入节点当前被分配到哪里。",
+  "Keep the global pool in its own workspace, then manage local imports and policy separately for the current profile.":
+    "把全局池放在独立工作区里，再单独管理当前配置的本地导入和策略。",
+  "Global workspace": "全局工作区",
+  "Current profile workspace": "当前配置工作区",
   "Global scope": "全局作用域",
+  "Applies to every profile that keeps global pool enabled.": "会作用于所有保持启用全局池的配置。",
+  "Applies across all profiles.": "作用于所有配置。",
   "allocation defaults to global": "默认分配到全局",
   "allocation defaults to {profileId}": "默认分配到 {profileId}",
   "remote fetch": "远程拉取",
@@ -530,12 +536,17 @@ export const zhCN: MessageCatalog = {
   "Import local pool for {profileId}": "为 {profileId} 导入本地代理池",
   "Import nodes for the current profile only. These nodes stay local unless you later reassign them from the inventory table.":
     "仅为当前配置导入节点；除非稍后在库存表里改分配，否则这些节点会保持本地归属。",
+  "Only the local import and policy below are scoped to this profile.":
+    "只有下面的本地导入和策略属于当前配置。",
+  "Scoped to {profileId} only.": "仅作用于 {profileId}。",
   "Import profile pool": "导入本地池",
   "Profile pool updated": "本地池已更新",
   "Imported {proxyCount} proxies across {ipCount} distinct IPs into profile {profileId}.":
     "已向配置 {profileId} 导入 {proxyCount} 个代理，覆盖 {ipCount} 个不同 IP。",
   "Profile policy": "配置策略",
   "Use global pool for {profileId}": "{profileId} 使用全局代理池",
+  "Only changes whether {profileId} inherits the global pool.":
+    "这里只控制 {profileId} 是否继承全局池。",
   "Toggle whether this profile composes its effective pool from both local imports and the global pool, or only from local imports.":
     "切换当前配置的有效池是否由“本地导入 + 全局池”共同组成，或仅使用本地导入。",
   "global enabled": "已启用全局",
@@ -548,8 +559,11 @@ export const zhCN: MessageCatalog = {
   "Profile proxy settings unavailable": "配置代理设置暂不可用",
   "Unified inventory": "统一库存",
   "Global pool and profile allocations": "全局池与配置分配",
+  "Global inventory and allocations": "全局库存与分配",
   "Track source scope, current allocation, and where each node is effective.":
     "查看来源作用域、当前分配，以及节点实际生效到哪些配置。",
+  "Track source scope, current allocation, and where each imported node is effective.":
+    "查看来源作用域、当前分配，以及每个导入节点实际生效到哪些配置。",
   "Every imported node records both its source scope and its current allocation scope. Re-imports follow the source of truth and restore nodes that upstreams still serve.":
     "每个导入节点都会记录来源作用域和当前分配作用域；重新导入会以源数据为准，恢复上游仍然提供的节点。",
   "{count} nodes": "{count} 个节点",

@@ -72,7 +72,14 @@ export const enUS: MessageCatalog = {
     "The proxies workspace is restricted to the admin operator plane because it can change global pool allocation.",
   "Manage the global pool, the current profile's local imports, and where each imported node is allocated.":
     "Manage the global pool, the current profile's local imports, and where each imported node is allocated.",
+  "Keep the global pool in its own workspace, then manage local imports and policy separately for the current profile.":
+    "Keep the global pool in its own workspace, then manage local imports and policy separately for the current profile.",
+  "Global workspace": "Global workspace",
+  "Current profile workspace": "Current profile workspace",
   "Global scope": "Global scope",
+  "Applies to every profile that keeps global pool enabled.":
+    "Applies to every profile that keeps global pool enabled.",
+  "Applies across all profiles.": "Applies across all profiles.",
   "allocation defaults to global": "allocation defaults to global",
   "allocation defaults to {profileId}": "allocation defaults to {profileId}",
   "remote fetch": "remote fetch",
@@ -92,12 +99,17 @@ export const enUS: MessageCatalog = {
   "Import local pool for {profileId}": "Import local pool for {profileId}",
   "Import nodes for the current profile only. These nodes stay local unless you later reassign them from the inventory table.":
     "Import nodes for the current profile only. These nodes stay local unless you later reassign them from the inventory table.",
+  "Only the local import and policy below are scoped to this profile.":
+    "Only the local import and policy below are scoped to this profile.",
+  "Scoped to {profileId} only.": "Scoped to {profileId} only.",
   "Import profile pool": "Import profile pool",
   "Profile pool updated": "Profile pool updated",
   "Imported {proxyCount} proxies across {ipCount} distinct IPs into profile {profileId}.":
     "Imported {proxyCount} proxies across {ipCount} distinct IPs into profile {profileId}.",
   "Profile policy": "Profile policy",
   "Use global pool for {profileId}": "Use global pool for {profileId}",
+  "Only changes whether {profileId} inherits the global pool.":
+    "Only changes whether {profileId} inherits the global pool.",
   "Toggle whether this profile composes its effective pool from both local imports and the global pool, or only from local imports.":
     "Toggle whether this profile composes its effective pool from both local imports and the global pool, or only from local imports.",
   "global enabled": "global enabled",
@@ -111,8 +123,11 @@ export const enUS: MessageCatalog = {
   "Profile proxy settings unavailable": "Profile proxy settings unavailable",
   "Unified inventory": "Unified inventory",
   "Global pool and profile allocations": "Global pool and profile allocations",
+  "Global inventory and allocations": "Global inventory and allocations",
   "Track source scope, current allocation, and where each node is effective.":
     "Track source scope, current allocation, and where each node is effective.",
+  "Track source scope, current allocation, and where each imported node is effective.":
+    "Track source scope, current allocation, and where each imported node is effective.",
   "Every imported node records both its source scope and its current allocation scope. Re-imports follow the source of truth and restore nodes that upstreams still serve.":
     "Every imported node records both its source scope and its current allocation scope. Re-imports follow the source of truth and restore nodes that upstreams still serve.",
   "{count} nodes": "{count} nodes",

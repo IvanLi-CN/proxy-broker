@@ -99,12 +99,16 @@
 
 ### Proxies workspace
 
-页面包含四类主操作面：
+页面拆成两个明确的工作区页签：
 
-1. 全局导入卡片。
-2. 当前 profile 本地导入卡片。
-3. 当前 profile 的 `use_global_proxies` 开关。
-4. 统一 inventory table：展示所有导入节点、来源作用域、当前分配作用域、生效 profile，并提供改分配与删除动作。
+1. `全局工作区`
+   - 全局导入卡片。
+   - 全局 inventory table：展示所有导入节点、来源作用域、当前分配作用域、生效 profile，并提供改分配与删除动作。
+2. `当前配置工作区`
+   - 当前 profile 本地导入卡片。
+   - 当前 profile 的 `use_global_proxies` 开关。
+
+全局配置不得嵌在当前 profile 语义的内容区里；即使当前 profile selector 仍存在于 AppShell，全局池也必须通过单独的工作区入口访问。
 
 ### Overview workspace
 
@@ -142,25 +146,25 @@
 
 - `source_type=storybook_canvas`
 - `target_program=mock-only`
-- `capture_scope=browser-viewport`
+- `capture_scope=element`
 - `sensitive_exclusion=N/A`
 - `submission_gate=pending-owner-approval`
 - `story_id_or_title=Pages/ProxiesPage/ZhCN`
-- `state=管理员 happy path（zh-CN）`
-- `evidence_note=展示新的 Proxies 工作区在管理员视角下同时承载全局导入、本地导入、profile 级使用全局开关，以及跨 profile 的统一 inventory table。`
+- `state=全局工作区（zh-CN）`
+- `evidence_note=展示全局池拥有独立工作区入口，并在该工作区中承载全局导入与跨 profile inventory 分配。`
 
-![Proxies workspace happy path](./assets/proxies-workspace-zh-cn.png)
+![Proxies workspace global tab](./assets/proxies-workspace-global-tab-zh-cn.png)
 
 - `source_type=storybook_canvas`
 - `target_program=mock-only`
-- `capture_scope=browser-viewport`
+- `capture_scope=element`
 - `sensitive_exclusion=N/A`
 - `submission_gate=pending-owner-approval`
-- `story_id_or_title=Pages/ProxiesPage/LocalOnly`
-- `state=profile local-only`
-- `evidence_note=展示当前 profile 关闭 use_global_proxies 后的 local-only 状态，确认页面会显式提示仅本地池生效，同时保留统一 inventory 管理入口。`
+- `story_id_or_title=Pages/ProxiesPage/ZhCN`
+- `state=当前配置工作区（zh-CN）`
+- `evidence_note=展示当前 profile 的本地导入和 use_global_proxies 策略被单独收拢到当前配置工作区，不再混入全局池配置。`
 
-![Proxies workspace local-only](./assets/proxies-workspace-local-only.png)
+![Proxies workspace profile tab](./assets/proxies-workspace-profile-tab-zh-cn.png)
 
 - `source_type=storybook_canvas`
 - `target_program=mock-only`

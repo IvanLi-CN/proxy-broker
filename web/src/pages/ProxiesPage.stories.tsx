@@ -49,7 +49,7 @@ const meta = {
     docs: {
       description: {
         component:
-          "Administrator proxies workspace for global imports, current-profile local imports, global usage policy, and cross-profile allocation management.",
+          "Administrator proxies workspace split into a dedicated global workspace and a separate current-profile workspace.",
       },
     },
   },
@@ -136,9 +136,13 @@ export const Default: Story = {
   async play({ canvasElement }) {
     const canvas = within(canvasElement);
     await expect(canvas.getByRole("heading", { name: /proxies/i })).toBeVisible();
+    await expect(canvas.getByRole("tab", { name: /global workspace/i })).toHaveAttribute(
+      "data-state",
+      "active",
+    );
     await expect(canvas.getByRole("heading", { name: /import global proxy pool/i })).toBeVisible();
     await expect(
-      canvas.getByRole("heading", { name: /global pool and profile allocations/i }),
+      canvas.getByRole("heading", { name: /global inventory and allocations/i }),
     ).toBeVisible();
     await expect(canvas.getByRole("button", { name: /delete/i })).toBeVisible();
   },
@@ -150,8 +154,28 @@ export const ZhCN: Story = {
   },
 };
 
+export const ProfileWorkspace: Story = {
+  args: {
+    defaultWorkspace: "profile",
+  },
+  async play({ canvasElement }) {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("tab", { name: /current profile workspace/i })).toHaveAttribute(
+      "data-state",
+      "active",
+    );
+    await expect(
+      canvas.getByRole("heading", { name: /import local pool for edge-jp/i }),
+    ).toBeVisible();
+    await expect(
+      canvas.getByRole("heading", { name: /use global pool for edge-jp/i }),
+    ).toBeVisible();
+  },
+};
+
 export const LocalOnly: Story = {
   args: {
+    defaultWorkspace: "profile",
     proxySettings: {
       profile_id: "edge-jp",
       use_global_proxies: false,

@@ -575,6 +575,7 @@ test("operator can drive the main workflows", async ({ page }) => {
     page.getByText("Imported 12 proxies across 9 distinct IPs into the global pool."),
   ).toBeVisible();
 
+  await page.getByRole("tab", { name: /current profile workspace/i }).click();
   await page.getByRole("button", { name: /import profile pool/i }).click();
   await expect(
     page.getByText("Imported 48 proxies across 26 distinct IPs into profile fresh-lab."),
@@ -583,6 +584,7 @@ test("operator can drive the main workflows", async ({ page }) => {
   await page.getByRole("checkbox", { name: /use global pool for fresh-lab/i }).click();
   await expect(page.getByText("local-only").first()).toBeVisible();
 
+  await page.getByRole("tab", { name: /global workspace/i }).click();
   await expect(page.getByText("global-jp-entry")).toBeVisible();
   await expect(page.getByText("fresh-lab-entry")).toBeVisible();
 
