@@ -183,15 +183,10 @@ function ProxyLoadCard({
             </div>
           </div>
 
-          <div className="grid gap-3 rounded-[28px] border border-border/70 bg-[linear-gradient(135deg,rgba(59,130,246,0.08),rgba(20,184,166,0.06))] p-4 md:grid-cols-[1fr_auto] md:items-center">
-            <div className="space-y-1">
-              <div className="text-sm font-semibold text-foreground">{t("What happens next")}</div>
-              <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-                {t(
-                  "Imported nodes become source-authoritative inventory. Re-imports restore anything the upstream still serves, even after local deletes or reassignment.",
-                )}
-              </p>
-            </div>
+          <div className="flex flex-col gap-3 rounded-[24px] border border-border/70 bg-muted/20 p-4 md:flex-row md:items-center md:justify-between">
+            <p className="max-w-xl text-xs leading-5 text-muted-foreground">
+              {t("Re-import restores nodes that still exist upstream.")}
+            </p>
             <Button disabled={pending} size="lg" type="submit" className="min-w-52">
               {pending ? t("Loading subscription...") : submitLabel}
             </Button>

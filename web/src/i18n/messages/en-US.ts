@@ -77,8 +77,8 @@ export const enUS: MessageCatalog = {
   "allocation defaults to {profileId}": "allocation defaults to {profileId}",
   "remote fetch": "remote fetch",
   "host file": "host file",
-  "Imported nodes become source-authoritative inventory. Re-imports restore anything the upstream still serves, even after local deletes or reassignment.":
-    "Imported nodes become source-authoritative inventory. Re-imports restore anything the upstream still serves, even after local deletes or reassignment.",
+  "Re-import restores nodes that still exist upstream.":
+    "Re-import restores nodes that still exist upstream.",
   "Imported {count} global proxies": "Imported {count} global proxies",
   "Imported {count} profile proxies for {profileId}":
     "Imported {count} profile proxies for {profileId}",

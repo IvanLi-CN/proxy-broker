@@ -156,7 +156,6 @@ export const zhCN: MessageCatalog = {
     "填写后端可以直接抓取的上游订阅链接。",
   "Provide a server-local path that the Rust process can read on disk.":
     "填写后端服务在服务器本机可读取的文件路径。",
-  "What happens next": "接下来会发生什么",
   "A successful load replaces the candidate pool for this profile. Review warnings at once if the upstream feed contains skipped or malformed records.":
     "加载成功后会替换这个配置的候选池；如果上游订阅里有跳过或损坏的记录，请立刻检查警告。",
   "Loading subscription...": "正在加载订阅……",
@@ -518,8 +517,7 @@ export const zhCN: MessageCatalog = {
   "allocation defaults to {profileId}": "默认分配到 {profileId}",
   "remote fetch": "远程拉取",
   "host file": "主机文件",
-  "Imported nodes become source-authoritative inventory. Re-imports restore anything the upstream still serves, even after local deletes or reassignment.":
-    "导入节点以源数据为准；即使本地删除或改分配，只要上游仍存在，重新导入时就会恢复。",
+  "Re-import restores nodes that still exist upstream.": "重新导入会恢复上游仍存在的节点。",
   "Imported {count} global proxies": "已导入 {count} 个全局代理",
   "Imported {count} profile proxies for {profileId}": "已为 {profileId} 导入 {count} 个本地代理",
   "Import global proxy pool": "导入全局代理池",
