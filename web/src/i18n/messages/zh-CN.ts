@@ -548,6 +548,8 @@ export const zhCN: MessageCatalog = {
   "Profile proxy settings unavailable": "配置代理设置暂不可用",
   "Unified inventory": "统一库存",
   "Global pool and profile allocations": "全局池与配置分配",
+  "Track source scope, current allocation, and where each node is effective.":
+    "查看来源作用域、当前分配，以及节点实际生效到哪些配置。",
   "Every imported node records both its source scope and its current allocation scope. Re-imports follow the source of truth and restore nodes that upstreams still serve.":
     "每个导入节点都会记录来源作用域和当前分配作用域；重新导入会以源数据为准，恢复上游仍然提供的节点。",
   "{count} nodes": "{count} 个节点",

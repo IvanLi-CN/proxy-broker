@@ -111,6 +111,8 @@ export const enUS: MessageCatalog = {
   "Profile proxy settings unavailable": "Profile proxy settings unavailable",
   "Unified inventory": "Unified inventory",
   "Global pool and profile allocations": "Global pool and profile allocations",
+  "Track source scope, current allocation, and where each node is effective.":
+    "Track source scope, current allocation, and where each node is effective.",
   "Every imported node records both its source scope and its current allocation scope. Re-imports follow the source of truth and restore nodes that upstreams still serve.":
     "Every imported node records both its source scope and its current allocation scope. Re-imports follow the source of truth and restore nodes that upstreams still serve.",
   "{count} nodes": "{count} nodes",

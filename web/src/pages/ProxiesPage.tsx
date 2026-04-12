@@ -85,40 +85,40 @@ function ProxyLoadCard({
   const sourceType = form.watch("sourceType");
 
   return (
-    <Card className="overflow-hidden border-border/70 bg-card/96 shadow-[0_24px_70px_-44px_rgba(15,23,42,0.55)]">
-      <CardHeader className="gap-4 border-b border-border/70 bg-muted/15 pb-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="space-y-2">
+    <Card className="overflow-hidden border-border/70 bg-card/96 shadow-[0_20px_60px_-40px_rgba(15,23,42,0.5)]">
+      <CardHeader className="gap-3 border-b border-border/70 bg-muted/15 pb-4">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="space-y-1.5">
             <div className="text-[11px] font-semibold uppercase tracking-[0.32em] text-primary/80">
               {eyebrow}
             </div>
-            <CardTitle className="flex items-center gap-2 text-xl tracking-tight md:text-2xl">
-              <FolderSyncIcon className="size-5 text-primary" />
+            <CardTitle className="flex items-center gap-2 text-lg tracking-tight md:text-xl">
+              <FolderSyncIcon className="size-4.5 text-primary" />
               {title}
             </CardTitle>
-            <CardDescription className="max-w-2xl text-sm leading-6 text-muted-foreground md:text-[15px]">
+            <CardDescription className="max-w-xl text-sm leading-5 text-muted-foreground">
               {description}
             </CardDescription>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-1.5">
             <Badge
               variant="outline"
-              className="rounded-full px-3 py-1 font-mono text-[11px] uppercase tracking-[0.16em]"
+              className="rounded-full px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.16em]"
             >
               {scopeChip}
             </Badge>
             <Badge
               variant="outline"
-              className="rounded-full px-3 py-1 font-mono text-[11px] uppercase tracking-[0.16em]"
+              className="rounded-full px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.16em]"
             >
               {sourceType === "url" ? t("remote fetch") : t("host file")}
             </Badge>
           </div>
         </div>
       </CardHeader>
-      <CardContent className="space-y-6 pt-6">
+      <CardContent className="space-y-4 pt-4">
         <form
-          className="space-y-6"
+          className="space-y-3"
           onSubmit={form.handleSubmit((values) =>
             onSubmit({
               source: {
@@ -128,7 +128,7 @@ function ProxyLoadCard({
             }),
           )}
         >
-          <div className="grid gap-4 rounded-[28px] border border-border/70 bg-background/80 p-4 md:grid-cols-[minmax(280px,0.34fr)_minmax(0,1fr)]">
+          <div className="grid gap-3 rounded-[20px] border border-border/70 bg-background/80 p-3 md:grid-cols-[168px_minmax(0,1fr)] xl:grid-cols-[168px_minmax(0,1fr)_auto] xl:items-start">
             <div className="space-y-2">
               <Label htmlFor={`${eyebrow}-source-type`}>{t("Source type")}</Label>
               <Controller
@@ -154,9 +154,6 @@ function ProxyLoadCard({
                   </Select>
                 )}
               />
-              <p className="min-h-12 text-xs leading-5 text-muted-foreground">
-                {t("URL mode fetches remotely; file mode resolves from the Rust host filesystem.")}
-              </p>
             </div>
             <div className="space-y-2">
               <Label htmlFor={`${eyebrow}-source-value`}>{t("Value")}</Label>
@@ -167,30 +164,29 @@ function ProxyLoadCard({
                 placeholder="https://example.com/subscription.yaml"
                 className="bg-card font-mono text-xs md:text-sm"
               />
-              {form.formState.errors.sourceValue ? (
-                <p className="min-h-12 text-xs text-destructive" role="alert">
-                  {t(
-                    form.formState.errors.sourceValue.message ?? "validation.source_value_required",
-                  )}
-                </p>
-              ) : (
-                <p className="min-h-12 text-xs leading-5 text-muted-foreground">
-                  {sourceType === "url"
-                    ? t("Use the upstream subscription URL that the backend can fetch directly.")
-                    : t("Provide a server-local path that the Rust process can read on disk.")}
-                </p>
-              )}
+            </div>
+            <div className="flex xl:justify-end">
+              <Button disabled={pending} size="lg" type="submit" className="w-full xl:min-w-40">
+                {pending ? t("Loading subscription...") : submitLabel}
+              </Button>
             </div>
           </div>
 
-          <div className="flex flex-col gap-3 rounded-[24px] border border-border/70 bg-muted/20 p-4 md:flex-row md:items-center md:justify-between">
-            <p className="max-w-xl text-xs leading-5 text-muted-foreground">
-              {t("Re-import restores nodes that still exist upstream.")}
+          {form.formState.errors.sourceValue ? (
+            <p className="text-xs text-destructive" role="alert">
+              {t(form.formState.errors.sourceValue.message ?? "validation.source_value_required")}
             </p>
-            <Button disabled={pending} size="lg" type="submit" className="min-w-52">
-              {pending ? t("Loading subscription...") : submitLabel}
-            </Button>
-          </div>
+          ) : (
+            <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs leading-5 text-muted-foreground">
+              <span>
+                {sourceType === "url"
+                  ? t("Use the upstream subscription URL that the backend can fetch directly.")
+                  : t("Provide a server-local path that the Rust process can read on disk.")}
+              </span>
+              <span className="hidden text-border md:inline">•</span>
+              <span>{t("Re-import restores nodes that still exist upstream.")}</span>
+            </div>
+          )}
         </form>
 
         {response ? (
@@ -233,19 +229,19 @@ function InventoryProfiles({ effectiveProfileIds }: { effectiveProfileIds: strin
   }
 
   return (
-    <div className="flex flex-wrap gap-1.5">
-      {effectiveProfileIds.slice(0, 4).map((profileId) => (
+    <div className="flex flex-wrap gap-1">
+      {effectiveProfileIds.slice(0, 3).map((profileId) => (
         <Badge
           key={profileId}
           variant="secondary"
-          className="rounded-full bg-muted/70 px-2 py-0.5 text-[11px]"
+          className="rounded-full bg-muted/70 px-1.5 py-0 text-[10px]"
         >
           {profileId}
         </Badge>
       ))}
-      {effectiveProfileIds.length > 4 ? (
-        <Badge variant="outline" className="rounded-full px-2 py-0.5 text-[11px]">
-          {t("+{count} more", { count: formatNumber(effectiveProfileIds.length - 4) })}
+      {effectiveProfileIds.length > 3 ? (
+        <Badge variant="outline" className="rounded-full px-1.5 py-0 text-[10px]">
+          {t("+{count} more", { count: formatNumber(effectiveProfileIds.length - 3) })}
         </Badge>
       ) : null}
     </div>
@@ -313,7 +309,7 @@ export function ProxiesPage({
 
   if (authError) {
     return (
-      <div className="space-y-8">
+      <div className="space-y-5">
         <header>
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">{t("Proxies")}</h1>
         </header>
@@ -328,7 +324,7 @@ export function ProxiesPage({
 
   if (accessDenied) {
     return (
-      <div className="space-y-8">
+      <div className="space-y-5">
         <header>
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">{t("Proxies")}</h1>
         </header>
@@ -344,17 +340,17 @@ export function ProxiesPage({
   }
 
   return (
-    <div className="space-y-8">
-      <header className="space-y-2">
+    <div className="space-y-5">
+      <header className="space-y-1.5">
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">{t("Proxies")}</h1>
-        <p className="max-w-4xl text-sm leading-6 text-muted-foreground md:text-[15px]">
+        <p className="max-w-3xl text-sm leading-5 text-muted-foreground">
           {t(
             "Manage the global pool, the current profile's local imports, and where each imported node is allocated.",
           )}
         </p>
       </header>
 
-      <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <ProxyLoadCard
           defaultValue="https://example.com/global-subscription.yaml"
           description={t(
@@ -378,94 +374,29 @@ export function ProxiesPage({
           title={t("Import global proxy pool")}
         />
 
-        <div className="space-y-6">
-          <ProxyLoadCard
-            defaultValue="https://example.com/profile-subscription.yaml"
-            description={t(
-              "Import nodes for the current profile only. These nodes stay local unless you later reassign them from the inventory table.",
-            )}
-            error={profileLoadError}
-            eyebrow={t("Current profile")}
-            onSubmit={onLoadProfile}
-            pending={loadingProfile}
-            response={profileLoadResponse}
-            scopeChip={t("allocation defaults to {profileId}", { profileId })}
-            submitLabel={t("Import profile pool")}
-            successDescription={t(
-              "Imported {proxyCount} proxies across {ipCount} distinct IPs into profile {profileId}.",
-              {
-                proxyCount: profileLoadResponse?.loaded_proxies ?? 0,
-                ipCount: profileLoadResponse?.distinct_ips ?? 0,
-                profileId,
-              },
-            )}
-            successTitle={t("Profile pool updated")}
-            title={t("Import local pool for {profileId}", { profileId })}
-          />
-
-          <Card className="overflow-hidden border-border/70 bg-card/96 shadow-[0_24px_70px_-44px_rgba(15,23,42,0.55)]">
-            <CardHeader className="gap-3 border-b border-border/70 bg-muted/15 pb-5">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="space-y-2">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.32em] text-primary/80">
-                    {t("Profile policy")}
-                  </div>
-                  <CardTitle className="flex items-center gap-2 text-xl tracking-tight">
-                    <Settings2Icon className="size-5 text-primary" />
-                    {t("Use global pool for {profileId}", { profileId })}
-                  </CardTitle>
-                  <CardDescription className="max-w-2xl text-sm leading-6 text-muted-foreground md:text-[15px]">
-                    {t(
-                      "Toggle whether this profile composes its effective pool from both local imports and the global pool, or only from local imports.",
-                    )}
-                  </CardDescription>
-                </div>
-                <Badge
-                  variant={useGlobalProxies ? "default" : "secondary"}
-                  className={cn(
-                    "rounded-full px-3 py-1 font-mono text-[11px] uppercase tracking-[0.16em]",
-                    !useGlobalProxies && "bg-muted text-foreground",
-                  )}
-                >
-                  {useGlobalProxies ? t("global enabled") : t("local-only")}
-                </Badge>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4 pt-6">
-              <div className="flex items-start gap-3 rounded-2xl border border-border/70 bg-background/70 p-4">
-                <Checkbox
-                  id="use-global-proxies"
-                  checked={useGlobalProxies}
-                  disabled={proxySettingsLoading || updatingSettings}
-                  onCheckedChange={(checked) => {
-                    void onToggleUseGlobalProxies(checked === true);
-                  }}
-                  aria-label={t("Use global pool for {profileId}", { profileId })}
-                />
-                <div className="space-y-1">
-                  <Label
-                    htmlFor="use-global-proxies"
-                    className="cursor-pointer text-sm font-medium text-foreground"
-                  >
-                    {t("Compose {profileId} from the global pool as well", { profileId })}
-                  </Label>
-                  <p className="text-sm leading-6 text-muted-foreground">
-                    {t(
-                      "Turning this off immediately rebuilds the profile from local nodes only and removes sessions that depended on global-only nodes.",
-                    )}
-                  </p>
-                </div>
-              </div>
-              {proxySettingsError ? (
-                <ActionResponsePanel
-                  title={t("Profile proxy settings unavailable")}
-                  description={proxySettingsError}
-                  tone="error"
-                />
-              ) : null}
-            </CardContent>
-          </Card>
-        </div>
+        <ProxyLoadCard
+          defaultValue="https://example.com/profile-subscription.yaml"
+          description={t(
+            "Import nodes for the current profile only. These nodes stay local unless you later reassign them from the inventory table.",
+          )}
+          error={profileLoadError}
+          eyebrow={t("Current profile")}
+          onSubmit={onLoadProfile}
+          pending={loadingProfile}
+          response={profileLoadResponse}
+          scopeChip={t("allocation defaults to {profileId}", { profileId })}
+          submitLabel={t("Import profile pool")}
+          successDescription={t(
+            "Imported {proxyCount} proxies across {ipCount} distinct IPs into profile {profileId}.",
+            {
+              proxyCount: profileLoadResponse?.loaded_proxies ?? 0,
+              ipCount: profileLoadResponse?.distinct_ips ?? 0,
+              profileId,
+            },
+          )}
+          successTitle={t("Profile pool updated")}
+          title={t("Import local pool for {profileId}", { profileId })}
+        />
       </section>
 
       {inventoryError ? (
@@ -479,28 +410,75 @@ export function ProxiesPage({
       <DataTablePanel
         eyebrow={t("Unified inventory")}
         title={t("Global pool and profile allocations")}
-        description={t(
-          "Every imported node records both its source scope and its current allocation scope. Re-imports follow the source of truth and restore nodes that upstreams still serve.",
-        )}
+        description={t("Track source scope, current allocation, and where each node is effective.")}
         chips={[
           t(items.length === 1 ? "{count} node" : "{count} nodes", {
             count: formatNumber(items.length),
           }),
           t("current profile {profileId}", { profileId }),
-          useGlobalProxies ? t("global enabled") : t("local-only"),
         ]}
         actions={
           <Badge
             variant="outline"
-            className="rounded-full px-3 py-1 font-mono text-[11px] uppercase tracking-[0.16em]"
+            className="rounded-full px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.16em]"
           >
             <Layers3Icon className="mr-1 size-3.5" />
             {inventoryLoading ? t("loading inventory") : t("inventory live")}
           </Badge>
         }
       >
-        <div className="space-y-4">
-          <div className="rounded-[22px] border border-border/70 bg-muted/15 p-4 text-sm leading-6 text-muted-foreground">
+        <div className="space-y-3">
+          <div className="grid gap-3 rounded-[20px] border border-border/70 bg-muted/10 p-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+            <div className="space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                  <Settings2Icon className="size-4 text-primary" />
+                  {t("Use global pool for {profileId}", { profileId })}
+                </div>
+                <Badge
+                  variant={useGlobalProxies ? "default" : "secondary"}
+                  className={cn(
+                    "rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.16em]",
+                    !useGlobalProxies && "bg-muted text-foreground",
+                  )}
+                >
+                  {useGlobalProxies ? t("global enabled") : t("local-only")}
+                </Badge>
+              </div>
+              <p className="text-xs leading-5 text-muted-foreground">
+                {t(
+                  "Turning this off immediately rebuilds the profile from local nodes only and removes sessions that depended on global-only nodes.",
+                )}
+              </p>
+            </div>
+            <div className="flex items-center gap-3 rounded-full border border-border/70 bg-background/80 px-3 py-2">
+              <Checkbox
+                id="use-global-proxies"
+                checked={useGlobalProxies}
+                disabled={proxySettingsLoading || updatingSettings}
+                onCheckedChange={(checked) => {
+                  void onToggleUseGlobalProxies(checked === true);
+                }}
+                aria-label={t("Use global pool for {profileId}", { profileId })}
+              />
+              <Label
+                htmlFor="use-global-proxies"
+                className="cursor-pointer text-sm font-medium text-foreground"
+              >
+                {t("Compose {profileId} from the global pool as well", { profileId })}
+              </Label>
+            </div>
+          </div>
+
+          {proxySettingsError ? (
+            <ActionResponsePanel
+              title={t("Profile proxy settings unavailable")}
+              description={proxySettingsError}
+              tone="error"
+            />
+          ) : null}
+
+          <div className="rounded-[16px] border border-dashed border-border/70 bg-muted/10 px-3 py-2 text-xs leading-5 text-muted-foreground">
             {t(
               "Deleting or reallocating an imported node only affects the current inventory snapshot. The next source reload restores anything the upstream still contains.",
             )}
@@ -509,12 +487,24 @@ export function ProxiesPage({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>{t("Proxy")}</TableHead>
-                <TableHead>{t("Source scope")}</TableHead>
-                <TableHead>{t("Allocation scope")}</TableHead>
-                <TableHead>{t("Effective profiles")}</TableHead>
-                <TableHead>{t("Resolved IPs")}</TableHead>
-                <TableHead className="text-right">{t("Actions")}</TableHead>
+                <TableHead className="h-10 px-3 text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                  {t("Proxy")}
+                </TableHead>
+                <TableHead className="h-10 px-3 text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                  {t("Source scope")}
+                </TableHead>
+                <TableHead className="h-10 px-3 text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                  {t("Allocation scope")}
+                </TableHead>
+                <TableHead className="h-10 px-3 text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                  {t("Effective profiles")}
+                </TableHead>
+                <TableHead className="h-10 px-3 text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                  {t("Resolved IPs")}
+                </TableHead>
+                <TableHead className="h-10 px-3 text-right text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                  {t("Actions")}
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -522,7 +512,7 @@ export function ProxiesPage({
                 <TableRow>
                   <TableCell
                     colSpan={6}
-                    className="py-10 text-center text-sm text-muted-foreground"
+                    className="px-3 py-8 text-center text-sm text-muted-foreground"
                   >
                     {inventoryLoading
                       ? t("Loading proxy inventory...")
@@ -537,20 +527,20 @@ export function ProxiesPage({
                     reallocatingNodeId === item.node_id || deletingNodeId === item.node_id;
                   return (
                     <TableRow key={item.node_id}>
-                      <TableCell className="align-top">
-                        <div className="space-y-1">
+                      <TableCell className="px-3 py-3 align-top">
+                        <div className="space-y-0.5">
                           <div className="font-medium text-foreground">{item.proxy_name}</div>
                           <div className="font-mono text-xs text-muted-foreground">
                             {item.proxy_type} · {item.server}
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell className="align-top">
-                        <Badge variant="outline" className="rounded-full px-2.5 py-1 text-[11px]">
+                      <TableCell className="px-3 py-3 align-top">
+                        <Badge variant="outline" className="rounded-full px-2 py-0.5 text-[10px]">
                           {formatScopeLabel(item.source_scope, t)}
                         </Badge>
                       </TableCell>
-                      <TableCell className="align-top">
+                      <TableCell className="px-3 py-3 align-top">
                         <Select
                           disabled={pending}
                           value={encodeScope(item.allocation_scope)}
@@ -558,7 +548,7 @@ export function ProxiesPage({
                             void onReassignNode(item.node_id, decodeScope(value));
                           }}
                         >
-                          <SelectTrigger size="sm" className="w-[180px] bg-background">
+                          <SelectTrigger size="sm" className="h-8 w-[156px] bg-background text-xs">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -574,21 +564,22 @@ export function ProxiesPage({
                           </SelectContent>
                         </Select>
                       </TableCell>
-                      <TableCell className="align-top">
+                      <TableCell className="px-3 py-3 align-top">
                         <InventoryProfiles effectiveProfileIds={item.effective_profile_ids} />
                       </TableCell>
-                      <TableCell className="align-top">
-                        <div className="max-w-[260px] whitespace-normal text-xs leading-5 text-muted-foreground">
+                      <TableCell className="px-3 py-3 align-top">
+                        <div className="max-w-[240px] whitespace-normal text-[11px] leading-5 text-muted-foreground">
                           {item.resolved_ips.length > 0
                             ? item.resolved_ips.join(", ")
                             : t("No resolved IPs")}
                         </div>
                       </TableCell>
-                      <TableCell className="align-top text-right">
+                      <TableCell className="px-3 py-3 align-top text-right">
                         <div className="flex justify-end gap-2">
                           <Button
                             variant="destructive"
                             size="sm"
+                            className="h-8 px-2.5 text-xs"
                             disabled={pending}
                             onClick={() => {
                               void onDeleteNode(item.node_id);
