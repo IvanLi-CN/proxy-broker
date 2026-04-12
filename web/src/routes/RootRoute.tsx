@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Outlet } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 
 import { AppShell } from "@/components/AppShell";
@@ -19,6 +19,7 @@ export interface RootOutletContext {
 
 export function RootRoute() {
   const { t } = useI18n();
+  const location = useLocation();
   const [profileId, setProfileId] = useProfilePreference();
   const queryClient = useQueryClient();
   const healthQuery = useQuery({
@@ -46,6 +47,7 @@ export function RootRoute() {
     isLoading: authMeQuery.isLoading && !authMeQuery.data,
     error: authMeQuery.error ?? null,
   });
+  const shellMode = location.pathname.startsWith("/proxies") ? "global" : "profile";
 
   const handleCreateProfile = async (nextProfileId: string) => {
     try {
@@ -87,6 +89,7 @@ export function RootRoute() {
       }
       profilesLoading={profilesQuery.isLoading}
       profileId={profileId}
+      shellMode={shellMode}
     >
       <Outlet
         context={

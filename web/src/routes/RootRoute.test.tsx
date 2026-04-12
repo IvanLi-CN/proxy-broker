@@ -5,18 +5,25 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api";
 import { RootRoute } from "@/routes/RootRoute";
 
-const { mockToast, mockUseMutation, mockUseProfilePreference, mockUseQuery, mockUseQueryClient } =
-  vi.hoisted(() => ({
-    mockToast: {
-      error: vi.fn(),
-      info: vi.fn(),
-      success: vi.fn(),
-    },
-    mockUseMutation: vi.fn(),
-    mockUseProfilePreference: vi.fn(),
-    mockUseQuery: vi.fn(),
-    mockUseQueryClient: vi.fn(),
-  }));
+const {
+  mockToast,
+  mockUseLocation,
+  mockUseMutation,
+  mockUseProfilePreference,
+  mockUseQuery,
+  mockUseQueryClient,
+} = vi.hoisted(() => ({
+  mockToast: {
+    error: vi.fn(),
+    info: vi.fn(),
+    success: vi.fn(),
+  },
+  mockUseLocation: vi.fn(),
+  mockUseMutation: vi.fn(),
+  mockUseProfilePreference: vi.fn(),
+  mockUseQuery: vi.fn(),
+  mockUseQueryClient: vi.fn(),
+}));
 
 let latestAppShellProps: ComponentProps<typeof import("@/components/AppShell").AppShell> | null =
   null;
@@ -44,6 +51,7 @@ vi.mock("@/components/AppShell", () => ({
 
 vi.mock("react-router-dom", () => ({
   Outlet: () => null,
+  useLocation: () => mockUseLocation(),
 }));
 
 describe("RootRoute", () => {
@@ -53,11 +61,13 @@ describe("RootRoute", () => {
     mockUseProfilePreference.mockReset();
     mockUseQuery.mockReset();
     mockUseQueryClient.mockReset();
+    mockUseLocation.mockReset();
     mockToast.error.mockReset();
     mockToast.info.mockReset();
     mockToast.success.mockReset();
 
     mockUseProfilePreference.mockReturnValue(["default", vi.fn()]);
+    mockUseLocation.mockReturnValue({ pathname: "/" });
     mockUseQueryClient.mockReturnValue({
       invalidateQueries: vi.fn().mockResolvedValue(undefined),
     });

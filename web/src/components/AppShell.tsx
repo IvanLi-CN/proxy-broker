@@ -42,6 +42,7 @@ import { cn } from "@/lib/utils";
 interface AppShellProps {
   profileId: string;
   profiles: string[];
+  shellMode?: "profile" | "global";
   profilesLoading?: boolean;
   profilesCreating?: boolean;
   profilesError?: string | null;
@@ -56,6 +57,7 @@ interface AppShellProps {
 export function AppShell({
   profileId,
   profiles,
+  shellMode = "profile",
   profilesLoading = false,
   profilesCreating = false,
   profilesError = null,
@@ -69,6 +71,7 @@ export function AppShell({
   const { t } = useI18n();
   const isHealthy = (healthStatus ?? "").toLowerCase() === "ok";
   const healthStatusLabel = formatHealthStatus(healthStatus, t);
+  const isGlobalShell = shellMode === "global";
   const navItems = [
     {
       to: "/",
@@ -86,7 +89,7 @@ export function AppShell({
       to: "/proxies",
       label: t("Proxies"),
       icon: CableIcon,
-      meta: t("Manage the global pool, profile imports, and allocations"),
+      meta: t("Manage the global pool and cross-profile allocations"),
     },
     {
       to: "/ips",
@@ -121,16 +124,33 @@ export function AppShell({
               </div>
             </div>
           </div>
-          <ProfileSwitcher
-            profileId={profileId}
-            profiles={profiles}
-            isLoading={profilesLoading}
-            isCreating={profilesCreating}
-            loadError={profilesError}
-            onProfileIdChange={onProfileIdChange}
-            onCreateProfile={onCreateProfile}
-            onRetryProfiles={onRetryProfiles}
-          />
+          {isGlobalShell ? (
+            <div className="rounded-[26px] border border-sidebar-border/80 bg-sidebar-accent/45 p-4 shadow-sm">
+              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.28em] text-sidebar-foreground/68">
+                <CableIcon className="size-3.5" />
+                {t("Global workspace")}
+              </div>
+              <div className="mt-3 space-y-1">
+                <div className="text-sm font-semibold tracking-[-0.02em] text-sidebar-foreground">
+                  {t("Shared proxy administration")}
+                </div>
+                <p className="text-xs leading-5 text-sidebar-foreground/60">
+                  {t("Global pool and cross-profile allocations live here.")}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <ProfileSwitcher
+              profileId={profileId}
+              profiles={profiles}
+              isLoading={profilesLoading}
+              isCreating={profilesCreating}
+              loadError={profilesError}
+              onProfileIdChange={onProfileIdChange}
+              onCreateProfile={onCreateProfile}
+              onRetryProfiles={onRetryProfiles}
+            />
+          )}
         </SidebarHeader>
         <SidebarContent className="px-2 py-4">
           <SidebarGroup>
@@ -230,12 +250,18 @@ export function AppShell({
             <SidebarTrigger className="border-border/70 bg-background/80 hover:bg-background" />
             <div>
               <div className="text-[11px] font-semibold uppercase tracking-[0.28em] text-muted-foreground">
-                {t("Local operator plane")}
+                {isGlobalShell ? t("Global operator plane") : t("Local operator plane")}
               </div>
-              <div className="flex items-center gap-1 text-sm font-medium text-foreground md:text-base">
-                <span>{t("Profile")}</span>
-                <span className="font-mono">{profileId}</span>
-              </div>
+              {isGlobalShell ? (
+                <div className="flex items-center gap-1 text-sm font-medium text-foreground md:text-base">
+                  <span>{t("Global workspace")}</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1 text-sm font-medium text-foreground md:text-base">
+                  <span>{t("Profile")}</span>
+                  <span className="font-mono">{profileId}</span>
+                </div>
+              )}
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">

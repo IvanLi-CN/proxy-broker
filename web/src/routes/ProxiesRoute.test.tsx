@@ -103,7 +103,6 @@ describe("ProxiesRoute", () => {
 
     render(<ProxiesRoute />);
 
-    expect(latestProxiesPageProps?.profileId).toBe("edge-jp");
     expect(latestProxiesPageProps?.profiles).toEqual(["default", "edge-jp", "lab-us"]);
   });
 });

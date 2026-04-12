@@ -68,14 +68,24 @@ export const enUS: MessageCatalog = {
   Proxies: "Proxies",
   "Manage the global pool, profile imports, and allocations":
     "Manage the global pool, profile imports, and allocations",
+  "Manage the global pool and cross-profile allocations":
+    "Manage the global pool and cross-profile allocations",
   "The proxies workspace is restricted to the admin operator plane because it can change global pool allocation.":
     "The proxies workspace is restricted to the admin operator plane because it can change global pool allocation.",
   "Manage the global pool, the current profile's local imports, and where each imported node is allocated.":
     "Manage the global pool, the current profile's local imports, and where each imported node is allocated.",
+  "Manage the shared global pool and cross-profile allocations from one place.":
+    "Manage the shared global pool and cross-profile allocations from one place.",
+  "Manage the shared global pool and cross-profile allocations from one place. Profile-local imports and usage stay inside each profile overview.":
+    "Manage the shared global pool and cross-profile allocations from one place. Profile-local imports and usage stay inside each profile overview.",
   "Keep the global pool in its own workspace, then manage local imports and policy separately for the current profile.":
     "Keep the global pool in its own workspace, then manage local imports and policy separately for the current profile.",
   "Global workspace": "Global workspace",
   "Current profile workspace": "Current profile workspace",
+  "Shared proxy administration": "Shared proxy administration",
+  "Global pool and cross-profile allocations live here.":
+    "Global pool and cross-profile allocations live here.",
+  "Global operator plane": "Global operator plane",
   "Global scope": "Global scope",
   "Applies to every profile that keeps global pool enabled.":
     "Applies to every profile that keeps global pool enabled.",
@@ -99,6 +109,8 @@ export const enUS: MessageCatalog = {
   "Import local pool for {profileId}": "Import local pool for {profileId}",
   "Import nodes for the current profile only. These nodes stay local unless you later reassign them from the inventory table.":
     "Import nodes for the current profile only. These nodes stay local unless you later reassign them from the inventory table.",
+  "Import nodes for the current profile only. These nodes stay local unless you later reassign them from the global inventory.":
+    "Import nodes for the current profile only. These nodes stay local unless you later reassign them from the global inventory.",
   "Only the local import and policy below are scoped to this profile.":
     "Only the local import and policy below are scoped to this profile.",
   "Scoped to {profileId} only.": "Scoped to {profileId} only.",
@@ -144,8 +156,8 @@ export const enUS: MessageCatalog = {
   "Resolved IPs": "Resolved IPs",
   Actions: "Actions",
   "Loading proxy inventory...": "Loading proxy inventory...",
-  "No imported nodes yet. Use the cards above to seed the global or local pool.":
-    "No imported nodes yet. Use the cards above to seed the global or local pool.",
+  "No imported nodes yet. Import the shared global pool here, or add local nodes from a profile overview first.":
+    "No imported nodes yet. Import the shared global pool here, or add local nodes from a profile overview first.",
   "Global pool": "Global pool",
   "No active profiles": "No active profiles",
   "+{count} more": "+{count} more",

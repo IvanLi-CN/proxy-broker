@@ -2,18 +2,20 @@
 
 ## Goal
 
-把代理节点管理从各个 profile 的分散入口收拢到统一的管理员工作区，支持：
+把代理节点管理拆成清晰的两层入口，支持：
 
-- 导入全局代理池。
-- 导入当前 profile 的本地代理池。
-- 查看全局与所有 profile 的代理节点库存。
-- 调整节点当前分配到 `global` 或某个 `profile`。
-- 删除当前库存里的导入节点。
-- 为每个 profile 提供二态开关：`使用全局代理 / 不使用全局代理`。
+- 在独立的全局工作区导入全局代理池。
+- 在各自 profile 的总览页导入本地代理池。
+- 在全局工作区查看全局与所有 profile 的代理节点库存。
+- 在全局工作区调整节点当前分配到 `global` 或某个 `profile`。
+- 在全局工作区删除当前库存里的导入节点。
+- 在各自 profile 的总览页提供二态开关：`使用全局代理 / 不使用全局代理`。
 
 ## Scope
 
 - 新增管理员工作区 `/proxies`，并在 AppShell 导航中暴露 `Proxies`。
+- `/proxies` 必须使用独立的全局壳层，不显示 profile selector，也不承载任何 profile-local 配置入口。
+- 当前 profile 的本地导入与 `use_global_proxies` 开关必须保留在该 profile 的 `Overview` 页面内。
 - 后端新增 inventory layer：导入节点同时记录 `source_scope` 与 `allocation_scope`。
 - 现有 profile 业务接口继续按 profile 工作，但有效池改为：
   - 本地节点
@@ -99,21 +101,20 @@
 
 ### Proxies workspace
 
-页面拆成两个明确的工作区页签：
+`/proxies` 是独立的全局管理面，只承载：
 
-1. `全局工作区`
-   - 全局导入卡片。
-   - 全局 inventory table：展示所有导入节点、来源作用域、当前分配作用域、生效 profile，并提供改分配与删除动作。
-2. `当前配置工作区`
-   - 当前 profile 本地导入卡片。
-   - 当前 profile 的 `use_global_proxies` 开关。
+- 全局导入卡片。
+- 全局 inventory table：展示所有导入节点、来源作用域、当前分配作用域、生效 profile，并提供改分配与删除动作。
+- 管理员访问控制与错误态。
 
-全局配置不得嵌在当前 profile 语义的内容区里；即使当前 profile selector 仍存在于 AppShell，全局池也必须通过单独的工作区入口访问。
+这个页面不得出现当前 profile selector，不得出现 profile-local 导入卡片，也不得出现 `use_global_proxies` 开关。
 
 ### Overview workspace
 
-- 移除代理导入主入口。
-- 保留 health、refresh、access control 等非 inventory 运营面。
+- 保留 health、refresh、access control 等 profile 运营面。
+- 新增当前 profile 的本地代理导入卡片。
+- 新增当前 profile 的 `use_global_proxies` 策略卡片。
+- profile-local 入口不得反向承载全局池导入或跨 profile 分配。
 
 ## Acceptance Criteria
 
@@ -137,7 +138,8 @@
 
 ## Outcome
 
-- 新的管理员工作区 `Proxies` 已接管全局导入、本地导入、profile 级 global 开关、以及节点 inventory 分配/删除操作。
+- 新的管理员工作区 `Proxies` 已接管全局导入、节点 inventory 查看、跨 profile 分配与删除操作。
+- `Overview` 已接管当前 profile 的本地导入和 `use_global_proxies` 开关。
 - profile 有效池现在由 inventory layer 统一组合，不再直接把订阅源导入结果视为 profile 最终池。
 - SQLite 与 memory store 都已持久化 inventory 节点与 `profile_proxy_settings`。
 - 现有业务接口保持 profile 视角不变，但快照重建逻辑已改为读取 effective pool。
@@ -150,21 +152,21 @@
 - `sensitive_exclusion=N/A`
 - `submission_gate=pending-owner-approval`
 - `story_id_or_title=Pages/ProxiesPage/ZhCN`
-- `state=全局工作区（zh-CN）`
-- `evidence_note=展示全局池拥有独立工作区入口，并在该工作区中承载全局导入与跨 profile inventory 分配。`
+- `state=全局代理工作区（zh-CN）`
+- `evidence_note=展示 /proxies 已切到独立的全局壳层，不再显示 profile selector，并且只承载全局池导入与跨 profile inventory 分配。`
 
-![Proxies workspace global tab](./assets/proxies-workspace-global-tab-zh-cn.png)
+![Proxies global workspace](./assets/proxies-global-workspace-zh-cn.png)
 
 - `source_type=storybook_canvas`
 - `target_program=mock-only`
 - `capture_scope=element`
 - `sensitive_exclusion=N/A`
 - `submission_gate=pending-owner-approval`
-- `story_id_or_title=Pages/ProxiesPage/ZhCN`
-- `state=当前配置工作区（zh-CN）`
-- `evidence_note=展示当前 profile 的本地导入和 use_global_proxies 策略被单独收拢到当前配置工作区，不再混入全局池配置。`
+- `story_id_or_title=Pages/OverviewPage/ZhCN`
+- `state=profile 总览页中的代理设置（zh-CN）`
+- `evidence_note=展示当前 profile 的本地导入与 use_global_proxies 开关已经回收到 Overview，不再与全局池配置混放。`
 
-![Proxies workspace profile tab](./assets/proxies-workspace-profile-tab-zh-cn.png)
+![Overview profile proxy controls](./assets/overview-profile-proxy-controls-zh-cn.png)
 
 - `source_type=storybook_canvas`
 - `target_program=mock-only`
@@ -173,6 +175,6 @@
 - `submission_gate=pending-owner-approval`
 - `story_id_or_title=Pages/ProxiesPage/AccessDenied`
 - `state=admin-only access gate`
-- `evidence_note=展示非管理员访问 Proxies 工作区时的拒绝态，证明新入口不会退化成 profile-scoped 降级结果。`
+- `evidence_note=展示非管理员访问全局代理工作区时的拒绝态，证明这个入口仍是独立的全局管理面，而不是退化回 profile-scoped 页面。`
 
-![Proxies workspace access denied](./assets/proxies-workspace-access-denied.png)
+![Proxies global workspace access denied](./assets/proxies-global-access-denied.png)

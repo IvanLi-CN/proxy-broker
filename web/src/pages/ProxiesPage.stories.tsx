@@ -49,14 +49,15 @@ const meta = {
     docs: {
       description: {
         component:
-          "Administrator proxies workspace split into a dedicated global workspace and a separate current-profile workspace.",
+          "Administrator proxies workspace dedicated to the shared global pool and cross-profile allocations.",
       },
     },
   },
   render: (args) => (
     <AppShell
-      profileId={args.profileId}
+      profileId="edge-jp"
       profiles={args.profiles}
+      shellMode="global"
       profilesLoading={false}
       profilesCreating={false}
       profilesError={null}
@@ -80,7 +81,6 @@ const meta = {
     </AppShell>
   ),
   args: {
-    profileId: "edge-jp",
     profiles: ["default", "edge-jp", "lab-us"],
     currentUser: {
       status: "resolved",
@@ -101,29 +101,13 @@ const meta = {
       warnings: [],
     },
     globalLoadError: null,
-    profileLoadResponse: {
-      loaded_proxies: 4,
-      distinct_ips: 3,
-      warnings: ["proxy `edge-jp-local` dns resolve failed, reused 1 cached ip(s)"],
-    },
-    profileLoadError: null,
     loadingGlobal: false,
-    loadingProfile: false,
     inventory: inventoryFixture,
     inventoryLoading: false,
     inventoryError: null,
-    proxySettings: {
-      profile_id: "edge-jp",
-      use_global_proxies: true,
-    },
-    proxySettingsLoading: false,
-    proxySettingsError: null,
-    updatingSettings: false,
     reallocatingNodeId: null,
     deletingNodeId: null,
     onLoadGlobal: fn(),
-    onLoadProfile: fn(),
-    onToggleUseGlobalProxies: fn(),
     onReassignNode: fn(),
     onDeleteNode: fn(),
   },
@@ -136,10 +120,6 @@ export const Default: Story = {
   async play({ canvasElement }) {
     const canvas = within(canvasElement);
     await expect(canvas.getByRole("heading", { name: /proxies/i })).toBeVisible();
-    await expect(canvas.getByRole("tab", { name: /global workspace/i })).toHaveAttribute(
-      "data-state",
-      "active",
-    );
     await expect(canvas.getByRole("heading", { name: /import global proxy pool/i })).toBeVisible();
     await expect(
       canvas.getByRole("heading", { name: /global inventory and allocations/i }),
@@ -154,41 +134,10 @@ export const ZhCN: Story = {
   },
 };
 
-export const ProfileWorkspace: Story = {
-  args: {
-    defaultWorkspace: "profile",
-  },
-  async play({ canvasElement }) {
-    const canvas = within(canvasElement);
-    await expect(canvas.getByRole("tab", { name: /current profile workspace/i })).toHaveAttribute(
-      "data-state",
-      "active",
-    );
-    await expect(
-      canvas.getByRole("heading", { name: /import local pool for edge-jp/i }),
-    ).toBeVisible();
-    await expect(
-      canvas.getByRole("heading", { name: /use global pool for edge-jp/i }),
-    ).toBeVisible();
-  },
-};
-
-export const LocalOnly: Story = {
-  args: {
-    defaultWorkspace: "profile",
-    proxySettings: {
-      profile_id: "edge-jp",
-      use_global_proxies: false,
-    },
-  },
-};
-
 export const AccessDenied: Story = {
   args: {
     accessDenied: true,
     globalLoadResponse: null,
-    profileLoadResponse: null,
     inventory: null,
-    proxySettings: null,
   },
 };
