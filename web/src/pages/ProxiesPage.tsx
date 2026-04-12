@@ -128,7 +128,7 @@ function ProxyLoadCard({
             }),
           )}
         >
-          <div className="grid gap-3 rounded-[20px] border border-border/70 bg-background/80 p-3 md:grid-cols-[168px_minmax(0,1fr)] xl:grid-cols-[168px_minmax(0,1fr)_auto] xl:items-start">
+          <div className="grid gap-3 rounded-[20px] border border-border/70 bg-background/80 p-3 md:grid-cols-[168px_minmax(0,1fr)]">
             <div className="space-y-2">
               <Label htmlFor={`${eyebrow}-source-type`}>{t("Source type")}</Label>
               <Controller
@@ -165,11 +165,12 @@ function ProxyLoadCard({
                 className="bg-card font-mono text-xs md:text-sm"
               />
             </div>
-            <div className="flex xl:justify-end">
-              <Button disabled={pending} size="lg" type="submit" className="w-full xl:min-w-40">
-                {pending ? t("Loading subscription...") : submitLabel}
-              </Button>
-            </div>
+          </div>
+
+          <div className="flex justify-end">
+            <Button disabled={pending} size="lg" type="submit" className="min-w-40">
+              {pending ? t("Loading subscription...") : submitLabel}
+            </Button>
           </div>
 
           {form.formState.errors.sourceValue ? (
