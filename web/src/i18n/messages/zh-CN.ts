@@ -477,6 +477,8 @@ export const zhCN: MessageCatalog = {
   "Nothing on this route yet": "这个路由还没有内容",
   "The control surface only exposes Overview, Tasks, IP Extract, and Sessions right now.":
     "当前控制台只开放了总览、任务、IP 提取和会话这几个路由。",
+  "The control surface only exposes Overview, Tasks, Proxies, IP Extract, and Sessions right now.":
+    "当前控制台只开放了总览、任务、代理、IP 提取和会话这几个路由。",
   "Back to overview": "返回总览",
   "validation.source_value_required": "必须填写来源值",
   "error.api.with_code": "{code}: {message}",
@@ -505,4 +507,74 @@ export const zhCN: MessageCatalog = {
   "error.api.with_reason": "{message} 原因：{reason}",
   "error.task.fallback": "任务运行失败。",
   "error.task.summary_reason_prefix": "摘要原因：{reason}",
+  Proxies: "代理",
+  "Manage the global pool, profile imports, and allocations": "管理全局池、配置导入与节点分配",
+  "The proxies workspace is restricted to the admin operator plane because it can change global pool allocation.":
+    "代理工作区可以改动全局池分配，因此目前仅对管理员运维平面开放。",
+  "Manage the global pool, the current profile's local imports, and where each imported node is allocated.":
+    "统一管理全局池、当前配置的本地导入，以及每个导入节点当前被分配到哪里。",
+  "Global scope": "全局作用域",
+  "allocation defaults to global": "默认分配到全局",
+  "allocation defaults to {profileId}": "默认分配到 {profileId}",
+  "remote fetch": "远程拉取",
+  "host file": "主机文件",
+  "Imported nodes become source-authoritative inventory. Re-imports restore anything the upstream still serves, even after local deletes or reassignment.":
+    "导入节点以源数据为准；即使本地删除或改分配，只要上游仍存在，重新导入时就会恢复。",
+  "Imported {count} global proxies": "已导入 {count} 个全局代理",
+  "Imported {count} profile proxies for {profileId}": "已为 {profileId} 导入 {count} 个本地代理",
+  "Import global proxy pool": "导入全局代理池",
+  "Import one source into the shared global pool. Profiles that keep global usage enabled will inherit these nodes immediately.":
+    "把一个源导入共享的全局池；保持“使用全局代理”开启的配置会立刻继承这些节点。",
+  "Import global pool": "导入全局池",
+  "Global pool updated": "全局池已更新",
+  "Imported {proxyCount} proxies across {ipCount} distinct IPs into the global pool.":
+    "已向全局池导入 {proxyCount} 个代理，覆盖 {ipCount} 个不同 IP。",
+  "Import local pool for {profileId}": "为 {profileId} 导入本地代理池",
+  "Import nodes for the current profile only. These nodes stay local unless you later reassign them from the inventory table.":
+    "仅为当前配置导入节点；除非稍后在库存表里改分配，否则这些节点会保持本地归属。",
+  "Import profile pool": "导入本地池",
+  "Profile pool updated": "本地池已更新",
+  "Imported {proxyCount} proxies across {ipCount} distinct IPs into profile {profileId}.":
+    "已向配置 {profileId} 导入 {proxyCount} 个代理，覆盖 {ipCount} 个不同 IP。",
+  "Profile policy": "配置策略",
+  "Use global pool for {profileId}": "{profileId} 使用全局代理池",
+  "Toggle whether this profile composes its effective pool from both local imports and the global pool, or only from local imports.":
+    "切换当前配置的有效池是否由“本地导入 + 全局池”共同组成，或仅使用本地导入。",
+  "global enabled": "已启用全局",
+  "local-only": "仅本地",
+  "Enabled global pool for {profileId}": "已为 {profileId} 启用全局池",
+  "Disabled global pool for {profileId}": "已为 {profileId} 关闭全局池",
+  "Compose {profileId} from the global pool as well": "{profileId} 同时组合全局池中的节点",
+  "Turning this off immediately rebuilds the profile from local nodes only and removes sessions that depended on global-only nodes.":
+    "关闭后会立刻按“仅本地节点”重建当前配置，并清退依赖纯全局节点的会话。",
+  "Profile proxy settings unavailable": "配置代理设置暂不可用",
+  "Unified inventory": "统一库存",
+  "Global pool and profile allocations": "全局池与配置分配",
+  "Every imported node records both its source scope and its current allocation scope. Re-imports follow the source of truth and restore nodes that upstreams still serve.":
+    "每个导入节点都会记录来源作用域和当前分配作用域；重新导入会以源数据为准，恢复上游仍然提供的节点。",
+  "{count} nodes": "{count} 个节点",
+  "{count} node": "{count} 个节点",
+  "current profile {profileId}": "当前配置 {profileId}",
+  "loading inventory": "库存加载中",
+  "inventory live": "库存在线",
+  "Deleting or reallocating an imported node only affects the current inventory snapshot. The next source reload restores anything the upstream still contains.":
+    "删除或改分配只影响当前库存快照；下一次源重新导入时，所有上游仍包含的节点都会被恢复。",
+  "Source scope": "来源作用域",
+  "Allocation scope": "分配作用域",
+  "Effective profiles": "生效配置",
+  "Resolved IPs": "解析到的 IP",
+  Actions: "操作",
+  "Loading proxy inventory...": "正在加载代理库存……",
+  "No imported nodes yet. Use the cards above to seed the global or local pool.":
+    "还没有导入任何节点；先用上面的卡片为全局池或本地池注入数据吧。",
+  "Global pool": "全局池",
+  "No active profiles": "当前没有生效配置",
+  "+{count} more": "还有 {count} 个",
+  "No resolved IPs": "没有解析到的 IP",
+  Delete: "删除",
+  "Deleting...": "删除中……",
+  "Updated allocation for {nodeId}": "已更新节点 {nodeId} 的分配",
+  "Deleted imported node {nodeId}": "已删除导入节点 {nodeId}",
+  "Proxy inventory unavailable": "代理库存暂不可用",
+  "error.api.proxy_inventory_node_not_found": "找不到指定的导入代理节点。",
 };

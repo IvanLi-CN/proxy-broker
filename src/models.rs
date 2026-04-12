@@ -143,6 +143,46 @@ pub struct ListProfilesResponse {
     pub profiles: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ProxyScope {
+    Global,
+    Profile { profile_id: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListProxyInventoryResponse {
+    pub items: Vec<ProxyInventoryItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProxyInventoryItem {
+    pub node_id: String,
+    pub proxy_name: String,
+    pub proxy_type: String,
+    pub server: String,
+    pub resolved_ips: Vec<String>,
+    pub source_scope: ProxyScope,
+    pub allocation_scope: ProxyScope,
+    pub effective_profile_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateProxyAllocationRequest {
+    pub allocation_scope: ProxyScope,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProfileProxySettings {
+    pub profile_id: String,
+    pub use_global_proxies: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateProfileProxySettingsRequest {
+    pub use_global_proxies: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenBatchResponse {
     pub sessions: Vec<OpenSessionResponse>,
@@ -481,6 +521,12 @@ pub struct TaskListResponse {
     pub next_cursor: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ProxyInventoryListQuery {
+    pub scope: Option<String>,
+    pub profile_id: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskRunDetail {
     pub run: TaskRunSummary,
@@ -501,6 +547,20 @@ pub struct ProxyNode {
     pub server: String,
     pub resolved_ips: Vec<String>,
     pub raw_proxy: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProxyInventoryRecord {
+    pub node_id: String,
+    pub source_scope: ProxyScope,
+    pub allocation_scope: ProxyScope,
+    pub proxy_name: String,
+    pub proxy_type: String,
+    pub server: String,
+    pub resolved_ips: Vec<String>,
+    pub raw_proxy: serde_json::Value,
+    pub created_at: i64,
+    pub updated_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -577,6 +637,47 @@ impl SubscriptionSource {
         match source_type {
             "url" => Some(Self::Url(source_value)),
             "file" => Some(Self::File(source_value)),
+            _ => None,
+        }
+    }
+}
+
+impl ProxyScope {
+    pub fn global() -> Self {
+        Self::Global
+    }
+
+    pub fn profile(profile_id: impl Into<String>) -> Self {
+        Self::Profile {
+            profile_id: profile_id.into(),
+        }
+    }
+
+    pub fn profile_id(&self) -> Option<&str> {
+        match self {
+            Self::Global => None,
+            Self::Profile { profile_id } => Some(profile_id.as_str()),
+        }
+    }
+
+    pub fn key(&self) -> String {
+        match self {
+            Self::Global => "global".to_string(),
+            Self::Profile { profile_id } => format!("profile:{profile_id}"),
+        }
+    }
+
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Global => "global",
+            Self::Profile { .. } => "profile",
+        }
+    }
+
+    pub fn from_parts(scope_type: &str, profile_id: Option<String>) -> Option<Self> {
+        match scope_type {
+            "global" => Some(Self::Global),
+            "profile" => Some(Self::profile(profile_id?)),
             _ => None,
         }
     }

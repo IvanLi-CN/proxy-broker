@@ -62,4 +62,80 @@ export const enUS: MessageCatalog = {
   "error.api.with_reason": "{message} Reason: {reason}",
   "error.task.fallback": "Task run failed.",
   "error.task.summary_reason_prefix": "Summary reason: {reason}",
+  "The control surface only exposes Overview, Tasks, Proxies, IP Extract, and Sessions right now.":
+    "The control surface only exposes Overview, Tasks, Proxies, IP Extract, and Sessions right now.",
+  "error.api.proxy_inventory_node_not_found": "The imported proxy node could not be found.",
+  Proxies: "Proxies",
+  "Manage the global pool, profile imports, and allocations":
+    "Manage the global pool, profile imports, and allocations",
+  "The proxies workspace is restricted to the admin operator plane because it can change global pool allocation.":
+    "The proxies workspace is restricted to the admin operator plane because it can change global pool allocation.",
+  "Manage the global pool, the current profile's local imports, and where each imported node is allocated.":
+    "Manage the global pool, the current profile's local imports, and where each imported node is allocated.",
+  "Global scope": "Global scope",
+  "allocation defaults to global": "allocation defaults to global",
+  "allocation defaults to {profileId}": "allocation defaults to {profileId}",
+  "remote fetch": "remote fetch",
+  "host file": "host file",
+  "Imported nodes become source-authoritative inventory. Re-imports restore anything the upstream still serves, even after local deletes or reassignment.":
+    "Imported nodes become source-authoritative inventory. Re-imports restore anything the upstream still serves, even after local deletes or reassignment.",
+  "Imported {count} global proxies": "Imported {count} global proxies",
+  "Imported {count} profile proxies for {profileId}":
+    "Imported {count} profile proxies for {profileId}",
+  "Import global proxy pool": "Import global proxy pool",
+  "Import one source into the shared global pool. Profiles that keep global usage enabled will inherit these nodes immediately.":
+    "Import one source into the shared global pool. Profiles that keep global usage enabled will inherit these nodes immediately.",
+  "Import global pool": "Import global pool",
+  "Global pool updated": "Global pool updated",
+  "Imported {proxyCount} proxies across {ipCount} distinct IPs into the global pool.":
+    "Imported {proxyCount} proxies across {ipCount} distinct IPs into the global pool.",
+  "Import local pool for {profileId}": "Import local pool for {profileId}",
+  "Import nodes for the current profile only. These nodes stay local unless you later reassign them from the inventory table.":
+    "Import nodes for the current profile only. These nodes stay local unless you later reassign them from the inventory table.",
+  "Import profile pool": "Import profile pool",
+  "Profile pool updated": "Profile pool updated",
+  "Imported {proxyCount} proxies across {ipCount} distinct IPs into profile {profileId}.":
+    "Imported {proxyCount} proxies across {ipCount} distinct IPs into profile {profileId}.",
+  "Profile policy": "Profile policy",
+  "Use global pool for {profileId}": "Use global pool for {profileId}",
+  "Toggle whether this profile composes its effective pool from both local imports and the global pool, or only from local imports.":
+    "Toggle whether this profile composes its effective pool from both local imports and the global pool, or only from local imports.",
+  "global enabled": "global enabled",
+  "local-only": "local-only",
+  "Enabled global pool for {profileId}": "Enabled global pool for {profileId}",
+  "Disabled global pool for {profileId}": "Disabled global pool for {profileId}",
+  "Compose {profileId} from the global pool as well":
+    "Compose {profileId} from the global pool as well",
+  "Turning this off immediately rebuilds the profile from local nodes only and removes sessions that depended on global-only nodes.":
+    "Turning this off immediately rebuilds the profile from local nodes only and removes sessions that depended on global-only nodes.",
+  "Profile proxy settings unavailable": "Profile proxy settings unavailable",
+  "Unified inventory": "Unified inventory",
+  "Global pool and profile allocations": "Global pool and profile allocations",
+  "Every imported node records both its source scope and its current allocation scope. Re-imports follow the source of truth and restore nodes that upstreams still serve.":
+    "Every imported node records both its source scope and its current allocation scope. Re-imports follow the source of truth and restore nodes that upstreams still serve.",
+  "{count} nodes": "{count} nodes",
+  "{count} node": "{count} node",
+  "current profile {profileId}": "current profile {profileId}",
+  "loading inventory": "loading inventory",
+  "inventory live": "inventory live",
+  "Deleting or reallocating an imported node only affects the current inventory snapshot. The next source reload restores anything the upstream still contains.":
+    "Deleting or reallocating an imported node only affects the current inventory snapshot. The next source reload restores anything the upstream still contains.",
+  Proxy: "Proxy",
+  "Source scope": "Source scope",
+  "Allocation scope": "Allocation scope",
+  "Effective profiles": "Effective profiles",
+  "Resolved IPs": "Resolved IPs",
+  Actions: "Actions",
+  "Loading proxy inventory...": "Loading proxy inventory...",
+  "No imported nodes yet. Use the cards above to seed the global or local pool.":
+    "No imported nodes yet. Use the cards above to seed the global or local pool.",
+  "Global pool": "Global pool",
+  "No active profiles": "No active profiles",
+  "+{count} more": "+{count} more",
+  "No resolved IPs": "No resolved IPs",
+  Delete: "Delete",
+  "Deleting...": "Deleting...",
+  "Updated allocation for {nodeId}": "Updated allocation for {nodeId}",
+  "Deleted imported node {nodeId}": "Deleted imported node {nodeId}",
+  "Proxy inventory unavailable": "Proxy inventory unavailable",
 };

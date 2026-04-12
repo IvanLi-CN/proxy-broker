@@ -6,9 +6,10 @@ use sqlx::{Row, SqlitePool, sqlite::SqliteConnectOptions, sqlite::SqlitePoolOpti
 
 use crate::{
     models::{
-        ApiKeyRecord, IpRecord, ProbeRecord, ProfileSyncConfig, ProxyNode, SessionRecord,
-        SubscriptionSource, TaskEventLevel, TaskListQuery, TaskRunEventRecord, TaskRunKind,
-        TaskRunRecord, TaskRunStage, TaskRunStatus, TaskRunTrigger,
+        ApiKeyRecord, IpRecord, ProbeRecord, ProfileProxySettings, ProfileSyncConfig,
+        ProxyInventoryRecord, ProxyNode, ProxyScope, SessionRecord, SubscriptionSource,
+        TaskEventLevel, TaskListQuery, TaskRunEventRecord, TaskRunKind, TaskRunRecord,
+        TaskRunStage, TaskRunStatus, TaskRunTrigger,
     },
     store::BrokerStore,
     tasks::matches_task_query,
@@ -168,6 +169,57 @@ impl SqliteStore {
 
         sqlx::query(
             r#"
+            CREATE TABLE IF NOT EXISTS proxy_inventory_nodes (
+              node_id TEXT PRIMARY KEY,
+              source_scope_type TEXT NOT NULL,
+              source_scope_profile_id TEXT,
+              allocation_scope_type TEXT NOT NULL,
+              allocation_scope_profile_id TEXT,
+              proxy_name TEXT NOT NULL,
+              proxy_type TEXT NOT NULL,
+              server TEXT NOT NULL,
+              resolved_ips_json TEXT NOT NULL,
+              raw_proxy_json TEXT NOT NULL,
+              created_at INTEGER NOT NULL,
+              updated_at INTEGER NOT NULL
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_proxy_inventory_source_scope
+            ON proxy_inventory_nodes(source_scope_type, source_scope_profile_id)
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_proxy_inventory_allocation_scope
+            ON proxy_inventory_nodes(allocation_scope_type, allocation_scope_profile_id)
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS profile_proxy_settings (
+              profile_id TEXT PRIMARY KEY,
+              use_global_proxies INTEGER NOT NULL,
+              updated_at INTEGER NOT NULL
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"
             CREATE TABLE IF NOT EXISTS task_runs (
               run_id TEXT PRIMARY KEY,
               profile_id TEXT NOT NULL,
@@ -301,7 +353,20 @@ impl BrokerStore for SqliteStore {
               SELECT profile_id FROM sessions
               UNION
               SELECT profile_id FROM api_keys
+              UNION
+              SELECT profile_id FROM profile_sync_configs
+              UNION
+              SELECT profile_id FROM profile_proxy_settings
+              UNION
+              SELECT source_scope_profile_id AS profile_id
+              FROM proxy_inventory_nodes
+              WHERE source_scope_type = 'profile' AND source_scope_profile_id IS NOT NULL
+              UNION
+              SELECT allocation_scope_profile_id AS profile_id
+              FROM proxy_inventory_nodes
+              WHERE allocation_scope_type = 'profile' AND allocation_scope_profile_id IS NOT NULL
             )
+            WHERE profile_id IS NOT NULL
             ORDER BY profile_id ASC
             "#,
         )
@@ -314,6 +379,7 @@ impl BrokerStore for SqliteStore {
     }
 
     async fn create_profile(&self, profile_id: &str, created_at: i64) -> anyhow::Result<()> {
+        let mut tx = self.pool.begin().await?;
         sqlx::query(
             r#"
             INSERT INTO profiles (profile_id, created_at)
@@ -322,8 +388,20 @@ impl BrokerStore for SqliteStore {
         )
         .bind(profile_id)
         .bind(created_at)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
+        sqlx::query(
+            r#"
+            INSERT INTO profile_proxy_settings (profile_id, use_global_proxies, updated_at)
+            VALUES (?1, 1, ?2)
+            ON CONFLICT(profile_id) DO NOTHING
+            "#,
+        )
+        .bind(profile_id)
+        .bind(created_at)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
         Ok(())
     }
 
@@ -479,6 +557,112 @@ impl BrokerStore for SqliteStore {
                 })
             })
             .collect()
+    }
+
+    async fn list_proxy_inventory(&self) -> anyhow::Result<Vec<ProxyInventoryRecord>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT node_id, source_scope_type, source_scope_profile_id,
+                   allocation_scope_type, allocation_scope_profile_id,
+                   proxy_name, proxy_type, server, resolved_ips_json, raw_proxy_json,
+                   created_at, updated_at
+            FROM proxy_inventory_nodes
+            ORDER BY proxy_name ASC, node_id ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(map_proxy_inventory_row).collect()
+    }
+
+    async fn replace_proxy_inventory_scope(
+        &self,
+        source_scope: &ProxyScope,
+        nodes: &[ProxyInventoryRecord],
+    ) -> anyhow::Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            r#"
+            DELETE FROM proxy_inventory_nodes
+            WHERE source_scope_type = ?1 AND (
+              (?2 IS NULL AND source_scope_profile_id IS NULL) OR source_scope_profile_id = ?2
+            )
+            "#,
+        )
+        .bind(source_scope.kind())
+        .bind(source_scope.profile_id())
+        .execute(&mut *tx)
+        .await?;
+
+        for node in nodes {
+            persist_proxy_inventory_node(&mut tx, node).await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn get_proxy_inventory_node(
+        &self,
+        node_id: &str,
+    ) -> anyhow::Result<Option<ProxyInventoryRecord>> {
+        let row = sqlx::query(
+            r#"
+            SELECT node_id, source_scope_type, source_scope_profile_id,
+                   allocation_scope_type, allocation_scope_profile_id,
+                   proxy_name, proxy_type, server, resolved_ips_json, raw_proxy_json,
+                   created_at, updated_at
+            FROM proxy_inventory_nodes
+            WHERE node_id = ?1
+            "#,
+        )
+        .bind(node_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(map_proxy_inventory_row).transpose()
+    }
+
+    async fn update_proxy_inventory_allocation(
+        &self,
+        node_id: &str,
+        allocation_scope: &ProxyScope,
+        updated_at: i64,
+    ) -> anyhow::Result<Option<ProxyInventoryRecord>> {
+        let result = sqlx::query(
+            r#"
+            UPDATE proxy_inventory_nodes
+            SET allocation_scope_type = ?2,
+                allocation_scope_profile_id = ?3,
+                updated_at = ?4
+            WHERE node_id = ?1
+            "#,
+        )
+        .bind(node_id)
+        .bind(allocation_scope.kind())
+        .bind(allocation_scope.profile_id())
+        .bind(updated_at)
+        .execute(&self.pool)
+        .await?;
+        if result.rows_affected() == 0 {
+            return Ok(None);
+        }
+        self.get_proxy_inventory_node(node_id).await
+    }
+
+    async fn delete_proxy_inventory_node(
+        &self,
+        node_id: &str,
+    ) -> anyhow::Result<Option<ProxyInventoryRecord>> {
+        let existing = self.get_proxy_inventory_node(node_id).await?;
+        if existing.is_none() {
+            return Ok(None);
+        }
+        sqlx::query("DELETE FROM proxy_inventory_nodes WHERE node_id = ?1")
+            .bind(node_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(existing)
     }
 
     async fn replace_ip_records(
@@ -1030,6 +1214,44 @@ impl BrokerStore for SqliteStore {
         rows.into_iter().map(map_profile_sync_config_row).collect()
     }
 
+    async fn get_profile_proxy_settings(
+        &self,
+        profile_id: &str,
+    ) -> anyhow::Result<Option<ProfileProxySettings>> {
+        let row = sqlx::query(
+            r#"
+            SELECT profile_id, use_global_proxies, updated_at
+            FROM profile_proxy_settings
+            WHERE profile_id = ?1
+            "#,
+        )
+        .bind(profile_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(map_profile_proxy_settings_row).transpose()
+    }
+
+    async fn upsert_profile_proxy_settings(
+        &self,
+        settings: &ProfileProxySettings,
+    ) -> anyhow::Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO profile_proxy_settings (profile_id, use_global_proxies, updated_at)
+            VALUES (?1, ?2, strftime('%s','now'))
+            ON CONFLICT(profile_id) DO UPDATE SET
+              use_global_proxies = excluded.use_global_proxies,
+              updated_at = strftime('%s','now')
+            "#,
+        )
+        .bind(&settings.profile_id)
+        .bind(settings.use_global_proxies as i64)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     async fn insert_task_run(&self, run: &TaskRunRecord) -> anyhow::Result<()> {
         persist_task_run(&self.pool, run).await
     }
@@ -1127,6 +1349,88 @@ impl BrokerStore for SqliteStore {
 
         rows.into_iter().map(map_task_run_event_row).collect()
     }
+}
+
+async fn persist_proxy_inventory_node(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    node: &ProxyInventoryRecord,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        r#"
+        INSERT INTO proxy_inventory_nodes (
+          node_id, source_scope_type, source_scope_profile_id,
+          allocation_scope_type, allocation_scope_profile_id,
+          proxy_name, proxy_type, server, resolved_ips_json, raw_proxy_json,
+          created_at, updated_at
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+        ON CONFLICT(node_id) DO UPDATE SET
+          source_scope_type = excluded.source_scope_type,
+          source_scope_profile_id = excluded.source_scope_profile_id,
+          allocation_scope_type = excluded.allocation_scope_type,
+          allocation_scope_profile_id = excluded.allocation_scope_profile_id,
+          proxy_name = excluded.proxy_name,
+          proxy_type = excluded.proxy_type,
+          server = excluded.server,
+          resolved_ips_json = excluded.resolved_ips_json,
+          raw_proxy_json = excluded.raw_proxy_json,
+          created_at = excluded.created_at,
+          updated_at = excluded.updated_at
+        "#,
+    )
+    .bind(&node.node_id)
+    .bind(node.source_scope.kind())
+    .bind(node.source_scope.profile_id())
+    .bind(node.allocation_scope.kind())
+    .bind(node.allocation_scope.profile_id())
+    .bind(&node.proxy_name)
+    .bind(&node.proxy_type)
+    .bind(&node.server)
+    .bind(serde_json::to_string(&node.resolved_ips)?)
+    .bind(serde_json::to_string(&node.raw_proxy)?)
+    .bind(node.created_at)
+    .bind(node.updated_at)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+fn map_proxy_inventory_row(row: sqlx::sqlite::SqliteRow) -> anyhow::Result<ProxyInventoryRecord> {
+    let source_scope_type: String = row.try_get("source_scope_type")?;
+    let allocation_scope_type: String = row.try_get("allocation_scope_type")?;
+    let resolved_ips_json: String = row.try_get("resolved_ips_json")?;
+    let raw_proxy_json: String = row.try_get("raw_proxy_json")?;
+    Ok(ProxyInventoryRecord {
+        node_id: row.try_get("node_id")?,
+        source_scope: ProxyScope::from_parts(
+            &source_scope_type,
+            row.try_get("source_scope_profile_id")?,
+        )
+        .with_context(|| format!("unsupported proxy source scope type: {source_scope_type}"))?,
+        allocation_scope: ProxyScope::from_parts(
+            &allocation_scope_type,
+            row.try_get("allocation_scope_profile_id")?,
+        )
+        .with_context(|| {
+            format!("unsupported proxy allocation scope type: {allocation_scope_type}")
+        })?,
+        proxy_name: row.try_get("proxy_name")?,
+        proxy_type: row.try_get("proxy_type")?,
+        server: row.try_get("server")?,
+        resolved_ips: serde_json::from_str(&resolved_ips_json)?,
+        raw_proxy: serde_json::from_str(&raw_proxy_json)?,
+        created_at: row.try_get("created_at")?,
+        updated_at: row.try_get("updated_at")?,
+    })
+}
+
+fn map_profile_proxy_settings_row(
+    row: sqlx::sqlite::SqliteRow,
+) -> anyhow::Result<ProfileProxySettings> {
+    Ok(ProfileProxySettings {
+        profile_id: row.try_get("profile_id")?,
+        use_global_proxies: row.try_get::<i64, _>("use_global_proxies")? != 0,
+    })
 }
 
 fn map_api_key_row(row: sqlx::sqlite::SqliteRow) -> anyhow::Result<ApiKeyRecord> {

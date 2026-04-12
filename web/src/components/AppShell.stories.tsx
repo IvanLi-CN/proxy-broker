@@ -64,6 +64,7 @@ export const ZhCN: Story = {
     const links = [
       canvas.getByRole("link", { name: /总览/i }),
       canvas.getByRole("link", { name: /任务/i }),
+      canvas.getByRole("link", { name: /代理/i }),
       canvas.getByRole("link", { name: /IP 提取/i }),
       canvas.getByRole("link", { name: /会话/i }),
     ];

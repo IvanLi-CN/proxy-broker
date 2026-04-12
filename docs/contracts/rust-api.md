@@ -8,6 +8,11 @@
   - `replace_subscription(profile_id, nodes)`
   - `apply_subscription_snapshot(profile_id, nodes, ip_records, probe_records, removed_session_ids)`
   - `list_subscription(profile_id)`
+  - `list_proxy_inventory()`
+  - `replace_proxy_inventory_scope(source_scope, nodes)`
+  - `get_proxy_inventory_node(node_id)`
+  - `update_proxy_inventory_allocation(node_id, allocation_scope, updated_at)`
+  - `delete_proxy_inventory_node(node_id)`
   - `replace_ip_records(profile_id, records)`
   - `upsert_ip_records(profile_id, records)`
   - `list_ip_records(profile_id)`
@@ -43,3 +48,13 @@
   - `open_batch(profile_id, request)`
   - `list_sessions(profile_id)`
   - `close_session(profile_id, session_id)`
+
+
+- `BrokerService`
+  - `load_global_subscription(source)`
+  - `list_proxy_inventory(scope, profile_id)`
+  - `update_proxy_allocation(node_id, allocation_scope)`
+  - `delete_proxy_inventory_node(node_id)`
+  - `get_profile_proxy_settings(profile_id)`
+  - `update_profile_proxy_settings(profile_id, use_global_proxies)`
+  - `load_subscription(profile_id, source)` now imports into the profile-local inventory scope and rebuilds the effective pool instead of treating the upstream result as the final pool directly.

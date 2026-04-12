@@ -121,6 +121,41 @@ export interface ListProfilesResponse {
   profiles: string[];
 }
 
+export type ProxyScope = { type: "global" } | { type: "profile"; profile_id: string };
+
+export interface ProxyInventoryItem {
+  node_id: string;
+  proxy_name: string;
+  proxy_type: string;
+  server: string;
+  resolved_ips: string[];
+  source_scope: ProxyScope;
+  allocation_scope: ProxyScope;
+  effective_profile_ids: string[];
+}
+
+export interface ListProxyInventoryResponse {
+  items: ProxyInventoryItem[];
+}
+
+export interface ProxyInventoryListQuery {
+  scope?: "all" | "global" | "profile";
+  profile_id?: string;
+}
+
+export interface UpdateProxyAllocationRequest {
+  allocation_scope: ProxyScope;
+}
+
+export interface ProfileProxySettings {
+  profile_id: string;
+  use_global_proxies: boolean;
+}
+
+export interface UpdateProfileProxySettingsRequest {
+  use_global_proxies: boolean;
+}
+
 export interface HealthResponse {
   status: string;
 }

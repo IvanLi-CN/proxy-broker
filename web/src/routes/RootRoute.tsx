@@ -12,6 +12,7 @@ import type { AuthMeResponse, CurrentUserState } from "@/lib/types";
 
 export interface RootOutletContext {
   profileId: string;
+  profiles: string[];
   authMe: AuthMeResponse | null;
   currentUser: CurrentUserState;
 }
@@ -89,7 +90,12 @@ export function RootRoute() {
     >
       <Outlet
         context={
-          { profileId, authMe: authMeQuery.data ?? null, currentUser } satisfies RootOutletContext
+          {
+            profileId,
+            profiles,
+            authMe: authMeQuery.data ?? null,
+            currentUser,
+          } satisfies RootOutletContext
         }
       />
     </AppShell>

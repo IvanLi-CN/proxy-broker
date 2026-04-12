@@ -7,7 +7,7 @@ use axum::{
     http::StatusCode,
     middleware,
     response::sse::{Event, KeepAlive, Sse},
-    routing::{delete, get, post},
+    routing::{delete, get, patch, post},
 };
 
 use crate::{
@@ -16,8 +16,10 @@ use crate::{
     models::{
         CreateApiKeyRequest, CreateApiKeyResponse, CreateProfileRequest, CreateProfileResponse,
         HealthResponse, LoadSubscriptionRequest, OpenBatchRequest, OpenSessionRequest,
-        RefreshRequest, SearchSessionOptionsRequest, SuggestedPortResponse, TaskListQuery,
-        TaskRunDetail, TaskRunSummary, TaskStreamEnvelope,
+        ProfileProxySettings, ProxyInventoryListQuery, RefreshRequest,
+        SearchSessionOptionsRequest, SuggestedPortResponse, TaskListQuery, TaskRunDetail,
+        TaskRunSummary, TaskStreamEnvelope, UpdateProfileProxySettingsRequest,
+        UpdateProxyAllocationRequest,
     },
     service::BrokerService,
     tasks::{TaskBusEvent, build_task_list_response, matches_task_query},
@@ -35,6 +37,23 @@ pub fn build_router(state: AppState) -> Router {
         .route("/healthz", get(healthz))
         .route("/api/v1/auth/me", get(auth_me))
         .route("/api/v1/profiles", get(list_profiles).post(create_profile))
+        .route(
+            "/api/v1/proxies/global/subscriptions/load",
+            post(load_global_subscription),
+        )
+        .route("/api/v1/proxies", get(list_proxy_inventory))
+        .route(
+            "/api/v1/proxies/{node_id}/allocation",
+            patch(update_proxy_allocation),
+        )
+        .route(
+            "/api/v1/proxies/{node_id}",
+            delete(delete_proxy_inventory_node),
+        )
+        .route(
+            "/api/v1/profiles/{profile_id}/proxy-settings",
+            get(get_profile_proxy_settings).patch(update_profile_proxy_settings),
+        )
         .route("/api/v1/tasks", get(list_tasks))
         .route("/api/v1/tasks/events", get(stream_tasks))
         .route("/api/v1/tasks/{run_id}", get(get_task_run_detail))
@@ -116,6 +135,80 @@ async fn create_profile(
     let request = parse_json_payload(payload, "create_profile")?;
     let resp = state.service.create_profile(&request.profile_id).await?;
     Ok((StatusCode::CREATED, Json(resp)))
+}
+
+async fn load_global_subscription(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    payload: Result<Json<LoadSubscriptionRequest>, JsonRejection>,
+) -> Result<Json<crate::models::LoadSubscriptionResponse>, BrokerError> {
+    auth.require_admin()?;
+    let request = parse_json_payload(payload, "load_global_subscription")?;
+    let resp = state.service.load_global_subscription(&request.source).await?;
+    Ok(Json(resp))
+}
+
+async fn list_proxy_inventory(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    Query(query): Query<ProxyInventoryListQuery>,
+) -> Result<Json<crate::models::ListProxyInventoryResponse>, BrokerError> {
+    auth.require_admin()?;
+    let resp = state
+        .service
+        .list_proxy_inventory(query.scope.as_deref(), query.profile_id.as_deref())
+        .await?;
+    Ok(Json(resp))
+}
+
+async fn update_proxy_allocation(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    Path(node_id): Path<String>,
+    payload: Result<Json<UpdateProxyAllocationRequest>, JsonRejection>,
+) -> Result<Json<crate::models::ProxyInventoryItem>, BrokerError> {
+    auth.require_admin()?;
+    let request = parse_json_payload(payload, "update_proxy_allocation")?;
+    let resp = state
+        .service
+        .update_proxy_allocation(&node_id, &request.allocation_scope)
+        .await?;
+    Ok(Json(resp))
+}
+
+async fn delete_proxy_inventory_node(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    Path(node_id): Path<String>,
+) -> Result<StatusCode, BrokerError> {
+    auth.require_admin()?;
+    state.service.delete_proxy_inventory_node(&node_id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn get_profile_proxy_settings(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    Path(profile_id): Path<String>,
+) -> Result<Json<ProfileProxySettings>, BrokerError> {
+    auth.require_admin()?;
+    let resp = state.service.get_profile_proxy_settings(&profile_id).await?;
+    Ok(Json(resp))
+}
+
+async fn update_profile_proxy_settings(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    Path(profile_id): Path<String>,
+    payload: Result<Json<UpdateProfileProxySettingsRequest>, JsonRejection>,
+) -> Result<Json<ProfileProxySettings>, BrokerError> {
+    auth.require_admin()?;
+    let request = parse_json_payload(payload, "update_profile_proxy_settings")?;
+    let resp = state
+        .service
+        .update_profile_proxy_settings(&profile_id, request.use_global_proxies)
+        .await?;
+    Ok(Json(resp))
 }
 
 async fn list_tasks(

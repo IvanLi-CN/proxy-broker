@@ -4,8 +4,9 @@ mod sqlite;
 use async_trait::async_trait;
 
 use crate::models::{
-    ApiKeyRecord, IpRecord, ProbeRecord, ProfileSyncConfig, ProxyNode, SessionRecord,
-    TaskListQuery, TaskRunEventRecord, TaskRunRecord,
+    ApiKeyRecord, IpRecord, ProbeRecord, ProfileProxySettings, ProfileSyncConfig,
+    ProxyInventoryRecord, ProxyNode, ProxyScope, SessionRecord, TaskListQuery,
+    TaskRunEventRecord, TaskRunRecord,
 };
 
 pub use memory::MemoryStore;
@@ -30,6 +31,27 @@ pub trait BrokerStore: Send + Sync {
         removed_session_ids: &[String],
     ) -> anyhow::Result<()>;
     async fn list_subscription(&self, profile_id: &str) -> anyhow::Result<Vec<ProxyNode>>;
+
+    async fn list_proxy_inventory(&self) -> anyhow::Result<Vec<ProxyInventoryRecord>>;
+    async fn replace_proxy_inventory_scope(
+        &self,
+        source_scope: &ProxyScope,
+        nodes: &[ProxyInventoryRecord],
+    ) -> anyhow::Result<()>;
+    async fn get_proxy_inventory_node(
+        &self,
+        node_id: &str,
+    ) -> anyhow::Result<Option<ProxyInventoryRecord>>;
+    async fn update_proxy_inventory_allocation(
+        &self,
+        node_id: &str,
+        allocation_scope: &ProxyScope,
+        updated_at: i64,
+    ) -> anyhow::Result<Option<ProxyInventoryRecord>>;
+    async fn delete_proxy_inventory_node(
+        &self,
+        node_id: &str,
+    ) -> anyhow::Result<Option<ProxyInventoryRecord>>;
 
     async fn replace_ip_records(
         &self,
@@ -98,6 +120,15 @@ pub trait BrokerStore: Send + Sync {
         profile_id: &str,
     ) -> anyhow::Result<Option<ProfileSyncConfig>>;
     async fn list_profile_sync_configs(&self) -> anyhow::Result<Vec<ProfileSyncConfig>>;
+
+    async fn get_profile_proxy_settings(
+        &self,
+        profile_id: &str,
+    ) -> anyhow::Result<Option<ProfileProxySettings>>;
+    async fn upsert_profile_proxy_settings(
+        &self,
+        settings: &ProfileProxySettings,
+    ) -> anyhow::Result<()>;
 
     async fn insert_task_run(&self, run: &TaskRunRecord) -> anyhow::Result<()>;
     async fn update_task_run(&self, run: &TaskRunRecord) -> anyhow::Result<()>;

@@ -67,6 +67,8 @@ function formatKnownApiError(t: Translator, error: ApiError) {
       return t("error.api.api_key_not_found");
     case "task_run_not_found":
       return t("error.api.task_run_not_found");
+    case "proxy_inventory_node_not_found":
+      return t("error.api.proxy_inventory_node_not_found");
     case "profile_access_denied":
       return t("error.api.profile_access_denied");
     case "mihomo_unavailable":

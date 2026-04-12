@@ -3,6 +3,22 @@ import { expect, test } from "@playwright/test";
 test.beforeEach(async ({ page }) => {
   const recentTaskBaseSec = Math.floor(Date.now() / 1000) - 120;
   let profiles = ["default", "edge-jp"];
+  const profileSettingsByProfile: Record<
+    string,
+    { profile_id: string; use_global_proxies: boolean }
+  > = {
+    default: { profile_id: "default", use_global_proxies: true },
+    "edge-jp": { profile_id: "edge-jp", use_global_proxies: true },
+  };
+  let inventoryItems: Array<{
+    node_id: string;
+    proxy_name: string;
+    proxy_type: string;
+    server: string;
+    resolved_ips: string[];
+    source_scope: { type: "global" } | { type: "profile"; profile_id: string };
+    allocation_scope: { type: "global" } | { type: "profile"; profile_id: string };
+  }> = [];
   const taskList = {
     summary: {
       total_runs: 3,
@@ -123,6 +139,22 @@ test.beforeEach(async ({ page }) => {
     return decodeURIComponent(parts[4] ?? "default");
   };
 
+  const effectiveProfileIdsFor = (item: (typeof inventoryItems)[number]) => {
+    if (item.allocation_scope.type === "global") {
+      return profiles.filter(
+        (profileId) => profileSettingsByProfile[profileId]?.use_global_proxies ?? true,
+      );
+    }
+    return [item.allocation_scope.profile_id];
+  };
+
+  const inventoryResponse = () => ({
+    items: inventoryItems.map((item) => ({
+      ...item,
+      effective_profile_ids: effectiveProfileIdsFor(item),
+    })),
+  });
+
   await page.route("**/healthz", async (route) => {
     await route.fulfill({
       status: 200,
@@ -184,6 +216,10 @@ test.beforeEach(async ({ page }) => {
 
       profiles = [...profiles, profileId].sort((left, right) => left.localeCompare(right));
       sessionsByProfile[profileId] = [];
+      profileSettingsByProfile[profileId] = {
+        profile_id: profileId,
+        use_global_proxies: true,
+      };
       await route.fulfill({
         status: 201,
         contentType: "application/json",
@@ -231,7 +267,109 @@ test.beforeEach(async ({ page }) => {
     });
   });
 
+  await page.route("**/api/v1/proxies/global/subscriptions/load", async (route) => {
+    inventoryItems = [
+      {
+        node_id: "node-global-1",
+        proxy_name: "global-jp-entry",
+        proxy_type: "socks5",
+        server: "jp.example.com",
+        resolved_ips: ["203.0.113.10", "203.0.113.11"],
+        source_scope: { type: "global" },
+        allocation_scope: { type: "global" },
+      },
+    ];
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        loaded_proxies: 12,
+        distinct_ips: 9,
+        warnings: [],
+      }),
+    });
+  });
+
+  await page.route("**/api/v1/proxies?*", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(inventoryResponse()),
+    });
+  });
+
+  await page.route("**/api/v1/proxies/*/allocation", async (route) => {
+    const nodeId = route.request().url().split("/").slice(-2, -1)[0] ?? "";
+    const payload = JSON.parse(route.request().postData() ?? "{}") as {
+      allocation_scope?: { type: "global" } | { type: "profile"; profile_id: string };
+    };
+    inventoryItems = inventoryItems.map((item) =>
+      item.node_id === nodeId && payload.allocation_scope
+        ? { ...item, allocation_scope: payload.allocation_scope }
+        : item,
+    );
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({}) });
+  });
+
+  await page.route("**/api/v1/proxies/*", async (route) => {
+    if (route.request().method() === "DELETE") {
+      const nodeId = route.request().url().split("/").pop() ?? "";
+      inventoryItems = inventoryItems.filter((item) => item.node_id !== nodeId);
+      await route.fulfill({ status: 204, body: "" });
+      return;
+    }
+    await route.fallback();
+  });
+
+  await page.route("**/api/v1/profiles/*/proxy-settings", async (route) => {
+    const profileId = extractProfileId(route.request().url());
+    if (route.request().method() === "GET") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(
+          profileSettingsByProfile[profileId] ?? {
+            profile_id: profileId,
+            use_global_proxies: true,
+          },
+        ),
+      });
+      return;
+    }
+
+    if (route.request().method() === "PATCH") {
+      const payload = JSON.parse(route.request().postData() ?? "{}") as {
+        use_global_proxies?: boolean;
+      };
+      profileSettingsByProfile[profileId] = {
+        profile_id: profileId,
+        use_global_proxies: payload.use_global_proxies ?? true,
+      };
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(profileSettingsByProfile[profileId]),
+      });
+      return;
+    }
+
+    await route.fallback();
+  });
+
   await page.route("**/api/v1/profiles/*/subscriptions/load", async (route) => {
+    const profileId = extractProfileId(route.request().url());
+    inventoryItems = [
+      ...inventoryItems.filter((item) => item.source_scope.type === "global"),
+      {
+        node_id: `node-profile-${profileId}`,
+        proxy_name: `${profileId}-entry`,
+        proxy_type: "socks5",
+        server: `${profileId}.internal`,
+        resolved_ips: ["198.51.100.42"],
+        source_scope: { type: "profile", profile_id: profileId },
+        allocation_scope: { type: "profile", profile_id: profileId },
+      },
+    ];
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -431,8 +569,24 @@ test("operator can drive the main workflows", async ({ page }) => {
   await page.getByText('Create "fresh-lab"').click();
   await expect(page.getByRole("combobox", { name: /profile id/i })).toContainText("fresh-lab");
 
-  await page.getByRole("button", { name: /load subscription/i }).click();
-  await expect(page.getByText("Loaded 48 proxies across 26 distinct IPs.")).toBeVisible();
+  await page.getByRole("link", { name: /Proxies/i }).click();
+  await page.getByRole("button", { name: /import global pool/i }).click();
+  await expect(
+    page.getByText("Imported 12 proxies across 9 distinct IPs into the global pool."),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: /import profile pool/i }).click();
+  await expect(
+    page.getByText("Imported 48 proxies across 26 distinct IPs into profile fresh-lab."),
+  ).toBeVisible();
+
+  await page.getByRole("checkbox", { name: /use global pool for fresh-lab/i }).click();
+  await expect(page.getByText("local-only").first()).toBeVisible();
+
+  await expect(page.getByText("global-jp-entry")).toBeVisible();
+  await expect(page.getByText("fresh-lab-entry")).toBeVisible();
+
+  await page.getByRole("link", { name: /Overview/i }).click();
 
   await page.getByRole("button", { name: /refresh metadata/i }).click();
   await expect(

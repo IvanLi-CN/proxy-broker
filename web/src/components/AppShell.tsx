@@ -1,5 +1,6 @@
 import {
   ActivityIcon,
+  CableIcon,
   ChevronRightIcon,
   ClipboardListIcon,
   CommandIcon,
@@ -80,6 +81,12 @@ export function AppShell({
       label: t("Tasks"),
       icon: ClipboardListIcon,
       meta: t("Watch scheduled sync and metadata refresh runs"),
+    },
+    {
+      to: "/proxies",
+      label: t("Proxies"),
+      icon: CableIcon,
+      meta: t("Manage the global pool, profile imports, and allocations"),
     },
     {
       to: "/ips",

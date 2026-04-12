@@ -43,6 +43,8 @@ pub enum BrokerError {
     TaskRunNotFound,
     #[error("profile access denied")]
     ProfileAccessDenied,
+    #[error("proxy inventory node not found")]
+    ProxyInventoryNodeNotFound,
     #[error("mihomo runtime unavailable: {0}")]
     MihomoUnavailable(String),
     #[error("batch open failed")]
@@ -71,6 +73,7 @@ impl BrokerError {
             Self::ApiKeyNotFound => "api_key_not_found",
             Self::TaskRunNotFound => "task_run_not_found",
             Self::ProfileAccessDenied => "profile_access_denied",
+            Self::ProxyInventoryNodeNotFound => "proxy_inventory_node_not_found",
             Self::MihomoUnavailable(_) => "mihomo_unavailable",
             Self::BatchOpenFailed => "batch_open_failed",
             Self::Internal(_) => "internal_error",
@@ -96,6 +99,7 @@ impl BrokerError {
             Self::ApiKeyNotFound => StatusCode::NOT_FOUND,
             Self::TaskRunNotFound => StatusCode::NOT_FOUND,
             Self::ProfileAccessDenied => StatusCode::FORBIDDEN,
+            Self::ProxyInventoryNodeNotFound => StatusCode::NOT_FOUND,
             Self::MihomoUnavailable(_) => StatusCode::BAD_GATEWAY,
             Self::BatchOpenFailed => StatusCode::CONFLICT,
             Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
