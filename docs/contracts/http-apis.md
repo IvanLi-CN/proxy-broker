@@ -3,7 +3,7 @@
 ## Authentication model
 
 - Human identity comes from configured Forward Auth response headers.
-- Machine identity comes from profile-scoped API keys sent as:
+- Machine identity comes from owner-scoped API keys sent as:
   - `Authorization: Bearer pbk_<key_id>_<random>`
   - `X-API-Key: pbk_<key_id>_<random>`
 - `development` mode ignores incoming identity headers and forces the configured development principal.
@@ -44,8 +44,10 @@
   - `email?`
   - `groups[]`
   - `is_admin`
-  - `profile_id?`
   - `api_key_id?`
+  - `api_key_owner_subject?`
+  - `api_key_profile_scope?`
+  - `profile_id?` (compatibility field; only returned for single-profile API keys)
 - Error:
   - `authentication_required` (401)
   - `api_key_invalid` (401)
@@ -264,7 +266,7 @@
 - Change: Updated
 - Auth:
   - admin human or development principal
-  - API key bound to `{profile_id}`
+  - API key whose scope allows `{profile_id}`
 - Body:
   - `name?`: optional import display name
   - exactly one of:
@@ -301,7 +303,7 @@
 - Change: New
 - Auth:
   - admin human or development principal
-  - API key bound to `{profile_id}`
+  - API key whose scope allows `{profile_id}`
 - Body (optional):
   - `force`: `bool`
 - Success:
@@ -319,7 +321,7 @@
 - Change: New
 - Auth:
   - admin human or development principal
-  - API key bound to `{profile_id}`
+  - API key whose scope allows `{profile_id}`
 - Body:
   - `country_codes`: `string[]`
   - `cities`: `string[]`
@@ -343,7 +345,7 @@
 - Change: New
 - Auth:
   - admin human or development principal
-  - API key bound to `{profile_id}`
+  - API key whose scope allows `{profile_id}`
 - Body:
   - `kind`: `country|city|ip`
   - `query`: `string?`
@@ -370,7 +372,7 @@
 - Change: New
 - Auth:
   - admin human or development principal
-  - API key bound to `{profile_id}`
+  - API key whose scope allows `{profile_id}`
 - Body:
   - `selection_mode`: `any|geo|ip` (defaults to `any`)
   - `country_codes`: `string[]`
@@ -407,7 +409,7 @@
 - Change: New
 - Auth:
   - admin human or development principal
-  - API key bound to `{profile_id}`
+  - API key whose scope allows `{profile_id}`
 - Body:
   - `requests[]`: same shape and constraints as `POST /sessions/open`
 - Success:
@@ -429,7 +431,7 @@
 - Change: New
 - Auth:
   - admin human or development principal
-  - API key bound to `{profile_id}`
+  - API key whose scope allows `{profile_id}`
 - Success:
   - `port`
 - Notes:
@@ -448,7 +450,7 @@
 - Change: New
 - Auth:
   - admin human or development principal
-  - API key bound to `{profile_id}`
+  - API key whose scope allows `{profile_id}`
 - Success:
   - `sessions[]`
 - Error:
@@ -463,7 +465,7 @@
 - Change: New
 - Auth:
   - admin human or development principal
-  - API key bound to `{profile_id}`
+  - API key whose scope allows `{profile_id}`
 - Success: 204
 - Error:
   - `authentication_required` (401)
@@ -472,36 +474,39 @@
   - `api_key_revoked` (401)
   - `profile_access_denied` (403)
 
-## GET /api/v1/profiles/{profile_id}/api-keys
+## GET /api/v1/api-keys
 
 - Change: New
 - Auth: admin human or development principal
 - Success:
   - `api_keys[]`
-  - each item contains `key_id`, `profile_id`, `name`, `prefix`, `created_by`, `created_at`, `last_used_at?`, `revoked_at?`
+  - each item contains `key_id`, `name`, `prefix`, `created_by`, `owner_subject`, `profile_scope`, `created_at`, `last_used_at?`, `revoked_at?`
+  - `profile_id?` is a compatibility field and only appears when `profile_scope.kind=selected_profiles` with exactly one selected profile
 - Error:
   - `authentication_required` (401)
   - `admin_required` (403)
-  - `profile_not_found` (404)
 
-## POST /api/v1/profiles/{profile_id}/api-keys
+## POST /api/v1/api-keys
 
 - Change: New
 - Auth: admin human or development principal
 - Body:
   - `name`: `string`
+  - `profile_scope.kind`: `selected_profiles|all_profiles`
+  - `profile_scope.profile_ids[]`: required for `selected_profiles`, forbidden for `all_profiles`
 - Success:
   - `api_key`
   - `secret`
 - Notes:
+  - the key owner is always the current `principal.subject`
   - `secret` is only returned on create
 - Error:
   - `authentication_required` (401)
   - `admin_required` (403)
-  - `profile_not_found` (404)
   - `invalid_request` (400) when `name` is empty after `trim`
+  - `invalid_request` (400) when `profile_scope` is malformed, `selected_profiles` is empty, `all_profiles` includes `profile_ids`, or any referenced profile does not exist
 
-## DELETE /api/v1/profiles/{profile_id}/api-keys/{key_id}
+## DELETE /api/v1/api-keys/{key_id}
 
 - Change: New
 - Auth: admin human or development principal
@@ -509,8 +514,7 @@
 - Error:
   - `authentication_required` (401)
   - `admin_required` (403)
-  - `profile_not_found` (404)
-  - `api_key_not_found` (404)
+  - `api_key_not_found` (404) when the key does not belong to the current owner or does not exist
 
 ## GET /healthz
 

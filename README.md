@@ -6,7 +6,7 @@
 - building an IP-oriented pool with probe and geo metadata,
 - opening and closing local proxy listener sessions by selected IP,
 - serving an embedded Bun-built operator web console from the same binary,
-- enforcing human admin access with Forward Auth identity headers and profile-scoped API keys.
+- enforcing human admin access with Forward Auth identity headers and owner-scoped API keys.
 
 The service binds `127.0.0.1` by default, session listeners also default to
 `127.0.0.1`, and it exposes REST endpoints under `/api/v1`, a health probe at
@@ -16,7 +16,7 @@ Authentication defaults to `enforce`, which means the UI and protected APIs
 expect either:
 
 - a forwarded human identity that resolves to an admin user or admin group, or
-- a valid profile-scoped machine API key for profile business endpoints.
+- a valid owner-scoped machine API key whose scope allows the target profile business endpoint.
 
 ## Start the service
 
@@ -75,9 +75,9 @@ Development mode uses:
 - `PROXY_BROKER_AUTH_DEV_EMAIL`
 - `PROXY_BROKER_AUTH_DEV_GROUPS`
 
-Machine callers use profile-scoped API keys issued through:
+Machine callers use owner-scoped API keys issued through:
 
-- `POST /api/v1/profiles/{profile_id}/api-keys`
+- `POST /api/v1/api-keys`
 
 Then call profile business endpoints with either:
 
@@ -230,6 +230,8 @@ curl http://127.0.0.1:8080/api/v1/auth/me \
 
 Base path: `http://127.0.0.1:8080/api/v1/profiles/{profile_id}`
 
+Key management base path: `http://127.0.0.1:8080/api/v1/api-keys`
+
 ### Load subscription
 
 - `POST /subscriptions/load`
@@ -374,24 +376,30 @@ stay disambiguated by country.
 
 - `DELETE /sessions/{session_id}`
 
-### Issue a profile API key
+### Issue an owner API key
 
-- `POST /api/v1/profiles/{profile_id}/api-keys`
+- `POST /api/v1/api-keys`
 - Request body:
 
 ```json
 {
-  "name": "deploy-bot"
+  "name": "deploy-bot",
+  "profile_scope": {
+    "kind": "selected_profiles",
+    "profile_ids": ["default"]
+  }
 }
 ```
 
-### List profile API keys
+Use `"kind": "all_profiles"` to issue a key that can access both current and future profiles.
 
-- `GET /api/v1/profiles/{profile_id}/api-keys`
+### List owner API keys
 
-### Revoke a profile API key
+- `GET /api/v1/api-keys`
 
-- `DELETE /api/v1/profiles/{profile_id}/api-keys/{key_id}`
+### Revoke an owner API key
+
+- `DELETE /api/v1/api-keys/{key_id}`
 
 ### Machine caller example
 

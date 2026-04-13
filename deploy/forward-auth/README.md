@@ -26,7 +26,7 @@ The Authelia `access_control` policy for both human-facing broker hosts is `bypa
 - `broker-basic.<domain>`
   - smoke-only helper route with optional HTTP Basic-derived identity headers
 - `machine-broker.<domain>`
-  - machine-facing route with no proxy-side auth so `proxy-broker` profile API keys can authenticate directly
+  - machine-facing route with no proxy-side auth so `proxy-broker` owner-scoped API keys can authenticate directly
 
 ## Test Users
 

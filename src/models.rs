@@ -314,6 +314,55 @@ pub enum AuthPrincipalType {
     Development,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApiKeyProfileScopeKind {
+    SelectedProfiles,
+    AllProfiles,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApiKeyProfileScope {
+    pub kind: ApiKeyProfileScopeKind,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub profile_ids: Vec<String>,
+}
+
+impl ApiKeyProfileScope {
+    pub fn selected<I>(profile_ids: I) -> Self
+    where
+        I: IntoIterator<Item = String>,
+    {
+        Self {
+            kind: ApiKeyProfileScopeKind::SelectedProfiles,
+            profile_ids: profile_ids.into_iter().collect(),
+        }
+    }
+
+    pub fn all_profiles() -> Self {
+        Self {
+            kind: ApiKeyProfileScopeKind::AllProfiles,
+            profile_ids: Vec::new(),
+        }
+    }
+
+    pub fn single_profile_id(&self) -> Option<String> {
+        if self.kind == ApiKeyProfileScopeKind::SelectedProfiles && self.profile_ids.len() == 1 {
+            return self.profile_ids.first().cloned();
+        }
+        None
+    }
+
+    pub fn allows_profile(&self, profile_id: &str) -> bool {
+        match self.kind {
+            ApiKeyProfileScopeKind::AllProfiles => true,
+            ApiKeyProfileScopeKind::SelectedProfiles => {
+                self.profile_ids.iter().any(|item| item == profile_id)
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthMeResponse {
     pub authenticated: bool,
@@ -328,20 +377,28 @@ pub struct AuthMeResponse {
     pub profile_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api_key_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key_owner_subject: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key_profile_scope: Option<ApiKeyProfileScope>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateApiKeyRequest {
     pub name: String,
+    pub profile_scope: ApiKeyProfileScope,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiKeySummary {
     pub key_id: String,
-    pub profile_id: String,
     pub name: String,
     pub prefix: String,
     pub created_by: String,
+    pub owner_subject: String,
+    pub profile_scope: ApiKeyProfileScope,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile_id: Option<String>,
     pub created_at: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_used_at: Option<i64>,
@@ -666,12 +723,12 @@ pub struct ProxyImportRecord {
 #[derive(Debug, Clone)]
 pub struct ApiKeyRecord {
     pub key_id: String,
-    pub profile_id: String,
     pub name: String,
     pub secret_prefix: String,
     pub secret_salt: String,
     pub secret_hash: String,
     pub created_by_subject: String,
+    pub profile_scope: ApiKeyProfileScope,
     pub created_at: i64,
     pub last_used_at: Option<i64>,
     pub revoked_at: Option<i64>,
@@ -681,10 +738,12 @@ impl ApiKeyRecord {
     pub fn as_summary(&self) -> ApiKeySummary {
         ApiKeySummary {
             key_id: self.key_id.clone(),
-            profile_id: self.profile_id.clone(),
             name: self.name.clone(),
             prefix: self.secret_prefix.clone(),
             created_by: self.created_by_subject.clone(),
+            owner_subject: self.created_by_subject.clone(),
+            profile_scope: self.profile_scope.clone(),
+            profile_id: self.profile_scope.single_profile_id(),
             created_at: self.created_at,
             last_used_at: self.last_used_at,
             revoked_at: self.revoked_at,
@@ -839,6 +898,11 @@ impl_task_enum_codec!(TaskEventLevel {
     Info => "info",
     Warning => "warning",
     Error => "error",
+});
+
+impl_task_enum_codec!(ApiKeyProfileScopeKind {
+    SelectedProfiles => "selected_profiles",
+    AllProfiles => "all_profiles",
 });
 
 #[derive(Debug, Clone, Default)]

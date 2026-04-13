@@ -63,23 +63,36 @@ export const zhCN: MessageCatalog = {
   "Closed {sessionId}": "已关闭 {sessionId}",
   "Access control": "访问控制",
   "Identity and project keys": "身份与项目密钥",
-  "Forward Auth only tells the backend who the operator is. Admin checks and profile-scoped machine keys are enforced here.":
-    "前置认证只负责告诉后端当前操作者是谁；管理员校验与按配置绑定的机器密钥都在这里执行。",
+  "Forward Auth only tells the backend who the operator is. Admin checks and owner-scoped machine keys are enforced here.":
+    "前置认证只负责告诉后端当前操作者是谁；管理员校验与按操作者归属的机器密钥都在这里执行。",
   "New API key issued": "已签发新的 API 密钥",
   "Copy this secret now. The backend will only reveal it once.":
     "现在就复制这个密钥吧，后端只会展示这一次。",
+  "owner {subject}": "归属者 {subject}",
   "profile {profileId}": "配置 {profileId}",
   "prefix {prefix}": "前缀 {prefix}",
-  "Create a profile key": "创建配置密钥",
+  "Create an owner key": "创建归属密钥",
+  "Allow all profiles": "允许所有配置",
+  "All future profiles remain available to this key until it is revoked.":
+    "即使以后新增配置，这把密钥也会持续可用，直到被撤销。",
   "Machine keys can only be issued by an admin human or the development identity.":
     "只有管理员用户或开发模式身份可以签发机器密钥。",
   "API key name": "API 密钥名称",
+  "Available profiles": "可用配置",
+  "The new key may access only the selected profiles.": "新密钥只能访问这里选中的配置。",
+  "Select one or more profiles": "选择一个或多个配置",
+  "Search profiles": "搜索配置",
+  "No matching profiles": "没有匹配的配置",
   "Create key": "创建密钥",
   "Issued keys": "已签发密钥",
   "{count} total": "共 {count} 个",
   "Key inventory unavailable": "密钥列表暂不可用",
   "Loading issued keys...": "正在加载已签发密钥……",
-  "No machine keys have been issued for this profile yet.": "这个配置还没有签发任何机器密钥。",
+  "No machine keys have been issued for this owner yet.": "这个归属者还没有签发任何机器密钥。",
+  "Owner {subject}": "归属者 {subject}",
+  "Scope {value}": "范围 {value}",
+  "all profiles": "所有配置",
+  "{count} selected profiles": "已选择 {count} 个配置",
   revoked: "已撤销",
   active: "生效中",
   Revoke: "撤销",
@@ -114,10 +127,9 @@ export const zhCN: MessageCatalog = {
     "这是开发模式注入的本地管理员身份，设计上会绕过转发头。",
   admin: "管理员",
   "api key": "API 密钥",
-  "Machine principal resolved from a profile-scoped API key.":
-    "这是通过按配置绑定的 API 密钥解析出的机器主体。",
+  "Machine principal resolved from an owner-scoped API key.":
+    "这是通过按归属者授权的 API 密钥解析出的机器主体。",
   "API key ID: {id}": "API 密钥 ID：{id}",
-  "Bound profile: {profileId}": "绑定配置：{profileId}",
   "human admin": "管理员用户",
   human: "用户",
   "Forward Auth identified an administrator. The backend authorizes admin-only routes.":

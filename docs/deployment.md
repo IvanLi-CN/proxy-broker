@@ -6,7 +6,7 @@
 
 - Human users are identified from forwarded headers.
 - The service decides whether that human is an admin by checking `PROXY_BROKER_AUTH_ADMIN_USERS` and `PROXY_BROKER_AUTH_ADMIN_GROUPS`.
-- Machine callers authenticate with profile-scoped API keys issued by the service itself.
+- Machine callers authenticate with owner-scoped API keys issued by the service itself.
 - `development` mode bypasses forwarded headers and injects a fixed local admin principal.
 
 The default mode is `enforce`.
@@ -130,8 +130,8 @@ The rendered Traefik topology exposes four hosts on a shared test domain:
   - smoke-only route where Traefik forwards any HTTP Basic-derived identity
     headers through the same Authelia `forward-auth` endpoint
 - `machine-broker.<domain>`
-  - machine-facing route with no proxy-side human auth so profile API keys can
-    reach `proxy-broker` directly
+  - machine-facing route with no proxy-side human auth so owner-scoped API keys
+    can reach `proxy-broker` directly
 
 Session listeners are separate raw TCP entrypoints. They do not ride through the
 HTTPS web domain and should be reached through the broker host/IP that exposes
@@ -197,14 +197,14 @@ The same render step also allocates a free private `/24` subnet when you do not 
 - `/api/v1/profiles/{profile_id}/sessions/open-batch`
 - `/api/v1/profiles/{profile_id}/sessions/suggested-port`
 - `/api/v1/profiles/{profile_id}/sessions/{session_id}`
-  - admin human, development principal, or API key bound to that `profile_id`
-- `/api/v1/profiles/{profile_id}/api-keys`
-- `/api/v1/profiles/{profile_id}/api-keys/{key_id}`
+  - admin human, development principal, or API key whose scope allows that `profile_id`
+- `/api/v1/api-keys`
+- `/api/v1/api-keys/{key_id}`
   - admin human or development principal only
 
 ## Machine Access
 
-Profile API keys can be sent either as a bearer token or through `X-API-Key`.
+Owner-scoped API keys can be sent either as a bearer token or through `X-API-Key`.
 
 Bearer example:
 
@@ -222,6 +222,28 @@ curl http://127.0.0.1:8080/api/v1/profiles/default/sessions \
   -H "X-API-Key: pbk_<key_id>_<secret>"
 ```
 
+Issue a selected-profile key:
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/v1/api-keys \
+  -H "X-Forwarded-User: admin@example.com" \
+  -H "X-Forwarded-Email: admin@example.com" \
+  -H "X-Forwarded-Groups: proxy-broker-admins" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"deploy-bot","profile_scope":{"kind":"selected_profiles","profile_ids":["default"]}}'
+```
+
+Issue an all-profile key:
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/v1/api-keys \
+  -H "X-Forwarded-User: admin@example.com" \
+  -H "X-Forwarded-Email: admin@example.com" \
+  -H "X-Forwarded-Groups: proxy-broker-admins" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"fleet-bot","profile_scope":{"kind":"all_profiles"}}'
+```
+
 ## Session Port Pool
 
 - `PROXY_BROKER_SESSION_PORT_RANGE`
@@ -230,4 +252,4 @@ curl http://127.0.0.1:8080/api/v1/profiles/default/sessions \
   - use this when the deployment only exposes a fixed host port pool such as
     `20000-20999`
 
-Profile API keys are limited to their bound `profile_id`. Using a valid key against another profile returns `403 profile_access_denied`.
+Selected-profile API keys are limited to the chosen `profile_ids`. All-profile API keys dynamically cover both current and future profiles. Using a valid key against a profile outside its scope returns `403 profile_access_denied`.

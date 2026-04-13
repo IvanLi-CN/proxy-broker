@@ -7,11 +7,11 @@ use uuid::Uuid;
 
 use crate::{
     models::{
-        ApiKeyRecord, IpRecord, ProbeRecord, ProfileProxySettings, ProxyImportRecord,
-        ProxyImportSourceIdentity, ProxyImportSyncConfig, ProxyInventoryRecord, ProxyNode,
-        ProxyScope, SessionRecord, SubscriptionSource, TaskEventLevel, TaskListQuery,
-        TaskRunEventRecord, TaskRunKind, TaskRunRecord, TaskRunStage, TaskRunStatus,
-        TaskRunTrigger,
+        ApiKeyProfileScope, ApiKeyProfileScopeKind, ApiKeyRecord, IpRecord, ProbeRecord,
+        ProfileProxySettings, ProfileSyncConfig, ProxyImportRecord, ProxyImportSourceIdentity,
+        ProxyImportSyncConfig, ProxyInventoryRecord, ProxyNode, ProxyScope, SessionRecord,
+        SubscriptionSource, TaskEventLevel, TaskListQuery, TaskRunEventRecord, TaskRunKind,
+        TaskRunRecord, TaskRunStage, TaskRunStatus, TaskRunTrigger,
     },
     store::BrokerStore,
     tasks::matches_task_query,
@@ -128,24 +128,7 @@ impl SqliteStore {
         .execute(&self.pool)
         .await?;
 
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS api_keys (
-              key_id TEXT PRIMARY KEY,
-              profile_id TEXT NOT NULL,
-              name TEXT NOT NULL,
-              secret_prefix TEXT NOT NULL,
-              secret_salt TEXT NOT NULL,
-              secret_hash TEXT NOT NULL,
-              created_by_subject TEXT NOT NULL,
-              created_at INTEGER NOT NULL,
-              last_used_at INTEGER,
-              revoked_at INTEGER
-            )
-            "#,
-        )
-        .execute(&self.pool)
-        .await?;
+        self.migrate_api_keys_schema().await?;
 
         sqlx::query(
             r#"
@@ -366,15 +349,6 @@ impl SqliteStore {
         .execute(&self.pool)
         .await?;
 
-        sqlx::query(
-            r#"
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_secret_hash
-            ON api_keys(secret_hash)
-            "#,
-        )
-        .execute(&self.pool)
-        .await?;
-
         self.migrate_proxy_import_sync_configs().await?;
         self.backfill_proxy_imports_from_inventory().await?;
 
@@ -386,7 +360,6 @@ impl SqliteStore {
         )
         .execute(&self.pool)
         .await?;
-
         Ok(())
     }
 
@@ -678,6 +651,141 @@ impl SqliteStore {
         tx.commit().await?;
         Ok(())
     }
+
+    async fn migrate_api_keys_schema(&self) -> anyhow::Result<()> {
+        let columns = sqlx::query("PRAGMA table_info(api_keys)")
+            .fetch_all(&self.pool)
+            .await?;
+        let has_scope_kind = columns
+            .iter()
+            .filter_map(|row| row.try_get::<String, _>("name").ok())
+            .any(|name| name == "scope_kind");
+        let has_profile_id = columns
+            .iter()
+            .filter_map(|row| row.try_get::<String, _>("name").ok())
+            .any(|name| name == "profile_id");
+
+        if columns.is_empty() {
+            sqlx::query(
+                r#"
+                CREATE TABLE api_keys (
+                  key_id TEXT PRIMARY KEY,
+                  name TEXT NOT NULL,
+                  secret_prefix TEXT NOT NULL,
+                  secret_salt TEXT NOT NULL,
+                  secret_hash TEXT NOT NULL,
+                  created_by_subject TEXT NOT NULL,
+                  scope_kind TEXT NOT NULL,
+                  created_at INTEGER NOT NULL,
+                  last_used_at INTEGER,
+                  revoked_at INTEGER
+                )
+                "#,
+            )
+            .execute(&self.pool)
+            .await?;
+        } else if has_profile_id || !has_scope_kind {
+            let mut tx = self.pool.begin().await?;
+            sqlx::query("ALTER TABLE api_keys RENAME TO api_keys_old")
+                .execute(&mut *tx)
+                .await?;
+
+            sqlx::query(
+                r#"
+                CREATE TABLE api_keys (
+                  key_id TEXT PRIMARY KEY,
+                  name TEXT NOT NULL,
+                  secret_prefix TEXT NOT NULL,
+                  secret_salt TEXT NOT NULL,
+                  secret_hash TEXT NOT NULL,
+                  created_by_subject TEXT NOT NULL,
+                  scope_kind TEXT NOT NULL,
+                  created_at INTEGER NOT NULL,
+                  last_used_at INTEGER,
+                  revoked_at INTEGER
+                )
+                "#,
+            )
+            .execute(&mut *tx)
+            .await?;
+
+            sqlx::query(
+                r#"
+                INSERT INTO api_keys (
+                  key_id, name, secret_prefix, secret_salt, secret_hash,
+                  created_by_subject, scope_kind, created_at, last_used_at, revoked_at
+                )
+                SELECT
+                  key_id, name, secret_prefix, secret_salt, secret_hash,
+                  created_by_subject, 'selected_profiles', created_at, last_used_at, revoked_at
+                FROM api_keys_old
+                "#,
+            )
+            .execute(&mut *tx)
+            .await?;
+
+            sqlx::query(
+                r#"
+                CREATE TABLE IF NOT EXISTS api_key_profiles (
+                  key_id TEXT NOT NULL,
+                  profile_id TEXT NOT NULL,
+                  PRIMARY KEY (key_id, profile_id)
+                )
+                "#,
+            )
+            .execute(&mut *tx)
+            .await?;
+
+            sqlx::query(
+                r#"
+                INSERT INTO api_key_profiles (key_id, profile_id)
+                SELECT key_id, profile_id
+                FROM api_keys_old
+                "#,
+            )
+            .execute(&mut *tx)
+            .await?;
+
+            sqlx::query("DROP TABLE api_keys_old")
+                .execute(&mut *tx)
+                .await?;
+            tx.commit().await?;
+        }
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS api_key_profiles (
+              key_id TEXT NOT NULL,
+              profile_id TEXT NOT NULL,
+              PRIMARY KEY (key_id, profile_id)
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_api_key_profiles_profile
+            ON api_key_profiles(profile_id)
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_secret_hash
+            ON api_keys(secret_hash)
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -697,7 +805,7 @@ impl BrokerStore for SqliteStore {
               UNION
               SELECT profile_id FROM sessions
               UNION
-              SELECT profile_id FROM api_keys
+              SELECT profile_id FROM api_key_profiles
               UNION
               SELECT profile_id FROM profile_sync_configs
               UNION
@@ -1491,35 +1599,50 @@ impl BrokerStore for SqliteStore {
     }
 
     async fn insert_api_key(&self, api_key: &ApiKeyRecord) -> anyhow::Result<()> {
+        let mut tx = self.pool.begin().await?;
         sqlx::query(
             r#"
             INSERT INTO api_keys (
-              key_id, profile_id, name, secret_prefix, secret_salt, secret_hash,
-              created_by_subject, created_at, last_used_at, revoked_at
+              key_id, name, secret_prefix, secret_salt, secret_hash,
+              created_by_subject, scope_kind, created_at, last_used_at, revoked_at
             )
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
             "#,
         )
         .bind(&api_key.key_id)
-        .bind(&api_key.profile_id)
         .bind(&api_key.name)
         .bind(&api_key.secret_prefix)
         .bind(&api_key.secret_salt)
         .bind(&api_key.secret_hash)
         .bind(&api_key.created_by_subject)
+        .bind(api_key.profile_scope.kind.as_str())
         .bind(api_key.created_at)
         .bind(api_key.last_used_at)
         .bind(api_key.revoked_at)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
+
+        for profile_id in &api_key.profile_scope.profile_ids {
+            sqlx::query(
+                r#"
+                INSERT INTO api_key_profiles (key_id, profile_id)
+                VALUES (?1, ?2)
+                "#,
+            )
+            .bind(&api_key.key_id)
+            .bind(profile_id)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
         Ok(())
     }
 
     async fn get_api_key(&self, key_id: &str) -> anyhow::Result<Option<ApiKeyRecord>> {
         let row = sqlx::query(
             r#"
-            SELECT key_id, profile_id, name, secret_prefix, secret_salt, secret_hash,
-                   created_by_subject, created_at, last_used_at, revoked_at
+            SELECT key_id, name, secret_prefix, secret_salt, secret_hash,
+                   created_by_subject, scope_kind, created_at, last_used_at, revoked_at
             FROM api_keys
             WHERE key_id = ?1
             "#,
@@ -1528,29 +1651,41 @@ impl BrokerStore for SqliteStore {
         .fetch_optional(&self.pool)
         .await?;
 
-        row.map(map_api_key_row).transpose()
+        match row {
+            Some(row) => {
+                let profile_ids = fetch_api_key_profile_ids(&self.pool, key_id).await?;
+                Ok(Some(map_api_key_row(row, profile_ids)?))
+            }
+            None => Ok(None),
+        }
     }
 
-    async fn list_api_keys(&self, profile_id: &str) -> anyhow::Result<Vec<ApiKeyRecord>> {
+    async fn list_api_keys(&self, owner_subject: &str) -> anyhow::Result<Vec<ApiKeyRecord>> {
         let rows = sqlx::query(
             r#"
-            SELECT key_id, profile_id, name, secret_prefix, secret_salt, secret_hash,
-                   created_by_subject, created_at, last_used_at, revoked_at
+            SELECT key_id, name, secret_prefix, secret_salt, secret_hash,
+                   created_by_subject, scope_kind, created_at, last_used_at, revoked_at
             FROM api_keys
-            WHERE profile_id = ?1
+            WHERE created_by_subject = ?1
             ORDER BY created_at DESC, key_id ASC
             "#,
         )
-        .bind(profile_id)
+        .bind(owner_subject)
         .fetch_all(&self.pool)
         .await?;
 
-        rows.into_iter().map(map_api_key_row).collect()
+        let mut api_keys = Vec::with_capacity(rows.len());
+        for row in rows {
+            let key_id: String = row.try_get("key_id")?;
+            let profile_ids = fetch_api_key_profile_ids(&self.pool, &key_id).await?;
+            api_keys.push(map_api_key_row(row, profile_ids)?);
+        }
+        Ok(api_keys)
     }
 
     async fn revoke_api_key(
         &self,
-        profile_id: &str,
+        owner_subject: &str,
         key_id: &str,
         revoked_at: i64,
     ) -> anyhow::Result<bool> {
@@ -1558,10 +1693,10 @@ impl BrokerStore for SqliteStore {
             r#"
             UPDATE api_keys
             SET revoked_at = ?3
-            WHERE profile_id = ?1 AND key_id = ?2
+            WHERE created_by_subject = ?1 AND key_id = ?2
             "#,
         )
-        .bind(profile_id)
+        .bind(owner_subject)
         .bind(key_id)
         .bind(revoked_at)
         .execute(&self.pool)
@@ -2050,15 +2185,41 @@ fn map_profile_proxy_settings_row(
     })
 }
 
-fn map_api_key_row(row: sqlx::sqlite::SqliteRow) -> anyhow::Result<ApiKeyRecord> {
+async fn fetch_api_key_profile_ids(pool: &SqlitePool, key_id: &str) -> anyhow::Result<Vec<String>> {
+    let rows = sqlx::query(
+        r#"
+        SELECT profile_id
+        FROM api_key_profiles
+        WHERE key_id = ?1
+        ORDER BY profile_id ASC
+        "#,
+    )
+    .bind(key_id)
+    .fetch_all(pool)
+    .await?;
+
+    rows.into_iter()
+        .map(|row| row.try_get("profile_id").map_err(anyhow::Error::from))
+        .collect()
+}
+
+fn map_api_key_row(
+    row: sqlx::sqlite::SqliteRow,
+    profile_ids: Vec<String>,
+) -> anyhow::Result<ApiKeyRecord> {
+    let scope_kind: String = row.try_get("scope_kind")?;
     Ok(ApiKeyRecord {
         key_id: row.try_get("key_id")?,
-        profile_id: row.try_get("profile_id")?,
         name: row.try_get("name")?,
         secret_prefix: row.try_get("secret_prefix")?,
         secret_salt: row.try_get("secret_salt")?,
         secret_hash: row.try_get("secret_hash")?,
         created_by_subject: row.try_get("created_by_subject")?,
+        profile_scope: ApiKeyProfileScope {
+            kind: ApiKeyProfileScopeKind::parse(&scope_kind)
+                .with_context(|| format!("unsupported api key scope kind: {scope_kind}"))?,
+            profile_ids,
+        },
         created_at: row.try_get("created_at")?,
         last_used_at: row.try_get("last_used_at")?,
         revoked_at: row.try_get("revoked_at")?,
@@ -2221,10 +2382,13 @@ mod tests {
     use super::{SqliteStore, stable_proxy_import_id};
     use crate::{
         auth::issue_api_key,
-        models::{ProxyImportSourceIdentity, ProxyNode, ProxyScope, SubscriptionSource},
+        models::{
+            ApiKeyProfileScope, ApiKeyProfileScopeKind, ProxyImportSourceIdentity, ProxyNode,
+            ProxyScope, SubscriptionSource,
+        },
         store::BrokerStore,
     };
-    use sqlx::{sqlite::SqliteConnectOptions, sqlite::SqlitePoolOptions};
+    use sqlx::{Executor, sqlite::SqliteConnectOptions, sqlite::SqlitePoolOptions};
 
     fn temp_store_path() -> PathBuf {
         std::env::temp_dir().join(format!("proxy-broker-store-{}.db", uuid::Uuid::new_v4()))
@@ -2409,7 +2573,11 @@ mod tests {
     #[tokio::test]
     async fn api_keys_round_trip_and_touch_last_used() {
         let (store, path) = open_temp_store().await;
-        let issued = issue_api_key("alpha", "ci-bot", "admin@example.com");
+        let issued = issue_api_key(
+            "ci-bot",
+            "admin@example.com",
+            ApiKeyProfileScope::selected(["alpha".to_string()]),
+        );
 
         store
             .insert_api_key(&issued.record)
@@ -2428,14 +2596,26 @@ mod tests {
         assert_eq!(fetched.last_used_at, Some(77));
 
         let listed = store
-            .list_api_keys("alpha")
+            .list_api_keys("admin@example.com")
             .await
             .expect("list should succeed");
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].name, "ci-bot");
 
+        let other_owner_keys = store
+            .list_api_keys("viewer@example.com")
+            .await
+            .expect("list should succeed");
+        assert!(other_owner_keys.is_empty());
+
+        let other_owner_revoked = store
+            .revoke_api_key("viewer@example.com", &issued.record.key_id, 66)
+            .await
+            .expect("revoke should succeed");
+        assert!(!other_owner_revoked);
+
         let revoked = store
-            .revoke_api_key("alpha", &issued.record.key_id, 99)
+            .revoke_api_key("admin@example.com", &issued.record.key_id, 99)
             .await
             .expect("revoke should succeed");
         assert!(revoked);
@@ -2496,11 +2676,7 @@ mod tests {
             .list_proxy_imports()
             .await
             .expect("proxy imports should be listed after migration");
-        assert_eq!(
-            imports.len(),
-            1,
-            "legacy inventory should backfill one import"
-        );
+        assert_eq!(imports.len(), 1, "legacy inventory should backfill one import");
         assert_eq!(imports[0].import_id, expected_import_id);
         assert_eq!(imports[0].source_scope, expected_scope);
         assert_eq!(
@@ -2593,6 +2769,76 @@ mod tests {
             assert_eq!(nodes.len(), 1);
             assert_eq!(nodes[0].proxy_name, "same-name");
         }
+
+        let _ = tokio::fs::remove_file(path).await;
+    }
+
+    #[tokio::test]
+    async fn open_migrates_legacy_single_profile_api_keys() {
+        let path =
+            std::env::temp_dir().join(format!("proxy-broker-store-{}.db", uuid::Uuid::new_v4()));
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(&path)
+                    .create_if_missing(true),
+            )
+            .await
+            .expect("legacy sqlite pool should open");
+
+        pool.execute(
+            r#"
+            CREATE TABLE api_keys (
+              key_id TEXT PRIMARY KEY,
+              profile_id TEXT NOT NULL,
+              name TEXT NOT NULL,
+              secret_prefix TEXT NOT NULL,
+              secret_salt TEXT NOT NULL,
+              secret_hash TEXT NOT NULL,
+              created_by_subject TEXT NOT NULL,
+              created_at INTEGER NOT NULL,
+              last_used_at INTEGER,
+              revoked_at INTEGER
+            )
+            "#,
+        )
+        .await
+        .expect("legacy api_keys table should create");
+        pool.execute("CREATE UNIQUE INDEX idx_api_keys_secret_hash ON api_keys(secret_hash)")
+            .await
+            .expect("legacy api key hash index should create");
+        pool.execute(
+            r#"
+            INSERT INTO api_keys (
+              key_id, profile_id, name, secret_prefix, secret_salt, secret_hash, created_by_subject, created_at
+            ) VALUES (
+              'key_legacy', 'legacy-profile', 'legacy-bot', 'pbk_key_legacy_prefix', 'salt', 'hash', 'admin@example.com', 123
+            )
+            "#,
+        )
+        .await
+        .expect("legacy api key should insert");
+        pool.close().await;
+
+        let store = SqliteStore::open(&path)
+            .await
+            .expect("sqlite store should migrate legacy schema");
+        let migrated = store
+            .get_api_key("key_legacy")
+            .await
+            .expect("get should succeed")
+            .expect("migrated api key should exist");
+
+        assert_eq!(migrated.created_by_subject, "admin@example.com");
+        assert_eq!(
+            migrated.profile_scope.kind,
+            ApiKeyProfileScopeKind::SelectedProfiles
+        );
+        assert_eq!(migrated.profile_scope.profile_ids, vec!["legacy-profile"]);
+
+        let _ = tokio::fs::remove_file(path).await;
+    }
 
         let _ = tokio::fs::remove_file(path).await;
     }

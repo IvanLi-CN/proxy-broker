@@ -354,7 +354,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn api_key_is_limited_to_bound_profile() {
+    async fn api_key_is_limited_to_selected_profiles() {
         let app = enforce_router();
 
         let created_profile = app
@@ -377,10 +377,12 @@ mod tests {
             .oneshot(trusted_request(
                 Request::builder()
                     .method(Method::POST)
-                    .uri("/api/v1/profiles/alpha/api-keys")
+                    .uri("/api/v1/api-keys")
                     .header("content-type", "application/json")
                     .header("x-forwarded-user", "admin@example.com")
-                    .body(Body::from(r#"{"name":"deploy-bot"}"#))
+                    .body(Body::from(
+                        r#"{"name":"deploy-bot","profile_scope":{"kind":"selected_profiles","profile_ids":["alpha"]}}"#,
+                    ))
                     .unwrap(),
             ))
             .await
@@ -422,6 +424,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn api_key_with_all_profiles_scope_can_access_future_profiles() {
+        let app = enforce_router();
+
+        let created_key = app
+            .clone()
+            .oneshot(trusted_request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/api-keys")
+                    .header("content-type", "application/json")
+                    .header("x-forwarded-user", "admin@example.com")
+                    .body(Body::from(
+                        r#"{"name":"deploy-bot","profile_scope":{"kind":"all_profiles"}}"#,
+                    ))
+                    .unwrap(),
+            ))
+            .await
+            .expect("key create should respond");
+        assert_eq!(created_key.status(), StatusCode::CREATED);
+        let created_key_body = to_bytes(created_key.into_body(), usize::MAX)
+            .await
+            .expect("body should be readable");
+        let created_key_json: serde_json::Value =
+            serde_json::from_slice(&created_key_body).expect("body should be json");
+        let secret = created_key_json["secret"]
+            .as_str()
+            .expect("secret should be present");
+
+        let created_profile = app
+            .clone()
+            .oneshot(trusted_request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/profiles")
+                    .header("content-type", "application/json")
+                    .header("x-forwarded-user", "admin@example.com")
+                    .body(Body::from(r#"{"profile_id":"beta"}"#))
+                    .unwrap(),
+            ))
+            .await
+            .expect("create should respond");
+        assert_eq!(created_profile.status(), StatusCode::CREATED);
+
+        let allowed = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/profiles/beta/sessions")
+                    .header("authorization", format!("Bearer {secret}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("router should respond");
+        assert_eq!(allowed.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
     async fn api_key_cannot_access_admin_proxy_inventory_routes() {
         let app = enforce_router();
 
@@ -445,10 +504,12 @@ mod tests {
             .oneshot(trusted_request(
                 Request::builder()
                     .method(Method::POST)
-                    .uri("/api/v1/profiles/alpha/api-keys")
+                    .uri("/api/v1/api-keys")
                     .header("content-type", "application/json")
                     .header("x-forwarded-user", "admin@example.com")
-                    .body(Body::from(r#"{"name":"deploy-bot"}"#))
+                    .body(Body::from(
+                        r#"{"name":"deploy-bot","profile_scope":{"kind":"selected_profiles","profile_ids":["alpha"]}}"#,
+                    ))
                     .unwrap(),
             ))
             .await

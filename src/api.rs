@@ -37,6 +37,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/healthz", get(healthz))
         .route("/api/v1/auth/me", get(auth_me))
         .route("/api/v1/profiles", get(list_profiles).post(create_profile))
+        .route("/api/v1/api-keys", get(list_api_keys).post(create_api_key))
+        .route("/api/v1/api-keys/{key_id}", delete(revoke_api_key))
         .route(
             "/api/v1/proxies/global/subscriptions/load",
             post(load_global_subscription),
@@ -95,14 +97,6 @@ pub fn build_router(state: AppState) -> Router {
             get(suggested_port),
         )
         .route("/api/v1/profiles/{profile_id}/sessions", get(list_sessions))
-        .route(
-            "/api/v1/profiles/{profile_id}/api-keys",
-            get(list_api_keys).post(create_api_key),
-        )
-        .route(
-            "/api/v1/profiles/{profile_id}/api-keys/{key_id}",
-            delete(revoke_api_key),
-        )
         .route(
             "/api/v1/profiles/{profile_id}/sessions/{session_id}",
             delete(close_session),
@@ -556,24 +550,22 @@ async fn close_session(
 async fn list_api_keys(
     auth: AuthContext,
     State(state): State<AppState>,
-    Path(profile_id): Path<String>,
 ) -> Result<Json<crate::models::ListApiKeysResponse>, BrokerError> {
-    auth.require_admin()?;
-    let response = state.service.list_api_keys(&profile_id).await?;
+    let principal = auth.require_admin()?;
+    let response = state.service.list_api_keys(&principal.subject).await?;
     Ok(Json(response))
 }
 
 async fn create_api_key(
     auth: AuthContext,
     State(state): State<AppState>,
-    Path(profile_id): Path<String>,
     payload: Result<Json<CreateApiKeyRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<CreateApiKeyResponse>), BrokerError> {
     let principal = auth.require_admin()?;
     let request = parse_json_payload(payload, "create_api_key")?;
     let response = state
         .service
-        .create_api_key(&profile_id, &request, &principal.subject)
+        .create_api_key(&request, &principal.subject)
         .await?;
     Ok((StatusCode::CREATED, Json(response)))
 }
@@ -581,10 +573,13 @@ async fn create_api_key(
 async fn revoke_api_key(
     auth: AuthContext,
     State(state): State<AppState>,
-    Path((profile_id, key_id)): Path<(String, String)>,
+    Path(key_id): Path<String>,
 ) -> Result<StatusCode, BrokerError> {
-    auth.require_admin()?;
-    state.service.revoke_api_key(&profile_id, &key_id).await?;
+    let principal = auth.require_admin()?;
+    state
+        .service
+        .revoke_api_key(&principal.subject, &key_id)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

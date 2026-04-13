@@ -408,12 +408,14 @@ test.beforeEach(async ({ page }) => {
     });
   });
 
-  await page.route("**/api/v1/profiles/*/api-keys*", async (route) => {
+  await page.route("**/api/v1/api-keys*", async (route) => {
     if (route.request().method() === "GET") {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ api_keys: [] }),
+        body: JSON.stringify({
+          api_keys: [],
+        }),
       });
       return;
     }
@@ -425,10 +427,15 @@ test.beforeEach(async ({ page }) => {
         body: JSON.stringify({
           api_key: {
             key_id: "key_1",
-            profile_id: extractProfileId(route.request().url()),
             name: "ops",
             prefix: "pbk_mock",
             created_by: "dev-admin",
+            owner_subject: "dev-admin",
+            profile_scope: {
+              kind: "selected_profiles",
+              profile_ids: ["default"],
+            },
+            profile_id: "default",
             created_at: 1741748460,
             last_used_at: null,
             revoked_at: null,

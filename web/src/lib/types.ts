@@ -198,6 +198,13 @@ export interface HealthResponse {
 
 export type AuthPrincipalType = "human" | "api_key" | "development";
 
+export type ApiKeyProfileScopeKind = "selected_profiles" | "all_profiles";
+
+export interface ApiKeyProfileScope {
+  kind: ApiKeyProfileScopeKind;
+  profile_ids?: string[];
+}
+
 export interface AuthMeResponse {
   authenticated: boolean;
   principal_type: AuthPrincipalType;
@@ -207,6 +214,8 @@ export interface AuthMeResponse {
   is_admin: boolean;
   profile_id?: string | null;
   api_key_id?: string | null;
+  api_key_owner_subject?: string | null;
+  api_key_profile_scope?: ApiKeyProfileScope | null;
 }
 
 export type CurrentUserState =
@@ -227,14 +236,17 @@ export type CurrentUserState =
 
 export interface CreateApiKeyRequest {
   name: string;
+  profile_scope: ApiKeyProfileScope;
 }
 
 export interface ApiKeySummary {
   key_id: string;
-  profile_id: string;
   name: string;
   prefix: string;
   created_by: string;
+  owner_subject: string;
+  profile_scope: ApiKeyProfileScope;
+  profile_id?: string | null;
   created_at: number;
   last_used_at?: number | null;
   revoked_at?: number | null;

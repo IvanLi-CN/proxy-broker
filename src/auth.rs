@@ -14,7 +14,8 @@ use crate::{
     api::AppState,
     error::BrokerError,
     models::{
-        ApiKeyRecord, AuthMeResponse, AuthPrincipalType, CreateApiKeyResponse, now_epoch_sec,
+        ApiKeyProfileScope, ApiKeyRecord, AuthMeResponse, AuthPrincipalType, CreateApiKeyResponse,
+        now_epoch_sec,
     },
 };
 
@@ -126,6 +127,8 @@ impl AuthConfig {
             is_admin: true,
             profile_id: None,
             api_key_id: None,
+            api_key_owner_subject: None,
+            api_key_profile_scope: None,
         }
     }
 
@@ -244,6 +247,8 @@ impl HumanIdentityCandidate {
             is_admin,
             profile_id: None,
             api_key_id: None,
+            api_key_owner_subject: None,
+            api_key_profile_scope: None,
         }
     }
 }
@@ -257,6 +262,8 @@ pub struct Principal {
     pub is_admin: bool,
     pub profile_id: Option<String>,
     pub api_key_id: Option<String>,
+    pub api_key_owner_subject: Option<String>,
+    pub api_key_profile_scope: Option<ApiKeyProfileScope>,
 }
 
 impl Principal {
@@ -270,18 +277,26 @@ impl Principal {
             is_admin: self.is_admin,
             profile_id: self.profile_id.clone(),
             api_key_id: self.api_key_id.clone(),
+            api_key_owner_subject: self.api_key_owner_subject.clone(),
+            api_key_profile_scope: self.api_key_profile_scope.clone(),
         }
     }
 
-    pub fn api_key(profile_id: String, key_id: String) -> Self {
+    pub fn api_key(
+        key_id: String,
+        owner_subject: String,
+        profile_scope: ApiKeyProfileScope,
+    ) -> Self {
         Self {
             principal_type: AuthPrincipalType::ApiKey,
             subject: format!("api-key:{key_id}"),
             email: None,
             groups: Vec::new(),
             is_admin: false,
-            profile_id: Some(profile_id),
+            profile_id: profile_scope.single_profile_id(),
             api_key_id: Some(key_id),
+            api_key_owner_subject: Some(owner_subject),
+            api_key_profile_scope: Some(profile_scope),
         }
     }
 }
@@ -323,7 +338,11 @@ impl RequestAuthState {
         }
 
         if principal.principal_type == AuthPrincipalType::ApiKey {
-            if principal.profile_id.as_deref() == Some(profile_id) {
+            if principal
+                .api_key_profile_scope
+                .as_ref()
+                .is_some_and(|scope| scope.allows_profile(profile_id))
+            {
                 return Ok(principal);
             }
             return Err(BrokerError::ProfileAccessDenied);
@@ -416,7 +435,11 @@ impl IssuedApiKey {
     }
 }
 
-pub fn issue_api_key(profile_id: &str, name: &str, created_by_subject: &str) -> IssuedApiKey {
+pub fn issue_api_key(
+    name: &str,
+    created_by_subject: &str,
+    profile_scope: ApiKeyProfileScope,
+) -> IssuedApiKey {
     let key_id = Uuid::new_v4().simple().to_string();
     let random = Uuid::new_v4().simple().to_string();
     let secret = format!("pbk_{key_id}_{random}");
@@ -426,12 +449,12 @@ pub fn issue_api_key(profile_id: &str, name: &str, created_by_subject: &str) -> 
     IssuedApiKey {
         record: ApiKeyRecord {
             key_id,
-            profile_id: profile_id.to_string(),
             name: name.trim().to_string(),
             secret_prefix: secret.chars().take(18).collect(),
             secret_salt: salt.clone(),
             secret_hash: hash_secret(&salt, &secret),
             created_by_subject: created_by_subject.to_string(),
+            profile_scope,
             created_at,
             last_used_at: None,
             revoked_at: None,

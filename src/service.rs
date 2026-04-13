@@ -29,18 +29,19 @@ use crate::{
     },
     error::{BrokerError, BrokerResult},
     models::{
-        CreateApiKeyRequest, CreateApiKeyResponse, CreateProfileResponse, ExtractIpItem,
-        ExtractIpRequest, ExtractIpResponse, IpRecord, ListApiKeysResponse, ListProfilesResponse,
-        ListProxyImportResponse, ListProxyInventoryResponse, ListSessionsResponse,
-        LoadSubscriptionRequest, LoadSubscriptionResponse, OpenBatchRequest, OpenBatchResponse,
-        OpenSessionRequest, OpenSessionResponse, ProbeRecord, ProfileProxySettings,
-        ProxyImportItem, ProxyImportKind, ProxyImportRecord, ProxyImportSourceIdentity,
-        ProxyImportSyncConfig, ProxyInventoryItem, ProxyInventoryRecord, ProxyNode, ProxyScope,
-        RefreshRequest, RefreshResponse, SearchSessionOptionsRequest, SearchSessionOptionsResponse,
-        SessionOptionItem, SessionOptionKind, SessionRecord, SessionSelectionMode,
-        SubscriptionSource, SuggestedPortResponse, TaskEventLevel, TaskListQuery, TaskListResponse,
-        TaskRunDetail, TaskRunEventRecord, TaskRunKind, TaskRunRecord, TaskRunScope, TaskRunStage,
-        TaskRunStatus, TaskRunSummary, TaskRunTrigger, now_epoch_sec,
+        ApiKeyProfileScope, ApiKeyProfileScopeKind, CreateApiKeyRequest, CreateApiKeyResponse,
+        CreateProfileResponse, ExtractIpItem, ExtractIpRequest, ExtractIpResponse, IpRecord,
+        ListApiKeysResponse, ListProfilesResponse, ListProxyImportResponse,
+        ListProxyInventoryResponse, ListSessionsResponse, LoadSubscriptionRequest,
+        LoadSubscriptionResponse, OpenBatchRequest, OpenBatchResponse, OpenSessionRequest,
+        OpenSessionResponse, ProbeRecord, ProfileProxySettings, ProxyImportItem, ProxyImportKind,
+        ProxyImportRecord, ProxyImportSourceIdentity, ProxyImportSyncConfig, ProxyInventoryItem,
+        ProxyInventoryRecord, ProxyNode, ProxyScope, RefreshRequest, RefreshResponse,
+        SearchSessionOptionsRequest, SearchSessionOptionsResponse, SessionOptionItem,
+        SessionOptionKind, SessionRecord, SessionSelectionMode, SubscriptionSource,
+        SuggestedPortResponse, TaskEventLevel, TaskListQuery, TaskListResponse, TaskRunDetail,
+        TaskRunEventRecord, TaskRunKind, TaskRunRecord, TaskRunScope, TaskRunStage, TaskRunStatus,
+        TaskRunSummary, TaskRunTrigger, now_epoch_sec,
     },
     runtime::MihomoRuntime,
     store::BrokerStore,
@@ -214,6 +215,61 @@ impl BrokerService {
                 .cloned()
                 .collect(),
             ProxyScope::Profile { profile_id } => vec![profile_id.clone()],
+        }
+    }
+
+    async fn normalize_api_key_scope(
+        &self,
+        scope: &ApiKeyProfileScope,
+    ) -> BrokerResult<ApiKeyProfileScope> {
+        match scope.kind {
+            ApiKeyProfileScopeKind::AllProfiles => {
+                if !scope.profile_ids.is_empty() {
+                    return Err(BrokerError::InvalidRequest(
+                        "profile ids must be omitted when profile_scope.kind=all_profiles"
+                            .to_string(),
+                    ));
+                }
+                Ok(ApiKeyProfileScope::all_profiles())
+            }
+            ApiKeyProfileScopeKind::SelectedProfiles => {
+                let mut profile_ids = scope
+                    .profile_ids
+                    .iter()
+                    .map(|item| item.trim())
+                    .filter(|item| !item.is_empty())
+                    .map(ToOwned::to_owned)
+                    .collect::<Vec<_>>();
+                profile_ids.sort();
+                profile_ids.dedup();
+                if profile_ids.is_empty() {
+                    return Err(BrokerError::InvalidRequest(
+                        "profile_scope.profile_ids must not be empty when kind=selected_profiles"
+                            .to_string(),
+                    ));
+                }
+
+                let known_profiles = self
+                    .store
+                    .list_profiles()
+                    .await
+                    .map_err(BrokerError::from)?
+                    .into_iter()
+                    .collect::<HashSet<_>>();
+                let unknown_profiles = profile_ids
+                    .iter()
+                    .filter(|profile_id| !known_profiles.contains(*profile_id))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                if !unknown_profiles.is_empty() {
+                    return Err(BrokerError::InvalidRequest(format!(
+                        "unknown profiles in profile_scope.profile_ids: {}",
+                        unknown_profiles.join(", ")
+                    )));
+                }
+
+                Ok(ApiKeyProfileScope::selected(profile_ids))
+            }
         }
     }
 
@@ -3207,14 +3263,10 @@ impl BrokerService {
         self.task_events.subscribe()
     }
 
-    pub async fn list_api_keys(&self, profile_id: &str) -> BrokerResult<ListApiKeysResponse> {
-        if !self.profile_exists(profile_id).await? {
-            return Err(BrokerError::ProfileNotFound);
-        }
-
+    pub async fn list_api_keys(&self, owner_subject: &str) -> BrokerResult<ListApiKeysResponse> {
         let api_keys = self
             .store
-            .list_api_keys(profile_id)
+            .list_api_keys(owner_subject)
             .await
             .map_err(BrokerError::from)?
             .into_iter()
@@ -3226,14 +3278,9 @@ impl BrokerService {
 
     pub async fn create_api_key(
         &self,
-        profile_id: &str,
         request: &CreateApiKeyRequest,
         created_by_subject: &str,
     ) -> BrokerResult<CreateApiKeyResponse> {
-        if !self.profile_exists(profile_id).await? {
-            return Err(BrokerError::ProfileNotFound);
-        }
-
         let name = request.name.trim();
         if name.is_empty() {
             return Err(BrokerError::InvalidRequest(
@@ -3241,7 +3288,8 @@ impl BrokerService {
             ));
         }
 
-        let issued = issue_api_key(profile_id, name, created_by_subject);
+        let profile_scope = self.normalize_api_key_scope(&request.profile_scope).await?;
+        let issued = issue_api_key(name, created_by_subject, profile_scope);
         self.store
             .insert_api_key(&issued.record)
             .await
@@ -3249,14 +3297,10 @@ impl BrokerService {
         Ok(issued.into_response())
     }
 
-    pub async fn revoke_api_key(&self, profile_id: &str, key_id: &str) -> BrokerResult<()> {
-        if !self.profile_exists(profile_id).await? {
-            return Err(BrokerError::ProfileNotFound);
-        }
-
+    pub async fn revoke_api_key(&self, owner_subject: &str, key_id: &str) -> BrokerResult<()> {
         let revoked = self
             .store
-            .revoke_api_key(profile_id, key_id, now_epoch_sec())
+            .revoke_api_key(owner_subject, key_id, now_epoch_sec())
             .await
             .map_err(BrokerError::from)?;
         if revoked {
@@ -3289,7 +3333,11 @@ impl BrokerService {
             .await
             .map_err(BrokerError::from)?;
 
-        Ok(Principal::api_key(api_key.profile_id, api_key.key_id))
+        Ok(Principal::api_key(
+            api_key.key_id,
+            api_key.created_by_subject,
+            api_key.profile_scope,
+        ))
     }
 
     pub async fn list_sessions(&self, profile_id: &str) -> BrokerResult<ListSessionsResponse> {
@@ -4551,18 +4599,18 @@ mod tests {
             self.inner.get_api_key(key_id).await
         }
 
-        async fn list_api_keys(&self, profile_id: &str) -> anyhow::Result<Vec<ApiKeyRecord>> {
-            self.inner.list_api_keys(profile_id).await
+        async fn list_api_keys(&self, owner_subject: &str) -> anyhow::Result<Vec<ApiKeyRecord>> {
+            self.inner.list_api_keys(owner_subject).await
         }
 
         async fn revoke_api_key(
             &self,
-            profile_id: &str,
+            owner_subject: &str,
             key_id: &str,
             revoked_at: i64,
         ) -> anyhow::Result<bool> {
             self.inner
-                .revoke_api_key(profile_id, key_id, revoked_at)
+                .revoke_api_key(owner_subject, key_id, revoked_at)
                 .await
         }
 

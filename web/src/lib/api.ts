@@ -207,15 +207,14 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  listApiKeys: (profileId: string) =>
-    request<ListApiKeysResponse>(profilePath(profileId, "/api-keys")),
-  createApiKey: (profileId: string, payload: CreateApiKeyRequest) =>
-    request<CreateApiKeyResponse>(profilePath(profileId, "/api-keys"), {
+  listApiKeys: () => request<ListApiKeysResponse>("/api/v1/api-keys"),
+  createApiKey: (payload: CreateApiKeyRequest) =>
+    request<CreateApiKeyResponse>("/api/v1/api-keys", {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  revokeApiKey: (profileId: string, keyId: string) =>
-    request<void>(profilePath(profileId, `/api-keys/${encodeURIComponent(keyId)}`), {
+  revokeApiKey: (keyId: string) =>
+    request<void>(`/api/v1/api-keys/${encodeURIComponent(keyId)}`, {
       method: "DELETE",
     }),
   closeSession: (profileId: string, sessionId: string) =>

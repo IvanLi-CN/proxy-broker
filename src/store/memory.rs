@@ -23,6 +23,7 @@ struct MemoryStoreState {
     proxy_inventory: HashMap<String, ProxyInventoryRecord>,
     proxy_import_sync_configs: HashMap<String, ProxyImportSyncConfig>,
     profile_proxy_settings: HashMap<String, ProfileProxySettings>,
+    api_keys: HashMap<String, ApiKeyRecord>,
 }
 
 #[derive(Default, Clone)]
@@ -76,6 +77,12 @@ impl BrokerStore for MemoryStore {
         for config in guard.proxy_import_sync_configs.values() {
             profiles.insert(config.profile_id.clone());
         }
+        profiles.extend(
+            guard
+                .api_keys
+                .values()
+                .flat_map(|record| record.profile_scope.profile_ids.iter().cloned()),
+        );
         for item in guard.proxy_inventory.values() {
             if let Some(profile_id) = item.source_scope.profile_id() {
                 profiles.insert(profile_id.to_string());
@@ -484,11 +491,13 @@ impl BrokerStore for MemoryStore {
     }
 
     async fn insert_api_key(&self, api_key: &ApiKeyRecord) -> anyhow::Result<()> {
-        self.with_profile_mut(&api_key.profile_id, |profile| {
-            profile
-                .api_keys
-                .insert(api_key.key_id.clone(), api_key.clone());
-        })?;
+        let mut guard = self
+            .inner
+            .write()
+            .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
+        guard
+            .api_keys
+            .insert(api_key.key_id.clone(), api_key.clone());
         Ok(())
     }
 
@@ -497,38 +506,48 @@ impl BrokerStore for MemoryStore {
             .inner
             .read()
             .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
-        Ok(guard
-            .profiles
-            .values()
-            .find_map(|profile| profile.api_keys.get(key_id).cloned()))
+        Ok(guard.api_keys.get(key_id).cloned())
     }
 
-    async fn list_api_keys(&self, profile_id: &str) -> anyhow::Result<Vec<ApiKeyRecord>> {
-        self.with_profile(profile_id, |profile| {
-            let mut api_keys = profile.api_keys.values().cloned().collect::<Vec<_>>();
-            api_keys.sort_by(|left, right| {
-                right
-                    .created_at
-                    .cmp(&left.created_at)
-                    .then_with(|| left.key_id.cmp(&right.key_id))
-            });
-            api_keys
-        })
+    async fn list_api_keys(&self, owner_subject: &str) -> anyhow::Result<Vec<ApiKeyRecord>> {
+        let guard = self
+            .inner
+            .read()
+            .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
+        let mut api_keys = guard
+            .api_keys
+            .values()
+            .filter(|record| record.created_by_subject == owner_subject)
+            .cloned()
+            .collect::<Vec<_>>();
+        api_keys.sort_by(|left, right| {
+            right
+                .created_at
+                .cmp(&left.created_at)
+                .then_with(|| left.key_id.cmp(&right.key_id))
+        });
+        Ok(api_keys)
     }
 
     async fn revoke_api_key(
         &self,
-        profile_id: &str,
+        owner_subject: &str,
         key_id: &str,
         revoked_at: i64,
     ) -> anyhow::Result<bool> {
-        self.with_profile_mut(profile_id, |profile| {
-            if let Some(record) = profile.api_keys.get_mut(key_id) {
+        let mut guard = self
+            .inner
+            .write()
+            .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
+        Ok(if let Some(record) = guard.api_keys.get_mut(key_id) {
+            if record.created_by_subject == owner_subject {
                 record.revoked_at = Some(revoked_at);
                 true
             } else {
                 false
             }
+        } else {
+            false
         })
     }
 
@@ -537,11 +556,8 @@ impl BrokerStore for MemoryStore {
             .inner
             .write()
             .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
-        for profile in guard.profiles.values_mut() {
-            if let Some(record) = profile.api_keys.get_mut(key_id) {
-                record.last_used_at = Some(last_used_at);
-                break;
-            }
+        if let Some(record) = guard.api_keys.get_mut(key_id) {
+            record.last_used_at = Some(last_used_at);
         }
         Ok(())
     }
@@ -764,9 +780,9 @@ mod tests {
     use crate::{
         auth::issue_api_key,
         models::{
-            ProfileProxySettings, ProxyImportKind, ProxyImportRecord, ProxyImportSourceIdentity,
-            ProxyImportSyncConfig, ProxyInventoryRecord, ProxyScope, SessionRecord,
-            SubscriptionSource,
+            ApiKeyProfileScope, ProfileProxySettings, ProxyImportKind, ProxyImportRecord,
+            ProxyImportSourceIdentity, ProxyImportSyncConfig, ProxyInventoryRecord, ProxyScope,
+            SessionRecord, SubscriptionSource,
         },
         store::BrokerStore,
     };
@@ -955,22 +971,59 @@ mod tests {
     #[tokio::test]
     async fn issue_api_key_round_trip() {
         let store = MemoryStore::new();
-        let key = issue_api_key("default", "demo", "admin@example.com");
+        let issued = issue_api_key(
+            "deploy-bot",
+            "admin@example.com",
+            ApiKeyProfileScope::selected(["alpha".to_string()]),
+        );
 
         store
-            .insert_api_key(&key.record)
+            .insert_api_key(&issued.record)
             .await
-            .expect("insert api key");
-
-        let listed = store.list_api_keys("default").await.expect("list keys");
-        assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].key_id, key.record.key_id);
+            .expect("insert should succeed");
+        store
+            .touch_api_key_last_used(&issued.record.key_id, 42)
+            .await
+            .expect("touch should succeed");
 
         let fetched = store
-            .get_api_key(&key.record.key_id)
+            .get_api_key(&issued.record.key_id)
             .await
-            .expect("get key")
-            .expect("key should exist");
-        assert_eq!(fetched.secret_hash, key.record.secret_hash);
+            .expect("get should succeed")
+            .expect("api key should exist");
+        assert_eq!(fetched.secret_hash, issued.record.secret_hash);
+        assert_eq!(fetched.last_used_at, Some(42));
+
+        let listed = store
+            .list_api_keys("admin@example.com")
+            .await
+            .expect("list should succeed");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].name, "deploy-bot");
+
+        let other_owner_keys = store
+            .list_api_keys("viewer@example.com")
+            .await
+            .expect("list should succeed");
+        assert!(other_owner_keys.is_empty());
+
+        let other_owner_revoked = store
+            .revoke_api_key("viewer@example.com", &issued.record.key_id, 77)
+            .await
+            .expect("revoke should succeed");
+        assert!(!other_owner_revoked);
+
+        let revoked = store
+            .revoke_api_key("admin@example.com", &issued.record.key_id, 88)
+            .await
+            .expect("revoke should succeed");
+        assert!(revoked);
+
+        let revoked_record = store
+            .get_api_key(&issued.record.key_id)
+            .await
+            .expect("get should succeed")
+            .expect("api key should still exist");
+        assert_eq!(revoked_record.revoked_at, Some(88));
     }
 }

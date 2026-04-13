@@ -167,7 +167,7 @@ status="$(request_json \
 [ "$status" = "403" ]
 assert_json_field "$viewer_ui" "code" "admin_required"
 
-echo "[smoke] creating profiles and a profile API key as admin"
+echo "[smoke] creating profiles and owner-scoped API keys as admin"
 create_default="$TMP_DIR/create-default.json"
 status="$(request_json \
   POST \
@@ -193,13 +193,15 @@ assert_json_field "$create_other" "profile_id" "other"
 create_key="$TMP_DIR/create-key.json"
 status="$(request_json \
   POST \
-  "https://${FORWARD_AUTH_BROKER_BASIC_HOST}:${FORWARD_AUTH_HTTPS_PORT}/api/v1/profiles/default/api-keys" \
+  "https://${FORWARD_AUTH_BROKER_BASIC_HOST}:${FORWARD_AUTH_HTTPS_PORT}/api/v1/api-keys" \
   "$create_key" \
   -H "$(basic_header "$FORWARD_AUTH_ADMIN_USER" "$FORWARD_AUTH_ADMIN_PASSWORD")" \
   -H "Content-Type: application/json" \
-  --data '{"name":"smoke-bot"}')"
+  --data '{"name":"smoke-bot","profile_scope":{"kind":"selected_profiles","profile_ids":["default"]}}')"
 [ "$status" = "201" ]
 assert_json_field "$create_key" "api_key.name" "smoke-bot"
+assert_json_field "$create_key" "api_key.owner_subject" "$FORWARD_AUTH_ADMIN_USER"
+assert_json_field "$create_key" "api_key.profile_scope.kind" "selected_profiles"
 
 api_key_secret="$(python3 - "$create_key" <<'PY'
 import json
@@ -208,7 +210,26 @@ print(json.load(open(sys.argv[1], "r", encoding="utf-8"))["secret"])
 PY
 )"
 
-echo "[smoke] machine host accepts profile API key and enforces profile scope"
+create_all_key="$TMP_DIR/create-all-key.json"
+status="$(request_json \
+  POST \
+  "https://${FORWARD_AUTH_BROKER_BASIC_HOST}:${FORWARD_AUTH_HTTPS_PORT}/api/v1/api-keys" \
+  "$create_all_key" \
+  -H "$(basic_header "$FORWARD_AUTH_ADMIN_USER" "$FORWARD_AUTH_ADMIN_PASSWORD")" \
+  -H "Content-Type: application/json" \
+  --data '{"name":"fleet-bot","profile_scope":{"kind":"all_profiles"}}')"
+[ "$status" = "201" ]
+assert_json_field "$create_all_key" "api_key.name" "fleet-bot"
+assert_json_field "$create_all_key" "api_key.profile_scope.kind" "all_profiles"
+
+all_api_key_secret="$(python3 - "$create_all_key" <<'PY'
+import json
+import sys
+print(json.load(open(sys.argv[1], "r", encoding="utf-8"))["secret"])
+PY
+)"
+
+echo "[smoke] machine host accepts selected-profile API key and enforces scope"
 machine_me="$TMP_DIR/machine-me.json"
 status="$(request_json \
   GET \
@@ -217,6 +238,8 @@ status="$(request_json \
   -H "Authorization: Bearer ${api_key_secret}")"
 [ "$status" = "200" ]
 assert_json_field "$machine_me" "principal_type" "api_key"
+assert_json_field "$machine_me" "api_key_owner_subject" "$FORWARD_AUTH_ADMIN_USER"
+assert_json_field "$machine_me" "api_key_profile_scope.kind" "selected_profiles"
 assert_json_field "$machine_me" "profile_id" "default"
 
 machine_default="$TMP_DIR/machine-default.json"
@@ -235,6 +258,37 @@ status="$(request_json \
   -H "Authorization: Bearer ${api_key_secret}")"
 [ "$status" = "403" ]
 assert_json_field "$machine_other" "code" "profile_access_denied"
+
+create_future="$TMP_DIR/create-future.json"
+status="$(request_json \
+  POST \
+  "https://${FORWARD_AUTH_BROKER_BASIC_HOST}:${FORWARD_AUTH_HTTPS_PORT}/api/v1/profiles" \
+  "$create_future" \
+  -H "$(basic_header "$FORWARD_AUTH_ADMIN_USER" "$FORWARD_AUTH_ADMIN_PASSWORD")" \
+  -H "Content-Type: application/json" \
+  --data '{"profile_id":"future"}')"
+[ "$status" = "201" ]
+assert_json_field "$create_future" "profile_id" "future"
+
+echo "[smoke] all-profile API key reaches profiles created after issuance"
+all_machine_me="$TMP_DIR/all-machine-me.json"
+status="$(request_json \
+  GET \
+  "https://${FORWARD_AUTH_MACHINE_HOST}:${FORWARD_AUTH_HTTPS_PORT}/api/v1/auth/me" \
+  "$all_machine_me" \
+  -H "Authorization: Bearer ${all_api_key_secret}")"
+[ "$status" = "200" ]
+assert_json_field "$all_machine_me" "principal_type" "api_key"
+assert_json_field "$all_machine_me" "api_key_owner_subject" "$FORWARD_AUTH_ADMIN_USER"
+assert_json_field "$all_machine_me" "api_key_profile_scope.kind" "all_profiles"
+
+machine_future="$TMP_DIR/machine-future.json"
+status="$(request_json \
+  GET \
+  "https://${FORWARD_AUTH_MACHINE_HOST}:${FORWARD_AUTH_HTTPS_PORT}/api/v1/profiles/future/sessions" \
+  "$machine_future" \
+  -H "Authorization: Bearer ${all_api_key_secret}")"
+[ "$status" = "200" ]
 
 printf '[smoke] success: https://%s:%s, https://%s:%s, https://%s:%s\n' \
   "$FORWARD_AUTH_BROKER_HOST" \

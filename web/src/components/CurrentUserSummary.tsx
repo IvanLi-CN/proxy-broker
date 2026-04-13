@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
-import { useI18n } from "@/i18n";
+import { type Translator, useI18n } from "@/i18n";
 import type { CurrentUserState } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -17,6 +17,33 @@ interface CurrentUserSummaryProps {
   currentUser: CurrentUserState;
   variant?: "compact" | "detail";
   className?: string;
+}
+
+function summarizeApiKeyScope(
+  scope: NonNullable<
+    Extract<CurrentUserState, { status: "resolved" }>["identity"]["api_key_profile_scope"]
+  >,
+  t: Translator,
+) {
+  if (scope.kind === "all_profiles") {
+    return {
+      badge: t("all profiles"),
+      detail: t("All profiles"),
+    };
+  }
+
+  const profileIds = scope.profile_ids ?? [];
+  if (profileIds.length === 1) {
+    return {
+      badge: t("profile {profileId}", { profileId: profileIds[0] }),
+      detail: profileIds[0] ?? "",
+    };
+  }
+
+  return {
+    badge: t("{count} selected profiles", { count: profileIds.length }),
+    detail: profileIds.join(" / "),
+  };
 }
 
 export function CurrentUserSummary({
@@ -203,42 +230,47 @@ function describeCurrentUser(currentUser: CurrentUserState, t: ReturnType<typeof
         ],
         metaLines: commonMeta,
       };
-    case "api_key":
+    case "api_key": {
+      const scopeSummary = identity.api_key_profile_scope
+        ? summarizeApiKeyScope(identity.api_key_profile_scope, t)
+        : null;
       return {
         icon: KeyRoundIcon,
         iconClassName: "text-violet-500",
         shortLabel: t("api key"),
         subjectLabel: identity.subject,
         primaryLabel: identity.subject,
-        description: t("Machine principal resolved from a profile-scoped API key."),
+        description: t("Machine principal resolved from an owner-scoped API key."),
         badgeClassName:
           "border-violet-500/20 bg-violet-500/[0.09] text-violet-700 dark:text-violet-300",
         badges: [
           ...commonBadges,
-          ...(identity.profile_id
+          ...(scopeSummary
             ? [
                 {
-                  label: t("profile {profileId}", { profileId: identity.profile_id }),
+                  label: scopeSummary.badge,
                   className: "bg-background/80 text-muted-foreground",
                 },
               ]
             : []),
         ],
-        extraCompactBadges: identity.profile_id
+        extraCompactBadges: scopeSummary
           ? [
               {
-                label: t("profile {profileId}", { profileId: identity.profile_id }),
+                label: scopeSummary.badge,
                 className: "bg-background/80 text-muted-foreground",
               },
             ]
           : [],
         metaLines: [
           ...(identity.api_key_id ? [t("API key ID: {id}", { id: identity.api_key_id })] : []),
-          ...(identity.profile_id
-            ? [t("Bound profile: {profileId}", { profileId: identity.profile_id })]
+          ...(identity.api_key_owner_subject
+            ? [t("Owner {subject}", { subject: identity.api_key_owner_subject })]
             : []),
+          ...(scopeSummary ? [t("Scope {value}", { value: scopeSummary.detail })] : []),
         ],
       };
+    }
     default:
       return {
         icon: identity.is_admin ? ShieldCheckIcon : ShieldEllipsisIcon,

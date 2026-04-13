@@ -4,6 +4,7 @@ import { RefreshCard } from "@/features/overview/components/RefreshCard";
 import { useI18n } from "@/i18n";
 import type {
   ApiKeySummary,
+  CreateApiKeyRequest,
   CreateApiKeyResponse,
   CurrentUserState,
   HealthResponse,
@@ -18,6 +19,8 @@ interface OverviewPageProps {
   refreshError?: string | null;
   refreshing: boolean;
   currentUser: CurrentUserState;
+  currentProfileId: string;
+  availableProfiles: string[];
   apiKeys?: ApiKeySummary[];
   latestCreatedApiKey?: CreateApiKeyResponse | null;
   apiKeysLoading?: boolean;
@@ -25,7 +28,7 @@ interface OverviewPageProps {
   creatingApiKey?: boolean;
   revokingApiKeyId?: string | null;
   onRefresh: (payload: RefreshRequest) => void | Promise<void>;
-  onCreateApiKey: (name: string) => void | Promise<void>;
+  onCreateApiKey: (payload: CreateApiKeyRequest) => void | Promise<void>;
   onRevokeApiKey: (keyId: string) => void | Promise<void>;
 }
 
@@ -36,6 +39,8 @@ export function OverviewPage({
   refreshError,
   refreshing,
   currentUser,
+  currentProfileId,
+  availableProfiles,
   apiKeys = [],
   latestCreatedApiKey = null,
   apiKeysLoading = false,
@@ -74,7 +79,9 @@ export function OverviewPage({
 
         <div className="space-y-6">
           <AccessControlCard
+            availableProfiles={availableProfiles}
             currentUser={currentUser}
+            currentProfileId={currentProfileId}
             apiKeys={apiKeys}
             latestCreatedKey={latestCreatedApiKey}
             apiKeysLoading={apiKeysLoading}
