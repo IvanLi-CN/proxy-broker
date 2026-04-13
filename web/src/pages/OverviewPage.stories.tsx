@@ -35,16 +35,8 @@ const meta = {
     </AppShell>
   ),
   args: {
-    profileId: "default",
     health: healthFixture,
     activeSessions: sessionsFixture.sessions.length,
-    profileLoadResponse: {
-      loaded_proxies: 6,
-      distinct_ips: 4,
-      warnings: [],
-    },
-    profileLoadError: null,
-    loadingProfile: false,
     refreshResponse: refreshFixture,
     refreshError: null,
     refreshing: false,
@@ -72,20 +64,10 @@ const meta = {
       },
     ],
     latestCreatedApiKey: null,
-    proxySettings: {
-      profile_id: "default",
-      use_global_proxies: true,
-    },
-    proxySettingsLoading: false,
-    proxySettingsError: null,
-    updatingSettings: false,
-    showProxyPolicy: true,
     apiKeysLoading: false,
     apiKeysError: null,
     creatingApiKey: false,
     revokingApiKeyId: null,
-    onLoadProfile: fn(),
-    onToggleUseGlobalProxies: fn(),
     onRefresh: fn(),
     onCreateApiKey: fn(),
     onRevokeApiKey: fn(),
@@ -98,12 +80,8 @@ type Story = StoryObj<typeof meta>;
 export const Default: Story = {
   async play({ canvasElement }) {
     const canvas = within(canvasElement);
-    await expect(
-      canvas.getByRole("heading", { name: /import local pool for default/i }),
-    ).toBeVisible();
-    await expect(
-      canvas.getByRole("heading", { name: /use global pool for default/i }),
-    ).toBeVisible();
+    await expect(canvas.getByRole("heading", { name: /overview/i })).toBeVisible();
+    await expect(canvas.getByRole("heading", { name: /refresh metadata/i })).toBeVisible();
   },
 };
 
@@ -115,8 +93,6 @@ export const ZhCN: Story = {
 
 export const ErrorState: Story = {
   args: {
-    profileLoadResponse: null,
-    profileLoadError: "subscription_fetch_failed: upstream not reachable",
     refreshResponse: null,
     refreshError: "mihomo_unavailable: controller not reachable",
   },
@@ -136,8 +112,6 @@ export const AnonymousState: Story = {
     },
     apiKeys: [],
     activeSessions: 0,
-    profileLoadResponse: null,
     refreshResponse: null,
-    showProxyPolicy: false,
   },
 };

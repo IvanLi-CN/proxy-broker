@@ -36,13 +36,13 @@ import {
 } from "@/components/ui/sidebar";
 import { useI18n } from "@/i18n";
 import { formatHealthStatus } from "@/lib/format";
+import { isGlobalProfileId } from "@/lib/profile-selection";
 import type { CurrentUserState } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface AppShellProps {
   profileId: string;
   profiles: string[];
-  shellMode?: "profile" | "global";
   profilesLoading?: boolean;
   profilesCreating?: boolean;
   profilesError?: string | null;
@@ -57,7 +57,6 @@ interface AppShellProps {
 export function AppShell({
   profileId,
   profiles,
-  shellMode = "profile",
   profilesLoading = false,
   profilesCreating = false,
   profilesError = null,
@@ -71,37 +70,42 @@ export function AppShell({
   const { t } = useI18n();
   const isHealthy = (healthStatus ?? "").toLowerCase() === "ok";
   const healthStatusLabel = formatHealthStatus(healthStatus, t);
-  const isGlobalShell = shellMode === "global";
+  const isGlobalConfig = isGlobalProfileId(profileId);
   const navItems = [
     {
       to: "/",
       label: t("Overview"),
       icon: LayoutDashboardIcon,
       meta: t("Load feeds and refresh pool metadata"),
+      requiresProfile: true,
     },
     {
       to: "/tasks",
       label: t("Tasks"),
       icon: ClipboardListIcon,
       meta: t("Watch scheduled sync and metadata refresh runs"),
+      requiresProfile: true,
     },
     {
       to: "/proxies",
-      label: t("Global proxies"),
+      label: t("Proxy"),
       icon: CableIcon,
-      meta: t("Shared pool and cross-profile allocations"),
+      meta: t("Manage local imports, global pool usage, and allocations"),
+      requiresProfile: false,
     },
     {
       to: "/ips",
       label: t("IP Extract"),
       icon: GlobeIcon,
       meta: t("Filter the pool down to candidate edges"),
+      requiresProfile: true,
     },
     {
       to: "/sessions",
       label: t("Sessions"),
       icon: RouteIcon,
       meta: t("Open, audit, and close live listeners"),
+      requiresProfile: true,
     },
   ];
 
@@ -124,64 +128,78 @@ export function AppShell({
               </div>
             </div>
           </div>
-          {isGlobalShell ? (
-            <div className="rounded-[26px] border border-sidebar-border/80 bg-sidebar-accent/45 px-4 py-3 shadow-sm">
-              <div className="flex items-center gap-2 text-sm font-semibold tracking-[-0.02em] text-sidebar-foreground">
-                <CableIcon className="size-4 text-sidebar-primary" />
-                {t("Global proxies")}
-              </div>
-              <p className="mt-1 text-xs leading-5 text-sidebar-foreground/60">
-                {t("Shared pool and cross-profile allocations")}
-              </p>
-            </div>
-          ) : (
-            <ProfileSwitcher
-              profileId={profileId}
-              profiles={profiles}
-              isLoading={profilesLoading}
-              isCreating={profilesCreating}
-              loadError={profilesError}
-              onProfileIdChange={onProfileIdChange}
-              onCreateProfile={onCreateProfile}
-              onRetryProfiles={onRetryProfiles}
-            />
-          )}
+          <ProfileSwitcher
+            profileId={profileId}
+            profiles={profiles}
+            isLoading={profilesLoading}
+            isCreating={profilesCreating}
+            loadError={profilesError}
+            onProfileIdChange={onProfileIdChange}
+            onCreateProfile={onCreateProfile}
+            onRetryProfiles={onRetryProfiles}
+          />
         </SidebarHeader>
         <SidebarContent className="px-2 py-4">
           <SidebarGroup>
             <SidebarGroupLabel>{t("Workspace")}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu className="gap-3 group-data-[collapsible=icon]:gap-2">
-                {navItems.map((item) => (
-                  <SidebarMenuItem key={item.to}>
-                    <SidebarMenuButton asChild tooltip={item.label} className="h-auto">
-                      <NavLink
-                        to={item.to}
-                        end={item.to === "/"}
-                        className={({ isActive }) =>
-                          cn(
-                            "group/nav flex items-start gap-3 rounded-2xl border border-transparent px-3 py-3 transition-all duration-200 hover:border-sidebar-border hover:bg-sidebar-accent/65",
-                            isActive &&
-                              "border-sidebar-border bg-sidebar-accent text-sidebar-accent-foreground shadow-sm",
-                          )
-                        }
-                      >
-                        <div className="mt-0.5 rounded-xl border border-sidebar-border/80 bg-background/70 p-2 text-sidebar-primary">
-                          <item.icon className="size-4" />
-                        </div>
-                        <div className="min-w-0 flex-1 space-y-1 group-data-[collapsible=icon]:hidden">
-                          <div className="flex items-center gap-2 text-sm font-semibold">
-                            <span>{item.label}</span>
-                            <ChevronRightIcon className="size-3.5 text-sidebar-foreground/45 transition-transform group-hover/nav:translate-x-0.5" />
+                {navItems.map((item) => {
+                  const disabled = isGlobalConfig && item.requiresProfile;
+
+                  return (
+                    <SidebarMenuItem key={item.to}>
+                      {disabled ? (
+                        <div className="flex items-start gap-3 rounded-2xl border border-transparent px-3 py-3 opacity-55">
+                          <div className="mt-0.5 rounded-xl border border-sidebar-border/80 bg-background/55 p-2 text-sidebar-primary">
+                            <item.icon className="size-4" />
                           </div>
-                          <div className="text-xs leading-5 text-sidebar-foreground/65">
-                            {item.meta}
+                          <div className="min-w-0 flex-1 space-y-1 group-data-[collapsible=icon]:hidden">
+                            <div className="flex items-center gap-2 text-sm font-semibold">
+                              <span>{item.label}</span>
+                              <Badge
+                                variant="outline"
+                                className="rounded-full px-1.5 py-0 text-[10px] uppercase tracking-[0.14em]"
+                              >
+                                {t("Profile only")}
+                              </Badge>
+                            </div>
+                            <div className="text-xs leading-5 text-sidebar-foreground/65">
+                              {t("Select a concrete profile to use this workspace.")}
+                            </div>
                           </div>
                         </div>
-                      </NavLink>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
+                      ) : (
+                        <SidebarMenuButton asChild tooltip={item.label} className="h-auto">
+                          <NavLink
+                            to={item.to}
+                            end={item.to === "/"}
+                            className={({ isActive }) =>
+                              cn(
+                                "group/nav flex items-start gap-3 rounded-2xl border border-transparent px-3 py-3 transition-all duration-200 hover:border-sidebar-border hover:bg-sidebar-accent/65",
+                                isActive &&
+                                  "border-sidebar-border bg-sidebar-accent text-sidebar-accent-foreground shadow-sm",
+                              )
+                            }
+                          >
+                            <div className="mt-0.5 rounded-xl border border-sidebar-border/80 bg-background/70 p-2 text-sidebar-primary">
+                              <item.icon className="size-4" />
+                            </div>
+                            <div className="min-w-0 flex-1 space-y-1 group-data-[collapsible=icon]:hidden">
+                              <div className="flex items-center gap-2 text-sm font-semibold">
+                                <span>{item.label}</span>
+                                <ChevronRightIcon className="size-3.5 text-sidebar-foreground/45 transition-transform group-hover/nav:translate-x-0.5" />
+                              </div>
+                              <div className="text-xs leading-5 text-sidebar-foreground/65">
+                                {item.meta}
+                              </div>
+                            </div>
+                          </NavLink>
+                        </SidebarMenuButton>
+                      )}
+                    </SidebarMenuItem>
+                  );
+                })}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
@@ -245,11 +263,17 @@ export function AppShell({
             <SidebarTrigger className="border-border/70 bg-background/80 hover:bg-background" />
             <div>
               <div className="text-[11px] font-semibold uppercase tracking-[0.28em] text-muted-foreground">
-                {isGlobalShell ? t("Global operator plane") : t("Local operator plane")}
+                {isGlobalConfig ? t("Global operator plane") : t("Local operator plane")}
               </div>
-              {isGlobalShell ? (
+              {isGlobalConfig ? (
                 <div className="flex items-center gap-1 text-sm font-medium text-foreground md:text-base">
-                  <span>{t("Global proxies")}</span>
+                  <span>{t("Proxy")}</span>
+                  <Badge
+                    variant="outline"
+                    className="rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.16em]"
+                  >
+                    {t("Global")}
+                  </Badge>
                 </div>
               ) : (
                 <div className="flex items-center gap-1 text-sm font-medium text-foreground md:text-base">

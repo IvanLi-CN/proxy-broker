@@ -2,7 +2,10 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, fn, within } from "storybook/test";
 
 import { AppShell } from "@/components/AppShell";
+import { GLOBAL_PROFILE_ID } from "@/lib/profile-selection";
 import { ProxiesPage } from "@/pages/ProxiesPage";
+
+const profiles = ["default", "edge-jp", "lab-us"];
 
 const inventoryFixture = {
   items: [
@@ -26,17 +29,19 @@ const inventoryFixture = {
       allocation_scope: { type: "profile" as const, profile_id: "edge-jp" },
       effective_profile_ids: ["edge-jp"],
     },
-    {
-      node_id: "node-reassigned-1",
-      proxy_name: "lab-shared",
-      proxy_type: "socks5",
-      server: "shared.example.com",
-      resolved_ips: ["192.0.2.44"],
-      source_scope: { type: "profile" as const, profile_id: "lab-us" },
-      allocation_scope: { type: "global" as const },
-      effective_profile_ids: ["default", "edge-jp", "lab-us"],
-    },
   ],
+};
+
+const currentUser = {
+  status: "resolved" as const,
+  identity: {
+    authenticated: true,
+    principal_type: "human" as const,
+    subject: "admin@example.com",
+    email: "admin@example.com",
+    groups: ["admins", "ops"],
+    is_admin: true,
+  },
 };
 
 const meta = {
@@ -45,54 +50,23 @@ const meta = {
   tags: ["autodocs"],
   parameters: {
     layout: "fullscreen",
-    initialEntries: ["/proxies"],
     docs: {
       description: {
         component:
-          "Administrator proxies workspace dedicated to the shared global pool and cross-profile allocations.",
+          "Unified proxy workspace that follows the current config selector. Pick Global to manage the shared pool and allocations, or pick a profile to manage local imports and global-pool usage.",
       },
     },
   },
-  render: (args) => (
-    <AppShell
-      profileId="edge-jp"
-      profiles={args.profiles}
-      shellMode="global"
-      profilesLoading={false}
-      profilesCreating={false}
-      profilesError={null}
-      healthStatus="ok"
-      currentUser={{
-        status: "resolved",
-        identity: {
-          authenticated: true,
-          principal_type: "human",
-          subject: "admin@example.com",
-          email: "admin@example.com",
-          groups: ["admins", "ops"],
-          is_admin: true,
-        },
-      }}
-      onProfileIdChange={() => undefined}
-      onCreateProfile={async (value: string) => value}
-      onRetryProfiles={() => undefined}
-    >
-      <ProxiesPage {...args} />
-    </AppShell>
-  ),
+} satisfies Meta<typeof ProxiesPage>;
+
+export default meta;
+type Story = StoryObj<typeof meta>;
+
+export const GlobalConfig: Story = {
   args: {
-    profiles: ["default", "edge-jp", "lab-us"],
-    currentUser: {
-      status: "resolved",
-      identity: {
-        authenticated: true,
-        principal_type: "human",
-        subject: "admin@example.com",
-        email: "admin@example.com",
-        groups: ["admins"],
-        is_admin: true,
-      },
-    },
+    mode: "global",
+    profiles,
+    currentUser,
     accessDenied: false,
     authError: null,
     globalLoadResponse: {
@@ -111,24 +85,82 @@ const meta = {
     onReassignNode: fn(),
     onDeleteNode: fn(),
   },
-} satisfies Meta<typeof ProxiesPage>;
-
-export default meta;
-type Story = StoryObj<typeof meta>;
-
-export const Default: Story = {
+  render: (args) => (
+    <AppShell
+      profileId={GLOBAL_PROFILE_ID}
+      profiles={profiles}
+      profilesLoading={false}
+      profilesCreating={false}
+      profilesError={null}
+      healthStatus="ok"
+      currentUser={currentUser}
+      onProfileIdChange={() => undefined}
+      onCreateProfile={async (value: string) => value}
+      onRetryProfiles={() => undefined}
+    >
+      <ProxiesPage {...args} />
+    </AppShell>
+  ),
   async play({ canvasElement }) {
     const canvas = within(canvasElement);
-    await expect(canvas.getByRole("heading", { name: /global proxies/i })).toBeVisible();
+    await expect(canvas.getAllByText(/global/i)[0]).toBeVisible();
     await expect(canvas.getByRole("heading", { name: /import global proxy pool/i })).toBeVisible();
     await expect(
-      canvas.getByRole("heading", { name: /global inventory and allocations/i }),
+      canvas.getByRole("heading", { name: /global pool and profile allocations/i }),
     ).toBeVisible();
-    await expect(canvas.getByRole("button", { name: /delete/i })).toBeVisible();
+  },
+};
+
+export const ProfileConfig: Story = {
+  args: {
+    mode: "profile",
+    profileId: "edge-jp",
+    currentUser,
+    profileLoadResponse: {
+      loaded_proxies: 4,
+      distinct_ips: 3,
+      warnings: [],
+    },
+    profileLoadError: null,
+    loadingProfile: false,
+    proxySettings: {
+      profile_id: "edge-jp",
+      use_global_proxies: true,
+    },
+    proxySettingsLoading: false,
+    proxySettingsError: null,
+    updatingSettings: false,
+    showProxyPolicy: true,
+    onLoadProfile: fn(),
+    onToggleUseGlobalProxies: fn(),
+  },
+  render: (args) => (
+    <AppShell
+      profileId="edge-jp"
+      profiles={profiles}
+      profilesLoading={false}
+      profilesCreating={false}
+      profilesError={null}
+      healthStatus="ok"
+      currentUser={currentUser}
+      onProfileIdChange={() => undefined}
+      onCreateProfile={async (value: string) => value}
+      onRetryProfiles={() => undefined}
+    >
+      <ProxiesPage {...args} />
+    </AppShell>
+  ),
+  async play({ canvasElement }) {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("heading", { name: /import local proxy pool/i })).toBeVisible();
+    await expect(
+      canvas.getByRole("heading", { name: /use global pool for edge-jp/i }),
+    ).toBeVisible();
   },
 };
 
 export const ZhCN: Story = {
+  ...GlobalConfig,
   globals: {
     locale: "zh-CN",
   },
@@ -136,8 +168,35 @@ export const ZhCN: Story = {
 
 export const AccessDenied: Story = {
   args: {
+    mode: "global",
+    profiles,
+    currentUser,
     accessDenied: true,
+    authError: null,
     globalLoadResponse: null,
+    globalLoadError: null,
+    loadingGlobal: false,
     inventory: null,
+    inventoryLoading: false,
+    inventoryError: null,
+    onLoadGlobal: fn(),
+    onReassignNode: fn(),
+    onDeleteNode: fn(),
   },
+  render: (args) => (
+    <AppShell
+      profileId={GLOBAL_PROFILE_ID}
+      profiles={profiles}
+      profilesLoading={false}
+      profilesCreating={false}
+      profilesError={null}
+      healthStatus="ok"
+      currentUser={currentUser}
+      onProfileIdChange={() => undefined}
+      onCreateProfile={async (value: string) => value}
+      onRetryProfiles={() => undefined}
+    >
+      <ProxiesPage {...args} />
+    </AppShell>
+  ),
 };

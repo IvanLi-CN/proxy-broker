@@ -1,19 +1,23 @@
 import { useMutation } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { useOutletContext } from "react-router-dom";
+import { Navigate, useOutletContext } from "react-router-dom";
 import { toast } from "sonner";
 
 import { useI18n } from "@/i18n";
 import { api } from "@/lib/api";
 import { formatApiErrorMessage } from "@/lib/error-messages";
+import { isGlobalProfileId } from "@/lib/profile-selection";
 import type { ExtractIpRequest, ExtractIpResponse } from "@/lib/types";
 import { IpExtractPage } from "@/pages/IpExtractPage";
 import type { RootOutletContext } from "@/routes/RootRoute";
 
 export function IpExtractRoute() {
   const { t } = useI18n();
-  const { profileId } = useOutletContext<RootOutletContext>();
-  const previousProfileId = useRef(profileId);
+  const outlet = useOutletContext<RootOutletContext>();
+  const { profileId } = outlet;
+  const isGlobalConfig = outlet.isGlobalConfig ?? isGlobalProfileId(profileId);
+  const activeProfileId = outlet.activeProfileId ?? (isGlobalConfig ? null : profileId);
+  const previousProfileId = useRef(activeProfileId ?? "");
   const [resultByProfile, setResultByProfile] = useState<
     Record<string, { request: ExtractIpRequest; response: ExtractIpResponse } | null>
   >({});
@@ -39,22 +43,29 @@ export function IpExtractRoute() {
   const { reset: resetMutation } = mutation;
 
   useEffect(() => {
-    if (previousProfileId.current === profileId) {
+    if (!activeProfileId) {
       return;
     }
-    previousProfileId.current = profileId;
+    if (previousProfileId.current === activeProfileId) {
+      return;
+    }
+    previousProfileId.current = activeProfileId;
     resetMutation();
-  }, [profileId, resetMutation]);
+  }, [activeProfileId, resetMutation]);
+
+  if (!activeProfileId) {
+    return <Navigate replace to="/proxies" />;
+  }
 
   return (
     <IpExtractPage
       error={mutation.isError ? formatApiErrorMessage(mutation.error, t) : null}
       isPending={mutation.isPending}
-      lastRequest={resultByProfile[profileId]?.request ?? null}
+      lastRequest={resultByProfile[activeProfileId]?.request ?? null}
       onSubmit={async (payload) => {
-        await mutation.mutateAsync({ profileId, payload });
+        await mutation.mutateAsync({ profileId: activeProfileId, payload });
       }}
-      response={resultByProfile[profileId]?.response ?? null}
+      response={resultByProfile[activeProfileId]?.response ?? null}
     />
   );
 }

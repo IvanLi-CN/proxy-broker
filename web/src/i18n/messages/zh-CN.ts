@@ -507,10 +507,26 @@ export const zhCN: MessageCatalog = {
   "error.task.fallback": "任务运行失败。",
   "error.task.summary_reason_prefix": "摘要原因：{reason}",
   Global: "全局",
+  "Current config": "当前配置",
+  "Config ID": "配置 ID",
+  "Search configs or type a new ID": "搜索配置，或输入新的 ID",
+  "Loading configs...": "正在加载配置……",
+  Contexts: "上下文",
+  "Known configs": "已有配置",
+  "Shared pool and allocation control across every profile.": "管理所有配置共享池与节点分配控制。",
+  "Start an empty config catalog entry and switch to it immediately.":
+    "新建一个空的配置目录项，并立即切换过去。",
+  "No matching configs. Type a new ID to create one.": "没有匹配的配置。输入新 ID 即可创建。",
+  "Search the catalog or create a new empty config before loading any feed.":
+    "先搜索目录，或创建一个新的空配置，再去加载订阅。",
   "Profile workspace": "配置工作区",
   Proxies: "代理",
   "Global proxies": "全局代理",
   "Shared pool and cross-profile allocations": "共享池与跨配置分配",
+  "Manage local imports, global pool usage, and allocations":
+    "管理本地导入、全局池使用方式与节点分配。",
+  "Profile only": "仅配置",
+  "Select a concrete profile to use this workspace.": "先选择一个具体配置，才能使用这个工作区。",
   "Manage the global pool, profile imports, and allocations": "管理全局池、配置导入与节点分配",
   "Manage the global pool and cross-profile allocations": "管理全局池与跨配置分配",
   "The proxies workspace is restricted to the admin operator plane because it can change global pool allocation.":
@@ -545,22 +561,35 @@ export const zhCN: MessageCatalog = {
   "Import global proxy pool": "导入全局代理池",
   "Import one source into the shared global pool. Profiles that keep global usage enabled will inherit these nodes immediately.":
     "把一个源导入共享的全局池；保持“使用全局代理”开启的配置会立刻继承这些节点。",
+  "Import one upstream into the shared pool. Profiles that keep global usage enabled inherit these nodes immediately.":
+    "把一个上游源导入共享池；保持启用全局池的配置会立刻继承这些节点。",
   "Import global pool": "导入全局池",
   "Global pool updated": "全局池已更新",
   "Imported {proxyCount} proxies across {ipCount} distinct IPs into the global pool.":
     "已向全局池导入 {proxyCount} 个代理，覆盖 {ipCount} 个不同 IP。",
+  "Manage the shared global pool and every profile allocation from here.":
+    "在这里统一管理共享全局池，以及每个配置当前的节点分配。",
+  "The global config can change the shared pool and profile allocations, so only admins can open it.":
+    "全局配置可以改动共享池和各配置分配，因此只有管理员可以打开。",
   "Import local pool for {profileId}": "为 {profileId} 导入本地代理池",
   "Import nodes for the current profile only. These nodes stay local unless you later reassign them from the inventory table.":
     "仅为当前配置导入节点；除非稍后在库存表里改分配，否则这些节点会保持本地归属。",
   "Import nodes for the current profile only. These nodes stay local unless you later reassign them from the global inventory.":
     "仅为当前配置导入节点；除非稍后在全局库存里改分配，否则这些节点会保持本地归属。",
+  "Import nodes for this profile only. They stay local unless you later reassign them from the global config.":
+    "仅为这个配置导入节点；除非之后在全局配置里改分配，否则这些节点会保持本地归属。",
   "Only the local import and policy below are scoped to this profile.":
     "只有下面的本地导入和策略属于当前配置。",
   "Scoped to {profileId} only.": "仅作用于 {profileId}。",
   "Import profile pool": "导入本地池",
+  "Import local pool": "导入本地池",
   "Profile pool updated": "本地池已更新",
+  "Local pool updated": "本地池已更新",
+  "Import local proxy pool": "导入本地代理池",
   "Imported {proxyCount} proxies across {ipCount} distinct IPs into profile {profileId}.":
     "已向配置 {profileId} 导入 {proxyCount} 个代理，覆盖 {ipCount} 个不同 IP。",
+  "Manage local imports and whether {profileId} also composes the global pool.":
+    "管理本地导入，以及 {profileId} 是否继续组合全局池。",
   "Profile policy": "配置策略",
   "Use global pool for {profileId}": "{profileId} 使用全局代理池",
   "Only changes whether {profileId} inherits the global pool.":
@@ -582,6 +611,8 @@ export const zhCN: MessageCatalog = {
     "查看来源作用域、当前分配，以及节点实际生效到哪些配置。",
   "Track source scope, current allocation, and where each imported node is effective.":
     "查看来源作用域、当前分配，以及每个导入节点实际生效到哪些配置。",
+  "See where each imported node came from, where it is allocated now, and which profiles currently inherit it.":
+    "查看每个导入节点来自哪里、当前分配到哪里，以及哪些配置正在继承它。",
   "Every imported node records both its source scope and its current allocation scope. Re-imports follow the source of truth and restore nodes that upstreams still serve.":
     "每个导入节点都会记录来源作用域和当前分配作用域；重新导入会以源数据为准，恢复上游仍然提供的节点。",
   "{count} nodes": "{count} 个节点",
@@ -599,6 +630,7 @@ export const zhCN: MessageCatalog = {
   "Loading proxy inventory...": "正在加载代理库存……",
   "No imported nodes yet. Import the shared global pool here, or add local nodes from a profile overview first.":
     "还没有导入任何节点；先在这里导入共享全局池，或先去某个配置的总览页添加本地节点。",
+  "No imported nodes yet. Load the global pool first.": "还没有导入任何节点；先加载全局池。",
   "Global pool": "全局池",
   "No active profiles": "当前没有生效配置",
   "+{count} more": "还有 {count} 个",
@@ -608,5 +640,7 @@ export const zhCN: MessageCatalog = {
   "Updated allocation for {nodeId}": "已更新节点 {nodeId} 的分配",
   "Deleted imported node {nodeId}": "已删除导入节点 {nodeId}",
   "Proxy inventory unavailable": "代理库存暂不可用",
+  "Cross-profile allocation and node deletion are only available after switching the current config to Global.":
+    "跨配置分配和节点删除只在切换到“全局”配置后开放。",
   "error.api.proxy_inventory_node_not_found": "找不到指定的导入代理节点。",
 };

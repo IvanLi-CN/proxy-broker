@@ -68,7 +68,9 @@ describe("ProxiesRoute", () => {
 
   it("shows access denied when the current user is anonymous", () => {
     mockOutletContext.mockReturnValue({
-      profileId: "default",
+      profileId: "__global__",
+      activeProfileId: null,
+      isGlobalConfig: true,
       profiles: ["default"],
       authMe: null,
       currentUser: { status: "anonymous" },
@@ -76,12 +78,18 @@ describe("ProxiesRoute", () => {
 
     render(<ProxiesRoute />);
 
-    expect(latestProxiesPageProps?.accessDenied).toBe(true);
+    expect(latestProxiesPageProps?.mode).toBe("global");
+    if (latestProxiesPageProps?.mode !== "global") {
+      throw new Error("expected global proxies page");
+    }
+    expect(latestProxiesPageProps.accessDenied).toBe(true);
   });
 
   it("surfaces auth failures without mislabeling them as access denied", () => {
     mockOutletContext.mockReturnValue({
-      profileId: "default",
+      profileId: "__global__",
+      activeProfileId: null,
+      isGlobalConfig: true,
       profiles: ["default"],
       authMe: null,
       currentUser: { status: "error", message: "auth_unavailable: upstream timeout" },
@@ -89,13 +97,19 @@ describe("ProxiesRoute", () => {
 
     render(<ProxiesRoute />);
 
-    expect(latestProxiesPageProps?.accessDenied).toBe(false);
-    expect(latestProxiesPageProps?.authError).toBe("auth_unavailable: upstream timeout");
+    expect(latestProxiesPageProps?.mode).toBe("global");
+    if (latestProxiesPageProps?.mode !== "global") {
+      throw new Error("expected global proxies page");
+    }
+    expect(latestProxiesPageProps.accessDenied).toBe(false);
+    expect(latestProxiesPageProps.authError).toBe("auth_unavailable: upstream timeout");
   });
 
-  it("passes the current profile list through to the page", () => {
+  it("passes the current profile list through to the global page", () => {
     mockOutletContext.mockReturnValue({
-      profileId: "edge-jp",
+      profileId: "__global__",
+      activeProfileId: null,
+      isGlobalConfig: true,
       profiles: ["default", "edge-jp", "lab-us"],
       authMe: { is_admin: true },
       currentUser: { status: "resolved", identity: { is_admin: true } },
@@ -103,6 +117,29 @@ describe("ProxiesRoute", () => {
 
     render(<ProxiesRoute />);
 
-    expect(latestProxiesPageProps?.profiles).toEqual(["default", "edge-jp", "lab-us"]);
+    expect(latestProxiesPageProps?.mode).toBe("global");
+    if (latestProxiesPageProps?.mode !== "global") {
+      throw new Error("expected global proxies page");
+    }
+    expect(latestProxiesPageProps.profiles).toEqual(["default", "edge-jp", "lab-us"]);
+  });
+
+  it("switches the proxies page into profile mode for a normal config", () => {
+    mockOutletContext.mockReturnValue({
+      profileId: "edge-jp",
+      activeProfileId: "edge-jp",
+      isGlobalConfig: false,
+      profiles: ["default", "edge-jp", "lab-us"],
+      authMe: { is_admin: true },
+      currentUser: { status: "resolved", identity: { is_admin: true } },
+    });
+
+    render(<ProxiesRoute />);
+
+    expect(latestProxiesPageProps?.mode).toBe("profile");
+    expect(latestProxiesPageProps).toMatchObject({
+      profileId: "edge-jp",
+      showProxyPolicy: true,
+    });
   });
 });

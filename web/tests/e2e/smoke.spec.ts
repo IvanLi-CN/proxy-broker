@@ -559,17 +559,18 @@ test("operator can drive the main workflows", async ({ page }) => {
   await expect(page.getByText("Local API heartbeat")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Overview", level: 1 })).toBeVisible();
 
-  await page.getByRole("combobox", { name: /profile id/i }).click();
-  await page.getByPlaceholder("Search profiles or type a new ID").fill("edge");
-  await page.getByText("edge-jp").click();
-  await expect(page.getByRole("combobox", { name: /profile id/i })).toContainText("edge-jp");
+  await page.getByRole("combobox", { name: /config id/i }).click();
+  await page.getByPlaceholder("Search configs or type a new ID").fill("edge");
+  await page.getByRole("option", { name: /^edge-jp$/i }).click();
+  await expect(page.getByRole("combobox", { name: /config id/i })).toContainText("edge-jp");
 
-  await page.getByRole("combobox", { name: /profile id/i }).click();
-  await page.getByPlaceholder("Search profiles or type a new ID").fill("fresh-lab");
+  await page.getByRole("combobox", { name: /config id/i }).click();
+  await page.getByPlaceholder("Search configs or type a new ID").fill("fresh-lab");
   await page.getByText('Create "fresh-lab"').click();
-  await expect(page.getByRole("combobox", { name: /profile id/i })).toContainText("fresh-lab");
+  await expect(page.getByRole("combobox", { name: /config id/i })).toContainText("fresh-lab");
 
-  await page.getByRole("link", { name: /Proxies/i }).click();
+  await page.getByRole("combobox", { name: /config id/i }).click();
+  await page.getByText(/^Global$/i).click();
   await page.getByRole("button", { name: /import global pool/i }).click();
   await expect(
     page.getByText("Imported 12 proxies across 9 distinct IPs into the global pool."),
@@ -577,8 +578,9 @@ test("operator can drive the main workflows", async ({ page }) => {
 
   await expect(page.getByText("global-jp-entry")).toBeVisible();
 
-  await page.getByRole("link", { name: /Overview/i }).click();
-  await page.getByRole("button", { name: /import profile pool/i }).click();
+  await page.getByRole("combobox", { name: /config id/i }).click();
+  await page.getByRole("option", { name: /^fresh-lab$/i }).click();
+  await page.getByRole("button", { name: /import local pool/i }).click();
   await expect(
     page.getByText("Imported 48 proxies across 26 distinct IPs into profile fresh-lab."),
   ).toBeVisible();
@@ -586,6 +588,7 @@ test("operator can drive the main workflows", async ({ page }) => {
   await page.getByRole("checkbox", { name: /use global pool for fresh-lab/i }).click();
   await expect(page.getByText("local-only").first()).toBeVisible();
 
+  await page.getByRole("link", { name: /Overview/i }).click();
   await page.getByRole("button", { name: /refresh metadata/i }).click();
   await expect(
     page.getByText("Probed 26 IPs, updated 12 geo records, skipped 14 cached entries."),

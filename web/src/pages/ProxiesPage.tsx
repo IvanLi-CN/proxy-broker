@@ -19,6 +19,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { ProfileProxyPolicyCard } from "@/features/proxies/components/ProfileProxyPolicyCard";
 import { ProxyLoadCard } from "@/features/proxies/components/ProxyLoadCard";
 import { useI18n } from "@/i18n";
 import type {
@@ -26,6 +27,7 @@ import type {
   ListProxyInventoryResponse,
   LoadSubscriptionRequest,
   LoadSubscriptionResponse,
+  ProfileProxySettings,
   ProxyScope,
 } from "@/lib/types";
 
@@ -72,7 +74,8 @@ function InventoryProfiles({ effectiveProfileIds }: { effectiveProfileIds: strin
   );
 }
 
-export interface ProxiesPageProps {
+interface GlobalProxiesPageProps {
+  mode: "global";
   profiles: string[];
   currentUser: CurrentUserState;
   accessDenied?: boolean;
@@ -90,7 +93,33 @@ export interface ProxiesPageProps {
   onDeleteNode: (nodeId: string) => void | Promise<void>;
 }
 
-export function ProxiesPage({
+interface ProfileProxiesPageProps {
+  mode: "profile";
+  profileId: string;
+  currentUser: CurrentUserState;
+  profileLoadResponse?: LoadSubscriptionResponse | null;
+  profileLoadError?: string | null;
+  loadingProfile: boolean;
+  proxySettings?: ProfileProxySettings | null;
+  proxySettingsLoading?: boolean;
+  proxySettingsError?: string | null;
+  updatingSettings?: boolean;
+  showProxyPolicy?: boolean;
+  onLoadProfile: (payload: LoadSubscriptionRequest) => void | Promise<void>;
+  onToggleUseGlobalProxies: (nextValue: boolean) => void | Promise<void>;
+}
+
+export type ProxiesPageProps = GlobalProxiesPageProps | ProfileProxiesPageProps;
+
+export function ProxiesPage(props: ProxiesPageProps) {
+  if (props.mode === "global") {
+    return <GlobalProxiesView {...props} />;
+  }
+
+  return <ProfileProxiesView {...props} />;
+}
+
+function GlobalProxiesView({
   profiles,
   currentUser: _currentUser,
   accessDenied = false,
@@ -106,18 +135,18 @@ export function ProxiesPage({
   onLoadGlobal,
   onReassignNode,
   onDeleteNode,
-}: ProxiesPageProps) {
+}: GlobalProxiesPageProps) {
   const { formatNumber, t } = useI18n();
   const items = inventory?.items ?? [];
 
   if (authError) {
     return (
       <div className="space-y-5">
-        <header>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-            {t("Global proxies")}
-          </h1>
-        </header>
+        <PageHeader
+          scopeBadge={t("Global")}
+          title={t("Proxy")}
+          description={t("Manage the shared global pool and every profile allocation from here.")}
+        />
         <ActionResponsePanel
           title={t("Current user unavailable")}
           description={authError}
@@ -130,15 +159,15 @@ export function ProxiesPage({
   if (accessDenied) {
     return (
       <div className="space-y-5">
-        <header>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-            {t("Global proxies")}
-          </h1>
-        </header>
+        <PageHeader
+          scopeBadge={t("Global")}
+          title={t("Proxy")}
+          description={t("Manage the shared global pool and every profile allocation from here.")}
+        />
         <ActionResponsePanel
           title={t("Admin access required")}
           description={t(
-            "The proxies workspace is restricted to the admin operator plane because it can change global pool allocation.",
+            "The global config can change the shared pool and profile allocations, so only admins can open it.",
           )}
           tone="error"
         />
@@ -148,49 +177,34 @@ export function ProxiesPage({
 
   return (
     <div className="space-y-5">
-      <header className="space-y-1.5">
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-          {t("Global proxies")}
-        </h1>
-        <p className="max-w-3xl text-sm leading-5 text-muted-foreground">
-          {t(
-            "Manage the shared global pool and cross-profile allocations from one place. Profile-local imports and usage stay inside each profile overview.",
-          )}
-        </p>
-      </header>
+      <PageHeader
+        scopeBadge={t("Global")}
+        title={t("Proxy")}
+        description={t("Manage the shared global pool and every profile allocation from here.")}
+      />
 
-      <section className="space-y-3">
-        <div className="space-y-1">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.28em] text-primary/80">
-            {t("Shared global pool")}
-          </div>
-          <p className="text-sm leading-5 text-muted-foreground">
-            {t("Applies across all profiles.")}
-          </p>
-        </div>
-        <ProxyLoadCard
-          defaultValue="https://example.com/global-subscription.yaml"
-          description={t(
-            "Import one source into the shared global pool. Profiles that keep global usage enabled will inherit these nodes immediately.",
-          )}
-          error={globalLoadError}
-          eyebrow={t("Global scope")}
-          onSubmit={onLoadGlobal}
-          pending={loadingGlobal}
-          response={globalLoadResponse}
-          scopeChip={t("allocation defaults to global")}
-          submitLabel={t("Import global pool")}
-          successDescription={t(
-            "Imported {proxyCount} proxies across {ipCount} distinct IPs into the global pool.",
-            {
-              proxyCount: globalLoadResponse?.loaded_proxies ?? 0,
-              ipCount: globalLoadResponse?.distinct_ips ?? 0,
-            },
-          )}
-          successTitle={t("Global pool updated")}
-          title={t("Import global proxy pool")}
-        />
-      </section>
+      <ProxyLoadCard
+        defaultValue="https://example.com/global-subscription.yaml"
+        description={t(
+          "Import one upstream into the shared pool. Profiles that keep global usage enabled inherit these nodes immediately.",
+        )}
+        error={globalLoadError}
+        eyebrow={t("Global pool")}
+        onSubmit={onLoadGlobal}
+        pending={loadingGlobal}
+        response={globalLoadResponse}
+        scopeChip={t("allocation defaults to global")}
+        submitLabel={t("Import global pool")}
+        successDescription={t(
+          "Imported {proxyCount} proxies across {ipCount} distinct IPs into the global pool.",
+          {
+            proxyCount: globalLoadResponse?.loaded_proxies ?? 0,
+            ipCount: globalLoadResponse?.distinct_ips ?? 0,
+          },
+        )}
+        successTitle={t("Global pool updated")}
+        title={t("Import global proxy pool")}
+      />
 
       {inventoryError ? (
         <ActionResponsePanel
@@ -202,9 +216,9 @@ export function ProxiesPage({
 
       <DataTablePanel
         eyebrow={t("Unified inventory")}
-        title={t("Global inventory and allocations")}
+        title={t("Global pool and profile allocations")}
         description={t(
-          "Track source scope, current allocation, and where each imported node is effective.",
+          "See where each imported node came from, where it is allocated now, and which profiles currently inherit it.",
         )}
         chips={[
           t(items.length === 1 ? "{count} node" : "{count} nodes", {
@@ -260,15 +274,14 @@ export function ProxiesPage({
                   >
                     {inventoryLoading
                       ? t("Loading proxy inventory...")
-                      : t(
-                          "No imported nodes yet. Import the shared global pool here, or add local nodes from a profile overview first.",
-                        )}
+                      : t("No imported nodes yet. Load the global pool first.")}
                   </TableCell>
                 </TableRow>
               ) : (
                 items.map((item) => {
                   const pending =
                     reallocatingNodeId === item.node_id || deletingNodeId === item.node_id;
+
                   return (
                     <TableRow key={item.node_id}>
                       <TableCell className="px-3 py-3 align-top">
@@ -319,20 +332,18 @@ export function ProxiesPage({
                         </div>
                       </TableCell>
                       <TableCell className="px-3 py-3 align-top text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button
-                            variant="destructive"
-                            size="sm"
-                            className="h-8 px-2.5 text-xs"
-                            disabled={pending}
-                            onClick={() => {
-                              void onDeleteNode(item.node_id);
-                            }}
-                          >
-                            <Trash2Icon className="size-4" />
-                            {deletingNodeId === item.node_id ? t("Deleting...") : t("Delete")}
-                          </Button>
-                        </div>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className="h-8 px-2.5 text-xs"
+                          disabled={pending}
+                          onClick={() => {
+                            void onDeleteNode(item.node_id);
+                          }}
+                        >
+                          <Trash2Icon className="size-4" />
+                          {deletingNodeId === item.node_id ? t("Deleting...") : t("Delete")}
+                        </Button>
                       </TableCell>
                     </TableRow>
                   );
@@ -343,5 +354,111 @@ export function ProxiesPage({
         </div>
       </DataTablePanel>
     </div>
+  );
+}
+
+function ProfileProxiesView({
+  profileId,
+  currentUser: _currentUser,
+  profileLoadResponse,
+  profileLoadError,
+  loadingProfile,
+  proxySettings,
+  proxySettingsLoading = false,
+  proxySettingsError = null,
+  updatingSettings = false,
+  showProxyPolicy = true,
+  onLoadProfile,
+  onToggleUseGlobalProxies,
+}: ProfileProxiesPageProps) {
+  const { t } = useI18n();
+
+  return (
+    <div className="space-y-5">
+      <PageHeader
+        scopeBadge={profileId}
+        title={t("Proxy")}
+        description={t(
+          "Manage local imports and whether {profileId} also composes the global pool.",
+          {
+            profileId,
+          },
+        )}
+      />
+      <section className="grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(320px,0.9fr)]">
+        <ProxyLoadCard
+          defaultValue="https://example.com/profile-subscription.yaml"
+          description={t(
+            "Import nodes for this profile only. They stay local unless you later reassign them from the global config.",
+          )}
+          error={profileLoadError}
+          eyebrow={t("Current profile")}
+          onSubmit={onLoadProfile}
+          pending={loadingProfile}
+          response={profileLoadResponse}
+          scopeChip={t("allocation defaults to {profileId}", { profileId })}
+          submitLabel={t("Import local pool")}
+          successDescription={t(
+            "Imported {proxyCount} proxies across {ipCount} distinct IPs into profile {profileId}.",
+            {
+              proxyCount: profileLoadResponse?.loaded_proxies ?? 0,
+              ipCount: profileLoadResponse?.distinct_ips ?? 0,
+              profileId,
+            },
+          )}
+          successTitle={t("Local pool updated")}
+          title={t("Import local proxy pool")}
+        />
+
+        <div className="space-y-4">
+          {showProxyPolicy ? (
+            <ProfileProxyPolicyCard
+              profileId={profileId}
+              proxySettingsError={proxySettingsError}
+              proxySettingsLoading={proxySettingsLoading}
+              updatingSettings={updatingSettings}
+              useGlobalProxies={proxySettings?.use_global_proxies ?? true}
+              onToggleUseGlobalProxies={onToggleUseGlobalProxies}
+            />
+          ) : null}
+
+          <div className="rounded-[18px] border border-dashed border-border/70 bg-muted/10 px-4 py-3 text-xs leading-5 text-muted-foreground">
+            {t(
+              "Cross-profile allocation and node deletion are only available after switching the current config to Global.",
+            )}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function PageHeader({
+  scopeBadge,
+  title,
+  description,
+}: {
+  scopeBadge: string;
+  title: string;
+  description: string;
+}) {
+  const { t } = useI18n();
+
+  return (
+    <header className="space-y-1.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.28em] text-primary/80">
+          {t("Proxy")}
+        </div>
+        <Badge
+          variant="outline"
+          className="rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.16em]"
+        >
+          {scopeBadge}
+        </Badge>
+      </div>
+      <h1 className="text-2xl font-semibold tracking-tight text-foreground">{title}</h1>
+      <p className="max-w-3xl text-sm leading-5 text-muted-foreground">{description}</p>
+    </header>
   );
 }

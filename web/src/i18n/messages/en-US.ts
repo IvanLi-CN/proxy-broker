@@ -65,11 +65,30 @@ export const enUS: MessageCatalog = {
   "The control surface only exposes Overview, Tasks, Proxies, IP Extract, and Sessions right now.":
     "The control surface only exposes Overview, Tasks, Proxies, IP Extract, and Sessions right now.",
   Global: "Global",
+  "Current config": "Current config",
+  "Config ID": "Config ID",
+  "Search configs or type a new ID": "Search configs or type a new ID",
+  "Loading configs...": "Loading configs...",
+  Contexts: "Contexts",
+  "Known configs": "Known configs",
+  "Shared pool and allocation control across every profile.":
+    "Shared pool and allocation control across every profile.",
+  "Start an empty config catalog entry and switch to it immediately.":
+    "Start an empty config catalog entry and switch to it immediately.",
+  "No matching configs. Type a new ID to create one.":
+    "No matching configs. Type a new ID to create one.",
+  "Search the catalog or create a new empty config before loading any feed.":
+    "Search the catalog or create a new empty config before loading any feed.",
   "Profile workspace": "Profile workspace",
   "error.api.proxy_inventory_node_not_found": "The imported proxy node could not be found.",
   Proxies: "Proxies",
   "Global proxies": "Global proxies",
   "Shared pool and cross-profile allocations": "Shared pool and cross-profile allocations",
+  "Manage local imports, global pool usage, and allocations":
+    "Manage local imports, global pool usage, and allocations",
+  "Profile only": "Profile only",
+  "Select a concrete profile to use this workspace.":
+    "Select a concrete profile to use this workspace.",
   "Manage the global pool, profile imports, and allocations":
     "Manage the global pool, profile imports, and allocations",
   "Manage the global pool and cross-profile allocations":
@@ -110,22 +129,35 @@ export const enUS: MessageCatalog = {
   "Import global proxy pool": "Import global proxy pool",
   "Import one source into the shared global pool. Profiles that keep global usage enabled will inherit these nodes immediately.":
     "Import one source into the shared global pool. Profiles that keep global usage enabled will inherit these nodes immediately.",
+  "Import one upstream into the shared pool. Profiles that keep global usage enabled inherit these nodes immediately.":
+    "Import one upstream into the shared pool. Profiles that keep global usage enabled inherit these nodes immediately.",
   "Import global pool": "Import global pool",
   "Global pool updated": "Global pool updated",
   "Imported {proxyCount} proxies across {ipCount} distinct IPs into the global pool.":
     "Imported {proxyCount} proxies across {ipCount} distinct IPs into the global pool.",
+  "Manage the shared global pool and every profile allocation from here.":
+    "Manage the shared global pool and every profile allocation from here.",
+  "The global config can change the shared pool and profile allocations, so only admins can open it.":
+    "The global config can change the shared pool and profile allocations, so only admins can open it.",
   "Import local pool for {profileId}": "Import local pool for {profileId}",
   "Import nodes for the current profile only. These nodes stay local unless you later reassign them from the inventory table.":
     "Import nodes for the current profile only. These nodes stay local unless you later reassign them from the inventory table.",
   "Import nodes for the current profile only. These nodes stay local unless you later reassign them from the global inventory.":
     "Import nodes for the current profile only. These nodes stay local unless you later reassign them from the global inventory.",
+  "Import nodes for this profile only. They stay local unless you later reassign them from the global config.":
+    "Import nodes for this profile only. They stay local unless you later reassign them from the global config.",
   "Only the local import and policy below are scoped to this profile.":
     "Only the local import and policy below are scoped to this profile.",
   "Scoped to {profileId} only.": "Scoped to {profileId} only.",
   "Import profile pool": "Import profile pool",
+  "Import local pool": "Import local pool",
   "Profile pool updated": "Profile pool updated",
+  "Local pool updated": "Local pool updated",
+  "Import local proxy pool": "Import local proxy pool",
   "Imported {proxyCount} proxies across {ipCount} distinct IPs into profile {profileId}.":
     "Imported {proxyCount} proxies across {ipCount} distinct IPs into profile {profileId}.",
+  "Manage local imports and whether {profileId} also composes the global pool.":
+    "Manage local imports and whether {profileId} also composes the global pool.",
   "Profile policy": "Profile policy",
   "Use global pool for {profileId}": "Use global pool for {profileId}",
   "Only changes whether {profileId} inherits the global pool.":
@@ -148,6 +180,8 @@ export const enUS: MessageCatalog = {
     "Track source scope, current allocation, and where each node is effective.",
   "Track source scope, current allocation, and where each imported node is effective.":
     "Track source scope, current allocation, and where each imported node is effective.",
+  "See where each imported node came from, where it is allocated now, and which profiles currently inherit it.":
+    "See where each imported node came from, where it is allocated now, and which profiles currently inherit it.",
   "Every imported node records both its source scope and its current allocation scope. Re-imports follow the source of truth and restore nodes that upstreams still serve.":
     "Every imported node records both its source scope and its current allocation scope. Re-imports follow the source of truth and restore nodes that upstreams still serve.",
   "{count} nodes": "{count} nodes",
@@ -166,6 +200,8 @@ export const enUS: MessageCatalog = {
   "Loading proxy inventory...": "Loading proxy inventory...",
   "No imported nodes yet. Import the shared global pool here, or add local nodes from a profile overview first.":
     "No imported nodes yet. Import the shared global pool here, or add local nodes from a profile overview first.",
+  "No imported nodes yet. Load the global pool first.":
+    "No imported nodes yet. Load the global pool first.",
   "Global pool": "Global pool",
   "No active profiles": "No active profiles",
   "+{count} more": "+{count} more",
@@ -175,4 +211,6 @@ export const enUS: MessageCatalog = {
   "Updated allocation for {nodeId}": "Updated allocation for {nodeId}",
   "Deleted imported node {nodeId}": "Deleted imported node {nodeId}",
   "Proxy inventory unavailable": "Proxy inventory unavailable",
+  "Cross-profile allocation and node deletion are only available after switching the current config to Global.":
+    "Cross-profile allocation and node deletion are only available after switching the current config to Global.",
 };

@@ -9,6 +9,7 @@ const {
   mockToast,
   mockUseLocation,
   mockUseMutation,
+  mockUseNavigate,
   mockUseProfilePreference,
   mockUseQuery,
   mockUseQueryClient,
@@ -20,6 +21,7 @@ const {
   },
   mockUseLocation: vi.fn(),
   mockUseMutation: vi.fn(),
+  mockUseNavigate: vi.fn(),
   mockUseProfilePreference: vi.fn(),
   mockUseQuery: vi.fn(),
   mockUseQueryClient: vi.fn(),
@@ -52,12 +54,14 @@ vi.mock("@/components/AppShell", () => ({
 vi.mock("react-router-dom", () => ({
   Outlet: () => null,
   useLocation: () => mockUseLocation(),
+  useNavigate: () => mockUseNavigate(),
 }));
 
 describe("RootRoute", () => {
   beforeEach(() => {
     latestAppShellProps = null;
     mockUseMutation.mockReset();
+    mockUseNavigate.mockReset();
     mockUseProfilePreference.mockReset();
     mockUseQuery.mockReset();
     mockUseQueryClient.mockReset();
@@ -68,6 +72,7 @@ describe("RootRoute", () => {
 
     mockUseProfilePreference.mockReturnValue(["default", vi.fn()]);
     mockUseLocation.mockReturnValue({ pathname: "/" });
+    mockUseNavigate.mockReturnValue(vi.fn());
     mockUseQueryClient.mockReturnValue({
       invalidateQueries: vi.fn().mockResolvedValue(undefined),
     });
@@ -181,5 +186,37 @@ describe("RootRoute", () => {
     expect(latestAppShellProps?.currentUser).toEqual({
       status: "anonymous",
     });
+  });
+
+  it("redirects persisted global selection back to /proxies", () => {
+    const navigate = vi.fn();
+
+    mockUseNavigate.mockReturnValue(navigate);
+    mockUseProfilePreference.mockReturnValue(["__global__", vi.fn()]);
+    mockUseLocation.mockReturnValue({ pathname: "/" });
+    mockUseQuery
+      .mockReturnValueOnce({
+        data: { status: "healthy" },
+      })
+      .mockReturnValueOnce({
+        data: {
+          authenticated: true,
+          principal_type: "human",
+          subject: "admin@example.com",
+          email: "admin@example.com",
+          groups: ["admins"],
+          is_admin: true,
+        },
+      })
+      .mockReturnValueOnce({
+        data: { profiles: ["default", "edge-jp"] },
+        isError: false,
+        isLoading: false,
+        refetch: vi.fn(),
+      });
+
+    render(<RootRoute />);
+
+    expect(navigate).toHaveBeenCalledWith("/proxies", { replace: true });
   });
 });
