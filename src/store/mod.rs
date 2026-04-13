@@ -5,8 +5,8 @@ use async_trait::async_trait;
 
 use crate::models::{
     ApiKeyRecord, IpRecord, ProbeRecord, ProfileProxySettings, ProfileSyncConfig,
-    ProxyInventoryRecord, ProxyNode, ProxyScope, SessionRecord, TaskListQuery,
-    TaskRunEventRecord, TaskRunRecord,
+    ProxyInventoryRecord, ProxyNode, ProxyScope, SessionRecord, TaskListQuery, TaskRunEventRecord,
+    TaskRunRecord,
 };
 
 pub use memory::MemoryStore;

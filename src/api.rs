@@ -16,10 +16,9 @@ use crate::{
     models::{
         CreateApiKeyRequest, CreateApiKeyResponse, CreateProfileRequest, CreateProfileResponse,
         HealthResponse, LoadSubscriptionRequest, OpenBatchRequest, OpenSessionRequest,
-        ProfileProxySettings, ProxyInventoryListQuery, RefreshRequest,
-        SearchSessionOptionsRequest, SuggestedPortResponse, TaskListQuery, TaskRunDetail,
-        TaskRunSummary, TaskStreamEnvelope, UpdateProfileProxySettingsRequest,
-        UpdateProxyAllocationRequest,
+        ProfileProxySettings, ProxyInventoryListQuery, RefreshRequest, SearchSessionOptionsRequest,
+        SuggestedPortResponse, TaskListQuery, TaskRunDetail, TaskRunSummary, TaskStreamEnvelope,
+        UpdateProfileProxySettingsRequest, UpdateProxyAllocationRequest,
     },
     service::BrokerService,
     tasks::{TaskBusEvent, build_task_list_response, matches_task_query},
@@ -144,7 +143,10 @@ async fn load_global_subscription(
 ) -> Result<Json<crate::models::LoadSubscriptionResponse>, BrokerError> {
     auth.require_admin()?;
     let request = parse_json_payload(payload, "load_global_subscription")?;
-    let resp = state.service.load_global_subscription(&request.source).await?;
+    let resp = state
+        .service
+        .load_global_subscription(&request.source)
+        .await?;
     Ok(Json(resp))
 }
 
@@ -192,7 +194,10 @@ async fn get_profile_proxy_settings(
     Path(profile_id): Path<String>,
 ) -> Result<Json<ProfileProxySettings>, BrokerError> {
     auth.require_admin()?;
-    let resp = state.service.get_profile_proxy_settings(&profile_id).await?;
+    let resp = state
+        .service
+        .get_profile_proxy_settings(&profile_id)
+        .await?;
     Ok(Json(resp))
 }
 

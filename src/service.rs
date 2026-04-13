@@ -32,14 +32,14 @@ use crate::{
         CreateApiKeyRequest, CreateApiKeyResponse, CreateProfileResponse, ExtractIpItem,
         ExtractIpRequest, ExtractIpResponse, IpRecord, ListApiKeysResponse, ListProfilesResponse,
         ListProxyInventoryResponse, ListSessionsResponse, LoadSubscriptionResponse,
-        OpenBatchRequest, OpenBatchResponse, OpenSessionRequest, OpenSessionResponse,
-        ProbeRecord, ProfileProxySettings, ProfileSyncConfig, ProxyInventoryItem,
-        ProxyInventoryRecord, ProxyNode, ProxyScope, RefreshRequest, RefreshResponse,
-        SearchSessionOptionsRequest, SearchSessionOptionsResponse, SessionOptionItem,
-        SessionOptionKind, SessionRecord, SessionSelectionMode, SubscriptionSource,
-        SuggestedPortResponse, TaskEventLevel, TaskListQuery, TaskListResponse, TaskRunDetail,
-        TaskRunEventRecord, TaskRunKind, TaskRunRecord, TaskRunScope, TaskRunStage,
-        TaskRunStatus, TaskRunSummary, TaskRunTrigger, now_epoch_sec,
+        OpenBatchRequest, OpenBatchResponse, OpenSessionRequest, OpenSessionResponse, ProbeRecord,
+        ProfileProxySettings, ProfileSyncConfig, ProxyInventoryItem, ProxyInventoryRecord,
+        ProxyNode, ProxyScope, RefreshRequest, RefreshResponse, SearchSessionOptionsRequest,
+        SearchSessionOptionsResponse, SessionOptionItem, SessionOptionKind, SessionRecord,
+        SessionSelectionMode, SubscriptionSource, SuggestedPortResponse, TaskEventLevel,
+        TaskListQuery, TaskListResponse, TaskRunDetail, TaskRunEventRecord, TaskRunKind,
+        TaskRunRecord, TaskRunScope, TaskRunStage, TaskRunStatus, TaskRunSummary, TaskRunTrigger,
+        now_epoch_sec,
     },
     runtime::MihomoRuntime,
     store::BrokerStore,
@@ -186,7 +186,8 @@ impl BrokerService {
         for profile_id in &profiles {
             settings.insert(
                 profile_id.clone(),
-                self.get_profile_proxy_settings_effective(profile_id).await?,
+                self.get_profile_proxy_settings_effective(profile_id)
+                    .await?,
             );
         }
         Ok((profiles, settings))
@@ -1152,7 +1153,10 @@ impl BrokerService {
                 if node.resolved_ips.is_empty() {
                     None
                 } else {
-                    Some(((node.proxy_name.clone(), node.server.clone()), node.resolved_ips.clone()))
+                    Some((
+                        (node.proxy_name.clone(), node.server.clone()),
+                        node.resolved_ips.clone(),
+                    ))
                 }
             })
             .collect();
@@ -1223,8 +1227,13 @@ impl BrokerService {
         })
     }
 
-    async fn compose_effective_proxy_nodes(&self, profile_id: &str) -> BrokerResult<Vec<ProxyNode>> {
-        let settings = self.get_profile_proxy_settings_effective(profile_id).await?;
+    async fn compose_effective_proxy_nodes(
+        &self,
+        profile_id: &str,
+    ) -> BrokerResult<Vec<ProxyNode>> {
+        let settings = self
+            .get_profile_proxy_settings_effective(profile_id)
+            .await?;
         let mut candidates = self
             .store
             .list_proxy_inventory()
@@ -1261,7 +1270,10 @@ impl BrokerService {
         Ok(nodes)
     }
 
-    async fn rebuild_effective_profile_locked(&self, profile_id: &str) -> BrokerResult<Vec<String>> {
+    async fn rebuild_effective_profile_locked(
+        &self,
+        profile_id: &str,
+    ) -> BrokerResult<Vec<String>> {
         let nodes = self.compose_effective_proxy_nodes(profile_id).await?;
         let existing_nodes = self
             .store
@@ -1420,7 +1432,8 @@ impl BrokerService {
         record: ProxyInventoryRecord,
     ) -> BrokerResult<ProxyInventoryItem> {
         let (profiles, settings) = self.list_profile_ids_with_settings().await?;
-        let effective_profile_ids = self.effective_profile_ids_for_record(&record, &profiles, &settings);
+        let effective_profile_ids =
+            self.effective_profile_ids_for_record(&record, &profiles, &settings);
         Ok(ProxyInventoryItem {
             node_id: record.node_id,
             proxy_name: record.proxy_name,
@@ -2620,10 +2633,7 @@ impl BrokerService {
         self.inventory_item_from_record(updated).await
     }
 
-    pub async fn delete_proxy_inventory_node(
-        &self,
-        node_id: &str,
-    ) -> BrokerResult<()> {
+    pub async fn delete_proxy_inventory_node(&self, node_id: &str) -> BrokerResult<()> {
         let before = self
             .store
             .delete_proxy_inventory_node(node_id)
@@ -3267,7 +3277,8 @@ fn compare_inventory_preference(
         .cmp(&left_direct)
         .then_with(|| {
             let left_local_source = inventory_scope_matches_profile(&left.source_scope, profile_id);
-            let right_local_source = inventory_scope_matches_profile(&right.source_scope, profile_id);
+            let right_local_source =
+                inventory_scope_matches_profile(&right.source_scope, profile_id);
             right_local_source.cmp(&left_local_source)
         })
         .then_with(|| right.updated_at.cmp(&left.updated_at))
@@ -4607,7 +4618,10 @@ proxies:
             .await
             .expect("global import should succeed");
         service
-            .load_subscription("edge-jp", &SubscriptionSource::File(local_source_path.clone()))
+            .load_subscription(
+                "edge-jp",
+                &SubscriptionSource::File(local_source_path.clone()),
+            )
             .await
             .expect("local import should succeed");
         let _ = tokio::fs::remove_file(&global_source_path).await;

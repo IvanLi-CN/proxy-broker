@@ -273,7 +273,12 @@ impl BrokerStore for MemoryStore {
                 .probe_records
                 .iter()
                 .cloned()
-                .map(|r| ((r.proxy_name.clone(), r.ip.clone(), r.target_url.clone()), r))
+                .map(|r| {
+                    (
+                        (r.proxy_name.clone(), r.ip.clone(), r.target_url.clone()),
+                        r,
+                    )
+                })
                 .collect();
             for record in records {
                 index.insert(
@@ -300,7 +305,8 @@ impl BrokerStore for MemoryStore {
         profile_id: &str,
         session: &SessionRecord,
     ) -> anyhow::Result<()> {
-        self.insert_sessions(profile_id, std::slice::from_ref(session)).await
+        self.insert_sessions(profile_id, std::slice::from_ref(session))
+            .await
     }
 
     async fn insert_sessions(
@@ -451,17 +457,20 @@ impl BrokerStore for MemoryStore {
     ) -> anyhow::Result<()> {
         self.with_profile_mut(profile_id, |profile| {
             for ip in ips {
-                let entry = profile.ip_records.entry(ip.to_string()).or_insert(IpRecord {
-                    ip: ip.to_string(),
-                    country_code: None,
-                    country_name: None,
-                    region_name: None,
-                    city: None,
-                    geo_source: None,
-                    probe_updated_at: None,
-                    geo_updated_at: None,
-                    last_used_at: None,
-                });
+                let entry = profile
+                    .ip_records
+                    .entry(ip.to_string())
+                    .or_insert(IpRecord {
+                        ip: ip.to_string(),
+                        country_code: None,
+                        country_name: None,
+                        region_name: None,
+                        city: None,
+                        geo_source: None,
+                        probe_updated_at: None,
+                        geo_updated_at: None,
+                        last_used_at: None,
+                    });
                 entry.last_used_at = Some(last_used_at);
             }
         })?;
@@ -716,7 +725,10 @@ mod tests {
             .await
             .expect("list should succeed");
 
-        let ids = listed.into_iter().map(|session| session.session_id).collect::<Vec<_>>();
+        let ids = listed
+            .into_iter()
+            .map(|session| session.session_id)
+            .collect::<Vec<_>>();
         assert_eq!(ids, vec!["c", "a", "b"]);
     }
 
