@@ -164,6 +164,12 @@ export const ZhCN: Story = {
   globals: {
     locale: "zh-CN",
   },
+  async play({ canvasElement }) {
+    const canvas = within(canvasElement);
+    await expect(canvas.getAllByText(/全局/i)[0]).toBeVisible();
+    await expect(canvas.getByRole("heading", { name: /导入全局代理池/i })).toBeVisible();
+    await expect(canvas.getByRole("heading", { name: /全局池与配置分配/i })).toBeVisible();
+  },
 };
 
 export const AccessDenied: Story = {

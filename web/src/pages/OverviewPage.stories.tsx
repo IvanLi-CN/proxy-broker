@@ -81,7 +81,9 @@ export const Default: Story = {
   async play({ canvasElement }) {
     const canvas = within(canvasElement);
     await expect(canvas.getByRole("heading", { name: /overview/i })).toBeVisible();
-    await expect(canvas.getByRole("heading", { name: /refresh metadata/i })).toBeVisible();
+    await expect(
+      canvas.getByRole("heading", { name: /refresh probes and geo hints/i }),
+    ).toBeVisible();
   },
 };
 

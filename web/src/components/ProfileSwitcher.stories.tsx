@@ -60,7 +60,7 @@ export const SearchNoMatch: Story = {
     const overlay = within(canvasElement.ownerDocument.body);
     await userEvent.click(canvas.getByRole("combobox"));
     await userEvent.type(
-      await overlay.findByPlaceholderText("Search profiles or type a new ID"),
+      await overlay.findByPlaceholderText("Search configs or type a new ID"),
       "tokyo",
     );
   },
@@ -75,7 +75,7 @@ export const Creating: Story = {
     const overlay = within(canvasElement.ownerDocument.body);
     await userEvent.click(canvas.getByRole("combobox"));
     await userEvent.type(
-      await overlay.findByPlaceholderText("Search profiles or type a new ID"),
+      await overlay.findByPlaceholderText("Search configs or type a new ID"),
       "fresh-lab",
     );
   },
