@@ -17,6 +17,7 @@ use futures_util::{StreamExt, TryStreamExt, stream};
 use maxminddb::{Reader, geoip2};
 use serde::Deserialize;
 use tokio::sync::{Mutex as TokioMutex, broadcast};
+use uuid::Uuid;
 
 use crate::{
     auth::{Principal, constant_time_eq, hash_secret, issue_api_key, parse_api_key_secret},
@@ -30,13 +31,15 @@ use crate::{
     models::{
         CreateApiKeyRequest, CreateApiKeyResponse, CreateProfileResponse, ExtractIpItem,
         ExtractIpRequest, ExtractIpResponse, IpRecord, ListApiKeysResponse, ListProfilesResponse,
-        ListSessionsResponse, LoadSubscriptionResponse, OpenBatchRequest, OpenBatchResponse,
-        OpenSessionRequest, OpenSessionResponse, ProbeRecord, ProfileSyncConfig, ProxyNode,
-        RefreshRequest, RefreshResponse, SearchSessionOptionsRequest, SearchSessionOptionsResponse,
-        SessionOptionItem, SessionOptionKind, SessionRecord, SessionSelectionMode,
-        SubscriptionSource, SuggestedPortResponse, TaskEventLevel, TaskListQuery, TaskListResponse,
-        TaskRunDetail, TaskRunEventRecord, TaskRunKind, TaskRunRecord, TaskRunScope, TaskRunStage,
-        TaskRunStatus, TaskRunSummary, TaskRunTrigger, now_epoch_sec,
+        ListProxyInventoryResponse, ListSessionsResponse, LoadSubscriptionResponse,
+        OpenBatchRequest, OpenBatchResponse, OpenSessionRequest, OpenSessionResponse, ProbeRecord,
+        ProfileProxySettings, ProfileSyncConfig, ProxyInventoryItem, ProxyInventoryRecord,
+        ProxyNode, ProxyScope, RefreshRequest, RefreshResponse, SearchSessionOptionsRequest,
+        SearchSessionOptionsResponse, SessionOptionItem, SessionOptionKind, SessionRecord,
+        SessionSelectionMode, SubscriptionSource, SuggestedPortResponse, TaskEventLevel,
+        TaskListQuery, TaskListResponse, TaskRunDetail, TaskRunEventRecord, TaskRunKind,
+        TaskRunRecord, TaskRunScope, TaskRunStage, TaskRunStatus, TaskRunSummary, TaskRunTrigger,
+        now_epoch_sec,
     },
     runtime::MihomoRuntime,
     store::BrokerStore,
@@ -103,6 +106,11 @@ struct LoadSubscriptionOutcome {
     new_ips: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
+struct ImportedInventoryOutcome {
+    response: LoadSubscriptionResponse,
+}
+
 impl BrokerService {
     pub fn new(
         store: Arc<dyn BrokerStore>,
@@ -145,6 +153,65 @@ impl BrokerService {
             .await
             .map_err(BrokerError::from)?;
         Ok(profiles.into_iter().any(|item| item == profile_id))
+    }
+
+    fn default_profile_proxy_settings(&self, profile_id: &str) -> ProfileProxySettings {
+        ProfileProxySettings {
+            profile_id: profile_id.to_string(),
+            use_global_proxies: true,
+        }
+    }
+
+    async fn get_profile_proxy_settings_effective(
+        &self,
+        profile_id: &str,
+    ) -> BrokerResult<ProfileProxySettings> {
+        Ok(self
+            .store
+            .get_profile_proxy_settings(profile_id)
+            .await
+            .map_err(BrokerError::from)?
+            .unwrap_or_else(|| self.default_profile_proxy_settings(profile_id)))
+    }
+
+    async fn list_profile_ids_with_settings(
+        &self,
+    ) -> BrokerResult<(Vec<String>, HashMap<String, ProfileProxySettings>)> {
+        let profiles = self
+            .store
+            .list_profiles()
+            .await
+            .map_err(BrokerError::from)?;
+        let mut settings = HashMap::new();
+        for profile_id in &profiles {
+            settings.insert(
+                profile_id.clone(),
+                self.get_profile_proxy_settings_effective(profile_id)
+                    .await?,
+            );
+        }
+        Ok((profiles, settings))
+    }
+
+    fn effective_profile_ids_for_record(
+        &self,
+        record: &ProxyInventoryRecord,
+        profiles: &[String],
+        settings: &HashMap<String, ProfileProxySettings>,
+    ) -> Vec<String> {
+        match &record.allocation_scope {
+            ProxyScope::Global => profiles
+                .iter()
+                .filter(|profile_id| {
+                    settings
+                        .get(profile_id.as_str())
+                        .map(|item| item.use_global_proxies)
+                        .unwrap_or(true)
+                })
+                .cloned()
+                .collect(),
+            ProxyScope::Profile { profile_id } => vec![profile_id.clone()],
+        }
     }
 
     async fn cleanup_profile_runtime_if_idle(&self, profile_id: &str, sessions: &[SessionRecord]) {
@@ -1044,45 +1111,19 @@ impl BrokerService {
         Ok(())
     }
 
-    pub async fn load_subscription(
-        &self,
-        profile_id: &str,
-        source: &crate::models::SubscriptionSource,
-    ) -> BrokerResult<LoadSubscriptionResponse> {
-        let outcome = self.load_subscription_internal(profile_id, source).await?;
-        let mut response = outcome.response;
-        if let Err(err) = self
-            .register_post_load_bookkeeping(profile_id, source, &outcome.new_ips)
-            .await
-        {
-            tracing::warn!(
-                profile_id,
-                error = %err,
-                "post-load task bookkeeping failed after successful subscription import"
-            );
-            response.warnings.push(format!(
-                "Imported subscription, but automatic task bookkeeping failed: {err}"
-            ));
-        }
-        Ok(response)
+    fn proxy_inventory_node_id(&self, source_scope: &ProxyScope, proxy_name: &str) -> String {
+        Uuid::new_v5(
+            &Uuid::NAMESPACE_URL,
+            format!("proxy-broker:{}:{proxy_name}", source_scope.key()).as_bytes(),
+        )
+        .to_string()
     }
 
-    pub async fn refresh(
+    async fn import_inventory_scope_from_source(
         &self,
-        profile_id: &str,
-        request: &RefreshRequest,
-    ) -> BrokerResult<RefreshResponse> {
-        self.refresh_metadata_internal(profile_id, request.force, None, None)
-            .await
-    }
-
-    async fn load_subscription_internal(
-        &self,
-        profile_id: &str,
+        source_scope: &ProxyScope,
         source: &SubscriptionSource,
-    ) -> BrokerResult<LoadSubscriptionOutcome> {
-        let _profile_guard = self.lock_profile(profile_id).await;
-
+    ) -> BrokerResult<ImportedInventoryOutcome> {
         let (mut nodes, mut warnings) = subscription::load_from_source(&self.http, source)
             .await
             .map_err(|err| match err {
@@ -1094,19 +1135,19 @@ impl BrokerService {
                 }
             })?;
 
-        if nodes.is_empty() {
-            return Err(BrokerError::SubscriptionInvalid);
-        }
-        if has_duplicate_proxy_names(&nodes) {
+        if nodes.is_empty() || has_duplicate_proxy_names(&nodes) {
             return Err(BrokerError::SubscriptionInvalid);
         }
 
-        let existing_nodes = self
+        let existing_scope_nodes = self
             .store
-            .list_subscription(profile_id)
+            .list_proxy_inventory()
             .await
-            .map_err(BrokerError::from)?;
-        let existing_ips_by_proxy: HashMap<(String, String), Vec<String>> = existing_nodes
+            .map_err(BrokerError::from)?
+            .into_iter()
+            .filter(|item| item.source_scope == *source_scope)
+            .collect::<Vec<_>>();
+        let existing_ips_by_proxy: HashMap<(String, String), Vec<String>> = existing_scope_nodes
             .iter()
             .filter_map(|node| {
                 if node.resolved_ips.is_empty() {
@@ -1119,6 +1160,11 @@ impl BrokerService {
                 }
             })
             .collect();
+        let existing_by_node_id = existing_scope_nodes
+            .iter()
+            .map(|item| (item.node_id.clone(), item.clone()))
+            .collect::<HashMap<_, _>>();
+
         for node in &mut nodes {
             if !node.resolved_ips.is_empty() {
                 continue;
@@ -1135,6 +1181,105 @@ impl BrokerService {
             }
         }
 
+        let distinct_ips = nodes
+            .iter()
+            .flat_map(|node| node.resolved_ips.iter().cloned())
+            .collect::<HashSet<_>>();
+        if distinct_ips.is_empty() {
+            return Err(BrokerError::SubscriptionInvalid);
+        }
+
+        let now = now_epoch_sec();
+        let inventory_nodes = nodes
+            .into_iter()
+            .map(|node| {
+                let node_id = self.proxy_inventory_node_id(source_scope, &node.proxy_name);
+                let created_at = existing_by_node_id
+                    .get(&node_id)
+                    .map(|item| item.created_at)
+                    .unwrap_or(now);
+                ProxyInventoryRecord {
+                    node_id,
+                    source_scope: source_scope.clone(),
+                    allocation_scope: source_scope.clone(),
+                    proxy_name: node.proxy_name,
+                    proxy_type: node.proxy_type,
+                    server: node.server,
+                    resolved_ips: node.resolved_ips,
+                    raw_proxy: node.raw_proxy,
+                    created_at,
+                    updated_at: now,
+                }
+            })
+            .collect::<Vec<_>>();
+
+        self.store
+            .replace_proxy_inventory_scope(source_scope, &inventory_nodes)
+            .await
+            .map_err(BrokerError::from)?;
+
+        Ok(ImportedInventoryOutcome {
+            response: LoadSubscriptionResponse {
+                loaded_proxies: inventory_nodes.len(),
+                distinct_ips: distinct_ips.len(),
+                warnings,
+            },
+        })
+    }
+
+    async fn compose_effective_proxy_nodes(
+        &self,
+        profile_id: &str,
+    ) -> BrokerResult<Vec<ProxyNode>> {
+        let settings = self
+            .get_profile_proxy_settings_effective(profile_id)
+            .await?;
+        let mut candidates = self
+            .store
+            .list_proxy_inventory()
+            .await
+            .map_err(BrokerError::from)?
+            .into_iter()
+            .filter(|item| match &item.allocation_scope {
+                ProxyScope::Global => settings.use_global_proxies,
+                ProxyScope::Profile {
+                    profile_id: allocated_profile_id,
+                } => allocated_profile_id == profile_id,
+            })
+            .collect::<Vec<_>>();
+        candidates.sort_by(|left, right| compare_inventory_preference(profile_id, left, right));
+
+        let mut by_name = HashMap::new();
+        for candidate in candidates {
+            by_name
+                .entry(candidate.proxy_name.clone())
+                .or_insert(candidate);
+        }
+
+        let mut nodes = by_name
+            .into_values()
+            .map(|item| ProxyNode {
+                proxy_name: item.proxy_name,
+                proxy_type: item.proxy_type,
+                server: item.server,
+                resolved_ips: item.resolved_ips,
+                raw_proxy: item.raw_proxy,
+            })
+            .collect::<Vec<_>>();
+        nodes.sort_by(|left, right| left.proxy_name.cmp(&right.proxy_name));
+        Ok(nodes)
+    }
+
+    async fn rebuild_effective_profile_locked(
+        &self,
+        profile_id: &str,
+    ) -> BrokerResult<Vec<String>> {
+        let nodes = self.compose_effective_proxy_nodes(profile_id).await?;
+        let existing_nodes = self
+            .store
+            .list_subscription(profile_id)
+            .await
+            .map_err(BrokerError::from)?;
         let existing_ip_records = self
             .store
             .list_ip_records(profile_id)
@@ -1145,6 +1290,30 @@ impl BrokerService {
             .map(|record| (record.ip.clone(), record))
             .collect();
         let existing_ip_keys: HashSet<String> = existing_ip_map.keys().cloned().collect();
+        let existing_sessions = self
+            .store
+            .list_sessions(profile_id)
+            .await
+            .map_err(BrokerError::from)?;
+
+        if nodes.is_empty() {
+            if !existing_sessions.is_empty() {
+                self.runtime
+                    .shutdown_profile(profile_id)
+                    .await
+                    .map_err(|e| BrokerError::MihomoUnavailable(e.to_string()))?;
+            }
+            let removed_session_ids = existing_sessions
+                .iter()
+                .map(|session| session.session_id.clone())
+                .collect::<Vec<_>>();
+            self.store
+                .apply_subscription_snapshot(profile_id, &[], &[], &[], &removed_session_ids)
+                .await
+                .map_err(BrokerError::from)?;
+            self.cleanup_profile_runtime_if_idle(profile_id, &[]).await;
+            return Ok(vec![]);
+        }
 
         let mut ip_map: HashMap<String, IpRecord> = HashMap::new();
         for node in &nodes {
@@ -1169,9 +1338,6 @@ impl BrokerService {
             }
         }
         let valid_ips: HashSet<String> = ip_map.keys().cloned().collect();
-        if valid_ips.is_empty() {
-            return Err(BrokerError::SubscriptionInvalid);
-        }
         let valid_proxy_ip_pairs: HashSet<(String, String)> = nodes
             .iter()
             .flat_map(|node| {
@@ -1180,11 +1346,6 @@ impl BrokerService {
                     .map(move |ip| (node.proxy_name.clone(), ip.clone()))
             })
             .collect();
-        let existing_sessions = self
-            .store
-            .list_sessions(profile_id)
-            .await
-            .map_err(BrokerError::from)?;
         let active_sessions: Vec<SessionRecord> = existing_sessions
             .iter()
             .filter(|session| {
@@ -1253,13 +1414,83 @@ impl BrokerService {
             .cloned()
             .collect::<Vec<_>>();
         new_ips.sort();
+        Ok(new_ips)
+    }
+
+    async fn rebuild_profiles(&self, profile_ids: &HashSet<String>) -> BrokerResult<()> {
+        let mut profile_ids = profile_ids.iter().cloned().collect::<Vec<_>>();
+        profile_ids.sort();
+        for profile_id in profile_ids {
+            let _profile_guard = self.lock_profile(&profile_id).await;
+            self.rebuild_effective_profile_locked(&profile_id).await?;
+        }
+        Ok(())
+    }
+
+    async fn inventory_item_from_record(
+        &self,
+        record: ProxyInventoryRecord,
+    ) -> BrokerResult<ProxyInventoryItem> {
+        let (profiles, settings) = self.list_profile_ids_with_settings().await?;
+        let effective_profile_ids =
+            self.effective_profile_ids_for_record(&record, &profiles, &settings);
+        Ok(ProxyInventoryItem {
+            node_id: record.node_id,
+            proxy_name: record.proxy_name,
+            proxy_type: record.proxy_type,
+            server: record.server,
+            resolved_ips: record.resolved_ips,
+            source_scope: record.source_scope,
+            allocation_scope: record.allocation_scope,
+            effective_profile_ids,
+        })
+    }
+
+    pub async fn load_subscription(
+        &self,
+        profile_id: &str,
+        source: &crate::models::SubscriptionSource,
+    ) -> BrokerResult<LoadSubscriptionResponse> {
+        let outcome = self.load_subscription_internal(profile_id, source).await?;
+        let mut response = outcome.response;
+        if let Err(err) = self
+            .register_post_load_bookkeeping(profile_id, source, &outcome.new_ips)
+            .await
+        {
+            tracing::warn!(
+                profile_id,
+                error = %err,
+                "post-load task bookkeeping failed after successful subscription import"
+            );
+            response.warnings.push(format!(
+                "Imported subscription, but automatic task bookkeeping failed: {err}"
+            ));
+        }
+        Ok(response)
+    }
+
+    pub async fn refresh(
+        &self,
+        profile_id: &str,
+        request: &RefreshRequest,
+    ) -> BrokerResult<RefreshResponse> {
+        self.refresh_metadata_internal(profile_id, request.force, None, None)
+            .await
+    }
+
+    async fn load_subscription_internal(
+        &self,
+        profile_id: &str,
+        source: &SubscriptionSource,
+    ) -> BrokerResult<LoadSubscriptionOutcome> {
+        let _profile_guard = self.lock_profile(profile_id).await;
+        let imported = self
+            .import_inventory_scope_from_source(&ProxyScope::profile(profile_id), source)
+            .await?;
+        let new_ips = self.rebuild_effective_profile_locked(profile_id).await?;
 
         Ok(LoadSubscriptionOutcome {
-            response: LoadSubscriptionResponse {
-                loaded_proxies: nodes.len(),
-                distinct_ips: valid_ips.len(),
-                warnings,
-            },
+            response: imported.response,
             new_ips,
         })
     }
@@ -2283,6 +2514,172 @@ impl BrokerService {
         })
     }
 
+    pub async fn load_global_subscription(
+        &self,
+        source: &SubscriptionSource,
+    ) -> BrokerResult<LoadSubscriptionResponse> {
+        let _global_guard = self.lock_profile("__global_proxy_scope__").await;
+        let imported = self
+            .import_inventory_scope_from_source(&ProxyScope::global(), source)
+            .await?;
+        let (profiles, settings) = self.list_profile_ids_with_settings().await?;
+        let affected_profiles = profiles
+            .into_iter()
+            .filter(|profile_id| {
+                settings
+                    .get(profile_id.as_str())
+                    .map(|item| item.use_global_proxies)
+                    .unwrap_or(true)
+            })
+            .collect::<HashSet<_>>();
+        self.rebuild_profiles(&affected_profiles).await?;
+        Ok(imported.response)
+    }
+
+    pub async fn list_proxy_inventory(
+        &self,
+        scope: Option<&str>,
+        profile_id: Option<&str>,
+    ) -> BrokerResult<ListProxyInventoryResponse> {
+        let mut items = self
+            .store
+            .list_proxy_inventory()
+            .await
+            .map_err(BrokerError::from)?;
+        match scope.unwrap_or("all") {
+            "all" => {}
+            "global" => items.retain(|item| matches!(&item.allocation_scope, ProxyScope::Global)),
+            "profile" => {
+                let profile_id = profile_id.ok_or_else(|| {
+                    BrokerError::InvalidRequest(
+                        "profile_id is required when scope=profile".to_string(),
+                    )
+                })?;
+                items.retain(|item| {
+                    matches!(
+                        &item.allocation_scope,
+                        ProxyScope::Profile {
+                            profile_id: allocated_profile_id,
+                        } if allocated_profile_id == profile_id
+                    )
+                });
+            }
+            _ => {
+                return Err(BrokerError::InvalidRequest(
+                    "scope must be one of all|global|profile".to_string(),
+                ));
+            }
+        }
+
+        let (profiles, settings) = self.list_profile_ids_with_settings().await?;
+        let items = items
+            .into_iter()
+            .map(|item| {
+                let effective_profile_ids =
+                    self.effective_profile_ids_for_record(&item, &profiles, &settings);
+                ProxyInventoryItem {
+                    node_id: item.node_id,
+                    proxy_name: item.proxy_name,
+                    proxy_type: item.proxy_type,
+                    server: item.server,
+                    resolved_ips: item.resolved_ips,
+                    source_scope: item.source_scope,
+                    allocation_scope: item.allocation_scope,
+                    effective_profile_ids,
+                }
+            })
+            .collect::<Vec<_>>();
+        let mut items = items;
+        items.sort_by(|left, right| {
+            left.proxy_name
+                .cmp(&right.proxy_name)
+                .then_with(|| left.server.cmp(&right.server))
+                .then_with(|| left.node_id.cmp(&right.node_id))
+        });
+        Ok(ListProxyInventoryResponse { items })
+    }
+
+    pub async fn update_proxy_allocation(
+        &self,
+        node_id: &str,
+        allocation_scope: &ProxyScope,
+    ) -> BrokerResult<ProxyInventoryItem> {
+        if let ProxyScope::Profile { profile_id } = allocation_scope
+            && !self.profile_exists(profile_id).await?
+        {
+            return Err(BrokerError::ProfileNotFound);
+        }
+
+        let before = self
+            .store
+            .get_proxy_inventory_node(node_id)
+            .await
+            .map_err(BrokerError::from)?
+            .ok_or(BrokerError::ProxyInventoryNodeNotFound)?;
+        let (profiles, settings) = self.list_profile_ids_with_settings().await?;
+        let before_effective = self.effective_profile_ids_for_record(&before, &profiles, &settings);
+        let updated = self
+            .store
+            .update_proxy_inventory_allocation(node_id, allocation_scope, now_epoch_sec())
+            .await
+            .map_err(BrokerError::from)?
+            .ok_or(BrokerError::ProxyInventoryNodeNotFound)?;
+        let after_effective = self.effective_profile_ids_for_record(&updated, &profiles, &settings);
+        let affected_profiles = before_effective
+            .into_iter()
+            .chain(after_effective)
+            .collect::<HashSet<_>>();
+        self.rebuild_profiles(&affected_profiles).await?;
+        self.inventory_item_from_record(updated).await
+    }
+
+    pub async fn delete_proxy_inventory_node(&self, node_id: &str) -> BrokerResult<()> {
+        let before = self
+            .store
+            .delete_proxy_inventory_node(node_id)
+            .await
+            .map_err(BrokerError::from)?
+            .ok_or(BrokerError::ProxyInventoryNodeNotFound)?;
+        let (profiles, settings) = self.list_profile_ids_with_settings().await?;
+        let affected_profiles = self
+            .effective_profile_ids_for_record(&before, &profiles, &settings)
+            .into_iter()
+            .collect::<HashSet<_>>();
+        self.rebuild_profiles(&affected_profiles).await?;
+        Ok(())
+    }
+
+    pub async fn get_profile_proxy_settings(
+        &self,
+        profile_id: &str,
+    ) -> BrokerResult<ProfileProxySettings> {
+        if !self.profile_exists(profile_id).await? {
+            return Err(BrokerError::ProfileNotFound);
+        }
+        self.get_profile_proxy_settings_effective(profile_id).await
+    }
+
+    pub async fn update_profile_proxy_settings(
+        &self,
+        profile_id: &str,
+        use_global_proxies: bool,
+    ) -> BrokerResult<ProfileProxySettings> {
+        if !self.profile_exists(profile_id).await? {
+            return Err(BrokerError::ProfileNotFound);
+        }
+        let _profile_guard = self.lock_profile(profile_id).await;
+        let settings = ProfileProxySettings {
+            profile_id: profile_id.to_string(),
+            use_global_proxies,
+        };
+        self.store
+            .upsert_profile_proxy_settings(&settings)
+            .await
+            .map_err(BrokerError::from)?;
+        self.rebuild_effective_profile_locked(profile_id).await?;
+        Ok(settings)
+    }
+
     pub async fn list_tasks(&self, query: &TaskListQuery) -> BrokerResult<TaskListResponse> {
         let all_summaries = self.list_task_run_summaries(query).await?;
         Ok(build_task_list_response(query, all_summaries))
@@ -2860,6 +3257,34 @@ fn search_session_options(
     Ok(items.into_iter().take(limit).collect())
 }
 
+fn inventory_scope_matches_profile(scope: &ProxyScope, profile_id: &str) -> bool {
+    matches!(
+        scope,
+        ProxyScope::Profile {
+            profile_id: scope_profile_id,
+        } if scope_profile_id == profile_id
+    )
+}
+
+fn compare_inventory_preference(
+    profile_id: &str,
+    left: &ProxyInventoryRecord,
+    right: &ProxyInventoryRecord,
+) -> CmpOrdering {
+    let left_direct = inventory_scope_matches_profile(&left.allocation_scope, profile_id);
+    let right_direct = inventory_scope_matches_profile(&right.allocation_scope, profile_id);
+    right_direct
+        .cmp(&left_direct)
+        .then_with(|| {
+            let left_local_source = inventory_scope_matches_profile(&left.source_scope, profile_id);
+            let right_local_source =
+                inventory_scope_matches_profile(&right.source_scope, profile_id);
+            right_local_source.cmp(&left_local_source)
+        })
+        .then_with(|| right.updated_at.cmp(&left.updated_at))
+        .then_with(|| left.node_id.cmp(&right.node_id))
+}
+
 fn filter_probe_records_by_pair(
     probe_records: Vec<ProbeRecord>,
     valid_proxy_ip_pairs: &HashSet<(String, String)>,
@@ -3394,8 +3819,9 @@ mod tests {
     use super::*;
     use crate::{
         models::{
-            ApiKeyRecord, IpRecord, ProbeRecord, ProfileSyncConfig, SessionRecord, SortMode,
-            SubscriptionSource, TaskListQuery, TaskRunEventRecord, TaskRunRecord,
+            ApiKeyRecord, IpRecord, ProbeRecord, ProfileProxySettings, ProfileSyncConfig,
+            ProxyInventoryRecord, ProxyScope, SessionRecord, SortMode, SubscriptionSource,
+            TaskListQuery, TaskRunEventRecord, TaskRunRecord,
         },
         runtime::MihomoRuntime,
         store::{BrokerStore, MemoryStore},
@@ -3479,6 +3905,45 @@ mod tests {
 
         async fn list_subscription(&self, profile_id: &str) -> anyhow::Result<Vec<ProxyNode>> {
             self.inner.list_subscription(profile_id).await
+        }
+
+        async fn list_proxy_inventory(&self) -> anyhow::Result<Vec<ProxyInventoryRecord>> {
+            self.inner.list_proxy_inventory().await
+        }
+
+        async fn replace_proxy_inventory_scope(
+            &self,
+            source_scope: &ProxyScope,
+            nodes: &[ProxyInventoryRecord],
+        ) -> anyhow::Result<()> {
+            self.inner
+                .replace_proxy_inventory_scope(source_scope, nodes)
+                .await
+        }
+
+        async fn get_proxy_inventory_node(
+            &self,
+            node_id: &str,
+        ) -> anyhow::Result<Option<ProxyInventoryRecord>> {
+            self.inner.get_proxy_inventory_node(node_id).await
+        }
+
+        async fn update_proxy_inventory_allocation(
+            &self,
+            node_id: &str,
+            allocation_scope: &ProxyScope,
+            updated_at: i64,
+        ) -> anyhow::Result<Option<ProxyInventoryRecord>> {
+            self.inner
+                .update_proxy_inventory_allocation(node_id, allocation_scope, updated_at)
+                .await
+        }
+
+        async fn delete_proxy_inventory_node(
+            &self,
+            node_id: &str,
+        ) -> anyhow::Result<Option<ProxyInventoryRecord>> {
+            self.inner.delete_proxy_inventory_node(node_id).await
         }
 
         async fn replace_ip_records(
@@ -3627,6 +4092,20 @@ mod tests {
 
         async fn list_profile_sync_configs(&self) -> anyhow::Result<Vec<ProfileSyncConfig>> {
             self.inner.list_profile_sync_configs().await
+        }
+
+        async fn get_profile_proxy_settings(
+            &self,
+            profile_id: &str,
+        ) -> anyhow::Result<Option<ProfileProxySettings>> {
+            self.inner.get_profile_proxy_settings(profile_id).await
+        }
+
+        async fn upsert_profile_proxy_settings(
+            &self,
+            settings: &ProfileProxySettings,
+        ) -> anyhow::Result<()> {
+            self.inner.upsert_profile_proxy_settings(settings).await
         }
 
         async fn insert_task_run(&self, run: &TaskRunRecord) -> anyhow::Result<()> {
@@ -4029,6 +4508,228 @@ proxies:
 
         assert!(
             matches!(result, Err(BrokerError::SubscriptionFetch(message)) if message.contains("returned non-2xx"))
+        );
+    }
+
+    #[tokio::test]
+    async fn global_pool_rebuilds_profiles_and_opt_out_removes_global_nodes() {
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
+        service
+            .create_profile("default")
+            .await
+            .expect("default profile should be created");
+        service
+            .create_profile("edge-jp")
+            .await
+            .expect("edge profile should be created");
+
+        let source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: global-node
+    type: socks5
+    server: 7.7.7.7
+"#,
+        )
+        .await;
+
+        service
+            .load_global_subscription(&SubscriptionSource::File(source_path.clone()))
+            .await
+            .expect("global import should succeed");
+        let _ = tokio::fs::remove_file(&source_path).await;
+
+        assert_eq!(
+            store
+                .list_subscription("default")
+                .await
+                .expect("default subscription should list")
+                .len(),
+            1
+        );
+        assert_eq!(
+            store
+                .list_subscription("edge-jp")
+                .await
+                .expect("edge subscription should list")
+                .len(),
+            1
+        );
+
+        service
+            .update_profile_proxy_settings("edge-jp", false)
+            .await
+            .expect("opt-out should succeed");
+
+        assert_eq!(
+            store
+                .list_subscription("default")
+                .await
+                .expect("default subscription should still list")
+                .len(),
+            1
+        );
+        assert!(
+            store
+                .list_subscription("edge-jp")
+                .await
+                .expect("edge subscription should list")
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn profile_local_import_wins_over_same_named_global_proxy() {
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
+        service
+            .create_profile("default")
+            .await
+            .expect("default profile should be created");
+        service
+            .create_profile("edge-jp")
+            .await
+            .expect("edge profile should be created");
+
+        let global_source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: shared-node
+    type: socks5
+    server: 7.7.7.7
+"#,
+        )
+        .await;
+        let local_source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: shared-node
+    type: socks5
+    server: 1.1.1.1
+"#,
+        )
+        .await;
+
+        service
+            .load_global_subscription(&SubscriptionSource::File(global_source_path.clone()))
+            .await
+            .expect("global import should succeed");
+        service
+            .load_subscription(
+                "edge-jp",
+                &SubscriptionSource::File(local_source_path.clone()),
+            )
+            .await
+            .expect("local import should succeed");
+        let _ = tokio::fs::remove_file(&global_source_path).await;
+        let _ = tokio::fs::remove_file(&local_source_path).await;
+
+        let default_nodes = store
+            .list_subscription("default")
+            .await
+            .expect("default subscription should list");
+        let edge_nodes = store
+            .list_subscription("edge-jp")
+            .await
+            .expect("edge subscription should list");
+
+        assert_eq!(default_nodes[0].server, "7.7.7.7");
+        assert_eq!(edge_nodes.len(), 1);
+        assert_eq!(edge_nodes[0].server, "1.1.1.1");
+    }
+
+    #[tokio::test]
+    async fn reassign_delete_and_reimport_restore_inventory_consistently() {
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
+        service
+            .create_profile("alpha")
+            .await
+            .expect("alpha profile should be created");
+        service
+            .create_profile("beta")
+            .await
+            .expect("beta profile should be created");
+
+        let source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: alpha-node
+    type: socks5
+    server: 4.4.4.4
+"#,
+        )
+        .await;
+
+        service
+            .load_subscription("alpha", &SubscriptionSource::File(source_path.clone()))
+            .await
+            .expect("local import should succeed");
+
+        let inventory = service
+            .list_proxy_inventory(Some("all"), None)
+            .await
+            .expect("inventory should list");
+        let node_id = inventory.items[0].node_id.clone();
+
+        service
+            .update_proxy_allocation(&node_id, &ProxyScope::global())
+            .await
+            .expect("reassignment should succeed");
+        assert_eq!(
+            store
+                .list_subscription("beta")
+                .await
+                .expect("beta subscription should list")
+                .len(),
+            1
+        );
+
+        service
+            .delete_proxy_inventory_node(&node_id)
+            .await
+            .expect("delete should succeed");
+        assert!(
+            store
+                .list_subscription("alpha")
+                .await
+                .expect("alpha subscription should list")
+                .is_empty()
+        );
+        assert!(
+            store
+                .list_subscription("beta")
+                .await
+                .expect("beta subscription should list")
+                .is_empty()
+        );
+
+        service
+            .load_subscription("alpha", &SubscriptionSource::File(source_path.clone()))
+            .await
+            .expect("reimport should restore node");
+        let _ = tokio::fs::remove_file(&source_path).await;
+
+        assert_eq!(
+            service
+                .list_proxy_inventory(Some("all"), None)
+                .await
+                .expect("inventory should list")
+                .items
+                .len(),
+            1
+        );
+        assert_eq!(
+            store
+                .list_subscription("alpha")
+                .await
+                .expect("alpha subscription should list")
+                .len(),
+            1
         );
     }
 

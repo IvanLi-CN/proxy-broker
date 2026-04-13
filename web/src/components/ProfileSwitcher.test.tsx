@@ -18,8 +18,8 @@ describe("ProfileSwitcher", () => {
       />,
     );
 
-    await user.click(screen.getByRole("combobox", { name: /profile id/i }));
-    await user.type(screen.getByPlaceholderText("Search profiles or type a new ID"), "jp");
+    await user.click(screen.getByRole("combobox", { name: /config id/i }));
+    await user.type(screen.getByPlaceholderText("Search configs or type a new ID"), "jp");
     await user.click(screen.getByText("edge-jp"));
 
     expect(onProfileIdChange).toHaveBeenCalledWith("edge-jp");
@@ -38,12 +38,31 @@ describe("ProfileSwitcher", () => {
       />,
     );
 
-    await user.click(screen.getByRole("combobox", { name: /profile id/i }));
-    await user.type(screen.getByPlaceholderText("Search profiles or type a new ID"), "fresh-lab");
+    await user.click(screen.getByRole("combobox", { name: /config id/i }));
+    await user.type(screen.getByPlaceholderText("Search configs or type a new ID"), "fresh-lab");
     await user.click(screen.getByText('Create "fresh-lab"'));
 
     await waitFor(() => {
       expect(onCreateProfile).toHaveBeenCalledWith("fresh-lab");
     });
+  });
+
+  it("offers a global config option before concrete profiles", async () => {
+    const user = userEvent.setup();
+    const onProfileIdChange = vi.fn();
+
+    render(
+      <ProfileSwitcher
+        profileId="default"
+        profiles={["default", "edge-jp"]}
+        onProfileIdChange={onProfileIdChange}
+        onCreateProfile={async (value) => value}
+      />,
+    );
+
+    await user.click(screen.getByRole("combobox", { name: /config id/i }));
+    await user.click(screen.getByText("Global"));
+
+    expect(onProfileIdChange).toHaveBeenCalledWith("__global__");
   });
 });

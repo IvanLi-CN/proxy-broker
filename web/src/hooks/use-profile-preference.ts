@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
 
+import { DEFAULT_PROFILE_ID } from "@/lib/profile-selection";
+
 const STORAGE_KEY = "proxy-broker.profile-id";
-const DEFAULT_PROFILE = "default";
 
 export function useProfilePreference() {
   const [profileId, setProfileId] = useState(() => {
     if (typeof window === "undefined") {
-      return DEFAULT_PROFILE;
+      return DEFAULT_PROFILE_ID;
     }
-    return window.localStorage.getItem(STORAGE_KEY) || DEFAULT_PROFILE;
+    return window.localStorage.getItem(STORAGE_KEY) || DEFAULT_PROFILE_ID;
   });
 
   useEffect(() => {

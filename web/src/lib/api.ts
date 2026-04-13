@@ -11,6 +11,7 @@ import type {
   HealthResponse,
   ListApiKeysResponse,
   ListProfilesResponse,
+  ListProxyInventoryResponse,
   ListSessionsResponse,
   LoadSubscriptionRequest,
   LoadSubscriptionResponse,
@@ -18,6 +19,8 @@ import type {
   OpenBatchResponse,
   OpenSessionRequest,
   OpenSessionResponse,
+  ProfileProxySettings,
+  ProxyInventoryListQuery,
   RefreshRequest,
   RefreshResponse,
   SearchSessionOptionsRequest,
@@ -26,6 +29,8 @@ import type {
   TaskListQuery,
   TaskListResponse,
   TaskRunDetail,
+  UpdateProfileProxySettingsRequest,
+  UpdateProxyAllocationRequest,
 } from "@/lib/types";
 
 class ApiError extends Error {
@@ -83,6 +88,22 @@ const withSearch = (path: string, query?: TaskListQuery) => {
   return suffix ? `${path}?${suffix}` : path;
 };
 
+const withProxyInventorySearch = (path: string, query?: ProxyInventoryListQuery) => {
+  if (!query) {
+    return path;
+  }
+
+  const params = new URLSearchParams();
+  if (query.scope) {
+    params.set("scope", query.scope);
+  }
+  if (query.profile_id) {
+    params.set("profile_id", query.profile_id);
+  }
+  const suffix = params.toString();
+  return suffix ? `${path}?${suffix}` : path;
+};
+
 export { ApiError };
 
 export const api = {
@@ -104,6 +125,29 @@ export const api = {
   loadSubscription: (profileId: string, payload: LoadSubscriptionRequest) =>
     request<LoadSubscriptionResponse>(profilePath(profileId, "/subscriptions/load"), {
       method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  loadGlobalSubscription: (payload: LoadSubscriptionRequest) =>
+    request<LoadSubscriptionResponse>("/api/v1/proxies/global/subscriptions/load", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  listProxyInventory: (query?: ProxyInventoryListQuery) =>
+    request<ListProxyInventoryResponse>(withProxyInventorySearch("/api/v1/proxies", query)),
+  updateProxyAllocation: (nodeId: string, payload: UpdateProxyAllocationRequest) =>
+    request<void>(`/api/v1/proxies/${encodeURIComponent(nodeId)}/allocation`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteProxyInventoryNode: (nodeId: string) =>
+    request<void>(`/api/v1/proxies/${encodeURIComponent(nodeId)}`, {
+      method: "DELETE",
+    }),
+  getProfileProxySettings: (profileId: string) =>
+    request<ProfileProxySettings>(profilePath(profileId, "/proxy-settings")),
+  updateProfileProxySettings: (profileId: string, payload: UpdateProfileProxySettingsRequest) =>
+    request<ProfileProxySettings>(profilePath(profileId, "/proxy-settings"), {
+      method: "PATCH",
       body: JSON.stringify(payload),
     }),
   refreshProfile: (profileId: string, payload: RefreshRequest) =>

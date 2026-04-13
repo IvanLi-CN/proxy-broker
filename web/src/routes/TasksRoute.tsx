@@ -1,11 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import { useOutletContext } from "react-router-dom";
+import { Navigate, useOutletContext } from "react-router-dom";
 
 import { useTaskEvents } from "@/hooks/use-task-events";
 import { useI18n } from "@/i18n";
 import { api } from "@/lib/api";
 import { formatApiErrorMessage } from "@/lib/error-messages";
+import { isGlobalProfileId } from "@/lib/profile-selection";
 import { filterTaskListResponse } from "@/lib/tasks";
 import type { TaskRunKind, TaskRunStatus, TaskRunTrigger } from "@/lib/types";
 import { TasksPage } from "@/pages/TasksPage";
@@ -17,7 +18,10 @@ const TASK_HISTORY_QUERY_REBASE_INTERVAL_MS = 60 * 60 * 1000;
 
 export function TasksRoute() {
   const { t } = useI18n();
-  const { profileId, authMe, currentUser } = useOutletContext<RootOutletContext>();
+  const outlet = useOutletContext<RootOutletContext>();
+  const { profileId, authMe, currentUser } = outlet;
+  const isGlobalConfig = outlet.isGlobalConfig ?? isGlobalProfileId(profileId);
+  const activeProfileId = outlet.activeProfileId ?? (isGlobalConfig ? null : profileId);
   const [scope, setScope] = useState<"current" | "all">("current");
   const [kind, setKind] = useState<TaskRunKind | undefined>(undefined);
   const [status, setStatus] = useState<TaskRunStatus | undefined>(undefined);
@@ -57,13 +61,13 @@ export function TasksRoute() {
 
   const liveTaskQuery = useMemo(
     () => ({
-      profile_id: scope === "current" ? profileId : undefined,
+      profile_id: scope === "current" ? (activeProfileId ?? undefined) : undefined,
       kind,
       status,
       trigger,
       running_only: runningOnly,
     }),
-    [kind, profileId, runningOnly, scope, status, trigger],
+    [activeProfileId, kind, runningOnly, scope, status, trigger],
   );
   const requestTaskQuery = useMemo(
     () => ({
@@ -102,17 +106,17 @@ export function TasksRoute() {
   const tasksQuery = useQuery({
     queryKey: ["tasks", requestTaskQuery],
     queryFn: () => api.listTasks(requestTaskQuery),
-    enabled: canAccess,
+    enabled: canAccess && Boolean(activeProfileId),
     placeholderData: (previousData) => previousData,
   });
   const detailQuery = useQuery({
     queryKey: ["task-run", selectedRunId],
     queryFn: () => api.getTaskRunDetail(selectedRunId ?? ""),
-    enabled: canAccess && Boolean(selectedRunId),
+    enabled: canAccess && Boolean(activeProfileId) && Boolean(selectedRunId),
   });
   const streamState = useTaskEvents({
     query: requestTaskQuery,
-    enabled: canAccess,
+    enabled: canAccess && Boolean(activeProfileId),
   });
   const visibleTaskList = useMemo(
     () => filterTaskListResponse(tasksQuery.data ?? null, visibleTaskQuery),
@@ -120,6 +124,9 @@ export function TasksRoute() {
   );
 
   useEffect(() => {
+    if (!activeProfileId) {
+      return;
+    }
     const runs = visibleTaskList?.runs ?? [];
     if (!runs.length) {
       setSelectedRun({
@@ -134,7 +141,11 @@ export function TasksRoute() {
         runId: runs[0]?.run_id ?? null,
       });
     }
-  }, [selectedRunId, selectionResetSignature, visibleTaskList?.runs]);
+  }, [activeProfileId, selectedRunId, selectionResetSignature, visibleTaskList?.runs]);
+
+  if (!activeProfileId) {
+    return <Navigate replace to="/proxies" />;
+  }
 
   return (
     <TasksPage
@@ -152,7 +163,7 @@ export function TasksRoute() {
       }
       onStatusChange={setStatus}
       onTriggerChange={setTrigger}
-      profileId={profileId}
+      profileId={activeProfileId}
       runningOnly={runningOnly}
       scope={scope}
       selectedRunDetail={selectedRunId ? (detailQuery.data ?? null) : null}

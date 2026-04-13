@@ -1,13 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { fn } from "storybook/test";
+import { expect, fn, within } from "storybook/test";
 
 import { AppShell } from "@/components/AppShell";
-import {
-  healthFixture,
-  refreshFixture,
-  sessionsFixture,
-  subscriptionFixture,
-} from "@/mocks/fixtures";
+import { healthFixture, refreshFixture, sessionsFixture } from "@/mocks/fixtures";
 import { OverviewPage } from "@/pages/OverviewPage";
 
 const meta = {
@@ -42,11 +37,8 @@ const meta = {
   args: {
     health: healthFixture,
     activeSessions: sessionsFixture.sessions.length,
-    loadResponse: subscriptionFixture,
-    loadError: null,
     refreshResponse: refreshFixture,
     refreshError: null,
-    loadingSubscription: false,
     refreshing: false,
     currentUser: {
       status: "resolved",
@@ -76,7 +68,6 @@ const meta = {
     apiKeysError: null,
     creatingApiKey: false,
     revokingApiKeyId: null,
-    onLoadSubscription: fn(),
     onRefresh: fn(),
     onCreateApiKey: fn(),
     onRevokeApiKey: fn(),
@@ -86,7 +77,13 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const Default: Story = {};
+export const Default: Story = {
+  async play({ canvasElement }) {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("heading", { name: /overview/i })).toBeVisible();
+    await expect(canvas.getByRole("button", { name: /refresh metadata/i })).toBeVisible();
+  },
+};
 
 export const ZhCN: Story = {
   globals: {
@@ -96,8 +93,6 @@ export const ZhCN: Story = {
 
 export const ErrorState: Story = {
   args: {
-    loadResponse: null,
-    loadError: "subscription_invalid: malformed upstream payload",
     refreshResponse: null,
     refreshError: "mihomo_unavailable: controller not reachable",
   },
@@ -106,7 +101,6 @@ export const ErrorState: Story = {
 export const QuietState: Story = {
   args: {
     activeSessions: 0,
-    loadResponse: null,
     refreshResponse: null,
   },
 };
@@ -118,7 +112,6 @@ export const AnonymousState: Story = {
     },
     apiKeys: [],
     activeSessions: 0,
-    loadResponse: null,
     refreshResponse: null,
   },
 };

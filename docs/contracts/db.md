@@ -48,6 +48,26 @@
   - `created_at INTEGER NOT NULL`
   - PK `(profile_id, session_id)`
 
+- `proxy_inventory_nodes`
+  - `node_id TEXT PRIMARY KEY`
+  - `source_scope_kind TEXT NOT NULL` (`global|profile`)
+  - `source_scope_profile_id TEXT`
+  - `allocation_scope_kind TEXT NOT NULL` (`global|profile`)
+  - `allocation_scope_profile_id TEXT`
+  - `proxy_name TEXT NOT NULL`
+  - `proxy_type TEXT NOT NULL`
+  - `server TEXT NOT NULL`
+  - `resolved_ips_json TEXT NOT NULL`
+  - `raw_proxy_json TEXT NOT NULL`
+  - `created_at INTEGER NOT NULL`
+  - `updated_at INTEGER NOT NULL`
+  - indexes on `(source_scope_kind, source_scope_profile_id)` and `(allocation_scope_kind, allocation_scope_profile_id)`
+
+- `profile_proxy_settings`
+  - `profile_id TEXT PRIMARY KEY`
+  - `use_global_proxies INTEGER NOT NULL`
+  - `updated_at INTEGER NOT NULL`
+
 - `api_keys`
   - `key_id TEXT PRIMARY KEY`
   - `profile_id TEXT NOT NULL`
@@ -68,3 +88,6 @@
 - `probe_records` 支持从旧版主键 `(profile_id, ip, target_url)` 迁移到新版主键（新增 `proxy_name`）。
 - `api_keys` 只保存 `secret_prefix`、`secret_salt` 与 `secret_hash`，不保存明文 secret。
 - `last_used_at` 在成功完成 API Key 认证后更新，`revoked_at` 用于软撤销。
+
+- `proxy_inventory_nodes` 是导入层的真相源；`subscription_nodes` / `ip_records` / `probe_records` / `sessions` 继续作为按 profile 物化后的 effective snapshot。
+- `profile_proxy_settings` 让 existing / new profiles 都能持久化 `use_global_proxies`，默认值为启用。

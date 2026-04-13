@@ -1,57 +1,64 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
-import { useOutletContext } from "react-router-dom";
+import { Navigate, useOutletContext } from "react-router-dom";
 import { toast } from "sonner";
 
 import { useI18n } from "@/i18n";
 import { api } from "@/lib/api";
 import { formatApiErrorMessage } from "@/lib/error-messages";
+import { isGlobalProfileId } from "@/lib/profile-selection";
 import { SessionsPage } from "@/pages/SessionsPage";
 import type { RootOutletContext } from "@/routes/RootRoute";
 
 export function SessionsRoute() {
   const { t } = useI18n();
-  const { profileId } = useOutletContext<RootOutletContext>();
-  const previousProfileId = useRef(profileId);
+  const outlet = useOutletContext<RootOutletContext>();
+  const { profileId } = outlet;
+  const isGlobalConfig = outlet.isGlobalConfig ?? isGlobalProfileId(profileId);
+  const activeProfileId = outlet.activeProfileId ?? (isGlobalConfig ? null : profileId);
+  const previousProfileId = useRef(activeProfileId ?? "");
   const queryClient = useQueryClient();
   const sessionsQuery = useQuery({
-    queryKey: ["sessions", profileId],
-    queryFn: () => api.listSessions(profileId),
+    queryKey: ["sessions", activeProfileId],
+    queryFn: () => api.listSessions(activeProfileId ?? ""),
+    enabled: Boolean(activeProfileId),
     refetchInterval: 5_000,
   });
   const suggestedPortQuery = useQuery({
-    queryKey: ["suggested-port", profileId],
-    queryFn: () => api.getSuggestedPort(profileId),
+    queryKey: ["suggested-port", activeProfileId],
+    queryFn: () => api.getSuggestedPort(activeProfileId ?? ""),
+    enabled: Boolean(activeProfileId),
     refetchInterval: 5_000,
   });
 
   const openMutation = useMutation({
     mutationFn: (payload: Parameters<typeof api.openSession>[1]) =>
-      api.openSession(profileId, payload),
+      api.openSession(activeProfileId ?? "", payload),
     onSuccess: async (data) => {
       toast.success(t("Opened {listen}", { listen: data.listen }));
-      await queryClient.invalidateQueries({ queryKey: ["sessions", profileId] });
-      await queryClient.invalidateQueries({ queryKey: ["suggested-port", profileId] });
+      await queryClient.invalidateQueries({ queryKey: ["sessions", activeProfileId] });
+      await queryClient.invalidateQueries({ queryKey: ["suggested-port", activeProfileId] });
     },
     onError: (error) => toast.error(formatApiErrorMessage(error, t)),
   });
 
   const batchMutation = useMutation({
-    mutationFn: (payload: Parameters<typeof api.openBatch>[1]) => api.openBatch(profileId, payload),
+    mutationFn: (payload: Parameters<typeof api.openBatch>[1]) =>
+      api.openBatch(activeProfileId ?? "", payload),
     onSuccess: async (data) => {
       toast.success(t("Opened {count} sessions in batch", { count: data.sessions.length }));
-      await queryClient.invalidateQueries({ queryKey: ["sessions", profileId] });
-      await queryClient.invalidateQueries({ queryKey: ["suggested-port", profileId] });
+      await queryClient.invalidateQueries({ queryKey: ["sessions", activeProfileId] });
+      await queryClient.invalidateQueries({ queryKey: ["suggested-port", activeProfileId] });
     },
     onError: (error) => toast.error(formatApiErrorMessage(error, t)),
   });
 
   const closeMutation = useMutation({
-    mutationFn: (sessionId: string) => api.closeSession(profileId, sessionId),
+    mutationFn: (sessionId: string) => api.closeSession(activeProfileId ?? "", sessionId),
     onSuccess: async (_, sessionId) => {
       toast.success(t("Closed {sessionId}", { sessionId }));
-      await queryClient.invalidateQueries({ queryKey: ["sessions", profileId] });
-      await queryClient.invalidateQueries({ queryKey: ["suggested-port", profileId] });
+      await queryClient.invalidateQueries({ queryKey: ["sessions", activeProfileId] });
+      await queryClient.invalidateQueries({ queryKey: ["suggested-port", activeProfileId] });
     },
     onError: (error) => toast.error(formatApiErrorMessage(error, t)),
   });
@@ -61,14 +68,21 @@ export function SessionsRoute() {
   const { reset: resetCloseMutation } = closeMutation;
 
   useEffect(() => {
-    if (previousProfileId.current === profileId) {
+    if (!activeProfileId) {
       return;
     }
-    previousProfileId.current = profileId;
+    if (previousProfileId.current === activeProfileId) {
+      return;
+    }
+    previousProfileId.current = activeProfileId;
     resetOpenMutation();
     resetBatchMutation();
     resetCloseMutation();
-  }, [profileId, resetOpenMutation, resetBatchMutation, resetCloseMutation]);
+  }, [activeProfileId, resetOpenMutation, resetBatchMutation, resetCloseMutation]);
+
+  if (!activeProfileId) {
+    return <Navigate replace to="/proxies" />;
+  }
 
   return (
     <SessionsPage
@@ -89,7 +103,7 @@ export function SessionsRoute() {
       openResponse={openMutation.data ?? null}
       opening={openMutation.isPending}
       searchSessionOptions={async (payload) =>
-        (await api.searchSessionOptions(profileId, payload)).items
+        (await api.searchSessionOptions(activeProfileId, payload)).items
       }
       sessions={sessionsQuery.data?.sessions ?? []}
       sessionsLoading={sessionsQuery.isLoading}

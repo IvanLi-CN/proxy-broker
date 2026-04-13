@@ -22,6 +22,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useI18n } from "@/i18n";
+import { GLOBAL_PROFILE_ID, isGlobalProfileId } from "@/lib/profile-selection";
 import { cn } from "@/lib/utils";
 
 interface ProfileSwitcherProps {
@@ -51,10 +52,19 @@ export function ProfileSwitcher({
   const deferredQuery = useDeferredValue(query);
   const normalizedQuery = deferredQuery.trim().toLowerCase();
   const trimmedQuery = query.trim();
+  const globalLabel = t("Global");
+  const globalMatchesQuery =
+    normalizedQuery.length === 0 ||
+    globalLabel.toLowerCase().includes(normalizedQuery) ||
+    "global".includes(normalizedQuery);
   const filteredProfiles = profiles.filter((candidate) =>
     candidate.toLowerCase().includes(normalizedQuery),
   );
-  const exactProfileExists = profiles.some((candidate) => candidate === trimmedQuery);
+  const exactProfileExists =
+    trimmedQuery === GLOBAL_PROFILE_ID ||
+    trimmedQuery.toLowerCase() === "global" ||
+    trimmedQuery === globalLabel ||
+    profiles.some((candidate) => candidate === trimmedQuery);
   const canCreate = trimmedQuery.length > 0 && !exactProfileExists;
 
   const handleOpenChange = (nextOpen: boolean) => {
@@ -77,15 +87,17 @@ export function ProfileSwitcher({
     handleOpenChange(false);
   };
 
+  const renderLabel = (value: string) => (isGlobalProfileId(value) ? globalLabel : value);
+
   return (
     <div className="rounded-[26px] border border-sidebar-border/80 bg-sidebar-accent/45 p-4 shadow-sm">
       <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.28em] text-sidebar-foreground/68">
         <FolderSearchIcon className="size-3.5" />
-        {t("Active profile")}
+        {t("Current config")}
       </div>
       <div className="mt-3 space-y-2">
         <Label className="text-sidebar-foreground/76" htmlFor="profile-id">
-          {t("Profile ID")}
+          {t("Config ID")}
         </Label>
         <Popover open={open} onOpenChange={handleOpenChange}>
           <PopoverTrigger asChild>
@@ -96,14 +108,14 @@ export function ProfileSwitcher({
               aria-expanded={open}
               className="h-auto w-full justify-between rounded-2xl border-sidebar-border bg-background/78 px-3 py-3 font-mono text-sm text-sidebar-foreground hover:bg-background"
             >
-              <span className="truncate text-left">{profileId}</span>
+              <span className="truncate text-left">{renderLabel(profileId)}</span>
               <ChevronsUpDownIcon className="size-4 shrink-0 text-sidebar-foreground/45" />
             </Button>
           </PopoverTrigger>
           <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-72 overflow-hidden border-sidebar-border bg-background/96 p-0 backdrop-blur-xl">
             <Command shouldFilter={false}>
               <CommandInput
-                placeholder={t("Search profiles or type a new ID")}
+                placeholder={t("Search configs or type a new ID")}
                 value={query}
                 onValueChange={setQuery}
               />
@@ -129,11 +141,36 @@ export function ProfileSwitcher({
                 {!loadError && isLoading && profiles.length === 0 ? (
                   <div className="flex items-center justify-center gap-2 px-3 py-6 text-sm text-muted-foreground">
                     <LoaderCircleIcon className="size-4 animate-spin" />
-                    {t("Loading profiles...")}
+                    {t("Loading configs...")}
                   </div>
                 ) : null}
+                {!loadError && globalMatchesQuery ? (
+                  <CommandGroup heading={t("Contexts")}>
+                    <CommandItem
+                      key={GLOBAL_PROFILE_ID}
+                      value={GLOBAL_PROFILE_ID}
+                      onSelect={() => handleSelect(GLOBAL_PROFILE_ID)}
+                    >
+                      <CheckIcon
+                        className={cn(
+                          "size-4 text-primary transition-opacity",
+                          isGlobalProfileId(profileId) ? "opacity-100" : "opacity-0",
+                        )}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-medium">{globalLabel}</div>
+                        <div className="truncate text-xs text-muted-foreground">
+                          {t("Shared pool and allocation control across every profile.")}
+                        </div>
+                      </div>
+                      {isGlobalProfileId(profileId) ? (
+                        <CommandShortcut>{t("Active")}</CommandShortcut>
+                      ) : null}
+                    </CommandItem>
+                  </CommandGroup>
+                ) : null}
                 {!loadError && filteredProfiles.length > 0 ? (
-                  <CommandGroup heading={t("Known profiles")}>
+                  <CommandGroup heading={t("Known configs")}>
                     {filteredProfiles.map((candidate) => (
                       <CommandItem
                         key={candidate}
@@ -173,7 +210,7 @@ export function ProfileSwitcher({
                           {t('Create "{value}"', { value: trimmedQuery })}
                         </div>
                         <div className="truncate text-xs text-muted-foreground">
-                          {t("Start an empty profile catalog entry and switch to it immediately.")}
+                          {t("Start an empty config catalog entry and switch to it immediately.")}
                         </div>
                       </div>
                     </CommandItem>
@@ -181,7 +218,7 @@ export function ProfileSwitcher({
                 ) : null}
                 {!loadError && !isLoading && filteredProfiles.length === 0 && !canCreate ? (
                   <CommandEmpty>
-                    {t("No matching profiles. Type a new ID to create one.")}
+                    {t("No matching configs. Type a new ID to create one.")}
                   </CommandEmpty>
                 ) : null}
               </CommandList>
@@ -189,7 +226,7 @@ export function ProfileSwitcher({
           </PopoverContent>
         </Popover>
         <p className="text-xs leading-5 text-sidebar-foreground/60">
-          {t("Search the catalog or create a new empty profile before loading any feed.")}
+          {t("Search the catalog or create a new empty config before loading any feed.")}
         </p>
       </div>
     </div>

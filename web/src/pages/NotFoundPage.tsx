@@ -17,7 +17,7 @@ export function NotFoundPage() {
         <h1 className="text-3xl font-semibold tracking-tight">{t("Nothing on this route yet")}</h1>
         <p className="max-w-xl text-sm text-muted-foreground md:text-base">
           {t(
-            "The control surface only exposes Overview, Tasks, IP Extract, and Sessions right now.",
+            "The control surface only exposes Overview, Tasks, Proxies, IP Extract, and Sessions right now.",
           )}
         </p>
       </div>

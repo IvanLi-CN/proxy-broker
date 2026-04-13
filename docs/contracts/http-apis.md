@@ -76,9 +76,114 @@
   - `invalid_request` (400) when `profile_id` is empty after `trim`
   - `profile_exists` (409) when the exact `profile_id` already exists
 
-## POST /api/v1/profiles/{profile_id}/subscriptions/load
+## POST /api/v1/proxies/global/subscriptions/load
 
 - Change: New
+- Auth: admin human or development principal
+- Body:
+  - `source.type`: `url|file`
+  - `source.value`: `string`
+- Success:
+  - `loaded_proxies`, `distinct_ips`, `warnings`
+- Notes:
+  - imports into the global inventory scope
+  - rebuilds effective pools for every profile with `use_global_proxies=true`
+  - does not create or update profile auto-sync schedules
+- Error:
+  - `authentication_required` (401)
+  - `admin_required` (403)
+  - `invalid_request` (400) when JSON body is malformed
+  - `subscription_invalid` (400)
+  - `subscription_fetch_failed` (502)
+
+## GET /api/v1/proxies
+
+- Change: New
+- Auth: admin human or development principal
+- Query:
+  - `scope`: `all|global|profile` (defaults to `all`)
+  - `profile_id`: required when `scope=profile`
+- Success:
+  - `items[]`
+  - each item contains:
+    - `node_id`
+    - `proxy_name`
+    - `proxy_type`
+    - `server`
+    - `resolved_ips[]`
+    - `source_scope`
+    - `allocation_scope`
+    - `effective_profile_ids[]`
+- Error:
+  - `authentication_required` (401)
+  - `admin_required` (403)
+  - `invalid_request` (400) when `scope` is invalid or `profile_id` is missing for `scope=profile`
+
+## PATCH /api/v1/proxies/{node_id}/allocation
+
+- Change: New
+- Auth: admin human or development principal
+- Body:
+  - `allocation_scope`
+    - `{ "type": "global" }`
+    - `{ "type": "profile", "profile_id": "..." }`
+- Success:
+  - returns the updated inventory item with recomputed `effective_profile_ids`
+- Notes:
+  - only the affected profiles are rebuilt
+- Error:
+  - `authentication_required` (401)
+  - `admin_required` (403)
+  - `invalid_request` (400)
+  - `profile_not_found` (404) when the target profile does not exist
+  - `proxy_inventory_node_not_found` (404)
+
+## DELETE /api/v1/proxies/{node_id}
+
+- Change: New
+- Auth: admin human or development principal
+- Success:
+  - `204 No Content`
+- Notes:
+  - removes the node from the current inventory snapshot only
+  - a later re-import from the same source restores the node if the upstream still contains it
+- Error:
+  - `authentication_required` (401)
+  - `admin_required` (403)
+  - `proxy_inventory_node_not_found` (404)
+
+## GET /api/v1/profiles/{profile_id}/proxy-settings
+
+- Change: New
+- Auth: admin human or development principal
+- Success:
+  - `profile_id`
+  - `use_global_proxies`
+- Error:
+  - `authentication_required` (401)
+  - `admin_required` (403)
+  - `profile_not_found` (404)
+
+## PATCH /api/v1/profiles/{profile_id}/proxy-settings
+
+- Change: New
+- Auth: admin human or development principal
+- Body:
+  - `use_global_proxies`: `bool`
+- Success:
+  - `profile_id`
+  - `use_global_proxies`
+- Notes:
+  - toggling the flag rebuilds the effective pool immediately
+- Error:
+  - `authentication_required` (401)
+  - `admin_required` (403)
+  - `invalid_request` (400)
+  - `profile_not_found` (404)
+
+## POST /api/v1/profiles/{profile_id}/subscriptions/load
+
+- Change: Updated
 - Auth:
   - admin human or development principal
   - API key bound to `{profile_id}`
@@ -86,6 +191,7 @@
   - `source.type`: `url|file`
   - `source.value`: `string`
 - Notes:
+  - imports into the current profile-local inventory scope and then rebuilds the effective pool for `{profile_id}`
   - `source.type=url` is fetched server-side with a compatibility UA fallback
     set, currently trying `Clash.Meta/1.18.3`, `mihomo/1.18.3`, then
     `Clash Verge/1.7.7`

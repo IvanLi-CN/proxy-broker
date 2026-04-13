@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Outlet } from "react-router-dom";
+import { useEffect } from "react";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
 import { AppShell } from "@/components/AppShell";
@@ -8,16 +9,22 @@ import { useI18n } from "@/i18n";
 import { ApiError, api } from "@/lib/api";
 import { resolveCurrentUserState } from "@/lib/current-user";
 import { formatApiErrorMessage } from "@/lib/error-messages";
+import { isGlobalProfileId } from "@/lib/profile-selection";
 import type { AuthMeResponse, CurrentUserState } from "@/lib/types";
 
 export interface RootOutletContext {
   profileId: string;
+  activeProfileId: string | null;
+  isGlobalConfig: boolean;
+  profiles: string[];
   authMe: AuthMeResponse | null;
   currentUser: CurrentUserState;
 }
 
 export function RootRoute() {
   const { t } = useI18n();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [profileId, setProfileId] = useProfilePreference();
   const queryClient = useQueryClient();
   const healthQuery = useQuery({
@@ -38,13 +45,27 @@ export function RootRoute() {
     mutationFn: (nextProfileId: string) => api.createProfile({ profile_id: nextProfileId }),
   });
   const profiles = Array.from(
-    new Set([...(profilesQuery.data?.profiles ?? []), profileId].filter(Boolean)),
+    new Set(
+      [
+        ...(profilesQuery.data?.profiles ?? []),
+        isGlobalProfileId(profileId) ? null : profileId,
+      ].filter((value): value is string => Boolean(value)),
+    ),
   ).sort((left, right) => left.localeCompare(right));
+  const isGlobalConfig = isGlobalProfileId(profileId);
+  const activeProfileId = isGlobalConfig ? null : profileId;
   const currentUser = resolveCurrentUserState({
     identity: authMeQuery.data ?? null,
     isLoading: authMeQuery.isLoading && !authMeQuery.data,
     error: authMeQuery.error ?? null,
   });
+
+  useEffect(() => {
+    if (!isGlobalConfig || location.pathname === "/proxies") {
+      return;
+    }
+    navigate("/proxies", { replace: true });
+  }, [isGlobalConfig, location.pathname, navigate]);
 
   const handleCreateProfile = async (nextProfileId: string) => {
     try {
@@ -89,7 +110,14 @@ export function RootRoute() {
     >
       <Outlet
         context={
-          { profileId, authMe: authMeQuery.data ?? null, currentUser } satisfies RootOutletContext
+          {
+            profileId,
+            activeProfileId,
+            isGlobalConfig,
+            profiles,
+            authMe: authMeQuery.data ?? null,
+            currentUser,
+          } satisfies RootOutletContext
         }
       />
     </AppShell>
