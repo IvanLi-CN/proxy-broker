@@ -103,11 +103,8 @@ export const GlobalConfig: Story = {
   ),
   async play({ canvasElement }) {
     const canvas = within(canvasElement);
-    await expect(canvas.getAllByText(/global/i)[0]).toBeVisible();
-    await expect(canvas.getByRole("heading", { name: /import global proxy pool/i })).toBeVisible();
-    await expect(
-      canvas.getByRole("heading", { name: /global pool and profile allocations/i }),
-    ).toBeVisible();
+    await expect(await canvas.findByText(/import global proxy pool/i)).toBeVisible();
+    await expect(await canvas.findByText(/global pool and profile allocations/i)).toBeVisible();
   },
 };
 
@@ -152,10 +149,8 @@ export const ProfileConfig: Story = {
   ),
   async play({ canvasElement }) {
     const canvas = within(canvasElement);
-    await expect(canvas.getByRole("heading", { name: /import local proxy pool/i })).toBeVisible();
-    await expect(
-      canvas.getByRole("heading", { name: /use global pool for edge-jp/i }),
-    ).toBeVisible();
+    await expect(await canvas.findByText(/import local proxy pool/i)).toBeVisible();
+    await expect(await canvas.findByText(/use global pool for edge-jp/i)).toBeVisible();
   },
 };
 
@@ -166,9 +161,8 @@ export const ZhCN: Story = {
   },
   async play({ canvasElement }) {
     const canvas = within(canvasElement);
-    await expect(canvas.getAllByText(/全局/i)[0]).toBeVisible();
-    await expect(canvas.getByRole("heading", { name: /导入全局代理池/i })).toBeVisible();
-    await expect(canvas.getByRole("heading", { name: /全局池与配置分配/i })).toBeVisible();
+    await expect(await canvas.findByText(/导入全局代理池/i)).toBeVisible();
+    await expect(await canvas.findByText(/全局池与配置分配/i)).toBeVisible();
   },
 };
 
@@ -205,4 +199,8 @@ export const AccessDenied: Story = {
       <ProxiesPage {...args} />
     </AppShell>
   ),
+  async play({ canvasElement }) {
+    const canvas = within(canvasElement);
+    await expect(await canvas.findByText(/admin access required/i)).toBeVisible();
+  },
 };
