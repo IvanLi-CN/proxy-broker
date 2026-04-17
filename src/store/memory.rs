@@ -9,8 +9,8 @@ use async_trait::async_trait;
 use crate::{
     models::{
         ApiKeyRecord, IpRecord, ProbeRecord, ProfileProxySettings, ProfileSnapshot,
-        ProfileSyncConfig, ProxyInventoryRecord, ProxyNode, ProxyScope, SessionRecord,
-        TaskListQuery, TaskRunEventRecord, TaskRunRecord,
+        ProxyImportRecord, ProxyImportSyncConfig, ProxyInventoryRecord, ProxyNode, ProxyScope,
+        SessionRecord, TaskListQuery, TaskRunEventRecord, TaskRunRecord,
     },
     store::BrokerStore,
     tasks::matches_task_query,
@@ -19,7 +19,9 @@ use crate::{
 #[derive(Default)]
 struct MemoryStoreState {
     profiles: HashMap<String, ProfileSnapshot>,
+    proxy_imports: HashMap<String, ProxyImportRecord>,
     proxy_inventory: HashMap<String, ProxyInventoryRecord>,
+    proxy_import_sync_configs: HashMap<String, ProxyImportSyncConfig>,
     profile_proxy_settings: HashMap<String, ProfileProxySettings>,
 }
 
@@ -71,6 +73,9 @@ impl BrokerStore for MemoryStore {
         let mut profiles = HashSet::new();
         profiles.extend(guard.profiles.keys().cloned());
         profiles.extend(guard.profile_proxy_settings.keys().cloned());
+        for config in guard.proxy_import_sync_configs.values() {
+            profiles.insert(config.profile_id.clone());
+        }
         for item in guard.proxy_inventory.values() {
             if let Some(profile_id) = item.source_scope.profile_id() {
                 profiles.insert(profile_id.to_string());
@@ -174,6 +179,47 @@ impl BrokerStore for MemoryStore {
         Ok(())
     }
 
+    async fn list_proxy_imports(&self) -> anyhow::Result<Vec<ProxyImportRecord>> {
+        let guard = self
+            .inner
+            .read()
+            .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
+        let mut items = guard.proxy_imports.values().cloned().collect::<Vec<_>>();
+        items.sort_by(|left, right| left.import_id.cmp(&right.import_id));
+        Ok(items)
+    }
+
+    async fn get_proxy_import(&self, import_id: &str) -> anyhow::Result<Option<ProxyImportRecord>> {
+        let guard = self
+            .inner
+            .read()
+            .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
+        Ok(guard.proxy_imports.get(import_id).cloned())
+    }
+
+    async fn replace_proxy_inventory_import(
+        &self,
+        import_record: &ProxyImportRecord,
+        nodes: &[ProxyInventoryRecord],
+    ) -> anyhow::Result<()> {
+        let mut guard = self
+            .inner
+            .write()
+            .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
+        guard
+            .proxy_imports
+            .insert(import_record.import_id.clone(), import_record.clone());
+        guard
+            .proxy_inventory
+            .retain(|_, item| item.import_id != import_record.import_id);
+        for node in nodes {
+            guard
+                .proxy_inventory
+                .insert(node.node_id.clone(), node.clone());
+        }
+        Ok(())
+    }
+
     async fn get_proxy_inventory_node(
         &self,
         node_id: &str,
@@ -183,6 +229,24 @@ impl BrokerStore for MemoryStore {
             .read()
             .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
         Ok(guard.proxy_inventory.get(node_id).cloned())
+    }
+
+    async fn list_proxy_inventory_for_import(
+        &self,
+        import_id: &str,
+    ) -> anyhow::Result<Vec<ProxyInventoryRecord>> {
+        let guard = self
+            .inner
+            .read()
+            .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
+        let mut items = guard
+            .proxy_inventory
+            .values()
+            .filter(|item| item.import_id == import_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        items.sort_by(|left, right| left.proxy_name.cmp(&right.proxy_name));
+        Ok(items)
     }
 
     async fn update_proxy_inventory_allocation(
@@ -204,6 +268,31 @@ impl BrokerStore for MemoryStore {
         Ok(None)
     }
 
+    async fn update_proxy_import_allocation(
+        &self,
+        import_id: &str,
+        allocation_scope: &ProxyScope,
+        updated_at: i64,
+    ) -> anyhow::Result<Option<ProxyImportRecord>> {
+        let mut guard = self
+            .inner
+            .write()
+            .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
+        let Some(import_record) = guard.proxy_imports.get_mut(import_id) else {
+            return Ok(None);
+        };
+        import_record.allocation_scope = allocation_scope.clone();
+        import_record.updated_at = updated_at;
+        let updated = import_record.clone();
+        for item in guard.proxy_inventory.values_mut() {
+            if item.import_id == import_id {
+                item.allocation_scope = allocation_scope.clone();
+                item.updated_at = updated_at;
+            }
+        }
+        Ok(Some(updated))
+    }
+
     async fn delete_proxy_inventory_node(
         &self,
         node_id: &str,
@@ -213,6 +302,24 @@ impl BrokerStore for MemoryStore {
             .write()
             .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
         Ok(guard.proxy_inventory.remove(node_id))
+    }
+
+    async fn delete_proxy_import(
+        &self,
+        import_id: &str,
+    ) -> anyhow::Result<Option<ProxyImportRecord>> {
+        let mut guard = self
+            .inner
+            .write()
+            .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
+        let removed = guard.proxy_imports.remove(import_id);
+        if removed.is_some() {
+            guard
+                .proxy_inventory
+                .retain(|_, item| item.import_id != import_id);
+            guard.proxy_import_sync_configs.remove(import_id);
+        }
+        Ok(removed)
     }
 
     async fn replace_ip_records(
@@ -477,32 +584,70 @@ impl BrokerStore for MemoryStore {
         Ok(())
     }
 
-    async fn upsert_profile_sync_config(&self, config: &ProfileSyncConfig) -> anyhow::Result<()> {
-        self.with_profile_mut(&config.profile_id, |profile| {
-            profile.sync_config = Some(config.clone());
-        })?;
+    async fn upsert_proxy_import_sync_config(
+        &self,
+        config: &ProxyImportSyncConfig,
+    ) -> anyhow::Result<()> {
+        let mut guard = self
+            .inner
+            .write()
+            .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
+        guard
+            .proxy_import_sync_configs
+            .insert(config.import_id.clone(), config.clone());
         Ok(())
     }
 
-    async fn get_profile_sync_config(
+    async fn get_proxy_import_sync_config(
         &self,
-        profile_id: &str,
-    ) -> anyhow::Result<Option<ProfileSyncConfig>> {
-        self.with_profile(profile_id, |profile| profile.sync_config.clone())
+        import_id: &str,
+    ) -> anyhow::Result<Option<ProxyImportSyncConfig>> {
+        let guard = self
+            .inner
+            .read()
+            .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
+        Ok(guard.proxy_import_sync_configs.get(import_id).cloned())
     }
 
-    async fn list_profile_sync_configs(&self) -> anyhow::Result<Vec<ProfileSyncConfig>> {
+    async fn list_proxy_import_sync_configs(&self) -> anyhow::Result<Vec<ProxyImportSyncConfig>> {
         let guard = self
             .inner
             .read()
             .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
         let mut items = guard
-            .profiles
+            .proxy_import_sync_configs
             .values()
-            .filter_map(|profile| profile.sync_config.clone())
+            .cloned()
             .collect::<Vec<_>>();
-        items.sort_by(|left, right| left.profile_id.cmp(&right.profile_id));
+        items.sort_by(|left, right| left.import_id.cmp(&right.import_id));
         Ok(items)
+    }
+
+    async fn list_proxy_import_sync_configs_for_profile(
+        &self,
+        profile_id: &str,
+    ) -> anyhow::Result<Vec<ProxyImportSyncConfig>> {
+        let guard = self
+            .inner
+            .read()
+            .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
+        let mut items = guard
+            .proxy_import_sync_configs
+            .values()
+            .filter(|config| config.profile_id == profile_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        items.sort_by(|left, right| left.import_id.cmp(&right.import_id));
+        Ok(items)
+    }
+
+    async fn delete_proxy_import_sync_config(&self, import_id: &str) -> anyhow::Result<()> {
+        let mut guard = self
+            .inner
+            .write()
+            .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
+        guard.proxy_import_sync_configs.remove(import_id);
+        Ok(())
     }
 
     async fn get_profile_proxy_settings(
@@ -618,7 +763,11 @@ mod tests {
     use super::MemoryStore;
     use crate::{
         auth::issue_api_key,
-        models::{ProfileProxySettings, ProxyInventoryRecord, ProxyScope, SessionRecord},
+        models::{
+            ProfileProxySettings, ProxyImportKind, ProxyImportRecord, ProxyImportSourceIdentity,
+            ProxyImportSyncConfig, ProxyInventoryRecord, ProxyScope, SessionRecord,
+            SubscriptionSource,
+        },
         store::BrokerStore,
     };
 
@@ -658,6 +807,7 @@ mod tests {
             .replace_proxy_inventory_scope(
                 &ProxyScope::profile("edge-jp"),
                 &[ProxyInventoryRecord {
+                    import_id: "import-a".to_string(),
                     node_id: "node-a".to_string(),
                     source_scope: ProxyScope::profile("edge-jp"),
                     allocation_scope: ProxyScope::global(),
@@ -730,6 +880,76 @@ mod tests {
             .map(|session| session.session_id)
             .collect::<Vec<_>>();
         assert_eq!(ids, vec!["c", "a", "b"]);
+    }
+
+    #[tokio::test]
+    async fn delete_proxy_import_removes_in_memory_sync_config() {
+        let store = MemoryStore::new();
+        let import_id = "import-delete";
+
+        store
+            .replace_proxy_inventory_import(
+                &ProxyImportRecord {
+                    import_id: import_id.to_string(),
+                    name: Some("edge-jp".to_string()),
+                    import_kind: ProxyImportKind::Subscription,
+                    source_scope: ProxyScope::profile("edge-jp"),
+                    source_identity: ProxyImportSourceIdentity {
+                        source_type: "file".to_string(),
+                        source_value: "/tmp/edge-jp.yaml".to_string(),
+                    },
+                    allocation_scope: ProxyScope::profile("edge-jp"),
+                    created_at: 1,
+                    updated_at: 1,
+                },
+                &[ProxyInventoryRecord {
+                    import_id: import_id.to_string(),
+                    node_id: "node-1".to_string(),
+                    source_scope: ProxyScope::profile("edge-jp"),
+                    allocation_scope: ProxyScope::profile("edge-jp"),
+                    proxy_name: "proxy-1".to_string(),
+                    proxy_type: "socks5".to_string(),
+                    server: "edge.example.com".to_string(),
+                    resolved_ips: vec!["1.1.1.1".to_string()],
+                    raw_proxy: serde_json::json!({"name": "proxy-1"}),
+                    created_at: 1,
+                    updated_at: 1,
+                }],
+            )
+            .await
+            .expect("import seed should succeed");
+        store
+            .upsert_proxy_import_sync_config(&ProxyImportSyncConfig {
+                import_id: import_id.to_string(),
+                profile_id: "edge-jp".to_string(),
+                source: SubscriptionSource::File("/tmp/edge-jp.yaml".to_string()),
+                enabled: true,
+                sync_every_sec: 60,
+                full_refresh_every_sec: 600,
+                last_sync_due_at: Some(1),
+                last_sync_started_at: None,
+                last_sync_finished_at: None,
+                last_full_refresh_due_at: Some(2),
+                last_full_refresh_started_at: None,
+                last_full_refresh_finished_at: None,
+                updated_at: 1,
+            })
+            .await
+            .expect("sync config seed should succeed");
+
+        store
+            .delete_proxy_import(import_id)
+            .await
+            .expect("delete should succeed")
+            .expect("import should exist");
+
+        assert!(
+            store
+                .get_proxy_import_sync_config(import_id)
+                .await
+                .expect("sync config query should succeed")
+                .is_none()
+        );
     }
 
     #[tokio::test]

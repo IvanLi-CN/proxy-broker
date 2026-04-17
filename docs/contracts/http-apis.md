@@ -78,15 +78,21 @@
 
 ## POST /api/v1/proxies/global/subscriptions/load
 
-- Change: New
+- Change: Updated
 - Auth: admin human or development principal
 - Body:
-  - `source.type`: `url|file`
-  - `source.value`: `string`
+  - `name?`: optional import display name
+  - exactly one of:
+    - `source.type`: `url|file`
+    - `source.value`: `string`
+    - `content`: raw Clash-compatible `proxies:` YAML or plain proxy list for one manual node group
 - Success:
   - `loaded_proxies`, `distinct_ips`, `warnings`
 - Notes:
-  - imports into the global inventory scope
+  - upserts one original import inside the global inventory scope using normalized `source.type + source.value` as the source identity
+  - when `content` is used, creates one manual node-group import without auto-sync registration
+  - only replaces nodes that belong to the same original import batch
+  - other global imports remain untouched
   - rebuilds effective pools for every profile with `use_global_proxies=true`
   - does not create or update profile auto-sync schedules
 - Error:
@@ -96,9 +102,41 @@
   - `subscription_invalid` (400)
   - `subscription_fetch_failed` (502)
 
-## GET /api/v1/proxies
+## GET /api/v1/proxy-imports
 
 - Change: New
+- Auth: admin human or development principal
+- Query:
+  - `scope`: `all|global|profile` (defaults to `all`)
+  - `profile_id`: required when `scope=profile`
+- Success:
+  - `items[]`
+  - each item contains:
+    - `import_id`
+    - `name?`
+    - `import_kind`: `subscription|single_node`
+    - `source_scope`
+    - `source_identity`
+      - `source_type`
+      - `source_value`
+    - `allocation_scope`
+    - `proxy_count`
+    - `distinct_ip_count`
+    - `effective_profile_ids[]`
+    - `created_at`
+    - `updated_at`
+- Notes:
+  - this is the canonical admin list surface for `/proxies`
+  - subscription imports are managed only at the import level, not per node
+  - list primary labels should render `name` first and fall back to `import_id`
+- Error:
+  - `authentication_required` (401)
+  - `admin_required` (403)
+  - `invalid_request` (400) when `scope` is invalid or `profile_id` is missing for `scope=profile`
+
+## GET /api/v1/proxies
+
+- Change: Compatibility
 - Auth: admin human or development principal
 - Query:
   - `scope`: `all|global|profile` (defaults to `all`)
@@ -111,15 +149,19 @@
     - `proxy_type`
     - `server`
     - `resolved_ips[]`
+    - `import_id`
     - `source_scope`
     - `allocation_scope`
     - `effective_profile_ids[]`
+- Notes:
+  - kept for compatibility and internal detail views
+  - no longer the primary admin allocation surface
 - Error:
   - `authentication_required` (401)
   - `admin_required` (403)
   - `invalid_request` (400) when `scope` is invalid or `profile_id` is missing for `scope=profile`
 
-## PATCH /api/v1/proxies/{node_id}/allocation
+## PATCH /api/v1/proxy-imports/{import_id}/allocation
 
 - Change: New
 - Auth: admin human or development principal
@@ -128,8 +170,10 @@
     - `{ "type": "global" }`
     - `{ "type": "profile", "profile_id": "..." }`
 - Success:
-  - returns the updated inventory item with recomputed `effective_profile_ids`
+  - returns the updated import item with recomputed `effective_profile_ids`
 - Notes:
+  - reallocates the whole original import batch
+  - for `single_node` imports this is equivalent to reassigning that one node
   - only the affected profiles are rebuilt
 - Error:
   - `authentication_required` (401)
@@ -138,15 +182,49 @@
   - `profile_not_found` (404) when the target profile does not exist
   - `proxy_inventory_node_not_found` (404)
 
-## DELETE /api/v1/proxies/{node_id}
+## PATCH /api/v1/proxies/{node_id}/allocation
+
+- Change: Compatibility
+- Auth: admin human or development principal
+- Body:
+  - `allocation_scope`
+    - `{ "type": "global" }`
+    - `{ "type": "profile", "profile_id": "..." }`
+- Success:
+  - returns the updated inventory item with recomputed `effective_profile_ids`
+- Notes:
+  - compatibility wrapper around import-level allocation
+  - for nodes that belong to a subscription import, the whole original import batch is reallocated
+- Error:
+  - `authentication_required` (401)
+  - `admin_required` (403)
+  - `invalid_request` (400)
+  - `profile_not_found` (404) when the target profile does not exist
+  - `proxy_inventory_node_not_found` (404)
+
+## DELETE /api/v1/proxy-imports/{import_id}
 
 - Change: New
 - Auth: admin human or development principal
 - Success:
   - `204 No Content`
 - Notes:
-  - removes the node from the current inventory snapshot only
-  - a later re-import from the same source restores the node if the upstream still contains it
+  - deletes the whole original import batch and its import-level sync config, if any
+  - a later re-import from the same source restores the batch if the upstream still contains it
+- Error:
+  - `authentication_required` (401)
+  - `admin_required` (403)
+  - `proxy_inventory_node_not_found` (404)
+
+## DELETE /api/v1/proxies/{node_id}
+
+- Change: Compatibility
+- Auth: admin human or development principal
+- Success:
+  - `204 No Content`
+- Notes:
+  - compatibility wrapper around import-level deletion
+  - for nodes that belong to a subscription import, deleting the node deletes the whole original import batch
 - Error:
   - `authentication_required` (401)
   - `admin_required` (403)
@@ -188,10 +266,17 @@
   - admin human or development principal
   - API key bound to `{profile_id}`
 - Body:
-  - `source.type`: `url|file`
-  - `source.value`: `string`
+  - `name?`: optional import display name
+  - exactly one of:
+    - `source.type`: `url|file`
+    - `source.value`: `string`
+    - `content`: raw Clash-compatible `proxies:` YAML or plain proxy list for one manual node group
 - Notes:
-  - imports into the current profile-local inventory scope and then rebuilds the effective pool for `{profile_id}`
+  - upserts one original import inside the current profile-local inventory scope and then rebuilds the effective pool for `{profile_id}`
+  - only replaces nodes that belong to the same original import batch
+  - other profile-local imports in the same profile remain untouched
+  - profile-local imports register auto-sync state per `import_id`, so multiple subscriptions can coexist without overwriting each other
+  - manual node-group loads do not register auto-sync config and always create a fresh original import batch
   - `source.type=url` is fetched server-side with a compatibility UA fallback
     set, currently trying `Clash.Meta/1.18.3`, `mihomo/1.18.3`, then
     `Clash Verge/1.7.7`

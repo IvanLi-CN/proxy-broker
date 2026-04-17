@@ -7,27 +7,39 @@ import { ProxiesPage } from "@/pages/ProxiesPage";
 
 const profiles = ["default", "edge-jp", "lab-us"];
 
-const inventoryFixture = {
+const proxyImportsFixture = {
   items: [
     {
-      node_id: "node-global-1",
-      proxy_name: "global-jp-entry",
-      proxy_type: "socks5",
-      server: "jp.example.com",
-      resolved_ips: ["203.0.113.10", "203.0.113.11"],
+      import_id: "import-global-1",
+      name: "global-jp",
+      import_kind: "subscription" as const,
       source_scope: { type: "global" as const },
+      source_identity: {
+        source_type: "url",
+        source_value: "https://example.com/global-jp.yaml",
+      },
       allocation_scope: { type: "global" as const },
       effective_profile_ids: ["default", "edge-jp", "lab-us"],
+      proxy_count: 12,
+      distinct_ip_count: 9,
+      created_at: 1_713_308_400,
+      updated_at: 1_713_309_000,
     },
     {
-      node_id: "node-profile-1",
-      proxy_name: "edge-jp-local",
-      proxy_type: "http",
-      server: "edge-jp.internal",
-      resolved_ips: ["198.51.100.22"],
+      import_id: "import-profile-1",
+      name: "edge-manual",
+      import_kind: "single_node" as const,
       source_scope: { type: "profile" as const, profile_id: "edge-jp" },
+      source_identity: {
+        source_type: "manual",
+        source_value: "import-profile-1",
+      },
       allocation_scope: { type: "profile" as const, profile_id: "edge-jp" },
       effective_profile_ids: ["edge-jp"],
+      proxy_count: 4,
+      distinct_ip_count: 3,
+      created_at: 1_713_308_800,
+      updated_at: 1_713_309_200,
     },
   ],
 };
@@ -76,14 +88,14 @@ export const GlobalConfig: Story = {
     },
     globalLoadError: null,
     loadingGlobal: false,
-    inventory: inventoryFixture,
-    inventoryLoading: false,
-    inventoryError: null,
-    reallocatingNodeId: null,
-    deletingNodeId: null,
+    proxyImports: proxyImportsFixture,
+    proxyImportsLoading: false,
+    proxyImportsError: null,
+    reallocatingImportId: null,
+    deletingImportId: null,
     onLoadGlobal: fn(),
-    onReassignNode: fn(),
-    onDeleteNode: fn(),
+    onReassignImport: fn(),
+    onDeleteImport: fn(),
   },
   render: (args) => (
     <AppShell
@@ -104,7 +116,9 @@ export const GlobalConfig: Story = {
   async play({ canvasElement }) {
     const canvas = within(canvasElement);
     await expect(await canvas.findByText(/import global proxy pool/i)).toBeVisible();
-    await expect(await canvas.findByText(/global pool and profile allocations/i)).toBeVisible();
+    await expect(
+      await canvas.findByText(/global pool and configuration allocations/i),
+    ).toBeVisible();
   },
 };
 
@@ -162,7 +176,7 @@ export const ZhCN: Story = {
   async play({ canvasElement }) {
     const canvas = within(canvasElement);
     await expect(await canvas.findByText(/导入全局代理池/i)).toBeVisible();
-    await expect(await canvas.findByText(/全局池与配置分配/i)).toBeVisible();
+    await expect(await canvas.findByText(/全局池与配置级分配/i)).toBeVisible();
   },
 };
 
@@ -176,12 +190,12 @@ export const AccessDenied: Story = {
     globalLoadResponse: null,
     globalLoadError: null,
     loadingGlobal: false,
-    inventory: null,
-    inventoryLoading: false,
-    inventoryError: null,
+    proxyImports: null,
+    proxyImportsLoading: false,
+    proxyImportsError: null,
     onLoadGlobal: fn(),
-    onReassignNode: fn(),
-    onDeleteNode: fn(),
+    onReassignImport: fn(),
+    onDeleteImport: fn(),
   },
   render: (args) => (
     <AppShell

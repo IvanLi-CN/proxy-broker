@@ -5,7 +5,9 @@ export type SessionOptionKind = "country" | "city" | "ip";
 export type SubscriptionSource = { type: "url"; value: string } | { type: "file"; value: string };
 
 export interface LoadSubscriptionRequest {
-  source: SubscriptionSource;
+  name?: string;
+  source?: SubscriptionSource;
+  content?: string;
 }
 
 export interface CreateProfileRequest {
@@ -122,8 +124,42 @@ export interface ListProfilesResponse {
 }
 
 export type ProxyScope = { type: "global" } | { type: "profile"; profile_id: string };
+export type ProxyImportKind = "subscription" | "single_node";
+
+export interface ProxyImportSourceIdentity {
+  source_type: string;
+  source_value: string;
+}
+
+export interface ProxyImportItem {
+  import_id: string;
+  name?: string | null;
+  import_kind: ProxyImportKind;
+  source_scope: ProxyScope;
+  source_identity: ProxyImportSourceIdentity;
+  allocation_scope: ProxyScope;
+  proxy_count: number;
+  distinct_ip_count: number;
+  effective_profile_ids: string[];
+  created_at: number;
+  updated_at: number;
+}
+
+export interface ListProxyImportResponse {
+  items: ProxyImportItem[];
+}
+
+export interface ProxyImportListQuery {
+  scope?: "all" | "global" | "profile";
+  profile_id?: string;
+}
+
+export interface UpdateProxyImportAllocationRequest {
+  allocation_scope: ProxyScope;
+}
 
 export interface ProxyInventoryItem {
+  import_id: string;
   node_id: string;
   proxy_name: string;
   proxy_type: string;

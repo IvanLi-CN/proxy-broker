@@ -11,6 +11,7 @@ import type {
   HealthResponse,
   ListApiKeysResponse,
   ListProfilesResponse,
+  ListProxyImportResponse,
   ListProxyInventoryResponse,
   ListSessionsResponse,
   LoadSubscriptionRequest,
@@ -20,6 +21,7 @@ import type {
   OpenSessionRequest,
   OpenSessionResponse,
   ProfileProxySettings,
+  ProxyImportListQuery,
   ProxyInventoryListQuery,
   RefreshRequest,
   RefreshResponse,
@@ -31,6 +33,7 @@ import type {
   TaskRunDetail,
   UpdateProfileProxySettingsRequest,
   UpdateProxyAllocationRequest,
+  UpdateProxyImportAllocationRequest,
 } from "@/lib/types";
 
 class ApiError extends Error {
@@ -104,6 +107,22 @@ const withProxyInventorySearch = (path: string, query?: ProxyInventoryListQuery)
   return suffix ? `${path}?${suffix}` : path;
 };
 
+const withProxyImportSearch = (path: string, query?: ProxyImportListQuery) => {
+  if (!query) {
+    return path;
+  }
+
+  const params = new URLSearchParams();
+  if (query.scope) {
+    params.set("scope", query.scope);
+  }
+  if (query.profile_id) {
+    params.set("profile_id", query.profile_id);
+  }
+  const suffix = params.toString();
+  return suffix ? `${path}?${suffix}` : path;
+};
+
 export { ApiError };
 
 export const api = {
@@ -131,6 +150,17 @@ export const api = {
     request<LoadSubscriptionResponse>("/api/v1/proxies/global/subscriptions/load", {
       method: "POST",
       body: JSON.stringify(payload),
+    }),
+  listProxyImports: (query?: ProxyImportListQuery) =>
+    request<ListProxyImportResponse>(withProxyImportSearch("/api/v1/proxy-imports", query)),
+  updateProxyImportAllocation: (importId: string, payload: UpdateProxyImportAllocationRequest) =>
+    request<void>(`/api/v1/proxy-imports/${encodeURIComponent(importId)}/allocation`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteProxyImport: (importId: string) =>
+    request<void>(`/api/v1/proxy-imports/${encodeURIComponent(importId)}`, {
+      method: "DELETE",
     }),
   listProxyInventory: (query?: ProxyInventoryListQuery) =>
     request<ListProxyInventoryResponse>(withProxyInventorySearch("/api/v1/proxies", query)),
