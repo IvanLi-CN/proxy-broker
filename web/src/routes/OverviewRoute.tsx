@@ -18,7 +18,9 @@ export function OverviewRoute() {
   const isGlobalConfig = outlet.isGlobalConfig ?? isGlobalProfileId(profileId);
   const activeProfileId = outlet.activeProfileId ?? (isGlobalConfig ? null : profileId);
   const previousProfileId = useRef(profileId);
+  const previousApiKeyOwnerSubject = useRef<string | null>(null);
   const queryClient = useQueryClient();
+  const apiKeyOwnerSubject = authMe?.subject ?? null;
   const [refreshResponseByProfile, setRefreshResponseByProfile] = useState<
     Record<string, RefreshResponse | null>
   >({});
@@ -36,7 +38,7 @@ export function OverviewRoute() {
     refetchInterval: 5_000,
   });
   const apiKeysQuery = useQuery({
-    queryKey: ["api-keys"],
+    queryKey: ["api-keys", apiKeyOwnerSubject],
     queryFn: api.listApiKeys,
     enabled: Boolean(authMe?.is_admin),
   });
@@ -61,7 +63,7 @@ export function OverviewRoute() {
     onSuccess: async (data) => {
       setLatestCreatedApiKey(data);
       toast.success(t("Issued machine key {name}", { name: data.api_key.name }));
-      await queryClient.invalidateQueries({ queryKey: ["api-keys"] });
+      await queryClient.invalidateQueries({ queryKey: ["api-keys", apiKeyOwnerSubject] });
     },
     onError: (error) => toast.error(formatApiErrorMessage(error, t)),
   });
@@ -70,7 +72,7 @@ export function OverviewRoute() {
     mutationFn: ({ keyId }: { keyId: string }) => api.revokeApiKey(keyId),
     onSuccess: async () => {
       toast.success(t("Revoked machine key"));
-      await queryClient.invalidateQueries({ queryKey: ["api-keys"] });
+      await queryClient.invalidateQueries({ queryKey: ["api-keys", apiKeyOwnerSubject] });
     },
     onError: (error) => toast.error(formatApiErrorMessage(error, t)),
   });
@@ -85,6 +87,14 @@ export function OverviewRoute() {
     resetRefreshMutation();
     setLatestCreatedApiKey(null);
   }, [profileId, resetRefreshMutation]);
+
+  useEffect(() => {
+    if (previousApiKeyOwnerSubject.current === apiKeyOwnerSubject) {
+      return;
+    }
+    previousApiKeyOwnerSubject.current = apiKeyOwnerSubject;
+    setLatestCreatedApiKey(null);
+  }, [apiKeyOwnerSubject]);
 
   if (!activeProfileId) {
     return <Navigate replace to="/proxies" />;
