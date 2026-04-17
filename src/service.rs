@@ -160,6 +160,14 @@ impl BrokerService {
         Ok(profiles.into_iter().any(|item| item == profile_id))
     }
 
+    pub async fn require_profile_exists(&self, profile_id: &str) -> BrokerResult<()> {
+        if self.profile_exists(profile_id).await? {
+            Ok(())
+        } else {
+            Err(BrokerError::ProfileNotFound)
+        }
+    }
+
     fn default_profile_proxy_settings(&self, profile_id: &str) -> ProfileProxySettings {
         ProfileProxySettings {
             profile_id: profile_id.to_string(),
@@ -2525,9 +2533,6 @@ impl BrokerService {
         profile_id: &str,
         request: &ExtractIpRequest,
     ) -> BrokerResult<ExtractIpResponse> {
-        if !self.profile_exists(profile_id).await? {
-            return Err(BrokerError::ProfileNotFound);
-        }
         validate_conflict(request)?;
         let _profile_guard = self.lock_profile(profile_id).await;
 
@@ -2554,9 +2559,6 @@ impl BrokerService {
         profile_id: &str,
         request: &OpenSessionRequest,
     ) -> BrokerResult<OpenSessionResponse> {
-        if !self.profile_exists(profile_id).await? {
-            return Err(BrokerError::ProfileNotFound);
-        }
         let _profile_guard = self.lock_profile(profile_id).await;
 
         let nodes = self
@@ -2687,9 +2689,6 @@ impl BrokerService {
     ) -> BrokerResult<OpenBatchResponse> {
         if request.requests.is_empty() {
             return Ok(OpenBatchResponse { sessions: vec![] });
-        }
-        if !self.profile_exists(profile_id).await? {
-            return Err(BrokerError::ProfileNotFound);
         }
 
         let _profile_guard = self.lock_profile(profile_id).await;
@@ -3351,9 +3350,6 @@ impl BrokerService {
     }
 
     pub async fn list_sessions(&self, profile_id: &str) -> BrokerResult<ListSessionsResponse> {
-        if !self.profile_exists(profile_id).await? {
-            return Err(BrokerError::ProfileNotFound);
-        }
         let sessions = self
             .store
             .list_sessions(profile_id)
@@ -3363,9 +3359,6 @@ impl BrokerService {
     }
 
     pub async fn close_session(&self, profile_id: &str, session_id: &str) -> BrokerResult<()> {
-        if !self.profile_exists(profile_id).await? {
-            return Err(BrokerError::ProfileNotFound);
-        }
         let _profile_guard = self.lock_profile(profile_id).await;
 
         let nodes = self

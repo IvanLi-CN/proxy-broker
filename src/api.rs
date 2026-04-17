@@ -378,6 +378,7 @@ async fn load_subscription(
     payload: Result<Json<LoadSubscriptionRequest>, JsonRejection>,
 ) -> Result<Json<crate::models::LoadSubscriptionResponse>, BrokerError> {
     auth.require_profile_access(&profile_id)?;
+    state.service.require_profile_exists(&profile_id).await?;
     let request = parse_json_payload(payload, "load_subscription")?;
     let resp = state
         .service
@@ -393,6 +394,7 @@ async fn refresh_profile(
     body: Bytes,
 ) -> Result<Json<crate::models::RefreshResponse>, BrokerError> {
     auth.require_profile_access(&profile_id)?;
+    state.service.require_profile_exists(&profile_id).await?;
     let request = decode_refresh_request(&body)?;
     let resp = state.service.refresh(&profile_id, &request).await?;
     Ok(Json(resp))
@@ -470,6 +472,7 @@ async fn extract_ips(
     payload: Result<Json<crate::models::ExtractIpRequest>, JsonRejection>,
 ) -> Result<Json<crate::models::ExtractIpResponse>, BrokerError> {
     auth.require_profile_access(&profile_id)?;
+    state.service.require_profile_exists(&profile_id).await?;
     let request = parse_json_payload(payload, "extract_ips")?;
     let resp = state.service.extract_ips(&profile_id, &request).await?;
     Ok(Json(resp))
@@ -482,6 +485,7 @@ async fn open_session(
     payload: Result<Json<OpenSessionRequest>, JsonRejection>,
 ) -> Result<Json<crate::models::OpenSessionResponse>, BrokerError> {
     auth.require_profile_access(&profile_id)?;
+    state.service.require_profile_exists(&profile_id).await?;
     let request = parse_json_payload(payload, "open_session")?;
     let resp = state.service.open_session(&profile_id, &request).await?;
     Ok(Json(resp))
@@ -494,6 +498,7 @@ async fn open_batch(
     payload: Result<Json<OpenBatchRequest>, JsonRejection>,
 ) -> Result<Json<crate::models::OpenBatchResponse>, BrokerError> {
     auth.require_profile_access(&profile_id)?;
+    state.service.require_profile_exists(&profile_id).await?;
     let request = parse_json_payload(payload, "open_batch")?;
     let resp = state.service.open_batch(&profile_id, &request).await?;
     Ok(Json(resp))
@@ -505,6 +510,7 @@ async fn suggested_port(
     Path(profile_id): Path<String>,
 ) -> Result<Json<SuggestedPortResponse>, BrokerError> {
     auth.require_profile_access(&profile_id)?;
+    state.service.require_profile_exists(&profile_id).await?;
     let resp = state.service.suggested_port(&profile_id).await?;
     Ok(Json(resp))
 }
@@ -516,6 +522,7 @@ async fn search_session_options(
     payload: Result<Json<SearchSessionOptionsRequest>, JsonRejection>,
 ) -> Result<Json<crate::models::SearchSessionOptionsResponse>, BrokerError> {
     auth.require_profile_access(&profile_id)?;
+    state.service.require_profile_exists(&profile_id).await?;
     let request = parse_json_payload(payload, "search_session_options")?;
     let resp = state
         .service
@@ -530,6 +537,7 @@ async fn list_sessions(
     Path(profile_id): Path<String>,
 ) -> Result<Json<crate::models::ListSessionsResponse>, BrokerError> {
     auth.require_profile_access(&profile_id)?;
+    state.service.require_profile_exists(&profile_id).await?;
     let resp = state.service.list_sessions(&profile_id).await?;
     Ok(Json(resp))
 }
@@ -540,6 +548,7 @@ async fn close_session(
     Path((profile_id, session_id)): Path<(String, String)>,
 ) -> Result<StatusCode, BrokerError> {
     auth.require_profile_access(&profile_id)?;
+    state.service.require_profile_exists(&profile_id).await?;
     state
         .service
         .close_session(&profile_id, &session_id)
