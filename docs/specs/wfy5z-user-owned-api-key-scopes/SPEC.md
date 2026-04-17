@@ -4,7 +4,7 @@
 
 - Status: 已实现（本地已验证）
 - Created: 2026-04-12
-- Last: 2026-04-12
+- Last: 2026-04-17
 
 ## Summary
 
@@ -66,7 +66,7 @@
 
 ## Visual Evidence
 
-- `证据绑定sha=6760606358c41a851f6ad19ff01ed65f20c43f90`
+- `证据绑定sha=6304e36ca1889034280f62ffaf4ee707745df5fb`
 - `source_type=storybook_canvas`
 - `target_program=mock-only`
 - `capture_scope=browser-viewport`
@@ -85,7 +85,7 @@
 - `submission_gate=pending-owner-approval`
 - `story_id_or_title=Features/Overview/AccessControlCard/AllProfiles`
 - `state=existing all-profiles key`
-- `evidence_note=展示 owner-scoped key 列表中的 all profiles scope 标签，以及对应的 owner / scope 元数据。`
+- `evidence_note=展示这次布局修复后的 issued key 卡片：owner/scope 与 created/last used 已并排铺开，直接证明右侧留白被收紧。`
 
 ![Access control all profiles](./assets/access-control-all-profiles.png)
 
@@ -115,3 +115,4 @@
 
 - 2026-04-12：创建 follow-up spec，冻结 owner-scoped API key 的范围、契约与验证口径。
 - 2026-04-12：完成 owner-scoped / selected-or-all API key 实现、持久化迁移、Web 管理台改造、文档同步与 Storybook 视觉证据。
+- 2026-04-17：收敛 rebase 后的布局回归，压缩 Issued keys 元数据区的横向留白，并刷新 all profiles 视觉证据。

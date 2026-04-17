@@ -285,23 +285,25 @@ export function AccessControlCard({
                       </Button>
                     </div>
                   </div>
-                  <div className="grid gap-1 text-xs leading-5 text-muted-foreground">
-                    <div>{t("Owner {subject}", { subject: apiKey.owner_subject })}</div>
-                    <div>
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs leading-5 text-muted-foreground max-[360px]:grid-cols-1">
+                    <div className="min-w-0 break-words">
+                      {t("Owner {subject}", { subject: apiKey.owner_subject })}
+                    </div>
+                    <div className="min-w-0 break-words">
                       {t("Scope {value}", { value: profileScopeDetail(apiKey.profile_scope, t) })}
                     </div>
-                    <div>
+                    <div className="min-w-0 break-words">
                       {t("Created {value}", {
                         value: formatTimestamp(locale, t, apiKey.created_at),
                       })}
                     </div>
-                    <div>
+                    <div className="min-w-0 break-words">
                       {t("Last used {value}", {
                         value: formatTimestamp(locale, t, apiKey.last_used_at),
                       })}
                     </div>
                     {apiKey.revoked_at ? (
-                      <div>
+                      <div className="min-w-0 break-words sm:col-span-2">
                         {t("Revoked {value}", {
                           value: formatTimestamp(locale, t, apiKey.revoked_at),
                         })}
