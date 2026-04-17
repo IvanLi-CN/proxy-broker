@@ -4,9 +4,9 @@ mod sqlite;
 use async_trait::async_trait;
 
 use crate::models::{
-    ApiKeyRecord, IpRecord, ProbeRecord, ProfileProxySettings, ProfileSyncConfig,
-    ProxyInventoryRecord, ProxyNode, ProxyScope, SessionRecord, TaskListQuery, TaskRunEventRecord,
-    TaskRunRecord,
+    ApiKeyRecord, IpRecord, ProbeRecord, ProfileProxySettings, ProxyImportRecord,
+    ProxyImportSyncConfig, ProxyInventoryRecord, ProxyNode, ProxyScope, SessionRecord,
+    TaskListQuery, TaskRunEventRecord, TaskRunRecord,
 };
 
 pub use memory::MemoryStore;
@@ -38,20 +38,41 @@ pub trait BrokerStore: Send + Sync {
         source_scope: &ProxyScope,
         nodes: &[ProxyInventoryRecord],
     ) -> anyhow::Result<()>;
+    async fn list_proxy_imports(&self) -> anyhow::Result<Vec<ProxyImportRecord>>;
+    async fn get_proxy_import(&self, import_id: &str) -> anyhow::Result<Option<ProxyImportRecord>>;
+    async fn replace_proxy_inventory_import(
+        &self,
+        import_record: &ProxyImportRecord,
+        nodes: &[ProxyInventoryRecord],
+    ) -> anyhow::Result<()>;
     async fn get_proxy_inventory_node(
         &self,
         node_id: &str,
     ) -> anyhow::Result<Option<ProxyInventoryRecord>>;
+    async fn list_proxy_inventory_for_import(
+        &self,
+        import_id: &str,
+    ) -> anyhow::Result<Vec<ProxyInventoryRecord>>;
     async fn update_proxy_inventory_allocation(
         &self,
         node_id: &str,
         allocation_scope: &ProxyScope,
         updated_at: i64,
     ) -> anyhow::Result<Option<ProxyInventoryRecord>>;
+    async fn update_proxy_import_allocation(
+        &self,
+        import_id: &str,
+        allocation_scope: &ProxyScope,
+        updated_at: i64,
+    ) -> anyhow::Result<Option<ProxyImportRecord>>;
     async fn delete_proxy_inventory_node(
         &self,
         node_id: &str,
     ) -> anyhow::Result<Option<ProxyInventoryRecord>>;
+    async fn delete_proxy_import(
+        &self,
+        import_id: &str,
+    ) -> anyhow::Result<Option<ProxyImportRecord>>;
 
     async fn replace_ip_records(
         &self,
@@ -114,12 +135,42 @@ pub trait BrokerStore: Send + Sync {
         last_used_at: i64,
     ) -> anyhow::Result<()>;
 
-    async fn upsert_profile_sync_config(&self, config: &ProfileSyncConfig) -> anyhow::Result<()>;
+    async fn upsert_proxy_import_sync_config(
+        &self,
+        config: &ProxyImportSyncConfig,
+    ) -> anyhow::Result<()>;
+    async fn get_proxy_import_sync_config(
+        &self,
+        import_id: &str,
+    ) -> anyhow::Result<Option<ProxyImportSyncConfig>>;
+    async fn list_proxy_import_sync_configs(&self) -> anyhow::Result<Vec<ProxyImportSyncConfig>>;
+    async fn list_proxy_import_sync_configs_for_profile(
+        &self,
+        profile_id: &str,
+    ) -> anyhow::Result<Vec<ProxyImportSyncConfig>>;
+    async fn delete_proxy_import_sync_config(&self, import_id: &str) -> anyhow::Result<()>;
+
+    async fn upsert_profile_sync_config(
+        &self,
+        config: &ProxyImportSyncConfig,
+    ) -> anyhow::Result<()> {
+        self.upsert_proxy_import_sync_config(config).await
+    }
+
     async fn get_profile_sync_config(
         &self,
         profile_id: &str,
-    ) -> anyhow::Result<Option<ProfileSyncConfig>>;
-    async fn list_profile_sync_configs(&self) -> anyhow::Result<Vec<ProfileSyncConfig>>;
+    ) -> anyhow::Result<Option<ProxyImportSyncConfig>> {
+        Ok(self
+            .list_proxy_import_sync_configs_for_profile(profile_id)
+            .await?
+            .into_iter()
+            .next())
+    }
+
+    async fn list_profile_sync_configs(&self) -> anyhow::Result<Vec<ProxyImportSyncConfig>> {
+        self.list_proxy_import_sync_configs().await
+    }
 
     async fn get_profile_proxy_settings(
         &self,

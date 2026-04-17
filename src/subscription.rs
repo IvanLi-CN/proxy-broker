@@ -202,22 +202,10 @@ async fn fetch_url_source(
     )))
 }
 
-pub async fn load_from_source(
-    client: &reqwest::Client,
-    source: &crate::models::SubscriptionSource,
+async fn load_from_proxies(
+    proxies: Vec<Value>,
+    mut warnings: Vec<String>,
 ) -> Result<(Vec<ProxyNode>, Vec<String>), SubscriptionLoadError> {
-    let (proxies, mut warnings) = match source {
-        crate::models::SubscriptionSource::Url(url) => fetch_url_source(client, url).await?,
-        crate::models::SubscriptionSource::File(path) => {
-            let raw = tokio::fs::read_to_string(path).await.map_err(|err| {
-                SubscriptionLoadError::InvalidPayload(format!(
-                    "failed to read subscription file `{path}`: {err}"
-                ))
-            })?;
-            (parse_subscription_payload(&raw)?, Vec::new())
-        }
-    };
-
     let sem = ArcSemaphore::new(DEFAULT_DNS_CONCURRENCY);
     let mut tasks = Vec::new();
     for yaml_proxy in proxies {
@@ -264,6 +252,30 @@ pub async fn load_from_source(
 
     nodes.sort_by(|a, b| a.proxy_name.cmp(&b.proxy_name));
     Ok((nodes, warnings))
+}
+
+pub async fn load_from_source(
+    client: &reqwest::Client,
+    source: &crate::models::SubscriptionSource,
+) -> Result<(Vec<ProxyNode>, Vec<String>), SubscriptionLoadError> {
+    let (proxies, warnings) = match source {
+        crate::models::SubscriptionSource::Url(url) => fetch_url_source(client, url).await?,
+        crate::models::SubscriptionSource::File(path) => {
+            let raw = tokio::fs::read_to_string(path).await.map_err(|err| {
+                SubscriptionLoadError::InvalidPayload(format!(
+                    "failed to read subscription file `{path}`: {err}"
+                ))
+            })?;
+            (parse_subscription_payload(&raw)?, Vec::new())
+        }
+    };
+    load_from_proxies(proxies, warnings).await
+}
+
+pub async fn load_from_content(
+    raw: &str,
+) -> Result<(Vec<ProxyNode>, Vec<String>), SubscriptionLoadError> {
+    load_from_proxies(parse_subscription_payload(raw)?, Vec::new()).await
 }
 
 #[derive(Clone)]

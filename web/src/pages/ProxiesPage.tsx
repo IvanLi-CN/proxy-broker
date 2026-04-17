@@ -22,12 +22,15 @@ import {
 import { ProfileProxyPolicyCard } from "@/features/proxies/components/ProfileProxyPolicyCard";
 import { ProxyLoadCard } from "@/features/proxies/components/ProxyLoadCard";
 import { useI18n } from "@/i18n";
+import { formatTimestamp } from "@/lib/format";
 import type {
   CurrentUserState,
-  ListProxyInventoryResponse,
+  ListProxyImportResponse,
   LoadSubscriptionRequest,
   LoadSubscriptionResponse,
   ProfileProxySettings,
+  ProxyImportItem,
+  ProxyImportKind,
   ProxyScope,
 } from "@/lib/types";
 
@@ -46,6 +49,14 @@ function formatScopeLabel(scope: ProxyScope, t: ReturnType<typeof useI18n>["t"])
   return scope.type === "global"
     ? t("Global pool")
     : t("Profile {profileId}", { profileId: scope.profile_id });
+}
+
+function formatImportKind(kind: ProxyImportKind, t: ReturnType<typeof useI18n>["t"]) {
+  return kind === "subscription" ? t("Subscription import") : t("Node group import");
+}
+
+function formatImportLabel(item: ProxyImportItem) {
+  return item.name?.trim() || item.import_id;
 }
 
 function InventoryProfiles({ effectiveProfileIds }: { effectiveProfileIds: string[] }) {
@@ -83,14 +94,14 @@ interface GlobalProxiesPageProps {
   globalLoadResponse?: LoadSubscriptionResponse | null;
   globalLoadError?: string | null;
   loadingGlobal: boolean;
-  inventory?: ListProxyInventoryResponse | null;
-  inventoryLoading: boolean;
-  inventoryError?: string | null;
-  reallocatingNodeId?: string | null;
-  deletingNodeId?: string | null;
+  proxyImports?: ListProxyImportResponse | null;
+  proxyImportsLoading: boolean;
+  proxyImportsError?: string | null;
+  reallocatingImportId?: string | null;
+  deletingImportId?: string | null;
   onLoadGlobal: (payload: LoadSubscriptionRequest) => void | Promise<void>;
-  onReassignNode: (nodeId: string, scope: ProxyScope) => void | Promise<void>;
-  onDeleteNode: (nodeId: string) => void | Promise<void>;
+  onReassignImport: (importId: string, scope: ProxyScope) => void | Promise<void>;
+  onDeleteImport: (importId: string) => void | Promise<void>;
 }
 
 interface ProfileProxiesPageProps {
@@ -127,17 +138,17 @@ function GlobalProxiesView({
   globalLoadResponse,
   globalLoadError,
   loadingGlobal,
-  inventory,
-  inventoryLoading,
-  inventoryError,
-  reallocatingNodeId = null,
-  deletingNodeId = null,
+  proxyImports,
+  proxyImportsLoading,
+  proxyImportsError,
+  reallocatingImportId = null,
+  deletingImportId = null,
   onLoadGlobal,
-  onReassignNode,
-  onDeleteNode,
+  onReassignImport,
+  onDeleteImport,
 }: GlobalProxiesPageProps) {
-  const { formatNumber, t } = useI18n();
-  const items = inventory?.items ?? [];
+  const { formatNumber, locale, t } = useI18n();
+  const items = proxyImports?.items ?? [];
 
   if (authError) {
     return (
@@ -186,7 +197,7 @@ function GlobalProxiesView({
       <ProxyLoadCard
         defaultValue="https://example.com/global-subscription.yaml"
         description={t(
-          "Import one upstream into the shared pool. Profiles that keep global usage enabled inherit these nodes immediately.",
+          "Import one subscription source or one node group into the shared pool. Profiles that keep global usage enabled inherit these nodes immediately.",
         )}
         error={globalLoadError}
         eyebrow={t("Global pool")}
@@ -206,22 +217,22 @@ function GlobalProxiesView({
         title={t("Import global proxy pool")}
       />
 
-      {inventoryError ? (
+      {proxyImportsError ? (
         <ActionResponsePanel
-          title={t("Proxy inventory unavailable")}
-          description={inventoryError}
+          title={t("Proxy imports unavailable")}
+          description={proxyImportsError}
           tone="error"
         />
       ) : null}
 
       <DataTablePanel
-        eyebrow={t("Unified inventory")}
-        title={t("Global pool and profile allocations")}
+        eyebrow={t("Original imports")}
+        title={t("Global pool and configuration allocations")}
         description={t(
-          "See where each imported node came from, where it is allocated now, and which profiles currently inherit it.",
+          "Allocate by original import source. Subscription rows are reassigned or deleted as a whole; profile composition still happens from their member nodes behind the scenes.",
         )}
         chips={[
-          t(items.length === 1 ? "{count} node" : "{count} nodes", {
+          t(items.length === 1 ? "{count} import" : "{count} imports", {
             count: formatNumber(items.length),
           }),
         ]}
@@ -231,14 +242,14 @@ function GlobalProxiesView({
             className="rounded-full px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.16em]"
           >
             <Layers3Icon className="mr-1 size-3.5" />
-            {inventoryLoading ? t("loading inventory") : t("inventory live")}
+            {proxyImportsLoading ? t("loading imports") : t("imports live")}
           </Badge>
         }
       >
         <div className="space-y-3">
           <div className="rounded-[16px] border border-dashed border-border/70 bg-muted/10 px-3 py-2 text-xs leading-5 text-muted-foreground">
             {t(
-              "Deleting or reallocating an imported node only affects the current inventory snapshot. The next source reload restores anything the upstream still contains.",
+              "Allocation and deletion now happen at the original import level. Re-importing the same source only refreshes that import and leaves other imports untouched.",
             )}
           </div>
 
@@ -246,7 +257,7 @@ function GlobalProxiesView({
             <TableHeader>
               <TableRow>
                 <TableHead className="h-10 px-3 text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
-                  {t("Proxy")}
+                  {t("Name")}
                 </TableHead>
                 <TableHead className="h-10 px-3 text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
                   {t("Source scope")}
@@ -258,7 +269,10 @@ function GlobalProxiesView({
                   {t("Effective profiles")}
                 </TableHead>
                 <TableHead className="h-10 px-3 text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
-                  {t("Resolved IPs")}
+                  {t("Contents")}
+                </TableHead>
+                <TableHead className="h-10 px-3 text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                  {t("Updated")}
                 </TableHead>
                 <TableHead className="h-10 px-3 text-right text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
                   {t("Actions")}
@@ -269,26 +283,33 @@ function GlobalProxiesView({
               {items.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={6}
+                    colSpan={7}
                     className="px-3 py-8 text-center text-sm text-muted-foreground"
                   >
-                    {inventoryLoading
-                      ? t("Loading proxy inventory...")
-                      : t("No imported nodes yet. Load the global pool first.")}
+                    {proxyImportsLoading
+                      ? t("Loading proxy imports...")
+                      : t("No imported sources yet. Load the global pool first.")}
                   </TableCell>
                 </TableRow>
               ) : (
                 items.map((item) => {
                   const pending =
-                    reallocatingNodeId === item.node_id || deletingNodeId === item.node_id;
+                    reallocatingImportId === item.import_id || deletingImportId === item.import_id;
 
                   return (
-                    <TableRow key={item.node_id}>
+                    <TableRow key={item.import_id}>
                       <TableCell className="px-3 py-3 align-top">
-                        <div className="space-y-0.5">
-                          <div className="font-medium text-foreground">{item.proxy_name}</div>
-                          <div className="font-mono text-xs text-muted-foreground">
-                            {item.proxy_type} · {item.server}
+                        <div className="space-y-1">
+                          <div className="font-medium text-foreground">
+                            {formatImportLabel(item)}
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            <Badge
+                              variant="secondary"
+                              className="rounded-full px-2 py-0.5 text-[10px]"
+                            >
+                              {formatImportKind(item.import_kind, t)}
+                            </Badge>
                           </div>
                         </div>
                       </TableCell>
@@ -302,7 +323,7 @@ function GlobalProxiesView({
                           disabled={pending}
                           value={encodeScope(item.allocation_scope)}
                           onValueChange={(value) => {
-                            void onReassignNode(item.node_id, decodeScope(value));
+                            void onReassignImport(item.import_id, decodeScope(value));
                           }}
                         >
                           <SelectTrigger size="sm" className="h-8 w-[156px] bg-background text-xs">
@@ -325,11 +346,15 @@ function GlobalProxiesView({
                         <InventoryProfiles effectiveProfileIds={item.effective_profile_ids} />
                       </TableCell>
                       <TableCell className="px-3 py-3 align-top">
-                        <div className="max-w-[240px] whitespace-normal text-[11px] leading-5 text-muted-foreground">
-                          {item.resolved_ips.length > 0
-                            ? item.resolved_ips.join(", ")
-                            : t("No resolved IPs")}
+                        <div className="space-y-0.5 text-[11px] leading-5 text-muted-foreground">
+                          <div>{t("{count} proxy", { count: formatNumber(item.proxy_count) })}</div>
+                          <div>
+                            {t("{count} IP", { count: formatNumber(item.distinct_ip_count) })}
+                          </div>
                         </div>
+                      </TableCell>
+                      <TableCell className="px-3 py-3 align-top text-[11px] text-muted-foreground">
+                        {formatTimestamp(locale, t, item.updated_at)}
                       </TableCell>
                       <TableCell className="px-3 py-3 align-top text-right">
                         <Button
@@ -338,11 +363,11 @@ function GlobalProxiesView({
                           className="h-8 px-2.5 text-xs"
                           disabled={pending}
                           onClick={() => {
-                            void onDeleteNode(item.node_id);
+                            void onDeleteImport(item.import_id);
                           }}
                         >
                           <Trash2Icon className="size-4" />
-                          {deletingNodeId === item.node_id ? t("Deleting...") : t("Delete")}
+                          {deletingImportId === item.import_id ? t("Deleting...") : t("Delete")}
                         </Button>
                       </TableCell>
                     </TableRow>
@@ -389,7 +414,7 @@ function ProfileProxiesView({
         <ProxyLoadCard
           defaultValue="https://example.com/profile-subscription.yaml"
           description={t(
-            "Import nodes for this profile only. They stay local unless you later reassign them from the global config.",
+            "Import one subscription source or one node group for this profile only. They stay local unless you later reassign them from the global config.",
           )}
           error={profileLoadError}
           eyebrow={t("Current profile")}

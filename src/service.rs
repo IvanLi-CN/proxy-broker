@@ -31,15 +31,16 @@ use crate::{
     models::{
         CreateApiKeyRequest, CreateApiKeyResponse, CreateProfileResponse, ExtractIpItem,
         ExtractIpRequest, ExtractIpResponse, IpRecord, ListApiKeysResponse, ListProfilesResponse,
-        ListProxyInventoryResponse, ListSessionsResponse, LoadSubscriptionResponse,
-        OpenBatchRequest, OpenBatchResponse, OpenSessionRequest, OpenSessionResponse, ProbeRecord,
-        ProfileProxySettings, ProfileSyncConfig, ProxyInventoryItem, ProxyInventoryRecord,
-        ProxyNode, ProxyScope, RefreshRequest, RefreshResponse, SearchSessionOptionsRequest,
-        SearchSessionOptionsResponse, SessionOptionItem, SessionOptionKind, SessionRecord,
-        SessionSelectionMode, SubscriptionSource, SuggestedPortResponse, TaskEventLevel,
-        TaskListQuery, TaskListResponse, TaskRunDetail, TaskRunEventRecord, TaskRunKind,
-        TaskRunRecord, TaskRunScope, TaskRunStage, TaskRunStatus, TaskRunSummary, TaskRunTrigger,
-        now_epoch_sec,
+        ListProxyImportResponse, ListProxyInventoryResponse, ListSessionsResponse,
+        LoadSubscriptionRequest, LoadSubscriptionResponse, OpenBatchRequest, OpenBatchResponse,
+        OpenSessionRequest, OpenSessionResponse, ProbeRecord, ProfileProxySettings,
+        ProxyImportItem, ProxyImportKind, ProxyImportRecord, ProxyImportSourceIdentity,
+        ProxyImportSyncConfig, ProxyInventoryItem, ProxyInventoryRecord, ProxyNode, ProxyScope,
+        RefreshRequest, RefreshResponse, SearchSessionOptionsRequest, SearchSessionOptionsResponse,
+        SessionOptionItem, SessionOptionKind, SessionRecord, SessionSelectionMode,
+        SubscriptionSource, SuggestedPortResponse, TaskEventLevel, TaskListQuery, TaskListResponse,
+        TaskRunDetail, TaskRunEventRecord, TaskRunKind, TaskRunRecord, TaskRunScope, TaskRunStage,
+        TaskRunStatus, TaskRunSummary, TaskRunTrigger, now_epoch_sec,
     },
     runtime::MihomoRuntime,
     store::BrokerStore,
@@ -104,11 +105,13 @@ pub struct BrokerService {
 struct LoadSubscriptionOutcome {
     response: LoadSubscriptionResponse,
     new_ips: Vec<String>,
+    import_id: String,
 }
 
 #[derive(Debug, Clone)]
 struct ImportedInventoryOutcome {
     response: LoadSubscriptionResponse,
+    import_id: String,
 }
 
 impl BrokerService {
@@ -410,27 +413,34 @@ impl BrokerService {
     async fn enqueue_due_tasks(&self) -> BrokerResult<()> {
         let configs = self
             .store
-            .list_profile_sync_configs()
+            .list_proxy_import_sync_configs()
             .await
             .map_err(BrokerError::from)?;
         let now = now_epoch_sec();
 
+        let mut configs_by_profile = HashMap::<String, Vec<ProxyImportSyncConfig>>::new();
         for config in configs {
-            if !config.enabled {
-                continue;
-            }
-            if self
-                .has_pending_or_running_tasks(&config.profile_id)
-                .await?
-            {
+            configs_by_profile
+                .entry(config.profile_id.clone())
+                .or_default()
+                .push(config);
+        }
+
+        for (profile_id, configs) in configs_by_profile {
+            if self.has_pending_or_running_tasks(&profile_id).await? {
                 continue;
             }
 
-            let sync_due = config.last_sync_due_at.map(|ts| ts <= now).unwrap_or(false);
-            let full_due = config
-                .last_full_refresh_due_at
-                .map(|ts| ts <= now)
-                .unwrap_or(false);
+            let sync_due = configs.iter().any(|config| {
+                config.enabled && config.last_sync_due_at.map(|ts| ts <= now).unwrap_or(false)
+            });
+            let full_due = configs.iter().any(|config| {
+                config.enabled
+                    && config
+                        .last_full_refresh_due_at
+                        .map(|ts| ts <= now)
+                        .unwrap_or(false)
+            });
 
             if !sync_due && !full_due {
                 continue;
@@ -438,7 +448,7 @@ impl BrokerService {
 
             if sync_due {
                 self.enqueue_task_run(
-                    &config.profile_id,
+                    &profile_id,
                     TaskRunKind::SubscriptionSync,
                     TaskRunTrigger::Schedule,
                     TaskRunScope::All,
@@ -448,7 +458,7 @@ impl BrokerService {
 
             if full_due {
                 self.enqueue_task_run(
-                    &config.profile_id,
+                    &profile_id,
                     TaskRunKind::MetadataRefreshFull,
                     TaskRunTrigger::Schedule,
                     TaskRunScope::All,
@@ -559,51 +569,97 @@ impl BrokerService {
         )
         .await?;
 
-        self.mark_sync_started(&run.profile_id).await?;
-        let config = self
+        let now = now_epoch_sec();
+        let configs = self
             .store
-            .get_profile_sync_config(&run.profile_id)
+            .list_proxy_import_sync_configs_for_profile(&run.profile_id)
             .await
             .map_err(BrokerError::from)?
-            .ok_or_else(|| {
-                BrokerError::InvalidRequest(format!(
-                    "profile `{}` has no persisted subscription source",
-                    run.profile_id
-                ))
-            })?;
-        let outcome = self
-            .load_subscription_internal(&run.profile_id, &config.source)
-            .await?;
-        let targeted_ips = outcome.new_ips.len() as u64;
+            .into_iter()
+            .filter(|config| {
+                config.enabled && config.last_sync_due_at.map(|ts| ts <= now).unwrap_or(false)
+            })
+            .collect::<Vec<_>>();
+        if configs.is_empty() {
+            return Err(BrokerError::InvalidRequest(format!(
+                "profile `{}` has no due persisted subscription source",
+                run.profile_id
+            )));
+        }
+        let due_import_ids = configs
+            .iter()
+            .map(|config| config.import_id.clone())
+            .collect::<Vec<_>>();
+        self.mark_sync_started_for_imports(&due_import_ids).await?;
+
+        let mut total_loaded_proxies = 0usize;
+        let mut warnings = Vec::<String>::new();
+        let mut new_ips = Vec::<String>::new();
+        let mut distinct_ips = HashSet::<String>::new();
+        let mut completed_import_ids = Vec::<String>::new();
+        for config in &configs {
+            let outcome = match self
+                .load_subscription_internal(&run.profile_id, &config.source, None)
+                .await
+            {
+                Ok(outcome) => outcome,
+                Err(err) => {
+                    let failed_at = now_epoch_sec();
+                    if !completed_import_ids.is_empty() {
+                        self.mark_sync_finished_for_imports(&completed_import_ids, failed_at)
+                            .await?;
+                    }
+                    self.mark_sync_failed_for_imports(
+                        std::slice::from_ref(&config.import_id),
+                        failed_at,
+                    )
+                    .await?;
+                    return Err(err);
+                }
+            };
+            total_loaded_proxies += outcome.response.loaded_proxies;
+            warnings.extend(outcome.response.warnings);
+            new_ips.extend(outcome.new_ips);
+            completed_import_ids.push(config.import_id.clone());
+            for node in self
+                .store
+                .list_proxy_inventory_for_import(&outcome.import_id)
+                .await
+                .map_err(BrokerError::from)?
+            {
+                distinct_ips.extend(node.resolved_ips);
+            }
+        }
+        new_ips.sort();
+        new_ips.dedup();
+        let targeted_ips = new_ips.len() as u64;
         run.progress_total = Some(targeted_ips);
         self.update_task_run_and_emit(run).await?;
         self.append_task_event(
             run,
             TaskEventLevel::Info,
             TaskRunStage::DiffingInventory,
-            format!(
-                "Subscription sync finished with {} new IP(s).",
-                outcome.new_ips.len()
-            ),
+            format!("Subscription sync finished with {} new IP(s).", new_ips.len()),
             Some(serde_json::json!({
-                "loaded_proxies": outcome.response.loaded_proxies,
-                "distinct_ips": outcome.response.distinct_ips,
-                "warnings": outcome.response.warnings,
-                "new_ips": outcome.new_ips,
+                "loaded_proxies": total_loaded_proxies,
+                "distinct_ips": distinct_ips.len(),
+                "warnings": warnings,
+                "new_ips": new_ips,
+                "import_ids": configs.iter().map(|config| config.import_id.clone()).collect::<Vec<_>>(),
             })),
         )
         .await?;
 
-        if outcome.new_ips.is_empty() {
-            self.mark_sync_finished(&run.profile_id, now_epoch_sec())
+        if new_ips.is_empty() {
+            self.mark_sync_finished_for_imports(&due_import_ids, now_epoch_sec())
                 .await?;
             self.complete_task_run(
                 run,
                 TaskRunStatus::Succeeded,
                 Some(serde_json::json!({
-                    "loaded_proxies": outcome.response.loaded_proxies,
-                    "distinct_ips": outcome.response.distinct_ips,
-                    "warnings": outcome.response.warnings,
+                    "loaded_proxies": total_loaded_proxies,
+                    "distinct_ips": distinct_ips.len(),
+                    "warnings": warnings,
                     "new_ips": 0,
                     "probed_ips": 0,
                     "geo_updated": 0,
@@ -625,15 +681,15 @@ impl BrokerService {
                     && queued_run.kind == TaskRunKind::MetadataRefreshFull
             })
         {
-            self.mark_sync_finished(&run.profile_id, now_epoch_sec())
+            self.mark_sync_finished_for_imports(&due_import_ids, now_epoch_sec())
                 .await?;
             self.complete_task_run(
                 run,
                 TaskRunStatus::Succeeded,
                 Some(serde_json::json!({
-                    "loaded_proxies": outcome.response.loaded_proxies,
-                    "distinct_ips": outcome.response.distinct_ips,
-                    "warnings": outcome.response.warnings,
+                    "loaded_proxies": total_loaded_proxies,
+                    "distinct_ips": distinct_ips.len(),
+                    "warnings": warnings,
                     "new_ips": targeted_ips,
                     "probed_ips": 0,
                     "geo_updated": 0,
@@ -647,25 +703,33 @@ impl BrokerService {
             return Ok(());
         }
 
-        let target_ip_set = outcome.new_ips.iter().cloned().collect::<HashSet<_>>();
-        let refresh = self
+        let target_ip_set = new_ips.iter().cloned().collect::<HashSet<_>>();
+        let refresh = match self
             .refresh_metadata_internal(
                 &run.profile_id,
                 false,
                 Some(&target_ip_set),
                 Some(&run.run_id),
             )
-            .await?;
+            .await
+        {
+            Ok(refresh) => refresh,
+            Err(err) => {
+                self.mark_sync_failed_for_imports(&due_import_ids, now_epoch_sec())
+                    .await?;
+                return Err(err);
+            }
+        };
 
-        self.mark_sync_finished(&run.profile_id, now_epoch_sec())
+        self.mark_sync_finished_for_imports(&due_import_ids, now_epoch_sec())
             .await?;
         self.complete_task_run(
             run,
             TaskRunStatus::Succeeded,
             Some(serde_json::json!({
-                "loaded_proxies": outcome.response.loaded_proxies,
-                "distinct_ips": outcome.response.distinct_ips,
-                "warnings": outcome.response.warnings,
+                "loaded_proxies": total_loaded_proxies,
+                "distinct_ips": distinct_ips.len(),
+                "warnings": warnings,
                 "new_ips": targeted_ips,
                 "probed_ips": refresh.probed_ips,
                 "geo_updated": refresh.geo_updated,
@@ -905,9 +969,7 @@ impl BrokerService {
         let failed_at = now_epoch_sec();
         if run.trigger == TaskRunTrigger::Schedule {
             match run.kind {
-                TaskRunKind::SubscriptionSync => {
-                    self.mark_sync_failed(&run.profile_id, failed_at).await?;
-                }
+                TaskRunKind::SubscriptionSync => {}
                 TaskRunKind::MetadataRefreshFull => {
                     self.mark_full_refresh_failed(&run.profile_id, failed_at)
                         .await?;
@@ -948,16 +1010,18 @@ impl BrokerService {
 
     async fn register_profile_sync_source(
         &self,
+        import_id: &str,
         profile_id: &str,
         source: &SubscriptionSource,
     ) -> BrokerResult<()> {
         let now = now_epoch_sec();
         let mut config = self
             .store
-            .get_profile_sync_config(profile_id)
+            .get_proxy_import_sync_config(import_id)
             .await
             .map_err(BrokerError::from)?
-            .unwrap_or(ProfileSyncConfig {
+            .unwrap_or(ProxyImportSyncConfig {
+                import_id: import_id.to_string(),
                 profile_id: profile_id.to_string(),
                 source: source.clone(),
                 enabled: true,
@@ -971,6 +1035,7 @@ impl BrokerService {
                 last_full_refresh_finished_at: None,
                 updated_at: now,
             });
+        config.profile_id = profile_id.to_string();
         config.source = source.clone();
         config.enabled = true;
         config.sync_every_sec = DEFAULT_AUTO_SYNC_EVERY_SEC;
@@ -987,54 +1052,81 @@ impl BrokerService {
         ));
         config.updated_at = now;
         self.store
-            .upsert_profile_sync_config(&config)
+            .upsert_proxy_import_sync_config(&config)
             .await
             .map_err(BrokerError::from)
     }
 
-    async fn mark_sync_started(&self, profile_id: &str) -> BrokerResult<()> {
-        let now = now_epoch_sec();
-        if let Some(mut config) = self
-            .store
-            .get_profile_sync_config(profile_id)
+    async fn sync_configs_for_profile(
+        &self,
+        profile_id: &str,
+    ) -> BrokerResult<Vec<ProxyImportSyncConfig>> {
+        self.store
+            .list_proxy_import_sync_configs_for_profile(profile_id)
             .await
-            .map_err(BrokerError::from)?
-        {
+            .map_err(BrokerError::from)
+    }
+
+    async fn mark_sync_started_for_imports(&self, import_ids: &[String]) -> BrokerResult<()> {
+        let now = now_epoch_sec();
+        for import_id in import_ids {
+            let Some(mut config) = self
+                .store
+                .get_proxy_import_sync_config(import_id)
+                .await
+                .map_err(BrokerError::from)?
+            else {
+                continue;
+            };
             config.last_sync_started_at = Some(now);
             config.updated_at = now;
             self.store
-                .upsert_profile_sync_config(&config)
+                .upsert_proxy_import_sync_config(&config)
                 .await
                 .map_err(BrokerError::from)?;
         }
         Ok(())
     }
 
-    async fn mark_sync_finished(&self, profile_id: &str, finished_at: i64) -> BrokerResult<()> {
-        if let Some(mut config) = self
-            .store
-            .get_profile_sync_config(profile_id)
-            .await
-            .map_err(BrokerError::from)?
-        {
+    async fn mark_sync_finished_for_imports(
+        &self,
+        import_ids: &[String],
+        finished_at: i64,
+    ) -> BrokerResult<()> {
+        for import_id in import_ids {
+            let Some(mut config) = self
+                .store
+                .get_proxy_import_sync_config(import_id)
+                .await
+                .map_err(BrokerError::from)?
+            else {
+                continue;
+            };
             config.last_sync_finished_at = Some(finished_at);
             config.last_sync_due_at = Some(finished_at + config.sync_every_sec as i64);
             config.updated_at = finished_at;
             self.store
-                .upsert_profile_sync_config(&config)
+                .upsert_proxy_import_sync_config(&config)
                 .await
                 .map_err(BrokerError::from)?;
         }
         Ok(())
     }
 
-    async fn mark_sync_failed(&self, profile_id: &str, failed_at: i64) -> BrokerResult<()> {
-        if let Some(mut config) = self
-            .store
-            .get_profile_sync_config(profile_id)
-            .await
-            .map_err(BrokerError::from)?
-        {
+    async fn mark_sync_failed_for_imports(
+        &self,
+        import_ids: &[String],
+        failed_at: i64,
+    ) -> BrokerResult<()> {
+        for import_id in import_ids {
+            let Some(mut config) = self
+                .store
+                .get_proxy_import_sync_config(import_id)
+                .await
+                .map_err(BrokerError::from)?
+            else {
+                continue;
+            };
             config.last_sync_due_at = Some(preserve_or_advance_due_at(
                 config.last_sync_due_at,
                 failed_at,
@@ -1042,7 +1134,7 @@ impl BrokerService {
             ));
             config.updated_at = failed_at;
             self.store
-                .upsert_profile_sync_config(&config)
+                .upsert_proxy_import_sync_config(&config)
                 .await
                 .map_err(BrokerError::from)?;
         }
@@ -1051,16 +1143,11 @@ impl BrokerService {
 
     async fn mark_full_refresh_started(&self, profile_id: &str) -> BrokerResult<()> {
         let now = now_epoch_sec();
-        if let Some(mut config) = self
-            .store
-            .get_profile_sync_config(profile_id)
-            .await
-            .map_err(BrokerError::from)?
-        {
+        for mut config in self.sync_configs_for_profile(profile_id).await? {
             config.last_full_refresh_started_at = Some(now);
             config.updated_at = now;
             self.store
-                .upsert_profile_sync_config(&config)
+                .upsert_proxy_import_sync_config(&config)
                 .await
                 .map_err(BrokerError::from)?;
         }
@@ -1068,12 +1155,7 @@ impl BrokerService {
     }
 
     async fn mark_full_refresh_failed(&self, profile_id: &str, failed_at: i64) -> BrokerResult<()> {
-        if let Some(mut config) = self
-            .store
-            .get_profile_sync_config(profile_id)
-            .await
-            .map_err(BrokerError::from)?
-        {
+        for mut config in self.sync_configs_for_profile(profile_id).await? {
             config.last_full_refresh_due_at = Some(preserve_or_advance_due_at(
                 config.last_full_refresh_due_at,
                 failed_at,
@@ -1081,7 +1163,7 @@ impl BrokerService {
             ));
             config.updated_at = failed_at;
             self.store
-                .upsert_profile_sync_config(&config)
+                .upsert_proxy_import_sync_config(&config)
                 .await
                 .map_err(BrokerError::from)?;
         }
@@ -1093,61 +1175,88 @@ impl BrokerService {
         profile_id: &str,
         finished_at: i64,
     ) -> BrokerResult<()> {
-        if let Some(mut config) = self
-            .store
-            .get_profile_sync_config(profile_id)
-            .await
-            .map_err(BrokerError::from)?
-        {
+        for mut config in self.sync_configs_for_profile(profile_id).await? {
             config.last_full_refresh_finished_at = Some(finished_at);
             config.last_full_refresh_due_at =
                 Some(finished_at + config.full_refresh_every_sec as i64);
             config.updated_at = finished_at;
             self.store
-                .upsert_profile_sync_config(&config)
+                .upsert_proxy_import_sync_config(&config)
                 .await
                 .map_err(BrokerError::from)?;
         }
         Ok(())
     }
 
-    fn proxy_inventory_node_id(&self, source_scope: &ProxyScope, proxy_name: &str) -> String {
+    fn proxy_import_source_identity(
+        &self,
+        source: &SubscriptionSource,
+    ) -> ProxyImportSourceIdentity {
+        ProxyImportSourceIdentity::from_source(source)
+    }
+
+    fn proxy_import_id(
+        &self,
+        source_scope: &ProxyScope,
+        source_identity: &ProxyImportSourceIdentity,
+    ) -> String {
         Uuid::new_v5(
             &Uuid::NAMESPACE_URL,
-            format!("proxy-broker:{}:{proxy_name}", source_scope.key()).as_bytes(),
+            format!(
+                "proxy-broker:import:{}:{}",
+                source_scope.key(),
+                source_identity.key()
+            )
+            .as_bytes(),
         )
         .to_string()
     }
 
-    async fn import_inventory_scope_from_source(
+    fn proxy_inventory_node_id(&self, import_id: &str, proxy_name: &str) -> String {
+        Uuid::new_v5(
+            &Uuid::NAMESPACE_URL,
+            format!("proxy-broker:import-node:{import_id}:{proxy_name}").as_bytes(),
+        )
+        .to_string()
+    }
+
+    fn generated_manual_import_name(&self, nodes: &[ProxyNode]) -> Option<String> {
+        let first = nodes.first()?.proxy_name.trim();
+        if first.is_empty() {
+            return None;
+        }
+        if nodes.len() == 1 {
+            return Some(first.to_string());
+        }
+        Some(format!("{first} +{}", nodes.len() - 1))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn persist_imported_inventory(
         &self,
         source_scope: &ProxyScope,
-        source: &SubscriptionSource,
+        import_id: String,
+        source_identity: ProxyImportSourceIdentity,
+        import_kind: ProxyImportKind,
+        requested_name: Option<&str>,
+        mut nodes: Vec<ProxyNode>,
+        mut warnings: Vec<String>,
     ) -> BrokerResult<ImportedInventoryOutcome> {
-        let (mut nodes, mut warnings) = subscription::load_from_source(&self.http, source)
-            .await
-            .map_err(|err| match err {
-                subscription::SubscriptionLoadError::SourceRead(message) => {
-                    BrokerError::SubscriptionFetch(message)
-                }
-                subscription::SubscriptionLoadError::InvalidPayload(_) => {
-                    BrokerError::SubscriptionInvalid
-                }
-            })?;
-
         if nodes.is_empty() || has_duplicate_proxy_names(&nodes) {
             return Err(BrokerError::SubscriptionInvalid);
         }
 
-        let existing_scope_nodes = self
+        let existing_import = self
             .store
-            .list_proxy_inventory()
+            .get_proxy_import(&import_id)
             .await
-            .map_err(BrokerError::from)?
-            .into_iter()
-            .filter(|item| item.source_scope == *source_scope)
-            .collect::<Vec<_>>();
-        let existing_ips_by_proxy: HashMap<(String, String), Vec<String>> = existing_scope_nodes
+            .map_err(BrokerError::from)?;
+        let existing_import_nodes = self
+            .store
+            .list_proxy_inventory_for_import(&import_id)
+            .await
+            .map_err(BrokerError::from)?;
+        let existing_ips_by_proxy: HashMap<(String, String), Vec<String>> = existing_import_nodes
             .iter()
             .filter_map(|node| {
                 if node.resolved_ips.is_empty() {
@@ -1160,7 +1269,7 @@ impl BrokerService {
                 }
             })
             .collect();
-        let existing_by_node_id = existing_scope_nodes
+        let existing_by_node_id = existing_import_nodes
             .iter()
             .map(|item| (item.node_id.clone(), item.clone()))
             .collect::<HashMap<_, _>>();
@@ -1190,18 +1299,45 @@ impl BrokerService {
         }
 
         let now = now_epoch_sec();
+        let derived_name = if import_kind == ProxyImportKind::SingleNode {
+            self.generated_manual_import_name(&nodes)
+        } else {
+            None
+        };
+        let import_record = ProxyImportRecord {
+            import_id: import_id.clone(),
+            name: requested_name
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+                .or_else(|| existing_import.as_ref().and_then(|item| item.name.clone()))
+                .or(derived_name),
+            import_kind,
+            source_scope: source_scope.clone(),
+            source_identity,
+            allocation_scope: existing_import
+                .as_ref()
+                .map(|item| item.allocation_scope.clone())
+                .unwrap_or_else(|| source_scope.clone()),
+            created_at: existing_import
+                .as_ref()
+                .map(|item| item.created_at)
+                .unwrap_or(now),
+            updated_at: now,
+        };
         let inventory_nodes = nodes
             .into_iter()
             .map(|node| {
-                let node_id = self.proxy_inventory_node_id(source_scope, &node.proxy_name);
+                let node_id = self.proxy_inventory_node_id(&import_id, &node.proxy_name);
                 let created_at = existing_by_node_id
                     .get(&node_id)
                     .map(|item| item.created_at)
                     .unwrap_or(now);
                 ProxyInventoryRecord {
+                    import_id: import_id.clone(),
                     node_id,
                     source_scope: source_scope.clone(),
-                    allocation_scope: source_scope.clone(),
+                    allocation_scope: import_record.allocation_scope.clone(),
                     proxy_name: node.proxy_name,
                     proxy_type: node.proxy_type,
                     server: node.server,
@@ -1214,17 +1350,75 @@ impl BrokerService {
             .collect::<Vec<_>>();
 
         self.store
-            .replace_proxy_inventory_scope(source_scope, &inventory_nodes)
+            .replace_proxy_inventory_import(&import_record, &inventory_nodes)
             .await
             .map_err(BrokerError::from)?;
 
         Ok(ImportedInventoryOutcome {
+            import_id,
             response: LoadSubscriptionResponse {
                 loaded_proxies: inventory_nodes.len(),
                 distinct_ips: distinct_ips.len(),
                 warnings,
             },
         })
+    }
+
+    async fn import_inventory_scope_from_source(
+        &self,
+        source_scope: &ProxyScope,
+        source: &SubscriptionSource,
+        requested_name: Option<&str>,
+    ) -> BrokerResult<ImportedInventoryOutcome> {
+        let (nodes, warnings) = subscription::load_from_source(&self.http, source)
+            .await
+            .map_err(|err| match err {
+                subscription::SubscriptionLoadError::SourceRead(message) => {
+                    BrokerError::SubscriptionFetch(message)
+                }
+                subscription::SubscriptionLoadError::InvalidPayload(_) => {
+                    BrokerError::SubscriptionInvalid
+                }
+            })?;
+
+        if nodes.is_empty() || has_duplicate_proxy_names(&nodes) {
+            return Err(BrokerError::SubscriptionInvalid);
+        }
+
+        let source_identity = self.proxy_import_source_identity(source);
+        let import_id = self.proxy_import_id(source_scope, &source_identity);
+        self.persist_imported_inventory(
+            source_scope,
+            import_id,
+            source_identity,
+            ProxyImportKind::Subscription,
+            requested_name,
+            nodes,
+            warnings,
+        )
+        .await
+    }
+
+    async fn import_inventory_scope_from_content(
+        &self,
+        source_scope: &ProxyScope,
+        content: &str,
+        requested_name: Option<&str>,
+    ) -> BrokerResult<ImportedInventoryOutcome> {
+        let (nodes, warnings) = subscription::load_from_content(content)
+            .await
+            .map_err(|_| BrokerError::SubscriptionInvalid)?;
+        let import_id = Uuid::new_v4().to_string();
+        self.persist_imported_inventory(
+            source_scope,
+            import_id.clone(),
+            ProxyImportSourceIdentity::manual(import_id),
+            ProxyImportKind::SingleNode,
+            requested_name,
+            nodes,
+            warnings,
+        )
+        .await
     }
 
     async fn compose_effective_proxy_nodes(
@@ -1435,6 +1629,7 @@ impl BrokerService {
         let effective_profile_ids =
             self.effective_profile_ids_for_record(&record, &profiles, &settings);
         Ok(ProxyInventoryItem {
+            import_id: record.import_id,
             node_id: record.node_id,
             proxy_name: record.proxy_name,
             proxy_type: record.proxy_type,
@@ -1446,16 +1641,82 @@ impl BrokerService {
         })
     }
 
+    async fn proxy_import_item_from_record(
+        &self,
+        record: ProxyImportRecord,
+    ) -> BrokerResult<ProxyImportItem> {
+        let (profiles, settings) = self.list_profile_ids_with_settings().await?;
+        let effective_profile_ids = match &record.allocation_scope {
+            ProxyScope::Global => profiles
+                .into_iter()
+                .filter(|profile_id| {
+                    settings
+                        .get(profile_id.as_str())
+                        .map(|item| item.use_global_proxies)
+                        .unwrap_or(true)
+                })
+                .collect::<Vec<_>>(),
+            ProxyScope::Profile { profile_id } => vec![profile_id.clone()],
+        };
+        let nodes = self
+            .store
+            .list_proxy_inventory_for_import(&record.import_id)
+            .await
+            .map_err(BrokerError::from)?;
+        let distinct_ip_count = nodes
+            .iter()
+            .flat_map(|item| item.resolved_ips.iter().cloned())
+            .collect::<HashSet<_>>()
+            .len();
+        Ok(ProxyImportItem {
+            import_id: record.import_id,
+            name: record.name,
+            import_kind: record.import_kind,
+            source_scope: record.source_scope,
+            source_identity: record.source_identity,
+            allocation_scope: record.allocation_scope,
+            proxy_count: nodes.len(),
+            distinct_ip_count,
+            effective_profile_ids,
+            created_at: record.created_at,
+            updated_at: record.updated_at,
+        })
+    }
+
     pub async fn load_subscription(
         &self,
         profile_id: &str,
         source: &crate::models::SubscriptionSource,
     ) -> BrokerResult<LoadSubscriptionResponse> {
-        let outcome = self.load_subscription_internal(profile_id, source).await?;
+        self.load_subscription_request(
+            profile_id,
+            &crate::models::LoadSubscriptionRequest {
+                name: None,
+                source: Some(source.clone()),
+                content: None,
+            },
+        )
+        .await
+    }
+
+    pub async fn load_subscription_request(
+        &self,
+        profile_id: &str,
+        request: &crate::models::LoadSubscriptionRequest,
+    ) -> BrokerResult<LoadSubscriptionResponse> {
+        let (outcome, source) = self
+            .load_subscription_request_internal(profile_id, request)
+            .await?;
         let mut response = outcome.response;
-        if let Err(err) = self
-            .register_post_load_bookkeeping(profile_id, source, &outcome.new_ips)
-            .await
+        if let Some(source) = source
+            && let Err(err) = self
+                .register_post_load_bookkeeping(
+                    profile_id,
+                    &outcome.import_id,
+                    &source,
+                    &outcome.new_ips,
+                )
+                .await
         {
             tracing::warn!(
                 profile_id,
@@ -1478,30 +1739,85 @@ impl BrokerService {
             .await
     }
 
+    async fn load_subscription_request_internal(
+        &self,
+        profile_id: &str,
+        request: &LoadSubscriptionRequest,
+    ) -> BrokerResult<(LoadSubscriptionOutcome, Option<SubscriptionSource>)> {
+        match (&request.source, request.content.as_deref()) {
+            (Some(source), None) => Ok((
+                self.load_subscription_internal(profile_id, source, request.name.as_deref())
+                    .await?,
+                Some(source.clone()),
+            )),
+            (None, Some(content)) => Ok((
+                self.load_manual_proxy_group_internal(profile_id, content, request.name.as_deref())
+                    .await?,
+                None,
+            )),
+            (Some(_), Some(_)) => Err(BrokerError::InvalidRequest(
+                "provide either `source` or `content`, not both".to_string(),
+            )),
+            (None, None) => Err(BrokerError::InvalidRequest(
+                "either `source` or `content` is required".to_string(),
+            )),
+        }
+    }
+
     async fn load_subscription_internal(
         &self,
         profile_id: &str,
         source: &SubscriptionSource,
+        requested_name: Option<&str>,
     ) -> BrokerResult<LoadSubscriptionOutcome> {
         let _profile_guard = self.lock_profile(profile_id).await;
         let imported = self
-            .import_inventory_scope_from_source(&ProxyScope::profile(profile_id), source)
+            .import_inventory_scope_from_source(
+                &ProxyScope::profile(profile_id),
+                source,
+                requested_name,
+            )
             .await?;
         let new_ips = self.rebuild_effective_profile_locked(profile_id).await?;
 
         Ok(LoadSubscriptionOutcome {
             response: imported.response,
             new_ips,
+            import_id: imported.import_id,
+        })
+    }
+
+    async fn load_manual_proxy_group_internal(
+        &self,
+        profile_id: &str,
+        content: &str,
+        requested_name: Option<&str>,
+    ) -> BrokerResult<LoadSubscriptionOutcome> {
+        let _profile_guard = self.lock_profile(profile_id).await;
+        let imported = self
+            .import_inventory_scope_from_content(
+                &ProxyScope::profile(profile_id),
+                content,
+                requested_name,
+            )
+            .await?;
+        let new_ips = self.rebuild_effective_profile_locked(profile_id).await?;
+
+        Ok(LoadSubscriptionOutcome {
+            response: imported.response,
+            new_ips,
+            import_id: imported.import_id,
         })
     }
 
     async fn register_post_load_bookkeeping(
         &self,
         profile_id: &str,
+        import_id: &str,
         source: &SubscriptionSource,
         new_ips: &[String],
     ) -> BrokerResult<()> {
-        self.register_profile_sync_source(profile_id, source)
+        self.register_profile_sync_source(import_id, profile_id, source)
             .await?;
 
         let queued_or_running = self.queued_or_running_task_runs(profile_id).await?;
@@ -2518,10 +2834,47 @@ impl BrokerService {
         &self,
         source: &SubscriptionSource,
     ) -> BrokerResult<LoadSubscriptionResponse> {
+        self.load_global_subscription_request(&LoadSubscriptionRequest {
+            name: None,
+            source: Some(source.clone()),
+            content: None,
+        })
+        .await
+    }
+
+    pub async fn load_global_subscription_request(
+        &self,
+        request: &LoadSubscriptionRequest,
+    ) -> BrokerResult<LoadSubscriptionResponse> {
         let _global_guard = self.lock_profile("__global_proxy_scope__").await;
-        let imported = self
-            .import_inventory_scope_from_source(&ProxyScope::global(), source)
-            .await?;
+        let imported = match (&request.source, request.content.as_deref()) {
+            (Some(source), None) => {
+                self.import_inventory_scope_from_source(
+                    &ProxyScope::global(),
+                    source,
+                    request.name.as_deref(),
+                )
+                .await?
+            }
+            (None, Some(content)) => {
+                self.import_inventory_scope_from_content(
+                    &ProxyScope::global(),
+                    content,
+                    request.name.as_deref(),
+                )
+                .await?
+            }
+            (Some(_), Some(_)) => {
+                return Err(BrokerError::InvalidRequest(
+                    "provide either `source` or `content`, not both".to_string(),
+                ));
+            }
+            (None, None) => {
+                return Err(BrokerError::InvalidRequest(
+                    "either `source` or `content` is required".to_string(),
+                ));
+            }
+        };
         let (profiles, settings) = self.list_profile_ids_with_settings().await?;
         let affected_profiles = profiles
             .into_iter()
@@ -2534,6 +2887,55 @@ impl BrokerService {
             .collect::<HashSet<_>>();
         self.rebuild_profiles(&affected_profiles).await?;
         Ok(imported.response)
+    }
+
+    pub async fn list_proxy_imports(
+        &self,
+        scope: Option<&str>,
+        profile_id: Option<&str>,
+    ) -> BrokerResult<ListProxyImportResponse> {
+        let mut items = self
+            .store
+            .list_proxy_imports()
+            .await
+            .map_err(BrokerError::from)?;
+        match scope.unwrap_or("all") {
+            "all" => {}
+            "global" => items.retain(|item| matches!(&item.allocation_scope, ProxyScope::Global)),
+            "profile" => {
+                let profile_id = profile_id.ok_or_else(|| {
+                    BrokerError::InvalidRequest(
+                        "profile_id is required when scope=profile".to_string(),
+                    )
+                })?;
+                items.retain(|item| {
+                    matches!(
+                        &item.allocation_scope,
+                        ProxyScope::Profile {
+                            profile_id: allocated_profile_id,
+                        } if allocated_profile_id == profile_id
+                    )
+                });
+            }
+            _ => {
+                return Err(BrokerError::InvalidRequest(
+                    "scope must be one of all|global|profile".to_string(),
+                ));
+            }
+        }
+        let mut items = futures_util::future::try_join_all(
+            items
+                .into_iter()
+                .map(|record| self.proxy_import_item_from_record(record)),
+        )
+        .await?;
+        items.sort_by(|left, right| {
+            left.updated_at
+                .cmp(&right.updated_at)
+                .reverse()
+                .then_with(|| left.import_id.cmp(&right.import_id))
+        });
+        Ok(ListProxyImportResponse { items })
     }
 
     pub async fn list_proxy_inventory(
@@ -2578,6 +2980,7 @@ impl BrokerService {
                 let effective_profile_ids =
                     self.effective_profile_ids_for_record(&item, &profiles, &settings);
                 ProxyInventoryItem {
+                    import_id: item.import_id,
                     node_id: item.node_id,
                     proxy_name: item.proxy_name,
                     proxy_type: item.proxy_type,
@@ -2616,35 +3019,107 @@ impl BrokerService {
             .await
             .map_err(BrokerError::from)?
             .ok_or(BrokerError::ProxyInventoryNodeNotFound)?;
-        let (profiles, settings) = self.list_profile_ids_with_settings().await?;
-        let before_effective = self.effective_profile_ids_for_record(&before, &profiles, &settings);
+        let updated_import = self
+            .update_proxy_import_allocation(&before.import_id, allocation_scope)
+            .await?;
         let updated = self
             .store
-            .update_proxy_inventory_allocation(node_id, allocation_scope, now_epoch_sec())
+            .get_proxy_inventory_node(node_id)
             .await
             .map_err(BrokerError::from)?
             .ok_or(BrokerError::ProxyInventoryNodeNotFound)?;
-        let after_effective = self.effective_profile_ids_for_record(&updated, &profiles, &settings);
+        let _ = updated_import;
+        self.inventory_item_from_record(updated).await
+    }
+
+    pub async fn update_proxy_import_allocation(
+        &self,
+        import_id: &str,
+        allocation_scope: &ProxyScope,
+    ) -> BrokerResult<ProxyImportItem> {
+        if let ProxyScope::Profile { profile_id } = allocation_scope
+            && !self.profile_exists(profile_id).await?
+        {
+            return Err(BrokerError::ProfileNotFound);
+        }
+
+        let before = self
+            .store
+            .get_proxy_import(import_id)
+            .await
+            .map_err(BrokerError::from)?
+            .ok_or(BrokerError::ProxyInventoryNodeNotFound)?;
+        let (profiles, settings) = self.list_profile_ids_with_settings().await?;
+        let before_effective = match &before.allocation_scope {
+            ProxyScope::Global => profiles
+                .iter()
+                .filter(|profile_id| {
+                    settings
+                        .get(profile_id.as_str())
+                        .map(|item| item.use_global_proxies)
+                        .unwrap_or(true)
+                })
+                .cloned()
+                .collect::<Vec<_>>(),
+            ProxyScope::Profile { profile_id } => vec![profile_id.clone()],
+        };
+        let updated = self
+            .store
+            .update_proxy_import_allocation(import_id, allocation_scope, now_epoch_sec())
+            .await
+            .map_err(BrokerError::from)?
+            .ok_or(BrokerError::ProxyInventoryNodeNotFound)?;
+        let after_effective = match &updated.allocation_scope {
+            ProxyScope::Global => profiles
+                .iter()
+                .filter(|profile_id| {
+                    settings
+                        .get(profile_id.as_str())
+                        .map(|item| item.use_global_proxies)
+                        .unwrap_or(true)
+                })
+                .cloned()
+                .collect::<Vec<_>>(),
+            ProxyScope::Profile { profile_id } => vec![profile_id.clone()],
+        };
         let affected_profiles = before_effective
             .into_iter()
             .chain(after_effective)
             .collect::<HashSet<_>>();
         self.rebuild_profiles(&affected_profiles).await?;
-        self.inventory_item_from_record(updated).await
+        self.proxy_import_item_from_record(updated).await
     }
 
     pub async fn delete_proxy_inventory_node(&self, node_id: &str) -> BrokerResult<()> {
         let before = self
             .store
-            .delete_proxy_inventory_node(node_id)
+            .get_proxy_inventory_node(node_id)
+            .await
+            .map_err(BrokerError::from)?
+            .ok_or(BrokerError::ProxyInventoryNodeNotFound)?;
+        self.delete_proxy_import(&before.import_id).await
+    }
+
+    pub async fn delete_proxy_import(&self, import_id: &str) -> BrokerResult<()> {
+        let before = self
+            .store
+            .delete_proxy_import(import_id)
             .await
             .map_err(BrokerError::from)?
             .ok_or(BrokerError::ProxyInventoryNodeNotFound)?;
         let (profiles, settings) = self.list_profile_ids_with_settings().await?;
-        let affected_profiles = self
-            .effective_profile_ids_for_record(&before, &profiles, &settings)
-            .into_iter()
-            .collect::<HashSet<_>>();
+        let affected_profiles = match &before.allocation_scope {
+            ProxyScope::Global => profiles
+                .into_iter()
+                .filter(|profile_id| {
+                    settings
+                        .get(profile_id.as_str())
+                        .map(|item| item.use_global_proxies)
+                        .unwrap_or(true)
+                })
+                .collect::<HashSet<_>>(),
+            ProxyScope::Profile { profile_id } => std::iter::once(profile_id.clone()).collect(),
+        };
         self.rebuild_profiles(&affected_profiles).await?;
         Ok(())
     }
@@ -3819,9 +4294,10 @@ mod tests {
     use super::*;
     use crate::{
         models::{
-            ApiKeyRecord, IpRecord, ProbeRecord, ProfileProxySettings, ProfileSyncConfig,
-            ProxyInventoryRecord, ProxyScope, SessionRecord, SortMode, SubscriptionSource,
-            TaskListQuery, TaskRunEventRecord, TaskRunRecord,
+            ApiKeyRecord, IpRecord, LoadSubscriptionRequest, ProbeRecord, ProfileProxySettings,
+            ProfileSyncConfig, ProxyImportRecord, ProxyImportSyncConfig, ProxyInventoryRecord,
+            ProxyScope, SessionRecord, SortMode, SubscriptionSource, TaskListQuery,
+            TaskRunEventRecord, TaskRunRecord,
         },
         runtime::MihomoRuntime,
         store::{BrokerStore, MemoryStore},
@@ -3928,6 +4404,34 @@ mod tests {
             self.inner.get_proxy_inventory_node(node_id).await
         }
 
+        async fn list_proxy_imports(&self) -> anyhow::Result<Vec<ProxyImportRecord>> {
+            self.inner.list_proxy_imports().await
+        }
+
+        async fn get_proxy_import(
+            &self,
+            import_id: &str,
+        ) -> anyhow::Result<Option<ProxyImportRecord>> {
+            self.inner.get_proxy_import(import_id).await
+        }
+
+        async fn replace_proxy_inventory_import(
+            &self,
+            import_record: &ProxyImportRecord,
+            nodes: &[ProxyInventoryRecord],
+        ) -> anyhow::Result<()> {
+            self.inner
+                .replace_proxy_inventory_import(import_record, nodes)
+                .await
+        }
+
+        async fn list_proxy_inventory_for_import(
+            &self,
+            import_id: &str,
+        ) -> anyhow::Result<Vec<ProxyInventoryRecord>> {
+            self.inner.list_proxy_inventory_for_import(import_id).await
+        }
+
         async fn update_proxy_inventory_allocation(
             &self,
             node_id: &str,
@@ -3939,11 +4443,29 @@ mod tests {
                 .await
         }
 
+        async fn update_proxy_import_allocation(
+            &self,
+            import_id: &str,
+            allocation_scope: &ProxyScope,
+            updated_at: i64,
+        ) -> anyhow::Result<Option<ProxyImportRecord>> {
+            self.inner
+                .update_proxy_import_allocation(import_id, allocation_scope, updated_at)
+                .await
+        }
+
         async fn delete_proxy_inventory_node(
             &self,
             node_id: &str,
         ) -> anyhow::Result<Option<ProxyInventoryRecord>> {
             self.inner.delete_proxy_inventory_node(node_id).await
+        }
+
+        async fn delete_proxy_import(
+            &self,
+            import_id: &str,
+        ) -> anyhow::Result<Option<ProxyImportRecord>> {
+            self.inner.delete_proxy_import(import_id).await
         }
 
         async fn replace_ip_records(
@@ -4083,6 +4605,13 @@ mod tests {
             Err(anyhow!("sync config unavailable"))
         }
 
+        async fn upsert_proxy_import_sync_config(
+            &self,
+            _config: &ProxyImportSyncConfig,
+        ) -> anyhow::Result<()> {
+            Err(anyhow!("sync config unavailable"))
+        }
+
         async fn get_profile_sync_config(
             &self,
             profile_id: &str,
@@ -4090,8 +4619,34 @@ mod tests {
             self.inner.get_profile_sync_config(profile_id).await
         }
 
+        async fn get_proxy_import_sync_config(
+            &self,
+            import_id: &str,
+        ) -> anyhow::Result<Option<ProxyImportSyncConfig>> {
+            self.inner.get_proxy_import_sync_config(import_id).await
+        }
+
         async fn list_profile_sync_configs(&self) -> anyhow::Result<Vec<ProfileSyncConfig>> {
             self.inner.list_profile_sync_configs().await
+        }
+
+        async fn list_proxy_import_sync_configs(
+            &self,
+        ) -> anyhow::Result<Vec<ProxyImportSyncConfig>> {
+            self.inner.list_proxy_import_sync_configs().await
+        }
+
+        async fn list_proxy_import_sync_configs_for_profile(
+            &self,
+            profile_id: &str,
+        ) -> anyhow::Result<Vec<ProxyImportSyncConfig>> {
+            self.inner
+                .list_proxy_import_sync_configs_for_profile(profile_id)
+                .await
+        }
+
+        async fn delete_proxy_import_sync_config(&self, import_id: &str) -> anyhow::Result<()> {
+            self.inner.delete_proxy_import_sync_config(import_id).await
         }
 
         async fn get_profile_proxy_settings(
@@ -4509,6 +5064,85 @@ proxies:
         assert!(
             matches!(result, Err(BrokerError::SubscriptionFetch(message)) if message.contains("returned non-2xx"))
         );
+    }
+
+    #[tokio::test]
+    async fn load_subscription_request_persists_explicit_import_name() {
+        let profile_id = "p-named-import";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
+        let source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: named-node
+    type: socks5
+    server: 8.8.4.4
+"#,
+        )
+        .await;
+
+        service
+            .load_subscription_request(
+                profile_id,
+                &LoadSubscriptionRequest {
+                    name: Some("ops-feed".to_string()),
+                    source: Some(SubscriptionSource::File(source_path.clone())),
+                    content: None,
+                },
+            )
+            .await
+            .expect("named import should succeed");
+        let _ = tokio::fs::remove_file(&source_path).await;
+
+        let imports = service
+            .list_proxy_imports(Some("profile"), Some(profile_id))
+            .await
+            .expect("proxy imports should list");
+        assert_eq!(imports.items.len(), 1);
+        assert_eq!(imports.items[0].name.as_deref(), Some("ops-feed"));
+    }
+
+    #[tokio::test]
+    async fn manual_node_group_import_autogenerates_group_name() {
+        let profile_id = "p-manual-group";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
+
+        service
+            .load_subscription_request(
+                profile_id,
+                &LoadSubscriptionRequest {
+                    name: None,
+                    source: None,
+                    content: Some(
+                        r#"
+proxies:
+  - name: hk-entry
+    type: socks5
+    server: 1.1.1.1
+    port: 1080
+  - name: jp-entry
+    type: socks5
+    server: 8.8.8.8
+    port: 1080
+"#
+                        .to_string(),
+                    ),
+                },
+            )
+            .await
+            .expect("manual node group import should succeed");
+
+        let imports = service
+            .list_proxy_imports(Some("profile"), Some(profile_id))
+            .await
+            .expect("proxy imports should list");
+        assert_eq!(imports.items.len(), 1);
+        assert_eq!(imports.items[0].import_kind, ProxyImportKind::SingleNode);
+        assert_eq!(imports.items[0].proxy_count, 2);
+        assert_eq!(imports.items[0].name.as_deref(), Some("hk-entry +1"));
     }
 
     #[tokio::test]
@@ -5455,14 +6089,20 @@ proxies:
 "#,
         )
         .await;
+        let source = SubscriptionSource::File(source_path.clone());
+        let import_id = service.proxy_import_id(
+            &ProxyScope::profile(profile_id),
+            &service.proxy_import_source_identity(&source),
+        );
         let now = now_epoch_sec();
         let expected_sync_due_at = now + 123;
         let expected_full_due_at = now + 456;
 
         store
             .upsert_profile_sync_config(&ProfileSyncConfig {
+                import_id: import_id.clone(),
                 profile_id: profile_id.to_string(),
-                source: SubscriptionSource::Url("https://example.com/subscription".to_string()),
+                source: source.clone(),
                 enabled: true,
                 sync_every_sec: DEFAULT_AUTO_SYNC_EVERY_SEC,
                 full_refresh_every_sec: DEFAULT_AUTO_FULL_REFRESH_EVERY_SEC,
@@ -5478,14 +6118,14 @@ proxies:
             .expect("sync config seed should succeed");
 
         service
-            .load_subscription(profile_id, &SubscriptionSource::File(source_path.clone()))
+            .load_subscription(profile_id, &source)
             .await
             .expect("load should succeed");
 
         let _ = tokio::fs::remove_file(&source_path).await;
 
         let config = store
-            .get_profile_sync_config(profile_id)
+            .get_proxy_import_sync_config(&import_id)
             .await
             .expect("sync config query should succeed")
             .expect("sync config should persist");
@@ -5508,12 +6148,18 @@ proxies:
 "#,
         )
         .await;
+        let source = SubscriptionSource::File(source_path.clone());
+        let import_id = service.proxy_import_id(
+            &ProxyScope::profile(profile_id),
+            &service.proxy_import_source_identity(&source),
+        );
         let now = now_epoch_sec();
 
         store
             .upsert_profile_sync_config(&ProfileSyncConfig {
+                import_id: import_id.clone(),
                 profile_id: profile_id.to_string(),
-                source: SubscriptionSource::Url("https://example.com/subscription".to_string()),
+                source: source.clone(),
                 enabled: true,
                 sync_every_sec: DEFAULT_AUTO_SYNC_EVERY_SEC,
                 full_refresh_every_sec: DEFAULT_AUTO_FULL_REFRESH_EVERY_SEC,
@@ -5529,14 +6175,14 @@ proxies:
             .expect("sync config seed should succeed");
 
         service
-            .load_subscription(profile_id, &SubscriptionSource::File(source_path.clone()))
+            .load_subscription(profile_id, &source)
             .await
             .expect("load should succeed");
 
         let _ = tokio::fs::remove_file(&source_path).await;
 
         let config = store
-            .get_profile_sync_config(profile_id)
+            .get_proxy_import_sync_config(&import_id)
             .await
             .expect("sync config query should succeed")
             .expect("sync config should persist");
@@ -5751,6 +6397,142 @@ proxies:
     }
 
     #[tokio::test]
+    async fn failed_subscription_sync_only_advances_attempted_imports() {
+        let profile_id = "p-tasks-sync-partial-failure";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
+        let now = now_epoch_sec();
+
+        store
+            .create_profile(profile_id, now)
+            .await
+            .expect("profile create should succeed");
+
+        let first_source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: first
+    type: socks5
+    server: 4.4.4.4
+"#,
+        )
+        .await;
+        let second_source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: second
+    type: socks5
+    server: 5.5.5.5
+"#,
+        )
+        .await;
+        let third_source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: third
+    type: socks5
+    server: 6.6.6.6
+"#,
+        )
+        .await;
+
+        let mut imports = vec![
+            SubscriptionSource::File(first_source_path.clone()),
+            SubscriptionSource::File(second_source_path.clone()),
+            SubscriptionSource::File(third_source_path.clone()),
+        ]
+        .into_iter()
+        .map(|source| {
+            let import_id = service.proxy_import_id(
+                &ProxyScope::profile(profile_id),
+                &service.proxy_import_source_identity(&source),
+            );
+            (source, import_id)
+        })
+        .collect::<Vec<_>>();
+        imports.sort_by(|left, right| left.1.cmp(&right.1));
+
+        let failing_source_path = match &imports[1].0 {
+            SubscriptionSource::File(path) => path.clone(),
+            SubscriptionSource::Url(_) => unreachable!("test sources are file-backed"),
+        };
+        tokio::fs::remove_file(&failing_source_path)
+            .await
+            .expect("failing source should be removed");
+
+        for (source, import_id) in &imports {
+            store
+                .upsert_profile_sync_config(&ProfileSyncConfig {
+                    import_id: import_id.clone(),
+                    profile_id: profile_id.to_string(),
+                    source: source.clone(),
+                    enabled: true,
+                    sync_every_sec: DEFAULT_AUTO_SYNC_EVERY_SEC,
+                    full_refresh_every_sec: DEFAULT_AUTO_FULL_REFRESH_EVERY_SEC,
+                    last_sync_due_at: Some(now - 1),
+                    last_sync_started_at: None,
+                    last_sync_finished_at: None,
+                    last_full_refresh_due_at: Some(now + 3600),
+                    last_full_refresh_started_at: None,
+                    last_full_refresh_finished_at: None,
+                    updated_at: now,
+                })
+                .await
+                .expect("sync config seed should succeed");
+        }
+
+        let mut run = service
+            .enqueue_task_run(
+                profile_id,
+                TaskRunKind::SubscriptionSync,
+                TaskRunTrigger::Schedule,
+                TaskRunScope::All,
+            )
+            .await
+            .expect("subscription sync queue should succeed");
+
+        let err = service
+            .execute_subscription_sync_task(&mut run)
+            .await
+            .expect_err("subscription sync should fail on the missing second source");
+        service
+            .fail_task_run(&mut run, err)
+            .await
+            .expect("failure closeout should succeed");
+
+        let first_config = store
+            .get_proxy_import_sync_config(&imports[0].1)
+            .await
+            .expect("first config query should succeed")
+            .expect("first config should persist");
+        let failed_config = store
+            .get_proxy_import_sync_config(&imports[1].1)
+            .await
+            .expect("failed config query should succeed")
+            .expect("failed config should persist");
+        let untouched_config = store
+            .get_proxy_import_sync_config(&imports[2].1)
+            .await
+            .expect("untouched config query should succeed")
+            .expect("untouched config should persist");
+
+        assert!(
+            first_config.last_sync_due_at.expect("first due at")
+                >= now + DEFAULT_AUTO_SYNC_EVERY_SEC as i64
+        );
+        assert!(
+            failed_config.last_sync_due_at.expect("failed due at")
+                >= now + DEFAULT_AUTO_SYNC_EVERY_SEC as i64
+        );
+        assert_eq!(untouched_config.last_sync_due_at, Some(now - 1));
+
+        let _ = tokio::fs::remove_file(&first_source_path).await;
+        let _ = tokio::fs::remove_file(&second_source_path).await;
+        let _ = tokio::fs::remove_file(&third_source_path).await;
+    }
+
+    #[tokio::test]
     async fn load_subscription_coalesces_post_load_task_scope() {
         let profile_id = "p-tasks-coalesce";
         let store = Arc::new(MemoryStore::new());
@@ -5910,6 +6692,7 @@ proxies:
 
         store
             .upsert_profile_sync_config(&ProfileSyncConfig {
+                import_id: format!("import::{profile_id}"),
                 profile_id: profile_id.to_string(),
                 source: SubscriptionSource::Url("https://example.com/subscription".to_string()),
                 enabled: true,
@@ -6012,6 +6795,7 @@ proxies:
 
         store
             .upsert_profile_sync_config(&ProfileSyncConfig {
+                import_id: format!("import::{profile_id}"),
                 profile_id: profile_id.to_string(),
                 source: SubscriptionSource::File(source_path.clone()),
                 enabled: true,

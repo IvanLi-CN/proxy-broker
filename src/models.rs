@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
@@ -11,7 +11,12 @@ pub enum SubscriptionSource {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoadSubscriptionRequest {
-    pub source: SubscriptionSource,
+    #[serde(default, deserialize_with = "deserialize_optional_trimmed_string")]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub source: Option<SubscriptionSource>,
+    #[serde(default, deserialize_with = "deserialize_optional_trimmed_string")]
+    pub content: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -156,7 +161,42 @@ pub struct ListProxyInventoryResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListProxyImportResponse {
+    pub items: Vec<ProxyImportItem>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum ProxyImportKind {
+    Subscription,
+    SingleNode,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProxyImportSourceIdentity {
+    pub source_type: String,
+    pub source_value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProxyImportItem {
+    pub import_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub import_kind: ProxyImportKind,
+    pub source_scope: ProxyScope,
+    pub source_identity: ProxyImportSourceIdentity,
+    pub allocation_scope: ProxyScope,
+    pub proxy_count: usize,
+    pub distinct_ip_count: usize,
+    pub effective_profile_ids: Vec<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyInventoryItem {
+    pub import_id: String,
     pub node_id: String,
     pub proxy_name: String,
     pub proxy_type: String,
@@ -169,6 +209,11 @@ pub struct ProxyInventoryItem {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateProxyAllocationRequest {
+    pub allocation_scope: ProxyScope,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateProxyImportAllocationRequest {
     pub allocation_scope: ProxyScope,
 }
 
@@ -369,7 +414,8 @@ pub enum TaskEventLevel {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProfileSyncConfig {
+pub struct ProxyImportSyncConfig {
+    pub import_id: String,
     pub profile_id: String,
     pub source: SubscriptionSource,
     pub enabled: bool,
@@ -383,6 +429,8 @@ pub struct ProfileSyncConfig {
     pub last_full_refresh_finished_at: Option<i64>,
     pub updated_at: i64,
 }
+
+pub type ProfileSyncConfig = ProxyImportSyncConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -527,6 +575,12 @@ pub struct ProxyInventoryListQuery {
     pub profile_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ProxyImportListQuery {
+    pub scope: Option<String>,
+    pub profile_id: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskRunDetail {
     pub run: TaskRunSummary,
@@ -551,6 +605,7 @@ pub struct ProxyNode {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyInventoryRecord {
+    pub import_id: String,
     pub node_id: String,
     pub source_scope: ProxyScope,
     pub allocation_scope: ProxyScope,
@@ -597,6 +652,18 @@ pub struct SessionRecord {
 }
 
 #[derive(Debug, Clone)]
+pub struct ProxyImportRecord {
+    pub import_id: String,
+    pub name: Option<String>,
+    pub import_kind: ProxyImportKind,
+    pub source_scope: ProxyScope,
+    pub source_identity: ProxyImportSourceIdentity,
+    pub allocation_scope: ProxyScope,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone)]
 pub struct ApiKeyRecord {
     pub key_id: String,
     pub profile_id: String,
@@ -640,6 +707,43 @@ impl SubscriptionSource {
             _ => None,
         }
     }
+}
+
+impl ProxyImportSourceIdentity {
+    pub fn from_source(source: &SubscriptionSource) -> Self {
+        let (source_type, source_value) = source.parts();
+        Self {
+            source_type: source_type.to_string(),
+            source_value: source_value.trim().to_string(),
+        }
+    }
+
+    pub fn key(&self) -> String {
+        format!("{}:{}", self.source_type, self.source_value)
+    }
+
+    pub fn manual(import_id: impl Into<String>) -> Self {
+        let import_id = import_id.into();
+        Self {
+            source_type: "manual".to_string(),
+            source_value: import_id,
+        }
+    }
+}
+
+fn deserialize_optional_trimmed_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<String>::deserialize(deserializer)?;
+    Ok(value.and_then(|item| {
+        let trimmed = item.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    }))
 }
 
 impl ProxyScope {
@@ -744,7 +848,8 @@ pub struct ProfileSnapshot {
     pub probe_records: Vec<ProbeRecord>,
     pub sessions: HashMap<String, SessionRecord>,
     pub api_keys: HashMap<String, ApiKeyRecord>,
-    pub sync_config: Option<ProfileSyncConfig>,
+    pub proxy_imports: HashMap<String, ProxyImportRecord>,
+    pub sync_configs: HashMap<String, ProxyImportSyncConfig>,
     pub task_runs: HashMap<String, TaskRunRecord>,
     pub task_run_events: HashMap<String, Vec<TaskRunEventRecord>>,
 }

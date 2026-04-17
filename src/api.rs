@@ -16,9 +16,10 @@ use crate::{
     models::{
         CreateApiKeyRequest, CreateApiKeyResponse, CreateProfileRequest, CreateProfileResponse,
         HealthResponse, LoadSubscriptionRequest, OpenBatchRequest, OpenSessionRequest,
-        ProfileProxySettings, ProxyInventoryListQuery, RefreshRequest, SearchSessionOptionsRequest,
-        SuggestedPortResponse, TaskListQuery, TaskRunDetail, TaskRunSummary, TaskStreamEnvelope,
-        UpdateProfileProxySettingsRequest, UpdateProxyAllocationRequest,
+        ProfileProxySettings, ProxyImportListQuery, ProxyInventoryListQuery, RefreshRequest,
+        SearchSessionOptionsRequest, SuggestedPortResponse, TaskListQuery, TaskRunDetail,
+        TaskRunSummary, TaskStreamEnvelope, UpdateProfileProxySettingsRequest,
+        UpdateProxyAllocationRequest, UpdateProxyImportAllocationRequest,
     },
     service::BrokerService,
     tasks::{TaskBusEvent, build_task_list_response, matches_task_query},
@@ -39,6 +40,15 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/v1/proxies/global/subscriptions/load",
             post(load_global_subscription),
+        )
+        .route("/api/v1/proxy-imports", get(list_proxy_imports))
+        .route(
+            "/api/v1/proxy-imports/{import_id}/allocation",
+            patch(update_proxy_import_allocation),
+        )
+        .route(
+            "/api/v1/proxy-imports/{import_id}",
+            delete(delete_proxy_import),
         )
         .route("/api/v1/proxies", get(list_proxy_inventory))
         .route(
@@ -145,7 +155,7 @@ async fn load_global_subscription(
     let request = parse_json_payload(payload, "load_global_subscription")?;
     let resp = state
         .service
-        .load_global_subscription(&request.source)
+        .load_global_subscription_request(&request)
         .await?;
     Ok(Json(resp))
 }
@@ -159,6 +169,19 @@ async fn list_proxy_inventory(
     let resp = state
         .service
         .list_proxy_inventory(query.scope.as_deref(), query.profile_id.as_deref())
+        .await?;
+    Ok(Json(resp))
+}
+
+async fn list_proxy_imports(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    Query(query): Query<ProxyImportListQuery>,
+) -> Result<Json<crate::models::ListProxyImportResponse>, BrokerError> {
+    auth.require_admin()?;
+    let resp = state
+        .service
+        .list_proxy_imports(query.scope.as_deref(), query.profile_id.as_deref())
         .await?;
     Ok(Json(resp))
 }
@@ -185,6 +208,31 @@ async fn delete_proxy_inventory_node(
 ) -> Result<StatusCode, BrokerError> {
     auth.require_admin()?;
     state.service.delete_proxy_inventory_node(&node_id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn update_proxy_import_allocation(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    Path(import_id): Path<String>,
+    payload: Result<Json<UpdateProxyImportAllocationRequest>, JsonRejection>,
+) -> Result<Json<crate::models::ProxyImportItem>, BrokerError> {
+    auth.require_admin()?;
+    let request = parse_json_payload(payload, "update_proxy_import_allocation")?;
+    let resp = state
+        .service
+        .update_proxy_import_allocation(&import_id, &request.allocation_scope)
+        .await?;
+    Ok(Json(resp))
+}
+
+async fn delete_proxy_import(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    Path(import_id): Path<String>,
+) -> Result<StatusCode, BrokerError> {
+    auth.require_admin()?;
+    state.service.delete_proxy_import(&import_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -339,7 +387,7 @@ async fn load_subscription(
     let request = parse_json_payload(payload, "load_subscription")?;
     let resp = state
         .service
-        .load_subscription(&profile_id, &request.source)
+        .load_subscription_request(&profile_id, &request)
         .await?;
     Ok(Json(resp))
 }
@@ -647,6 +695,7 @@ mod tests {
         let now = now_epoch_sec();
         store
             .upsert_profile_sync_config(&ProfileSyncConfig {
+                import_id: "import::default".to_string(),
                 profile_id: "default".to_string(),
                 source: SubscriptionSource::Url("https://example.com/sub".to_string()),
                 enabled: true,

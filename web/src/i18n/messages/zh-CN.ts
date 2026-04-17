@@ -480,6 +480,7 @@ export const zhCN: MessageCatalog = {
     "当前控制台只开放了总览、任务、代理、IP 提取和会话这几个路由。",
   "Back to overview": "返回总览",
   "validation.source_value_required": "必须填写来源值",
+  "validation.content_required": "必须填写节点内容",
   "error.api.with_code": "{code}: {message}",
   "error.api.subscription_invalid": "订阅载荷无效。",
   "error.api.subscription_fetch_failed": "订阅源暂时无法访问。",
@@ -559,16 +560,41 @@ export const zhCN: MessageCatalog = {
   "Imported {count} global proxies": "已导入 {count} 个全局代理",
   "Imported {count} profile proxies for {profileId}": "已为 {profileId} 导入 {count} 个本地代理",
   "Import global proxy pool": "导入全局代理池",
+  "Import type": "导入类型",
+  Subscription: "订阅",
+  Nodes: "节点",
+  Name: "名称",
+  "subscription source": "订阅源",
+  "node group": "节点组",
+  "Leave blank to use the source domain when possible": "留空时尽量使用源域名作为名称",
+  "Leave blank to group nodes by the first proxy name": "留空时按首个节点名生成分组名称",
+  "Optional. Leave blank to auto-name from the ASCII domain on URL imports; otherwise the list falls back to the import ID.":
+    "可选。URL 导入留空时会优先使用纯 ASCII 域名自动命名；如果提取不到，列表会回退显示导入 ID。",
+  "Optional. Leave blank to auto-name the node group from its first proxy; if that is unavailable, the list falls back to the import ID.":
+    "可选。留空时会优先用首个节点名自动命名整个节点组；如果拿不到，列表会回退显示导入 ID。",
+  "Nodes content": "节点内容",
+  "Paste one or more Clash-compatible nodes as `proxies:` YAML or a plain list. Everything in the textarea is imported as one original node group.":
+    "粘贴一个或多个兼容 Clash 的节点，支持 `proxies:` YAML 或纯列表；文本框里的全部节点会作为一个原始节点组导入。",
+  "Each submit creates one original import group that can later be reallocated or deleted as a whole.":
+    "每次提交都会创建一个原始导入组，之后只能整组改分配或删除。",
+  "Batch node imports keep every pasted node inside the same allocation group.":
+    "批量导入的节点会始终保留在同一个分配组里。",
   "Import one source into the shared global pool. Profiles that keep global usage enabled will inherit these nodes immediately.":
     "把一个源导入共享的全局池；保持“使用全局代理”开启的配置会立刻继承这些节点。",
   "Import one upstream into the shared pool. Profiles that keep global usage enabled inherit these nodes immediately.":
     "把一个上游源导入共享池；保持启用全局池的配置会立刻继承这些节点。",
+  "Import one subscription source or one node group into the shared pool. Profiles that keep global usage enabled inherit these nodes immediately.":
+    "向共享池导入一个订阅源或一个节点组；保持启用全局池的配置会立刻继承这些节点。",
   "Import global pool": "导入全局池",
   "Global pool updated": "全局池已更新",
   "Imported {proxyCount} proxies across {ipCount} distinct IPs into the global pool.":
     "已向全局池导入 {proxyCount} 个代理，覆盖 {ipCount} 个不同 IP。",
   "Manage the shared global pool and every profile allocation from here.":
     "在这里统一管理共享全局池，以及每个配置当前的节点分配。",
+  "Global pool and configuration allocations": "全局池与配置级分配",
+  "Original imports": "原始导入",
+  "Allocate by original import source. Subscription rows are reassigned or deleted as a whole; profile composition still happens from their member nodes behind the scenes.":
+    "按原始导入源做分配。订阅行只能整批改分配或删除；配置组合仍会在后台基于它包含的节点完成。",
   "The global config can change the shared pool and profile allocations, so only admins can open it.":
     "全局配置可以改动共享池和各配置分配，因此只有管理员可以打开。",
   "Import local pool for {profileId}": "为 {profileId} 导入本地代理池",
@@ -578,6 +604,8 @@ export const zhCN: MessageCatalog = {
     "仅为当前配置导入节点；除非稍后在全局库存里改分配，否则这些节点会保持本地归属。",
   "Import nodes for this profile only. They stay local unless you later reassign them from the global config.":
     "仅为这个配置导入节点；除非之后在全局配置里改分配，否则这些节点会保持本地归属。",
+  "Import one subscription source or one node group for this profile only. They stay local unless you later reassign them from the global config.":
+    "仅为当前配置导入一个订阅源或一个节点组；除非之后在全局配置里改分配，否则它们会保持本地归属。",
   "Only the local import and policy below are scoped to this profile.":
     "只有下面的本地导入和策略属于当前配置。",
   "Scoped to {profileId} only.": "仅作用于 {profileId}。",
@@ -617,28 +645,47 @@ export const zhCN: MessageCatalog = {
     "每个导入节点都会记录来源作用域和当前分配作用域；重新导入会以源数据为准，恢复上游仍然提供的节点。",
   "{count} nodes": "{count} 个节点",
   "{count} node": "{count} 个节点",
+  "{count} import": "{count} 个导入",
+  "{count} imports": "{count} 个导入",
   "current profile {profileId}": "当前配置 {profileId}",
+  "loading imports": "导入加载中",
+  "imports live": "导入在线",
   "loading inventory": "库存加载中",
   "inventory live": "库存在线",
   "Deleting or reallocating an imported node only affects the current inventory snapshot. The next source reload restores anything the upstream still contains.":
     "删除或改分配只影响当前库存快照；下一次源重新导入时，所有上游仍包含的节点都会被恢复。",
+  "Allocation and deletion now happen at the original import level. Re-importing the same source only refreshes that import and leaves other imports untouched.":
+    "现在的删除与改分配都以原始导入为单位；重新导入同一个源时，只会刷新该导入，不会影响其它导入。",
+  "Import source": "导入来源",
+  "Node group import": "节点组导入",
   "Source scope": "来源作用域",
   "Allocation scope": "分配作用域",
   "Effective profiles": "生效配置",
+  Contents: "内容规模",
+  Updated: "更新时间",
   "Resolved IPs": "解析到的 IP",
   Actions: "操作",
+  "Loading proxy imports...": "正在加载导入源……",
+  "No imported sources yet. Load the global pool first.": "还没有导入任何源；先加载全局池。",
   "Loading proxy inventory...": "正在加载代理库存……",
   "No imported nodes yet. Import the shared global pool here, or add local nodes from a profile overview first.":
     "还没有导入任何节点；先在这里导入共享全局池，或先去某个配置的总览页添加本地节点。",
   "No imported nodes yet. Load the global pool first.": "还没有导入任何节点；先加载全局池。",
   "Global pool": "全局池",
+  "Subscription import": "订阅导入",
+  "Single-node import": "单节点导入",
   "No active profiles": "当前没有生效配置",
   "+{count} more": "还有 {count} 个",
+  "{count} proxy": "{count} 个代理",
+  "{count} IP": "{count} 个 IP",
   "No resolved IPs": "没有解析到的 IP",
   Delete: "删除",
   "Deleting...": "删除中……",
+  "Updated allocation for {importId}": "已更新导入 {importId} 的分配",
+  "Deleted imported source {importId}": "已删除导入源 {importId}",
   "Updated allocation for {nodeId}": "已更新节点 {nodeId} 的分配",
   "Deleted imported node {nodeId}": "已删除导入节点 {nodeId}",
+  "Proxy imports unavailable": "导入源暂不可用",
   "Proxy inventory unavailable": "代理库存暂不可用",
   "Cross-profile allocation and node deletion are only available after switching the current config to Global.":
     "跨配置分配和节点删除只在切换到“全局”配置后开放。",

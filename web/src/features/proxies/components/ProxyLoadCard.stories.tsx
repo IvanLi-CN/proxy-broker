@@ -49,6 +49,19 @@ export const ErrorState: Story = {
   },
 };
 
+export const NodeGroupMode: Story = {
+  args: {
+    response: null,
+    error: null,
+    onSubmit: fn(),
+  },
+  async play({ canvasElement }) {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("tab", { name: /nodes/i }));
+    await expect(await canvas.findByLabelText(/nodes content/i)).toBeVisible();
+  },
+};
+
 export const Interaction: Story = {
   args: {
     response: null,
@@ -57,6 +70,8 @@ export const Interaction: Story = {
   },
   async play({ canvasElement, args }) {
     const canvas = within(canvasElement);
+    await userEvent.clear(canvas.getByLabelText("Name"));
+    await userEvent.type(canvas.getByLabelText("Name"), "edge-jp");
     await userEvent.clear(canvas.getByLabelText("Value"));
     await userEvent.type(canvas.getByLabelText("Value"), "https://example.com/feed.yaml");
     await userEvent.click(canvas.getByRole("button", { name: /import profile pool/i }));

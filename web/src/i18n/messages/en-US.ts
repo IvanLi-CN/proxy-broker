@@ -35,6 +35,7 @@ export const enUS: MessageCatalog = {
   Advanced: "Advanced",
   optional: "optional",
   "validation.source_value_required": "Source value is required.",
+  "validation.content_required": "Nodes content is required.",
   "error.api.with_code": "{code}: {message}",
   "error.api.subscription_invalid": "Subscription payload is invalid.",
   "error.api.subscription_fetch_failed": "Subscription source is temporarily unreachable.",
@@ -127,16 +128,63 @@ export const enUS: MessageCatalog = {
   "Imported {count} profile proxies for {profileId}":
     "Imported {count} profile proxies for {profileId}",
   "Import global proxy pool": "Import global proxy pool",
+  "Import type": "Import type",
+  Subscription: "Subscription",
+  Nodes: "Nodes",
+  Name: "Name",
+  "subscription source": "subscription source",
+  "node group": "node group",
+  "Leave blank to use the source domain when possible":
+    "Leave blank to use the source domain when possible",
+  "Leave blank to group nodes by the first proxy name":
+    "Leave blank to group nodes by the first proxy name",
+  "Optional. Leave blank to auto-name from the ASCII domain on URL imports; otherwise the list falls back to the import ID.":
+    "Optional. Leave blank to auto-name from the ASCII domain on URL imports; otherwise the list falls back to the import ID.",
+  "Optional. Leave blank to auto-name the node group from its first proxy; if that is unavailable, the list falls back to the import ID.":
+    "Optional. Leave blank to auto-name the node group from its first proxy; if that is unavailable, the list falls back to the import ID.",
+  "Nodes content": "Nodes content",
+  "Paste one or more Clash-compatible nodes as `proxies:` YAML or a plain list. Everything in the textarea is imported as one original node group.":
+    "Paste one or more Clash-compatible nodes as `proxies:` YAML or a plain list. Everything in the textarea is imported as one original node group.",
+  "Each submit creates one original import group that can later be reallocated or deleted as a whole.":
+    "Each submit creates one original import group that can later be reallocated or deleted as a whole.",
+  "Batch node imports keep every pasted node inside the same allocation group.":
+    "Batch node imports keep every pasted node inside the same allocation group.",
   "Import one source into the shared global pool. Profiles that keep global usage enabled will inherit these nodes immediately.":
     "Import one source into the shared global pool. Profiles that keep global usage enabled will inherit these nodes immediately.",
   "Import one upstream into the shared pool. Profiles that keep global usage enabled inherit these nodes immediately.":
     "Import one upstream into the shared pool. Profiles that keep global usage enabled inherit these nodes immediately.",
+  "Import one subscription source or one node group into the shared pool. Profiles that keep global usage enabled inherit these nodes immediately.":
+    "Import one subscription source or one node group into the shared pool. Profiles that keep global usage enabled inherit these nodes immediately.",
   "Import global pool": "Import global pool",
   "Global pool updated": "Global pool updated",
   "Imported {proxyCount} proxies across {ipCount} distinct IPs into the global pool.":
     "Imported {proxyCount} proxies across {ipCount} distinct IPs into the global pool.",
   "Manage the shared global pool and every profile allocation from here.":
     "Manage the shared global pool and every profile allocation from here.",
+  "Global pool and configuration allocations": "Global pool and configuration allocations",
+  "Original imports": "Original imports",
+  "Allocate by original import source. Subscription rows are reassigned or deleted as a whole; profile composition still happens from their member nodes behind the scenes.":
+    "Allocate by original import source. Subscription rows are reassigned or deleted as a whole; profile composition still happens from their member nodes behind the scenes.",
+  "{count} import": "{count} import",
+  "{count} imports": "{count} imports",
+  "loading imports": "loading imports",
+  "imports live": "imports live",
+  "Allocation and deletion now happen at the original import level. Re-importing the same source only refreshes that import and leaves other imports untouched.":
+    "Allocation and deletion now happen at the original import level. Re-importing the same source only refreshes that import and leaves other imports untouched.",
+  "Import source": "Import source",
+  "Node group import": "Node group import",
+  Contents: "Contents",
+  Updated: "Updated",
+  "Loading proxy imports...": "Loading proxy imports...",
+  "No imported sources yet. Load the global pool first.":
+    "No imported sources yet. Load the global pool first.",
+  "Subscription import": "Subscription import",
+  "Single-node import": "Single-node import",
+  "{count} proxy": "{count} proxy",
+  "{count} IP": "{count} IP",
+  "Updated allocation for {importId}": "Updated allocation for {importId}",
+  "Deleted imported source {importId}": "Deleted imported source {importId}",
+  "Proxy imports unavailable": "Proxy imports unavailable",
   "The global config can change the shared pool and profile allocations, so only admins can open it.":
     "The global config can change the shared pool and profile allocations, so only admins can open it.",
   "Import local pool for {profileId}": "Import local pool for {profileId}",
@@ -146,6 +194,8 @@ export const enUS: MessageCatalog = {
     "Import nodes for the current profile only. These nodes stay local unless you later reassign them from the global inventory.",
   "Import nodes for this profile only. They stay local unless you later reassign them from the global config.":
     "Import nodes for this profile only. They stay local unless you later reassign them from the global config.",
+  "Import one subscription source or one node group for this profile only. They stay local unless you later reassign them from the global config.":
+    "Import one subscription source or one node group for this profile only. They stay local unless you later reassign them from the global config.",
   "Only the local import and policy below are scoped to this profile.":
     "Only the local import and policy below are scoped to this profile.",
   "Scoped to {profileId} only.": "Scoped to {profileId} only.",

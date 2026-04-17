@@ -35,6 +35,7 @@ export function ProxiesRoute() {
 
   const refreshProxyQueries = async (requestedProfileId?: string | null) => {
     await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["proxy-imports"] }),
       queryClient.invalidateQueries({ queryKey: ["proxy-inventory"] }),
       queryClient.invalidateQueries({ queryKey: ["sessions"] }),
       queryClient.invalidateQueries({ queryKey: ["profiles"] }),
@@ -46,9 +47,9 @@ export function ProxiesRoute() {
     ]);
   };
 
-  const inventoryQuery = useQuery({
-    queryKey: ["proxy-inventory"],
-    queryFn: () => api.listProxyInventory({ scope: "all" }),
+  const importQuery = useQuery({
+    queryKey: ["proxy-imports"],
+    queryFn: () => api.listProxyImports({ scope: "all" }),
     enabled: isGlobalConfig && canManageGlobal,
   });
   const profileProxySettingsQuery = useQuery({
@@ -115,18 +116,18 @@ export function ProxiesRoute() {
     onError: (error) => toast.error(formatApiErrorMessage(error, t)),
   });
   const reassignMutation = useMutation({
-    mutationFn: ({ nodeId, scope }: { nodeId: string; scope: ProxyScope }) =>
-      api.updateProxyAllocation(nodeId, { allocation_scope: scope }),
+    mutationFn: ({ importId, scope }: { importId: string; scope: ProxyScope }) =>
+      api.updateProxyImportAllocation(importId, { allocation_scope: scope }),
     onSuccess: async (_, variables) => {
-      toast.success(t("Updated allocation for {nodeId}", { nodeId: variables.nodeId }));
+      toast.success(t("Updated allocation for {importId}", { importId: variables.importId }));
       await refreshProxyQueries();
     },
     onError: (error) => toast.error(formatApiErrorMessage(error, t)),
   });
   const deleteMutation = useMutation({
-    mutationFn: (nodeId: string) => api.deleteProxyInventoryNode(nodeId),
-    onSuccess: async (_, nodeId) => {
-      toast.success(t("Deleted imported node {nodeId}", { nodeId }));
+    mutationFn: (importId: string) => api.deleteProxyImport(importId),
+    onSuccess: async (_, importId) => {
+      toast.success(t("Deleted imported source {importId}", { importId }));
       await refreshProxyQueries();
     },
     onError: (error) => toast.error(formatApiErrorMessage(error, t)),
@@ -174,29 +175,27 @@ export function ProxiesRoute() {
       accessDenied={accessDenied}
       authError={authError}
       currentUser={currentUser}
-      deletingNodeId={deleteMutation.isPending ? (deleteMutation.variables ?? null) : null}
+      deletingImportId={deleteMutation.isPending ? (deleteMutation.variables ?? null) : null}
       globalLoadError={
         globalLoadMutation.isError ? formatApiErrorMessage(globalLoadMutation.error, t) : null
       }
       globalLoadResponse={globalLoadResponse}
-      inventory={inventoryQuery.data ?? null}
-      inventoryError={
-        inventoryQuery.isError ? formatApiErrorMessage(inventoryQuery.error, t) : null
-      }
-      inventoryLoading={inventoryQuery.isLoading}
+      proxyImports={importQuery.data ?? null}
+      proxyImportsError={importQuery.isError ? formatApiErrorMessage(importQuery.error, t) : null}
+      proxyImportsLoading={importQuery.isLoading}
       loadingGlobal={globalLoadMutation.isPending}
-      onDeleteNode={async (nodeId) => {
-        await deleteMutation.mutateAsync(nodeId);
+      onDeleteImport={async (importId) => {
+        await deleteMutation.mutateAsync(importId);
       }}
       onLoadGlobal={async (payload) => {
         await globalLoadMutation.mutateAsync(payload);
       }}
-      onReassignNode={async (nodeId, scope) => {
-        await reassignMutation.mutateAsync({ nodeId, scope });
+      onReassignImport={async (importId, scope) => {
+        await reassignMutation.mutateAsync({ importId, scope });
       }}
       profiles={profiles}
-      reallocatingNodeId={
-        reassignMutation.isPending ? (reassignMutation.variables?.nodeId ?? null) : null
+      reallocatingImportId={
+        reassignMutation.isPending ? (reassignMutation.variables?.importId ?? null) : null
       }
     />
   );

@@ -10,14 +10,17 @@ test.beforeEach(async ({ page }) => {
     default: { profile_id: "default", use_global_proxies: true },
     "edge-jp": { profile_id: "edge-jp", use_global_proxies: true },
   };
-  let inventoryItems: Array<{
-    node_id: string;
-    proxy_name: string;
-    proxy_type: string;
-    server: string;
-    resolved_ips: string[];
+  let proxyImports: Array<{
+    import_id: string;
+    name?: string;
+    import_kind: "subscription" | "single_node";
     source_scope: { type: "global" } | { type: "profile"; profile_id: string };
+    source_identity: { source_type: string; source_value: string };
     allocation_scope: { type: "global" } | { type: "profile"; profile_id: string };
+    proxy_count: number;
+    distinct_ip_count: number;
+    created_at: number;
+    updated_at: number;
   }> = [];
   const taskList = {
     summary: {
@@ -139,7 +142,7 @@ test.beforeEach(async ({ page }) => {
     return decodeURIComponent(parts[4] ?? "default");
   };
 
-  const effectiveProfileIdsFor = (item: (typeof inventoryItems)[number]) => {
+  const effectiveProfileIdsFor = (item: (typeof proxyImports)[number]) => {
     if (item.allocation_scope.type === "global") {
       return profiles.filter(
         (profileId) => profileSettingsByProfile[profileId]?.use_global_proxies ?? true,
@@ -148,8 +151,8 @@ test.beforeEach(async ({ page }) => {
     return [item.allocation_scope.profile_id];
   };
 
-  const inventoryResponse = () => ({
-    items: inventoryItems.map((item) => ({
+  const proxyImportsResponse = () => ({
+    items: proxyImports.map((item) => ({
       ...item,
       effective_profile_ids: effectiveProfileIdsFor(item),
     })),
@@ -268,15 +271,25 @@ test.beforeEach(async ({ page }) => {
   });
 
   await page.route("**/api/v1/proxies/global/subscriptions/load", async (route) => {
-    inventoryItems = [
+    const payload = JSON.parse(route.request().postData() ?? "{}") as {
+      name?: string;
+      source?: { type?: string; value?: string };
+    };
+    proxyImports = [
       {
-        node_id: "node-global-1",
-        proxy_name: "global-jp-entry",
-        proxy_type: "socks5",
-        server: "jp.example.com",
-        resolved_ips: ["203.0.113.10", "203.0.113.11"],
+        import_id: "import-global-1",
+        name: payload.name ?? "example.com",
+        import_kind: "subscription",
         source_scope: { type: "global" },
+        source_identity: {
+          source_type: payload.source?.type ?? "url",
+          source_value: payload.source?.value ?? "https://example.com/global-subscription.yaml",
+        },
         allocation_scope: { type: "global" },
+        proxy_count: 12,
+        distinct_ip_count: 9,
+        created_at: recentTaskBaseSec,
+        updated_at: recentTaskBaseSec,
       },
     ];
     await route.fulfill({
@@ -290,31 +303,31 @@ test.beforeEach(async ({ page }) => {
     });
   });
 
-  await page.route("**/api/v1/proxies?*", async (route) => {
+  await page.route("**/api/v1/proxy-imports?*", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(inventoryResponse()),
+      body: JSON.stringify(proxyImportsResponse()),
     });
   });
 
-  await page.route("**/api/v1/proxies/*/allocation", async (route) => {
-    const nodeId = route.request().url().split("/").slice(-2, -1)[0] ?? "";
+  await page.route("**/api/v1/proxy-imports/*/allocation", async (route) => {
+    const importId = route.request().url().split("/").slice(-2, -1)[0] ?? "";
     const payload = JSON.parse(route.request().postData() ?? "{}") as {
       allocation_scope?: { type: "global" } | { type: "profile"; profile_id: string };
     };
-    inventoryItems = inventoryItems.map((item) =>
-      item.node_id === nodeId && payload.allocation_scope
+    proxyImports = proxyImports.map((item) =>
+      item.import_id === importId && payload.allocation_scope
         ? { ...item, allocation_scope: payload.allocation_scope }
         : item,
     );
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({}) });
   });
 
-  await page.route("**/api/v1/proxies/*", async (route) => {
+  await page.route("**/api/v1/proxy-imports/*", async (route) => {
     if (route.request().method() === "DELETE") {
-      const nodeId = route.request().url().split("/").pop() ?? "";
-      inventoryItems = inventoryItems.filter((item) => item.node_id !== nodeId);
+      const importId = route.request().url().split("/").pop() ?? "";
+      proxyImports = proxyImports.filter((item) => item.import_id !== importId);
       await route.fulfill({ status: 204, body: "" });
       return;
     }
@@ -358,16 +371,30 @@ test.beforeEach(async ({ page }) => {
 
   await page.route("**/api/v1/profiles/*/subscriptions/load", async (route) => {
     const profileId = extractProfileId(route.request().url());
-    inventoryItems = [
-      ...inventoryItems.filter((item) => item.source_scope.type === "global"),
+    const payload = JSON.parse(route.request().postData() ?? "{}") as {
+      name?: string;
+      source?: { type?: string; value?: string };
+      content?: string;
+    };
+    proxyImports = [
+      ...proxyImports.filter((item) => item.source_scope.type === "global"),
       {
-        node_id: `node-profile-${profileId}`,
-        proxy_name: `${profileId}-entry`,
-        proxy_type: "socks5",
-        server: `${profileId}.internal`,
-        resolved_ips: ["198.51.100.42"],
+        import_id: `import-profile-${profileId}`,
+        name: payload.name ?? (payload.content ? `${profileId}-entry` : "example.com"),
+        import_kind: payload.content ? "single_node" : "subscription",
         source_scope: { type: "profile", profile_id: profileId },
+        source_identity: payload.content
+          ? { source_type: "manual", source_value: `import-profile-${profileId}` }
+          : {
+              source_type: payload.source?.type ?? "url",
+              source_value:
+                payload.source?.value ?? "https://example.com/profile-subscription.yaml",
+            },
         allocation_scope: { type: "profile", profile_id: profileId },
+        proxy_count: 48,
+        distinct_ip_count: 26,
+        created_at: recentTaskBaseSec,
+        updated_at: recentTaskBaseSec,
       },
     ];
     await route.fulfill({
@@ -576,7 +603,7 @@ test("operator can drive the main workflows", async ({ page }) => {
     page.getByText("Imported 12 proxies across 9 distinct IPs into the global pool."),
   ).toBeVisible();
 
-  await expect(page.getByText("global-jp-entry")).toBeVisible();
+  await expect(page.getByText("example.com")).toBeVisible();
 
   await page.getByRole("combobox", { name: /config id/i }).click();
   await page.getByRole("option", { name: /^fresh-lab$/i }).click();

@@ -1,15 +1,17 @@
 use std::path::Path;
 
-use anyhow::Context;
+use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use sqlx::{Row, SqlitePool, sqlite::SqliteConnectOptions, sqlite::SqlitePoolOptions};
+use uuid::Uuid;
 
 use crate::{
     models::{
-        ApiKeyRecord, IpRecord, ProbeRecord, ProfileProxySettings, ProfileSyncConfig,
-        ProxyInventoryRecord, ProxyNode, ProxyScope, SessionRecord, SubscriptionSource,
-        TaskEventLevel, TaskListQuery, TaskRunEventRecord, TaskRunKind, TaskRunRecord,
-        TaskRunStage, TaskRunStatus, TaskRunTrigger,
+        ApiKeyRecord, IpRecord, ProbeRecord, ProfileProxySettings, ProxyImportRecord,
+        ProxyImportSourceIdentity, ProxyImportSyncConfig, ProxyInventoryRecord, ProxyNode,
+        ProxyScope, SessionRecord, SubscriptionSource, TaskEventLevel, TaskListQuery,
+        TaskRunEventRecord, TaskRunKind, TaskRunRecord, TaskRunStage, TaskRunStatus,
+        TaskRunTrigger,
     },
     store::BrokerStore,
     tasks::matches_task_query,
@@ -169,10 +171,83 @@ impl SqliteStore {
 
         sqlx::query(
             r#"
-            CREATE TABLE IF NOT EXISTS proxy_inventory_nodes (
-              node_id TEXT PRIMARY KEY,
+            CREATE TABLE IF NOT EXISTS proxy_imports (
+              import_id TEXT PRIMARY KEY,
+              name TEXT,
+              import_kind TEXT NOT NULL,
               source_scope_type TEXT NOT NULL,
               source_scope_profile_id TEXT,
+              source_type TEXT NOT NULL,
+              source_value TEXT NOT NULL,
+              allocation_scope_type TEXT NOT NULL,
+              allocation_scope_profile_id TEXT,
+              created_at INTEGER NOT NULL,
+              updated_at INTEGER NOT NULL
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_proxy_imports_source_scope
+            ON proxy_imports(source_scope_type, source_scope_profile_id)
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_proxy_imports_allocation_scope
+            ON proxy_imports(allocation_scope_type, allocation_scope_profile_id)
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS proxy_import_sync_configs (
+              import_id TEXT PRIMARY KEY,
+              profile_id TEXT NOT NULL,
+              source_type TEXT NOT NULL,
+              source_value TEXT NOT NULL,
+              enabled INTEGER NOT NULL,
+              sync_every_sec INTEGER NOT NULL,
+              full_refresh_every_sec INTEGER NOT NULL,
+              last_sync_due_at INTEGER,
+              last_sync_started_at INTEGER,
+              last_sync_finished_at INTEGER,
+              last_full_refresh_due_at INTEGER,
+              last_full_refresh_started_at INTEGER,
+              last_full_refresh_finished_at INTEGER,
+              updated_at INTEGER NOT NULL
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_proxy_import_sync_configs_profile
+            ON proxy_import_sync_configs(profile_id)
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS proxy_inventory_nodes (
+              node_id TEXT PRIMARY KEY,
+              import_id TEXT NOT NULL,
+              source_scope_type TEXT NOT NULL,
+              source_scope_profile_id TEXT,
+              source_type TEXT NOT NULL DEFAULT 'legacy',
+              source_value TEXT NOT NULL DEFAULT '',
               allocation_scope_type TEXT NOT NULL,
               allocation_scope_profile_id TEXT,
               proxy_name TEXT NOT NULL,
@@ -183,6 +258,24 @@ impl SqliteStore {
               created_at INTEGER NOT NULL,
               updated_at INTEGER NOT NULL
             )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_proxy_inventory_import
+            ON proxy_inventory_nodes(import_id)
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_proxy_inventory_import_proxy_name
+            ON proxy_inventory_nodes(import_id, proxy_name)
             "#,
         )
         .execute(&self.pool)
@@ -286,6 +379,10 @@ impl SqliteStore {
         .execute(&self.pool)
         .await?;
 
+        self.migrate_proxy_inventory_import_schema().await?;
+        self.migrate_proxy_import_sync_configs().await?;
+        self.backfill_proxy_imports_from_inventory().await?;
+
         Ok(())
     }
 
@@ -333,6 +430,250 @@ impl SqliteStore {
 
         Ok(())
     }
+
+    async fn table_has_column(&self, table: &str, column: &str) -> anyhow::Result<bool> {
+        let query = format!("PRAGMA table_info({table})");
+        let rows = sqlx::query(&query).fetch_all(&self.pool).await?;
+        Ok(rows
+            .iter()
+            .filter_map(|row| row.try_get::<String, _>("name").ok())
+            .any(|name| name == column))
+    }
+
+    async fn migrate_proxy_inventory_import_schema(&self) -> anyhow::Result<()> {
+        if !self
+            .table_has_column("proxy_inventory_nodes", "import_id")
+            .await?
+        {
+            sqlx::query(
+                "ALTER TABLE proxy_inventory_nodes ADD COLUMN import_id TEXT NOT NULL DEFAULT ''",
+            )
+            .execute(&self.pool)
+            .await?;
+        }
+        if !self
+            .table_has_column("proxy_inventory_nodes", "source_type")
+            .await?
+        {
+            sqlx::query(
+                "ALTER TABLE proxy_inventory_nodes ADD COLUMN source_type TEXT NOT NULL DEFAULT 'legacy'",
+            )
+            .execute(&self.pool)
+            .await?;
+        }
+        if !self
+            .table_has_column("proxy_inventory_nodes", "source_value")
+            .await?
+        {
+            sqlx::query(
+                "ALTER TABLE proxy_inventory_nodes ADD COLUMN source_value TEXT NOT NULL DEFAULT ''",
+            )
+            .execute(&self.pool)
+            .await?;
+        }
+        if !self.table_has_column("proxy_imports", "name").await? {
+            sqlx::query("ALTER TABLE proxy_imports ADD COLUMN name TEXT")
+                .execute(&self.pool)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn migrate_proxy_import_sync_configs(&self) -> anyhow::Result<()> {
+        let legacy_rows = sqlx::query(
+            r#"
+            SELECT profile_id, source_type, source_value, enabled, sync_every_sec, full_refresh_every_sec,
+                   last_sync_due_at, last_sync_started_at, last_sync_finished_at,
+                   last_full_refresh_due_at, last_full_refresh_started_at, last_full_refresh_finished_at,
+                   updated_at
+            FROM profile_sync_configs
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .unwrap_or_default();
+
+        for row in legacy_rows {
+            let profile_id: String = row.try_get("profile_id")?;
+            let source_type: String = row.try_get("source_type")?;
+            let source_value: String = row.try_get("source_value")?;
+            let source_scope = ProxyScope::profile(profile_id.clone());
+            let source_identity = ProxyImportSourceIdentity {
+                source_type: source_type.clone(),
+                source_value: source_value.clone(),
+            };
+            let import_id = stable_proxy_import_id(&source_scope, &source_identity);
+            sqlx::query(
+                r#"
+                INSERT INTO proxy_import_sync_configs (
+                  import_id, profile_id, source_type, source_value, enabled, sync_every_sec, full_refresh_every_sec,
+                  last_sync_due_at, last_sync_started_at, last_sync_finished_at,
+                  last_full_refresh_due_at, last_full_refresh_started_at, last_full_refresh_finished_at,
+                  updated_at
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                ON CONFLICT(import_id) DO NOTHING
+                "#,
+            )
+            .bind(import_id)
+            .bind(profile_id)
+            .bind(source_type)
+            .bind(source_value)
+            .bind(row.try_get::<i64, _>("enabled")?)
+            .bind(row.try_get::<i64, _>("sync_every_sec")?)
+            .bind(row.try_get::<i64, _>("full_refresh_every_sec")?)
+            .bind(row.try_get::<Option<i64>, _>("last_sync_due_at")?)
+            .bind(row.try_get::<Option<i64>, _>("last_sync_started_at")?)
+            .bind(row.try_get::<Option<i64>, _>("last_sync_finished_at")?)
+            .bind(row.try_get::<Option<i64>, _>("last_full_refresh_due_at")?)
+            .bind(row.try_get::<Option<i64>, _>("last_full_refresh_started_at")?)
+            .bind(row.try_get::<Option<i64>, _>("last_full_refresh_finished_at")?)
+            .bind(row.try_get::<i64, _>("updated_at")?)
+            .execute(&self.pool)
+            .await?;
+        }
+        Ok(())
+    }
+
+    async fn backfill_proxy_imports_from_inventory(&self) -> anyhow::Result<()> {
+        let rows = sqlx::query(
+            r#"
+            SELECT node_id, import_id, source_scope_type, source_scope_profile_id, source_type, source_value,
+                   allocation_scope_type, allocation_scope_profile_id, proxy_name, proxy_type, server,
+                   resolved_ips_json, raw_proxy_json, created_at, updated_at
+            FROM proxy_inventory_nodes
+            ORDER BY created_at ASC, node_id ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        if rows.is_empty() {
+            return Ok(());
+        }
+
+        let legacy_configs =
+            sqlx::query("SELECT profile_id, source_type, source_value FROM profile_sync_configs")
+                .fetch_all(&self.pool)
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .map(|row| {
+                    Ok::<_, anyhow::Error>((
+                        row.try_get::<String, _>("profile_id")?,
+                        ProxyImportSourceIdentity {
+                            source_type: row.try_get("source_type")?,
+                            source_value: row.try_get("source_value")?,
+                        },
+                    ))
+                })
+                .collect::<Result<std::collections::HashMap<_, _>, _>>()?;
+
+        #[derive(Clone)]
+        struct ImportSeed {
+            record: ProxyImportRecord,
+        }
+
+        let mut imports = std::collections::HashMap::<String, ImportSeed>::new();
+        let mut tx = self.pool.begin().await?;
+        for row in rows {
+            let source_scope = ProxyScope::from_parts(
+                &row.try_get::<String, _>("source_scope_type")?,
+                row.try_get("source_scope_profile_id")?,
+            )
+            .ok_or_else(|| anyhow!("invalid proxy inventory source scope"))?;
+            let allocation_scope = ProxyScope::from_parts(
+                &row.try_get::<String, _>("allocation_scope_type")?,
+                row.try_get("allocation_scope_profile_id")?,
+            )
+            .ok_or_else(|| anyhow!("invalid proxy inventory allocation scope"))?;
+
+            let source_identity = {
+                let source_type: String = row.try_get("source_type")?;
+                let source_value: String = row.try_get("source_value")?;
+                if !(source_type.trim().is_empty()
+                    || (source_type == "legacy" && source_value.is_empty()))
+                {
+                    ProxyImportSourceIdentity {
+                        source_type,
+                        source_value,
+                    }
+                } else if let Some(profile_id) = source_scope.profile_id() {
+                    legacy_configs
+                        .get(profile_id)
+                        .cloned()
+                        .unwrap_or(ProxyImportSourceIdentity {
+                            source_type: "legacy_scope".to_string(),
+                            source_value: source_scope.key(),
+                        })
+                } else {
+                    ProxyImportSourceIdentity {
+                        source_type: "legacy_scope".to_string(),
+                        source_value: source_scope.key(),
+                    }
+                }
+            };
+
+            let import_id: String = {
+                let existing: String = row.try_get("import_id")?;
+                if existing.trim().is_empty() {
+                    stable_proxy_import_id(&source_scope, &source_identity)
+                } else {
+                    existing
+                }
+            };
+
+            sqlx::query(
+                "UPDATE proxy_inventory_nodes SET import_id = ?2, source_type = ?3, source_value = ?4 WHERE node_id = ?1",
+            )
+            .bind(row.try_get::<String, _>("node_id")?)
+            .bind(&import_id)
+            .bind(&source_identity.source_type)
+            .bind(&source_identity.source_value)
+            .execute(&mut *tx)
+            .await?;
+
+            let created_at: i64 = row.try_get("created_at")?;
+            let updated_at: i64 = row.try_get("updated_at")?;
+            imports
+                .entry(import_id.clone())
+                .and_modify(|seed| {
+                    if updated_at >= seed.record.updated_at {
+                        seed.record.allocation_scope = allocation_scope.clone();
+                        seed.record.updated_at = updated_at;
+                    }
+                    if created_at < seed.record.created_at {
+                        seed.record.created_at = created_at;
+                    }
+                })
+                .or_insert_with(|| ImportSeed {
+                    record: ProxyImportRecord {
+                        import_id: import_id.clone(),
+                        name: None,
+                        import_kind: crate::models::ProxyImportKind::Subscription,
+                        source_scope: source_scope.clone(),
+                        source_identity: source_identity.clone(),
+                        allocation_scope: allocation_scope.clone(),
+                        created_at,
+                        updated_at,
+                    },
+                });
+        }
+
+        for seed in imports.into_values() {
+            persist_proxy_import(&mut tx, &seed.record).await?;
+            sqlx::query(
+                "UPDATE proxy_inventory_nodes SET allocation_scope_type = ?2, allocation_scope_profile_id = ?3 WHERE import_id = ?1",
+            )
+            .bind(&seed.record.import_id)
+            .bind(seed.record.allocation_scope.kind())
+            .bind(seed.record.allocation_scope.profile_id())
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -355,6 +696,8 @@ impl BrokerStore for SqliteStore {
               SELECT profile_id FROM api_keys
               UNION
               SELECT profile_id FROM profile_sync_configs
+              UNION
+              SELECT profile_id FROM proxy_import_sync_configs
               UNION
               SELECT profile_id FROM profile_proxy_settings
               UNION
@@ -562,7 +905,7 @@ impl BrokerStore for SqliteStore {
     async fn list_proxy_inventory(&self) -> anyhow::Result<Vec<ProxyInventoryRecord>> {
         let rows = sqlx::query(
             r#"
-            SELECT node_id, source_scope_type, source_scope_profile_id,
+            SELECT import_id, node_id, source_scope_type, source_scope_profile_id, source_type, source_value,
                    allocation_scope_type, allocation_scope_profile_id,
                    proxy_name, proxy_type, server, resolved_ips_json, raw_proxy_json,
                    created_at, updated_at
@@ -602,13 +945,65 @@ impl BrokerStore for SqliteStore {
         Ok(())
     }
 
+    async fn list_proxy_imports(&self) -> anyhow::Result<Vec<ProxyImportRecord>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT import_id, name, import_kind, source_scope_type, source_scope_profile_id,
+                   source_type, source_value, allocation_scope_type, allocation_scope_profile_id,
+                   created_at, updated_at
+            FROM proxy_imports
+            ORDER BY created_at ASC, import_id ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(map_proxy_import_row).collect()
+    }
+
+    async fn get_proxy_import(&self, import_id: &str) -> anyhow::Result<Option<ProxyImportRecord>> {
+        let row = sqlx::query(
+            r#"
+            SELECT import_id, name, import_kind, source_scope_type, source_scope_profile_id,
+                   source_type, source_value, allocation_scope_type, allocation_scope_profile_id,
+                   created_at, updated_at
+            FROM proxy_imports
+            WHERE import_id = ?1
+            "#,
+        )
+        .bind(import_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(map_proxy_import_row).transpose()
+    }
+
+    async fn replace_proxy_inventory_import(
+        &self,
+        import_record: &ProxyImportRecord,
+        nodes: &[ProxyInventoryRecord],
+    ) -> anyhow::Result<()> {
+        let mut tx = self.pool.begin().await?;
+        persist_proxy_import(&mut tx, import_record).await?;
+        sqlx::query("DELETE FROM proxy_inventory_nodes WHERE import_id = ?1")
+            .bind(&import_record.import_id)
+            .execute(&mut *tx)
+            .await?;
+
+        for node in nodes {
+            persist_proxy_inventory_node(&mut tx, node).await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
     async fn get_proxy_inventory_node(
         &self,
         node_id: &str,
     ) -> anyhow::Result<Option<ProxyInventoryRecord>> {
         let row = sqlx::query(
             r#"
-            SELECT node_id, source_scope_type, source_scope_profile_id,
+            SELECT import_id, node_id, source_scope_type, source_scope_profile_id, source_type, source_value,
                    allocation_scope_type, allocation_scope_profile_id,
                    proxy_name, proxy_type, server, resolved_ips_json, raw_proxy_json,
                    created_at, updated_at
@@ -621,6 +1016,28 @@ impl BrokerStore for SqliteStore {
         .await?;
 
         row.map(map_proxy_inventory_row).transpose()
+    }
+
+    async fn list_proxy_inventory_for_import(
+        &self,
+        import_id: &str,
+    ) -> anyhow::Result<Vec<ProxyInventoryRecord>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT import_id, node_id, source_scope_type, source_scope_profile_id, source_type, source_value,
+                   allocation_scope_type, allocation_scope_profile_id,
+                   proxy_name, proxy_type, server, resolved_ips_json, raw_proxy_json,
+                   created_at, updated_at
+            FROM proxy_inventory_nodes
+            WHERE import_id = ?1
+            ORDER BY proxy_name ASC, node_id ASC
+            "#,
+        )
+        .bind(import_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(map_proxy_inventory_row).collect()
     }
 
     async fn update_proxy_inventory_allocation(
@@ -650,6 +1067,52 @@ impl BrokerStore for SqliteStore {
         self.get_proxy_inventory_node(node_id).await
     }
 
+    async fn update_proxy_import_allocation(
+        &self,
+        import_id: &str,
+        allocation_scope: &ProxyScope,
+        updated_at: i64,
+    ) -> anyhow::Result<Option<ProxyImportRecord>> {
+        let mut tx = self.pool.begin().await?;
+        let result = sqlx::query(
+            r#"
+            UPDATE proxy_imports
+            SET allocation_scope_type = ?2,
+                allocation_scope_profile_id = ?3,
+                updated_at = ?4
+            WHERE import_id = ?1
+            "#,
+        )
+        .bind(import_id)
+        .bind(allocation_scope.kind())
+        .bind(allocation_scope.profile_id())
+        .bind(updated_at)
+        .execute(&mut *tx)
+        .await?;
+        if result.rows_affected() == 0 {
+            tx.rollback().await?;
+            return Ok(None);
+        }
+
+        sqlx::query(
+            r#"
+            UPDATE proxy_inventory_nodes
+            SET allocation_scope_type = ?2,
+                allocation_scope_profile_id = ?3,
+                updated_at = ?4
+            WHERE import_id = ?1
+            "#,
+        )
+        .bind(import_id)
+        .bind(allocation_scope.kind())
+        .bind(allocation_scope.profile_id())
+        .bind(updated_at)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        self.get_proxy_import(import_id).await
+    }
+
     async fn delete_proxy_inventory_node(
         &self,
         node_id: &str,
@@ -662,6 +1125,31 @@ impl BrokerStore for SqliteStore {
             .bind(node_id)
             .execute(&self.pool)
             .await?;
+        Ok(existing)
+    }
+
+    async fn delete_proxy_import(
+        &self,
+        import_id: &str,
+    ) -> anyhow::Result<Option<ProxyImportRecord>> {
+        let existing = self.get_proxy_import(import_id).await?;
+        if existing.is_none() {
+            return Ok(None);
+        }
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("DELETE FROM proxy_inventory_nodes WHERE import_id = ?1")
+            .bind(import_id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM proxy_import_sync_configs WHERE import_id = ?1")
+            .bind(import_id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM proxy_imports WHERE import_id = ?1")
+            .bind(import_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
         Ok(existing)
     }
 
@@ -1132,18 +1620,22 @@ impl BrokerStore for SqliteStore {
         Ok(())
     }
 
-    async fn upsert_profile_sync_config(&self, config: &ProfileSyncConfig) -> anyhow::Result<()> {
+    async fn upsert_proxy_import_sync_config(
+        &self,
+        config: &ProxyImportSyncConfig,
+    ) -> anyhow::Result<()> {
         let (source_type, source_value) = config.source.parts();
         sqlx::query(
             r#"
-            INSERT INTO profile_sync_configs (
-              profile_id, source_type, source_value, enabled, sync_every_sec, full_refresh_every_sec,
+            INSERT INTO proxy_import_sync_configs (
+              import_id, profile_id, source_type, source_value, enabled, sync_every_sec, full_refresh_every_sec,
               last_sync_due_at, last_sync_started_at, last_sync_finished_at,
               last_full_refresh_due_at, last_full_refresh_started_at, last_full_refresh_finished_at,
               updated_at
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
-            ON CONFLICT(profile_id) DO UPDATE SET
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+            ON CONFLICT(import_id) DO UPDATE SET
+              profile_id = excluded.profile_id,
               source_type = excluded.source_type,
               source_value = excluded.source_value,
               enabled = excluded.enabled,
@@ -1158,6 +1650,7 @@ impl BrokerStore for SqliteStore {
               updated_at = excluded.updated_at
             "#,
         )
+        .bind(&config.import_id)
         .bind(&config.profile_id)
         .bind(source_type)
         .bind(source_value)
@@ -1176,42 +1669,76 @@ impl BrokerStore for SqliteStore {
         Ok(())
     }
 
-    async fn get_profile_sync_config(
+    async fn get_proxy_import_sync_config(
         &self,
-        profile_id: &str,
-    ) -> anyhow::Result<Option<ProfileSyncConfig>> {
+        import_id: &str,
+    ) -> anyhow::Result<Option<ProxyImportSyncConfig>> {
         let row = sqlx::query(
             r#"
-            SELECT profile_id, source_type, source_value, enabled, sync_every_sec, full_refresh_every_sec,
+            SELECT import_id, profile_id, source_type, source_value, enabled, sync_every_sec, full_refresh_every_sec,
                    last_sync_due_at, last_sync_started_at, last_sync_finished_at,
                    last_full_refresh_due_at, last_full_refresh_started_at, last_full_refresh_finished_at,
                    updated_at
-            FROM profile_sync_configs
-            WHERE profile_id = ?1
+            FROM proxy_import_sync_configs
+            WHERE import_id = ?1
             "#,
         )
-        .bind(profile_id)
+        .bind(import_id)
         .fetch_optional(&self.pool)
         .await?;
 
-        row.map(map_profile_sync_config_row).transpose()
+        row.map(map_proxy_import_sync_config_row).transpose()
     }
 
-    async fn list_profile_sync_configs(&self) -> anyhow::Result<Vec<ProfileSyncConfig>> {
+    async fn list_proxy_import_sync_configs(&self) -> anyhow::Result<Vec<ProxyImportSyncConfig>> {
         let rows = sqlx::query(
             r#"
-            SELECT profile_id, source_type, source_value, enabled, sync_every_sec, full_refresh_every_sec,
+            SELECT import_id, profile_id, source_type, source_value, enabled, sync_every_sec, full_refresh_every_sec,
                    last_sync_due_at, last_sync_started_at, last_sync_finished_at,
                    last_full_refresh_due_at, last_full_refresh_started_at, last_full_refresh_finished_at,
                    updated_at
-            FROM profile_sync_configs
-            ORDER BY profile_id ASC
+            FROM proxy_import_sync_configs
+            ORDER BY profile_id ASC, import_id ASC
             "#,
         )
         .fetch_all(&self.pool)
         .await?;
 
-        rows.into_iter().map(map_profile_sync_config_row).collect()
+        rows.into_iter()
+            .map(map_proxy_import_sync_config_row)
+            .collect()
+    }
+
+    async fn list_proxy_import_sync_configs_for_profile(
+        &self,
+        profile_id: &str,
+    ) -> anyhow::Result<Vec<ProxyImportSyncConfig>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT import_id, profile_id, source_type, source_value, enabled, sync_every_sec, full_refresh_every_sec,
+                   last_sync_due_at, last_sync_started_at, last_sync_finished_at,
+                   last_full_refresh_due_at, last_full_refresh_started_at, last_full_refresh_finished_at,
+                   updated_at
+            FROM proxy_import_sync_configs
+            WHERE profile_id = ?1
+            ORDER BY import_id ASC
+            "#,
+        )
+        .bind(profile_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(map_proxy_import_sync_config_row)
+            .collect()
+    }
+
+    async fn delete_proxy_import_sync_config(&self, import_id: &str) -> anyhow::Result<()> {
+        sqlx::query("DELETE FROM proxy_import_sync_configs WHERE import_id = ?1")
+            .bind(import_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
     }
 
     async fn get_profile_proxy_settings(
@@ -1358,15 +1885,18 @@ async fn persist_proxy_inventory_node(
     sqlx::query(
         r#"
         INSERT INTO proxy_inventory_nodes (
-          node_id, source_scope_type, source_scope_profile_id,
+          import_id, node_id, source_scope_type, source_scope_profile_id, source_type, source_value,
           allocation_scope_type, allocation_scope_profile_id,
           proxy_name, proxy_type, server, resolved_ips_json, raw_proxy_json,
           created_at, updated_at
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
         ON CONFLICT(node_id) DO UPDATE SET
+          import_id = excluded.import_id,
           source_scope_type = excluded.source_scope_type,
           source_scope_profile_id = excluded.source_scope_profile_id,
+          source_type = excluded.source_type,
+          source_value = excluded.source_value,
           allocation_scope_type = excluded.allocation_scope_type,
           allocation_scope_profile_id = excluded.allocation_scope_profile_id,
           proxy_name = excluded.proxy_name,
@@ -1378,9 +1908,12 @@ async fn persist_proxy_inventory_node(
           updated_at = excluded.updated_at
         "#,
     )
+    .bind(&node.import_id)
     .bind(&node.node_id)
     .bind(node.source_scope.kind())
     .bind(node.source_scope.profile_id())
+    .bind("inventory")
+    .bind(&node.import_id)
     .bind(node.allocation_scope.kind())
     .bind(node.allocation_scope.profile_id())
     .bind(&node.proxy_name)
@@ -1395,12 +1928,57 @@ async fn persist_proxy_inventory_node(
     Ok(())
 }
 
+async fn persist_proxy_import(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    import_record: &ProxyImportRecord,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        r#"
+        INSERT INTO proxy_imports (
+          import_id, name, import_kind, source_scope_type, source_scope_profile_id,
+          source_type, source_value, allocation_scope_type, allocation_scope_profile_id,
+          created_at, updated_at
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+        ON CONFLICT(import_id) DO UPDATE SET
+          name = excluded.name,
+          import_kind = excluded.import_kind,
+          source_scope_type = excluded.source_scope_type,
+          source_scope_profile_id = excluded.source_scope_profile_id,
+          source_type = excluded.source_type,
+          source_value = excluded.source_value,
+          allocation_scope_type = excluded.allocation_scope_type,
+          allocation_scope_profile_id = excluded.allocation_scope_profile_id,
+          created_at = excluded.created_at,
+          updated_at = excluded.updated_at
+        "#,
+    )
+    .bind(&import_record.import_id)
+    .bind(&import_record.name)
+    .bind(match import_record.import_kind {
+        crate::models::ProxyImportKind::Subscription => "subscription",
+        crate::models::ProxyImportKind::SingleNode => "single_node",
+    })
+    .bind(import_record.source_scope.kind())
+    .bind(import_record.source_scope.profile_id())
+    .bind(&import_record.source_identity.source_type)
+    .bind(&import_record.source_identity.source_value)
+    .bind(import_record.allocation_scope.kind())
+    .bind(import_record.allocation_scope.profile_id())
+    .bind(import_record.created_at)
+    .bind(import_record.updated_at)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
 fn map_proxy_inventory_row(row: sqlx::sqlite::SqliteRow) -> anyhow::Result<ProxyInventoryRecord> {
     let source_scope_type: String = row.try_get("source_scope_type")?;
     let allocation_scope_type: String = row.try_get("allocation_scope_type")?;
     let resolved_ips_json: String = row.try_get("resolved_ips_json")?;
     let raw_proxy_json: String = row.try_get("raw_proxy_json")?;
     Ok(ProxyInventoryRecord {
+        import_id: row.try_get("import_id")?,
         node_id: row.try_get("node_id")?,
         source_scope: ProxyScope::from_parts(
             &source_scope_type,
@@ -1419,6 +1997,41 @@ fn map_proxy_inventory_row(row: sqlx::sqlite::SqliteRow) -> anyhow::Result<Proxy
         server: row.try_get("server")?,
         resolved_ips: serde_json::from_str(&resolved_ips_json)?,
         raw_proxy: serde_json::from_str(&raw_proxy_json)?,
+        created_at: row.try_get("created_at")?,
+        updated_at: row.try_get("updated_at")?,
+    })
+}
+
+fn map_proxy_import_row(row: sqlx::sqlite::SqliteRow) -> anyhow::Result<ProxyImportRecord> {
+    let source_scope_type: String = row.try_get("source_scope_type")?;
+    let allocation_scope_type: String = row.try_get("allocation_scope_type")?;
+    let import_kind = match row.try_get::<String, _>("import_kind")?.as_str() {
+        "subscription" => crate::models::ProxyImportKind::Subscription,
+        "single_node" => crate::models::ProxyImportKind::SingleNode,
+        other => return Err(anyhow!("unsupported proxy import kind: {other}")),
+    };
+    Ok(ProxyImportRecord {
+        import_id: row.try_get("import_id")?,
+        name: row.try_get("name")?,
+        import_kind,
+        source_scope: ProxyScope::from_parts(
+            &source_scope_type,
+            row.try_get("source_scope_profile_id")?,
+        )
+        .with_context(|| {
+            format!("unsupported proxy import source scope type: {source_scope_type}")
+        })?,
+        source_identity: ProxyImportSourceIdentity {
+            source_type: row.try_get("source_type")?,
+            source_value: row.try_get("source_value")?,
+        },
+        allocation_scope: ProxyScope::from_parts(
+            &allocation_scope_type,
+            row.try_get("allocation_scope_profile_id")?,
+        )
+        .with_context(|| {
+            format!("unsupported proxy import allocation scope type: {allocation_scope_type}")
+        })?,
         created_at: row.try_get("created_at")?,
         updated_at: row.try_get("updated_at")?,
     })
@@ -1448,14 +2061,17 @@ fn map_api_key_row(row: sqlx::sqlite::SqliteRow) -> anyhow::Result<ApiKeyRecord>
     })
 }
 
-fn map_profile_sync_config_row(row: sqlx::sqlite::SqliteRow) -> anyhow::Result<ProfileSyncConfig> {
+fn map_proxy_import_sync_config_row(
+    row: sqlx::sqlite::SqliteRow,
+) -> anyhow::Result<ProxyImportSyncConfig> {
     let source_type: String = row.try_get("source_type")?;
     let source_value: String = row.try_get("source_value")?;
     let source = SubscriptionSource::from_parts(&source_type, source_value)
         .with_context(|| format!("unsupported profile sync source type: {source_type}"))?;
     let sync_every_sec: i64 = row.try_get("sync_every_sec")?;
     let full_refresh_every_sec: i64 = row.try_get("full_refresh_every_sec")?;
-    Ok(ProfileSyncConfig {
+    Ok(ProxyImportSyncConfig {
+        import_id: row.try_get("import_id")?,
         profile_id: row.try_get("profile_id")?,
         source,
         enabled: row.try_get::<i64, _>("enabled")? != 0,
@@ -1469,6 +2085,22 @@ fn map_profile_sync_config_row(row: sqlx::sqlite::SqliteRow) -> anyhow::Result<P
         last_full_refresh_finished_at: row.try_get("last_full_refresh_finished_at")?,
         updated_at: row.try_get("updated_at")?,
     })
+}
+
+fn stable_proxy_import_id(
+    source_scope: &ProxyScope,
+    source_identity: &ProxyImportSourceIdentity,
+) -> String {
+    Uuid::new_v5(
+        &Uuid::NAMESPACE_URL,
+        format!(
+            "proxy-broker:import:{}:{}",
+            source_scope.key(),
+            source_identity.key()
+        )
+        .as_bytes(),
+    )
+    .to_string()
 }
 
 async fn persist_task_run(pool: &SqlitePool, run: &TaskRunRecord) -> anyhow::Result<()> {
