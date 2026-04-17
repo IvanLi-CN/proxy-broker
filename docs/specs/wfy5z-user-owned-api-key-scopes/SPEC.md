@@ -71,7 +71,7 @@
 - `target_program=mock-only`
 - `capture_scope=browser-viewport`
 - `sensitive_exclusion=N/A`
-- `submission_gate=pending-owner-approval`
+- `submission_gate=owner-approved`
 - `story_id_or_title=Features/Overview/AccessControlCard/WithFreshSecret`
 - `state=fresh secret + multi-profile scope`
 - `evidence_note=展示 owner-scoped key 的一次性 secret 面板，并明确显示归属者与多 profile scope。`
@@ -82,7 +82,7 @@
 - `target_program=mock-only`
 - `capture_scope=browser-viewport`
 - `sensitive_exclusion=N/A`
-- `submission_gate=pending-owner-approval`
+- `submission_gate=owner-approved`
 - `story_id_or_title=Features/Overview/AccessControlCard/AllProfiles`
 - `state=existing all-profiles key`
 - `evidence_note=展示这次布局修复后的 issued key 卡片：owner/scope 与 created/last used 已并排铺开，直接证明右侧留白被收紧。`
@@ -93,7 +93,7 @@
 - `target_program=mock-only`
 - `capture_scope=browser-viewport`
 - `sensitive_exclusion=N/A`
-- `submission_gate=pending-owner-approval`
+- `submission_gate=owner-approved`
 - `story_id_or_title=Features/Overview/AccessControlCard/DevelopmentOperator`
 - `state=development principal + key management`
 - `evidence_note=展示 development 身份下的当前用户摘要与 owner-scoped key 管理入口，证明管理台在开发模式下仍保留一致的 owner / scope 语义。`
@@ -104,7 +104,7 @@
 - `target_program=mock-only`
 - `capture_scope=browser-viewport`
 - `sensitive_exclusion=N/A`
-- `submission_gate=pending-owner-approval`
+- `submission_gate=owner-approved`
 - `story_id_or_title=Pages/OverviewPage/AllProfilesKeyState`
 - `state=overview integration`
 - `evidence_note=展示 Overview 路由整页已接入全局 API key 管理契约，右侧 Access Control 卡片与当前用户摘要保持一致。`
