@@ -279,15 +279,6 @@ impl SqliteStore {
 
         sqlx::query(
             r#"
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_proxy_inventory_import_proxy_name
-            ON proxy_inventory_nodes(import_id, proxy_name)
-            "#,
-        )
-        .execute(&self.pool)
-        .await?;
-
-        sqlx::query(
-            r#"
             CREATE INDEX IF NOT EXISTS idx_proxy_inventory_source_scope
             ON proxy_inventory_nodes(source_scope_type, source_scope_profile_id)
             "#,
@@ -386,6 +377,15 @@ impl SqliteStore {
 
         self.migrate_proxy_import_sync_configs().await?;
         self.backfill_proxy_imports_from_inventory().await?;
+
+        sqlx::query(
+            r#"
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_proxy_inventory_import_proxy_name
+            ON proxy_inventory_nodes(import_id, proxy_name)
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
 
         Ok(())
     }
@@ -2238,7 +2238,11 @@ mod tests {
         (store, path)
     }
 
-    async fn seed_legacy_proxy_inventory_store(path: &Path) {
+    async fn seed_legacy_proxy_inventory_store(
+        path: &Path,
+        legacy_configs: &[(&str, &str)],
+        inventory_rows: &[(&str, &str, &str, &str, i64, i64)],
+    ) {
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent)
                 .await
@@ -2300,54 +2304,60 @@ mod tests {
         .await
         .expect("legacy profile_sync_configs schema should be created");
 
-        sqlx::query(
-            r#"
-            INSERT INTO profile_sync_configs (
-              profile_id, source_type, source_value, enabled, sync_every_sec, full_refresh_every_sec, updated_at
+        for &(profile_id, source_value) in legacy_configs {
+            sqlx::query(
+                r#"
+                INSERT INTO profile_sync_configs (
+                  profile_id, source_type, source_value, enabled, sync_every_sec, full_refresh_every_sec, updated_at
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                "#,
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-            "#,
-        )
-        .bind("legacy-profile")
-        .bind("url")
-        .bind("https://example.com/legacy.yaml")
-        .bind(1_i64)
-        .bind(300_i64)
-        .bind(3600_i64)
-        .bind(20_i64)
-        .execute(&pool)
-        .await
-        .expect("legacy profile sync config should be seeded");
+            .bind(profile_id)
+            .bind("url")
+            .bind(source_value)
+            .bind(1_i64)
+            .bind(300_i64)
+            .bind(3600_i64)
+            .bind(20_i64)
+            .execute(&pool)
+            .await
+            .expect("legacy profile sync config should be seeded");
+        }
 
-        sqlx::query(
-            r#"
-            INSERT INTO proxy_inventory_nodes (
-              node_id, source_scope_type, source_scope_profile_id, allocation_scope_type, allocation_scope_profile_id,
-              proxy_name, proxy_type, server, resolved_ips_json, raw_proxy_json, created_at, updated_at
+        for &(node_id, profile_id, proxy_name, server, created_at, updated_at) in inventory_rows {
+            sqlx::query(
+                r#"
+                INSERT INTO proxy_inventory_nodes (
+                  node_id, source_scope_type, source_scope_profile_id, allocation_scope_type, allocation_scope_profile_id,
+                  proxy_name, proxy_type, server, resolved_ips_json, raw_proxy_json, created_at, updated_at
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                "#,
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
-            "#,
-        )
-        .bind("legacy-node")
-        .bind("profile")
-        .bind("legacy-profile")
-        .bind("profile")
-        .bind("legacy-profile")
-        .bind("node-a")
-        .bind("socks5")
-        .bind("1.1.1.1")
-        .bind(serde_json::json!(["1.1.1.1"]).to_string())
-        .bind(serde_json::json!({
-            "name": "node-a",
-            "type": "socks5",
-            "server": "1.1.1.1"
-        })
-        .to_string())
-        .bind(10_i64)
-        .bind(20_i64)
-        .execute(&pool)
-        .await
-        .expect("legacy proxy inventory row should be seeded");
+            .bind(node_id)
+            .bind("profile")
+            .bind(profile_id)
+            .bind("profile")
+            .bind(profile_id)
+            .bind(proxy_name)
+            .bind("socks5")
+            .bind(server)
+            .bind(serde_json::json!([server]).to_string())
+            .bind(
+                serde_json::json!({
+                    "name": proxy_name,
+                    "type": "socks5",
+                    "server": server
+                })
+                .to_string(),
+            )
+            .bind(created_at)
+            .bind(updated_at)
+            .execute(&pool)
+            .await
+            .expect("legacy proxy inventory row should be seeded");
+        }
 
         pool.close().await;
     }
@@ -2443,7 +2453,12 @@ mod tests {
     #[tokio::test]
     async fn open_migrates_legacy_proxy_inventory_before_creating_import_indexes() {
         let path = temp_store_path();
-        seed_legacy_proxy_inventory_store(&path).await;
+        seed_legacy_proxy_inventory_store(
+            &path,
+            &[("legacy-profile", "https://example.com/legacy.yaml")],
+            &[("legacy-node", "legacy-profile", "node-a", "1.1.1.1", 10, 20)],
+        )
+        .await;
 
         let store = SqliteStore::open(&path)
             .await
@@ -2517,6 +2532,66 @@ mod tests {
                 assert_eq!(value, "https://example.com/legacy.yaml")
             }
             other => panic!("unexpected backfilled source: {other:?}"),
+        }
+
+        let _ = tokio::fs::remove_file(path).await;
+    }
+
+    #[tokio::test]
+    async fn open_backfills_legacy_import_ids_before_unique_proxy_name_index() {
+        let path = temp_store_path();
+        seed_legacy_proxy_inventory_store(
+            &path,
+            &[
+                ("legacy-a", "https://example.com/a.yaml"),
+                ("legacy-b", "https://example.com/b.yaml"),
+            ],
+            &[
+                ("legacy-node-a", "legacy-a", "same-name", "1.1.1.1", 10, 20),
+                ("legacy-node-b", "legacy-b", "same-name", "2.2.2.2", 11, 21),
+            ],
+        )
+        .await;
+
+        let store = SqliteStore::open(&path)
+            .await
+            .expect("legacy sqlite store should migrate duplicate proxy names successfully");
+
+        let expected_import_ids = [
+            (
+                ProxyScope::profile("legacy-a"),
+                ProxyImportSourceIdentity::from_source(&SubscriptionSource::Url(
+                    "https://example.com/a.yaml".to_string(),
+                )),
+            ),
+            (
+                ProxyScope::profile("legacy-b"),
+                ProxyImportSourceIdentity::from_source(&SubscriptionSource::Url(
+                    "https://example.com/b.yaml".to_string(),
+                )),
+            ),
+        ]
+        .into_iter()
+        .map(|(scope, source)| stable_proxy_import_id(&scope, &source))
+        .collect::<std::collections::BTreeSet<_>>();
+
+        let imports = store
+            .list_proxy_imports()
+            .await
+            .expect("proxy imports should be listed after duplicate-name migration");
+        let actual_import_ids = imports
+            .iter()
+            .map(|record| record.import_id.clone())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(actual_import_ids, expected_import_ids);
+
+        for import_id in actual_import_ids {
+            let nodes = store
+                .list_proxy_inventory_for_import(&import_id)
+                .await
+                .expect("inventory rows should stay readable after duplicate-name migration");
+            assert_eq!(nodes.len(), 1);
+            assert_eq!(nodes[0].proxy_name, "same-name");
         }
 
         let _ = tokio::fs::remove_file(path).await;
