@@ -2,9 +2,9 @@
 
 ## 状态
 
-- Status: 待实现
+- Status: 已完成
 - Created: 2026-04-17
-- Last: 2026-04-17
+- Last: 2026-04-19
 
 ## 背景 / 问题陈述
 
@@ -194,6 +194,7 @@ None
 ## 变更记录（Change log）
 
 - 2026-04-17: 初版规格，冻结 import-level allocation 与 sync 方向。
+- 2026-04-19: 修正 SQLite 旧库升级顺序，保证 `proxy_inventory_nodes` 会先补齐 `import_id/source_type/source_value` 再创建 import-level 索引，避免旧安装在启动阶段因 `no such column: import_id` 崩溃。
 
 ## 参考（References）
 

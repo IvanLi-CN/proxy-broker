@@ -263,6 +263,11 @@ impl SqliteStore {
         .execute(&self.pool)
         .await?;
 
+        // Legacy databases may already have proxy_inventory_nodes without the
+        // import-level columns. Repair that schema before creating any indexes
+        // that depend on import_id/source_type/source_value.
+        self.migrate_proxy_inventory_import_schema().await?;
+
         sqlx::query(
             r#"
             CREATE INDEX IF NOT EXISTS idx_proxy_inventory_import
@@ -379,7 +384,6 @@ impl SqliteStore {
         .execute(&self.pool)
         .await?;
 
-        self.migrate_proxy_inventory_import_schema().await?;
         self.migrate_proxy_import_sync_configs().await?;
         self.backfill_proxy_imports_from_inventory().await?;
 
@@ -2212,16 +2216,140 @@ fn map_task_run_event_row(row: sqlx::sqlite::SqliteRow) -> anyhow::Result<TaskRu
 
 #[cfg(test)]
 mod tests {
-    use super::SqliteStore;
-    use crate::{auth::issue_api_key, models::ProxyNode, store::BrokerStore};
+    use std::path::{Path, PathBuf};
+
+    use super::{SqliteStore, stable_proxy_import_id};
+    use crate::{
+        auth::issue_api_key,
+        models::{ProxyImportSourceIdentity, ProxyNode, ProxyScope, SubscriptionSource},
+        store::BrokerStore,
+    };
+    use sqlx::{sqlite::SqliteConnectOptions, sqlite::SqlitePoolOptions};
+
+    fn temp_store_path() -> PathBuf {
+        std::env::temp_dir().join(format!("proxy-broker-store-{}.db", uuid::Uuid::new_v4()))
+    }
 
     async fn open_temp_store() -> (SqliteStore, std::path::PathBuf) {
-        let path =
-            std::env::temp_dir().join(format!("proxy-broker-store-{}.db", uuid::Uuid::new_v4()));
+        let path = temp_store_path();
         let store = SqliteStore::open(&path)
             .await
             .expect("sqlite store should open");
         (store, path)
+    }
+
+    async fn seed_legacy_proxy_inventory_store(path: &Path) {
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .expect("sqlite parent should exist");
+        }
+
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(path)
+                    .create_if_missing(true),
+            )
+            .await
+            .expect("legacy sqlite should open");
+
+        sqlx::query(
+            r#"
+            CREATE TABLE proxy_inventory_nodes (
+              node_id TEXT PRIMARY KEY,
+              source_scope_type TEXT NOT NULL,
+              source_scope_profile_id TEXT,
+              allocation_scope_type TEXT NOT NULL,
+              allocation_scope_profile_id TEXT,
+              proxy_name TEXT NOT NULL,
+              proxy_type TEXT NOT NULL,
+              server TEXT NOT NULL,
+              resolved_ips_json TEXT NOT NULL,
+              raw_proxy_json TEXT NOT NULL,
+              created_at INTEGER NOT NULL,
+              updated_at INTEGER NOT NULL
+            )
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .expect("legacy proxy_inventory_nodes schema should be created");
+
+        sqlx::query(
+            r#"
+            CREATE TABLE profile_sync_configs (
+              profile_id TEXT PRIMARY KEY,
+              source_type TEXT NOT NULL,
+              source_value TEXT NOT NULL,
+              enabled INTEGER NOT NULL,
+              sync_every_sec INTEGER NOT NULL,
+              full_refresh_every_sec INTEGER NOT NULL,
+              last_sync_due_at INTEGER,
+              last_sync_started_at INTEGER,
+              last_sync_finished_at INTEGER,
+              last_full_refresh_due_at INTEGER,
+              last_full_refresh_started_at INTEGER,
+              last_full_refresh_finished_at INTEGER,
+              updated_at INTEGER NOT NULL
+            )
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .expect("legacy profile_sync_configs schema should be created");
+
+        sqlx::query(
+            r#"
+            INSERT INTO profile_sync_configs (
+              profile_id, source_type, source_value, enabled, sync_every_sec, full_refresh_every_sec, updated_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "#,
+        )
+        .bind("legacy-profile")
+        .bind("url")
+        .bind("https://example.com/legacy.yaml")
+        .bind(1_i64)
+        .bind(300_i64)
+        .bind(3600_i64)
+        .bind(20_i64)
+        .execute(&pool)
+        .await
+        .expect("legacy profile sync config should be seeded");
+
+        sqlx::query(
+            r#"
+            INSERT INTO proxy_inventory_nodes (
+              node_id, source_scope_type, source_scope_profile_id, allocation_scope_type, allocation_scope_profile_id,
+              proxy_name, proxy_type, server, resolved_ips_json, raw_proxy_json, created_at, updated_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            "#,
+        )
+        .bind("legacy-node")
+        .bind("profile")
+        .bind("legacy-profile")
+        .bind("profile")
+        .bind("legacy-profile")
+        .bind("node-a")
+        .bind("socks5")
+        .bind("1.1.1.1")
+        .bind(serde_json::json!(["1.1.1.1"]).to_string())
+        .bind(serde_json::json!({
+            "name": "node-a",
+            "type": "socks5",
+            "server": "1.1.1.1"
+        })
+        .to_string())
+        .bind(10_i64)
+        .bind(20_i64)
+        .execute(&pool)
+        .await
+        .expect("legacy proxy inventory row should be seeded");
+
+        pool.close().await;
     }
 
     fn sample_node(profile_name: &str, ip: &str) -> ProxyNode {
@@ -2308,6 +2436,88 @@ mod tests {
             .expect("get should succeed")
             .expect("api key should exist");
         assert_eq!(revoked_record.revoked_at, Some(99));
+
+        let _ = tokio::fs::remove_file(path).await;
+    }
+
+    #[tokio::test]
+    async fn open_migrates_legacy_proxy_inventory_before_creating_import_indexes() {
+        let path = temp_store_path();
+        seed_legacy_proxy_inventory_store(&path).await;
+
+        let store = SqliteStore::open(&path)
+            .await
+            .expect("legacy sqlite store should migrate successfully");
+
+        assert!(
+            store
+                .table_has_column("proxy_inventory_nodes", "import_id")
+                .await
+                .expect("import_id lookup should succeed"),
+            "legacy proxy_inventory_nodes should gain import_id before index creation"
+        );
+        assert!(
+            store
+                .table_has_column("proxy_inventory_nodes", "source_type")
+                .await
+                .expect("source_type lookup should succeed"),
+            "legacy proxy_inventory_nodes should gain source_type during migration"
+        );
+        assert!(
+            store
+                .table_has_column("proxy_inventory_nodes", "source_value")
+                .await
+                .expect("source_value lookup should succeed"),
+            "legacy proxy_inventory_nodes should gain source_value during migration"
+        );
+
+        let expected_scope = ProxyScope::profile("legacy-profile");
+        let expected_source = ProxyImportSourceIdentity::from_source(&SubscriptionSource::Url(
+            "https://example.com/legacy.yaml".to_string(),
+        ));
+        let expected_import_id = stable_proxy_import_id(&expected_scope, &expected_source);
+
+        let imports = store
+            .list_proxy_imports()
+            .await
+            .expect("proxy imports should be listed after migration");
+        assert_eq!(
+            imports.len(),
+            1,
+            "legacy inventory should backfill one import"
+        );
+        assert_eq!(imports[0].import_id, expected_import_id);
+        assert_eq!(imports[0].source_scope, expected_scope);
+        assert_eq!(
+            imports[0].source_identity.source_type,
+            expected_source.source_type
+        );
+        assert_eq!(
+            imports[0].source_identity.source_value,
+            expected_source.source_value
+        );
+
+        let nodes = store
+            .list_proxy_inventory_for_import(&expected_import_id)
+            .await
+            .expect("inventory nodes should remain accessible after migration");
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].node_id, "legacy-node");
+        assert_eq!(nodes[0].import_id, expected_import_id);
+        assert_eq!(nodes[0].server, "1.1.1.1");
+
+        let sync_config = store
+            .get_proxy_import_sync_config(&expected_import_id)
+            .await
+            .expect("proxy import sync config should load")
+            .expect("legacy profile sync config should be backfilled");
+        assert_eq!(sync_config.profile_id, "legacy-profile");
+        match sync_config.source {
+            SubscriptionSource::Url(value) => {
+                assert_eq!(value, "https://example.com/legacy.yaml")
+            }
+            other => panic!("unexpected backfilled source: {other:?}"),
+        }
 
         let _ = tokio::fs::remove_file(path).await;
     }
