@@ -26,4 +26,4 @@
 | m8z4p | 发布锚点与无额外 Secret 的主线发版修复 | 已完成 | `m8z4p-release-anchor-without-extra-secrets/SPEC.md` | 2026-03-24 | 对 workflow 变更目标自动生成 release anchor，继续用默认 `GITHUB_TOKEN` 发布最新版本 |
 | 4jfey | AppShell 工作区卡片间距修复 | 已完成 | `4jfey-appshell-workspace-card-spacing/SPEC.md` | 2026-04-01 | AppShell 工作区入口卡片已恢复垂直间距，并补齐 Storybook zh-CN 视觉证据 |
 | jrhgg | 全局代理池、Profile 分配与 Proxies 工作区 | 已完成 | `jrhgg-global-proxy-pool-and-allocation/SPEC.md` | 2026-04-12 | inventory layer、Proxies 工作区、global/profile 分配、profile 级 use_global_proxies 与 Storybook 视觉证据 |
-| qvbmc | 代理订阅归属与原始导入级分配 | 待实现 | `qvbmc-proxy-import-allocation/SPEC.md` | 2026-04-17 | import-level allocation、multi-import coexistence、import sync config |
+| qvbmc | 代理订阅归属与原始导入级分配 | 已完成 | `qvbmc-proxy-import-allocation/SPEC.md` | 2026-04-19 | import-level allocation、multi-import coexistence、import sync config；补齐旧 SQLite 升级顺序热修复 |
