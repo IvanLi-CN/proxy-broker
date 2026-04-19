@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::{
     models::{
         ApiKeyProfileScope, ApiKeyProfileScopeKind, ApiKeyRecord, IpRecord, ProbeRecord,
-        ProfileProxySettings, ProfileSyncConfig, ProxyImportRecord, ProxyImportSourceIdentity,
+        ProfileProxySettings, ProxyImportRecord, ProxyImportSourceIdentity,
         ProxyImportSyncConfig, ProxyInventoryRecord, ProxyNode, ProxyScope, SessionRecord,
         SubscriptionSource, TaskEventLevel, TaskListQuery, TaskRunEventRecord, TaskRunKind,
         TaskRunRecord, TaskRunStage, TaskRunStatus, TaskRunTrigger,
@@ -782,8 +782,6 @@ impl SqliteStore {
         .execute(&self.pool)
         .await?;
 
-        Ok(())
-    }
         Ok(())
     }
 }
@@ -2836,9 +2834,6 @@ mod tests {
             ApiKeyProfileScopeKind::SelectedProfiles
         );
         assert_eq!(migrated.profile_scope.profile_ids, vec!["legacy-profile"]);
-
-        let _ = tokio::fs::remove_file(path).await;
-    }
 
         let _ = tokio::fs::remove_file(path).await;
     }
