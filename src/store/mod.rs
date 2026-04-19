@@ -113,10 +113,10 @@ pub trait BrokerStore: Send + Sync {
 
     async fn insert_api_key(&self, api_key: &ApiKeyRecord) -> anyhow::Result<()>;
     async fn get_api_key(&self, key_id: &str) -> anyhow::Result<Option<ApiKeyRecord>>;
-    async fn list_api_keys(&self, profile_id: &str) -> anyhow::Result<Vec<ApiKeyRecord>>;
+    async fn list_api_keys(&self, owner_subject: &str) -> anyhow::Result<Vec<ApiKeyRecord>>;
     async fn revoke_api_key(
         &self,
-        profile_id: &str,
+        owner_subject: &str,
         key_id: &str,
         revoked_at: i64,
     ) -> anyhow::Result<bool>;

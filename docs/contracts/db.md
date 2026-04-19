@@ -105,16 +105,22 @@
 
 - `api_keys`
   - `key_id TEXT PRIMARY KEY`
-  - `profile_id TEXT NOT NULL`
   - `name TEXT NOT NULL`
   - `secret_prefix TEXT NOT NULL`
   - `secret_salt TEXT NOT NULL`
   - `secret_hash TEXT NOT NULL`
   - `created_by_subject TEXT NOT NULL`
+  - `scope_kind TEXT NOT NULL`
   - `created_at INTEGER NOT NULL`
   - `last_used_at INTEGER`
   - `revoked_at INTEGER`
   - unique index on `secret_hash`
+
+- `api_key_profiles`
+  - `key_id TEXT NOT NULL`
+  - `profile_id TEXT NOT NULL`
+  - PK `(key_id, profile_id)`
+  - index on `profile_id`
 
 ## Rollout
 
@@ -122,6 +128,8 @@
 - `profiles` 表用于持久化空 profile，使其在尚无业务数据时仍能被重新列出。
 - `probe_records` 支持从旧版主键 `(profile_id, ip, target_url)` 迁移到新版主键（新增 `proxy_name`）。
 - `api_keys` 只保存 `secret_prefix`、`secret_salt` 与 `secret_hash`，不保存明文 secret。
+- `api_keys.created_by_subject` 是 API Key 的 canonical owner；`scope_kind + api_key_profiles` 共同表示授权范围。
+- 历史单 profile API Key 会在迁移时自动回填为 `scope_kind=selected_profiles`，并在 `api_key_profiles` 中补一条 legacy `profile_id` 关联。
 - `last_used_at` 在成功完成 API Key 认证后更新，`revoked_at` 用于软撤销。
 
 - `proxy_imports` 是原始导入批次的真相源；`proxy_inventory_nodes` 是导入批次下的节点明细层，并通过 `import_id` 关联。

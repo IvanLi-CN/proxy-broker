@@ -22,17 +22,22 @@ describe("CurrentUserSummary", () => {
             subject: "deploy-bot",
             groups: [],
             is_admin: false,
-            profile_id: "default",
             api_key_id: "key-7",
+            api_key_owner_subject: "admin@example.com",
+            api_key_profile_scope: {
+              kind: "selected_profiles",
+              profile_ids: ["default", "edge-jp"],
+            },
           },
         }}
       />,
     );
 
     expect(
-      screen.getByText("Machine principal resolved from a profile-scoped API key."),
+      screen.getByText("Machine principal resolved from an owner-scoped API key."),
     ).toBeInTheDocument();
     expect(screen.getByText("API key ID: key-7")).toBeInTheDocument();
-    expect(screen.getByText("Bound profile: default")).toBeInTheDocument();
+    expect(screen.getByText("Owner admin@example.com")).toBeInTheDocument();
+    expect(screen.getByText("Scope default / edge-jp")).toBeInTheDocument();
   });
 });

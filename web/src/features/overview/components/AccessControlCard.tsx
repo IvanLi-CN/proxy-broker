@@ -1,30 +1,71 @@
 import { Trash2Icon } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { ActionResponsePanel } from "@/components/ActionResponsePanel";
 import { CurrentUserSummary } from "@/components/CurrentUserSummary";
+import { SearchableMultiSelect } from "@/components/SearchableMultiSelect";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { useI18n } from "@/i18n";
+import { Label } from "@/components/ui/label";
+import { type Translator, useI18n } from "@/i18n";
 import { formatTimestamp } from "@/lib/format";
-import type { ApiKeySummary, CreateApiKeyResponse, CurrentUserState } from "@/lib/types";
+import type {
+  ApiKeyProfileScope,
+  ApiKeySummary,
+  CreateApiKeyRequest,
+  CreateApiKeyResponse,
+  CurrentUserState,
+  SessionOptionItem,
+} from "@/lib/types";
 
 interface AccessControlCardProps {
   currentUser: CurrentUserState;
+  currentProfileId: string;
+  availableProfiles: string[];
   apiKeys: ApiKeySummary[];
   latestCreatedKey?: CreateApiKeyResponse | null;
   apiKeysLoading?: boolean;
   apiKeysError?: string | null;
   creatingApiKey?: boolean;
   revokingKeyId?: string | null;
-  onCreateApiKey: (name: string) => Promise<void> | void;
+  onCreateApiKey: (payload: CreateApiKeyRequest) => Promise<void> | void;
   onRevokeApiKey: (keyId: string) => Promise<void> | void;
+}
+
+function profileScopeSummary(scope: ApiKeyProfileScope, t: Translator) {
+  if (scope.kind === "all_profiles") {
+    return t("all profiles");
+  }
+
+  const profileIds = scope.profile_ids ?? [];
+  if (profileIds.length === 1) {
+    return t("profile {profileId}", { profileId: profileIds[0] });
+  }
+  if (profileIds.length === 2) {
+    return profileIds.join(" / ");
+  }
+  return t("{count} selected profiles", { count: profileIds.length });
+}
+
+function profileScopeDetail(scope: ApiKeyProfileScope, t: Translator) {
+  if (scope.kind === "all_profiles") {
+    return t("all profiles");
+  }
+
+  const profileIds = scope.profile_ids ?? [];
+  if (profileIds.length <= 3) {
+    return profileIds.join(" / ");
+  }
+  return t("{count} selected profiles", { count: profileIds.length });
 }
 
 export function AccessControlCard({
   currentUser,
+  currentProfileId,
+  availableProfiles,
   apiKeys,
   latestCreatedKey = null,
   apiKeysLoading = false,
@@ -36,17 +77,52 @@ export function AccessControlCard({
 }: AccessControlCardProps) {
   const { locale, t } = useI18n();
   const [keyName, setKeyName] = useState("");
+  const [allowAllProfiles, setAllowAllProfiles] = useState(false);
+  const [selectedProfiles, setSelectedProfiles] = useState<string[]>(
+    currentProfileId ? [currentProfileId] : [],
+  );
   const canManageKeys =
     currentUser.status === "resolved" &&
     (currentUser.identity.is_admin || currentUser.identity.principal_type === "development");
+  const normalizedProfiles = useMemo(
+    () =>
+      Array.from(new Set(availableProfiles.filter(Boolean))).sort((left, right) =>
+        left.localeCompare(right),
+      ),
+    [availableProfiles],
+  );
+
+  useEffect(() => {
+    setKeyName("");
+    setAllowAllProfiles(false);
+    setSelectedProfiles(currentProfileId ? [currentProfileId] : []);
+  }, [currentProfileId]);
 
   const handleCreate = async () => {
     const nextName = keyName.trim();
-    if (!nextName || !canManageKeys) {
+    if (!nextName || !canManageKeys || (!allowAllProfiles && selectedProfiles.length === 0)) {
       return;
     }
-    await onCreateApiKey(nextName);
+
+    await onCreateApiKey({
+      name: nextName,
+      profile_scope: allowAllProfiles
+        ? { kind: "all_profiles" }
+        : { kind: "selected_profiles", profile_ids: selectedProfiles },
+    });
     setKeyName("");
+    setAllowAllProfiles(false);
+    setSelectedProfiles(currentProfileId ? [currentProfileId] : []);
+  };
+
+  const searchProfiles = async (query: string): Promise<SessionOptionItem[]> => {
+    const normalizedQuery = query.trim().toLowerCase();
+    return normalizedProfiles
+      .filter((profileId) => !normalizedQuery || profileId.toLowerCase().includes(normalizedQuery))
+      .map((profileId) => ({
+        value: profileId,
+        label: profileId,
+      }));
   };
 
   return (
@@ -58,7 +134,7 @@ export function AccessControlCard({
         <CardTitle className="text-xl tracking-tight">{t("Identity and project keys")}</CardTitle>
         <CardDescription className="text-sm leading-6 text-muted-foreground">
           {t(
-            "Forward Auth only tells the backend who the operator is. Admin checks and profile-scoped machine keys are enforced here.",
+            "Forward Auth only tells the backend who the operator is. Admin checks and owner-scoped machine keys are enforced here.",
           )}
         </CardDescription>
       </CardHeader>
@@ -71,7 +147,10 @@ export function AccessControlCard({
               title={t("New API key issued")}
               description={t("Copy this secret now. The backend will only reveal it once.")}
               bullets={[
-                t("profile {profileId}", { profileId: latestCreatedKey.api_key.profile_id }),
+                t("owner {subject}", { subject: latestCreatedKey.api_key.owner_subject }),
+                t("scope {value}", {
+                  value: profileScopeSummary(latestCreatedKey.api_key.profile_scope, t),
+                }),
                 t("prefix {prefix}", { prefix: latestCreatedKey.api_key.prefix }),
               ]}
             />
@@ -81,14 +160,14 @@ export function AccessControlCard({
           </div>
         ) : null}
 
-        <div className="space-y-3">
-          <div className="text-sm font-medium text-foreground">{t("Create a profile key")}</div>
+        <div className="space-y-4">
+          <div className="text-sm font-medium text-foreground">{t("Create an owner key")}</div>
           {!canManageKeys ? (
             <div className="rounded-2xl border border-dashed border-border/70 px-4 py-4 text-sm text-muted-foreground">
               {t("Machine keys can only be issued by an admin human or the development identity.")}
             </div>
           ) : null}
-          <div className="flex gap-3">
+          <div className="space-y-3">
             <Input
               aria-label={t("API key name")}
               placeholder="deploy-bot"
@@ -96,9 +175,44 @@ export function AccessControlCard({
               onChange={(event) => setKeyName(event.target.value)}
               disabled={!canManageKeys}
             />
+            <div className="flex items-start gap-3 rounded-2xl border border-border/70 bg-background/60 px-4 py-3">
+              <Checkbox
+                id="api-key-all-profiles"
+                checked={allowAllProfiles}
+                disabled={!canManageKeys}
+                onCheckedChange={(checked) => setAllowAllProfiles(checked === true)}
+              />
+              <div className="space-y-1">
+                <Label htmlFor="api-key-all-profiles">{t("Allow all profiles")}</Label>
+                <p className="text-xs leading-5 text-muted-foreground">
+                  {t("All future profiles remain available to this key until it is revoked.")}
+                </p>
+              </div>
+            </div>
+            {!allowAllProfiles ? (
+              <SearchableMultiSelect
+                id="api-key-profile-scope"
+                label={t("Available profiles")}
+                helper={t("The new key may access only the selected profiles.")}
+                placeholder={t("Select one or more profiles")}
+                searchPlaceholder={t("Search profiles")}
+                emptyText={t("No matching profiles")}
+                values={selectedProfiles}
+                disabled={!canManageKeys}
+                searchKey={`profiles:${normalizedProfiles.join(",")}`}
+                onChange={setSelectedProfiles}
+                onSearch={searchProfiles}
+              />
+            ) : null}
             <Button
+              className="w-full sm:w-auto"
               onClick={() => void handleCreate()}
-              disabled={creatingApiKey || !keyName.trim() || !canManageKeys}
+              disabled={
+                creatingApiKey ||
+                !keyName.trim() ||
+                !canManageKeys ||
+                (!allowAllProfiles && selectedProfiles.length === 0)
+              }
             >
               {t("Create key")}
             </Button>
@@ -126,7 +240,7 @@ export function AccessControlCard({
           ) : null}
           {!apiKeysLoading && apiKeys.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-border/70 px-4 py-6 text-sm text-muted-foreground">
-              {t("No machine keys have been issued for this profile yet.")}
+              {t("No machine keys have been issued for this owner yet.")}
             </div>
           ) : null}
           {!apiKeysLoading && apiKeys.length > 0 ? (
@@ -143,7 +257,7 @@ export function AccessControlCard({
                         {apiKey.prefix}
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       {apiKey.revoked_at ? (
                         <Badge variant="secondary" className="rounded-full">
                           {t("revoked")}
@@ -153,6 +267,9 @@ export function AccessControlCard({
                           {t("active")}
                         </Badge>
                       )}
+                      <Badge variant="outline" className="rounded-full">
+                        {profileScopeSummary(apiKey.profile_scope, t)}
+                      </Badge>
                       <Button
                         variant="outline"
                         size="sm"
@@ -168,20 +285,25 @@ export function AccessControlCard({
                       </Button>
                     </div>
                   </div>
-                  <div className="grid gap-1 text-xs leading-5 text-muted-foreground">
-                    <div>{t("Created by {subject}", { subject: apiKey.created_by })}</div>
-                    <div>
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs leading-5 text-muted-foreground max-[360px]:grid-cols-1">
+                    <div className="min-w-0 break-words">
+                      {t("Owner {subject}", { subject: apiKey.owner_subject })}
+                    </div>
+                    <div className="min-w-0 break-words">
+                      {t("Scope {value}", { value: profileScopeDetail(apiKey.profile_scope, t) })}
+                    </div>
+                    <div className="min-w-0 break-words">
                       {t("Created {value}", {
                         value: formatTimestamp(locale, t, apiKey.created_at),
                       })}
                     </div>
-                    <div>
+                    <div className="min-w-0 break-words">
                       {t("Last used {value}", {
                         value: formatTimestamp(locale, t, apiKey.last_used_at),
                       })}
                     </div>
                     {apiKey.revoked_at ? (
-                      <div>
+                      <div className="min-w-0 break-words sm:col-span-2">
                         {t("Revoked {value}", {
                           value: formatTimestamp(locale, t, apiKey.revoked_at),
                         })}

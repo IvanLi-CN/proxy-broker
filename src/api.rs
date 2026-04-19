@@ -37,6 +37,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/healthz", get(healthz))
         .route("/api/v1/auth/me", get(auth_me))
         .route("/api/v1/profiles", get(list_profiles).post(create_profile))
+        .route("/api/v1/api-keys", get(list_api_keys).post(create_api_key))
+        .route("/api/v1/api-keys/{key_id}", delete(revoke_api_key))
         .route(
             "/api/v1/proxies/global/subscriptions/load",
             post(load_global_subscription),
@@ -95,14 +97,6 @@ pub fn build_router(state: AppState) -> Router {
             get(suggested_port),
         )
         .route("/api/v1/profiles/{profile_id}/sessions", get(list_sessions))
-        .route(
-            "/api/v1/profiles/{profile_id}/api-keys",
-            get(list_api_keys).post(create_api_key),
-        )
-        .route(
-            "/api/v1/profiles/{profile_id}/api-keys/{key_id}",
-            delete(revoke_api_key),
-        )
         .route(
             "/api/v1/profiles/{profile_id}/sessions/{session_id}",
             delete(close_session),
@@ -384,6 +378,7 @@ async fn load_subscription(
     payload: Result<Json<LoadSubscriptionRequest>, JsonRejection>,
 ) -> Result<Json<crate::models::LoadSubscriptionResponse>, BrokerError> {
     auth.require_profile_access(&profile_id)?;
+    state.service.require_profile_exists(&profile_id).await?;
     let request = parse_json_payload(payload, "load_subscription")?;
     let resp = state
         .service
@@ -399,6 +394,7 @@ async fn refresh_profile(
     body: Bytes,
 ) -> Result<Json<crate::models::RefreshResponse>, BrokerError> {
     auth.require_profile_access(&profile_id)?;
+    state.service.require_profile_exists(&profile_id).await?;
     let request = decode_refresh_request(&body)?;
     let resp = state.service.refresh(&profile_id, &request).await?;
     Ok(Json(resp))
@@ -476,6 +472,7 @@ async fn extract_ips(
     payload: Result<Json<crate::models::ExtractIpRequest>, JsonRejection>,
 ) -> Result<Json<crate::models::ExtractIpResponse>, BrokerError> {
     auth.require_profile_access(&profile_id)?;
+    state.service.require_profile_exists(&profile_id).await?;
     let request = parse_json_payload(payload, "extract_ips")?;
     let resp = state.service.extract_ips(&profile_id, &request).await?;
     Ok(Json(resp))
@@ -488,6 +485,7 @@ async fn open_session(
     payload: Result<Json<OpenSessionRequest>, JsonRejection>,
 ) -> Result<Json<crate::models::OpenSessionResponse>, BrokerError> {
     auth.require_profile_access(&profile_id)?;
+    state.service.require_profile_exists(&profile_id).await?;
     let request = parse_json_payload(payload, "open_session")?;
     let resp = state.service.open_session(&profile_id, &request).await?;
     Ok(Json(resp))
@@ -500,6 +498,7 @@ async fn open_batch(
     payload: Result<Json<OpenBatchRequest>, JsonRejection>,
 ) -> Result<Json<crate::models::OpenBatchResponse>, BrokerError> {
     auth.require_profile_access(&profile_id)?;
+    state.service.require_profile_exists(&profile_id).await?;
     let request = parse_json_payload(payload, "open_batch")?;
     let resp = state.service.open_batch(&profile_id, &request).await?;
     Ok(Json(resp))
@@ -511,6 +510,7 @@ async fn suggested_port(
     Path(profile_id): Path<String>,
 ) -> Result<Json<SuggestedPortResponse>, BrokerError> {
     auth.require_profile_access(&profile_id)?;
+    state.service.require_profile_exists(&profile_id).await?;
     let resp = state.service.suggested_port(&profile_id).await?;
     Ok(Json(resp))
 }
@@ -522,6 +522,7 @@ async fn search_session_options(
     payload: Result<Json<SearchSessionOptionsRequest>, JsonRejection>,
 ) -> Result<Json<crate::models::SearchSessionOptionsResponse>, BrokerError> {
     auth.require_profile_access(&profile_id)?;
+    state.service.require_profile_exists(&profile_id).await?;
     let request = parse_json_payload(payload, "search_session_options")?;
     let resp = state
         .service
@@ -536,6 +537,7 @@ async fn list_sessions(
     Path(profile_id): Path<String>,
 ) -> Result<Json<crate::models::ListSessionsResponse>, BrokerError> {
     auth.require_profile_access(&profile_id)?;
+    state.service.require_profile_exists(&profile_id).await?;
     let resp = state.service.list_sessions(&profile_id).await?;
     Ok(Json(resp))
 }
@@ -546,6 +548,7 @@ async fn close_session(
     Path((profile_id, session_id)): Path<(String, String)>,
 ) -> Result<StatusCode, BrokerError> {
     auth.require_profile_access(&profile_id)?;
+    state.service.require_profile_exists(&profile_id).await?;
     state
         .service
         .close_session(&profile_id, &session_id)
@@ -556,24 +559,22 @@ async fn close_session(
 async fn list_api_keys(
     auth: AuthContext,
     State(state): State<AppState>,
-    Path(profile_id): Path<String>,
 ) -> Result<Json<crate::models::ListApiKeysResponse>, BrokerError> {
-    auth.require_admin()?;
-    let response = state.service.list_api_keys(&profile_id).await?;
+    let principal = auth.require_admin()?;
+    let response = state.service.list_api_keys(&principal.subject).await?;
     Ok(Json(response))
 }
 
 async fn create_api_key(
     auth: AuthContext,
     State(state): State<AppState>,
-    Path(profile_id): Path<String>,
     payload: Result<Json<CreateApiKeyRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<CreateApiKeyResponse>), BrokerError> {
     let principal = auth.require_admin()?;
     let request = parse_json_payload(payload, "create_api_key")?;
     let response = state
         .service
-        .create_api_key(&profile_id, &request, &principal.subject)
+        .create_api_key(&request, &principal.subject)
         .await?;
     Ok((StatusCode::CREATED, Json(response)))
 }
@@ -581,10 +582,13 @@ async fn create_api_key(
 async fn revoke_api_key(
     auth: AuthContext,
     State(state): State<AppState>,
-    Path((profile_id, key_id)): Path<(String, String)>,
+    Path(key_id): Path<String>,
 ) -> Result<StatusCode, BrokerError> {
-    auth.require_admin()?;
-    state.service.revoke_api_key(&profile_id, &key_id).await?;
+    let principal = auth.require_admin()?;
+    state
+        .service
+        .revoke_api_key(&principal.subject, &key_id)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

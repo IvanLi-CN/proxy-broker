@@ -35,6 +35,8 @@ const meta = {
     </AppShell>
   ),
   args: {
+    currentProfileId: "default",
+    availableProfiles: ["default", "edge-jp", "lab-us"],
     health: healthFixture,
     activeSessions: sessionsFixture.sessions.length,
     refreshResponse: refreshFixture,
@@ -58,6 +60,11 @@ const meta = {
         name: "deploy-bot",
         prefix: "pbk_key-1_123456789",
         created_by: "admin@example.com",
+        owner_subject: "admin@example.com",
+        profile_scope: {
+          kind: "selected_profiles",
+          profile_ids: ["default", "edge-jp"],
+        },
         created_at: 1_742_447_800,
         last_used_at: 1_742_448_400,
         revoked_at: null,
@@ -102,6 +109,38 @@ export const QuietState: Story = {
   args: {
     activeSessions: 0,
     refreshResponse: null,
+  },
+};
+
+export const AllProfilesKeyState: Story = {
+  args: {
+    currentUser: {
+      status: "resolved",
+      identity: {
+        authenticated: true,
+        principal_type: "development",
+        subject: "dev@local",
+        email: "dev@local",
+        groups: ["proxy-broker-dev-admin"],
+        is_admin: true,
+      },
+    },
+    apiKeys: [
+      {
+        key_id: "key-all",
+        profile_id: null,
+        name: "fleet-bot",
+        prefix: "pbk_key-all_scopeall",
+        created_by: "dev@local",
+        owner_subject: "dev@local",
+        profile_scope: {
+          kind: "all_profiles",
+        },
+        created_at: 1_742_449_800,
+        last_used_at: 1_742_450_100,
+        revoked_at: null,
+      },
+    ],
   },
 };
 

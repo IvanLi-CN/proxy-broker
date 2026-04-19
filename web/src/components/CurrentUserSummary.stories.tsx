@@ -94,8 +94,11 @@ export const StateGallery: Story = {
             subject: "smoke-bot",
             groups: [],
             is_admin: false,
-            profile_id: "edge-jp",
             api_key_id: "key-42",
+            api_key_owner_subject: "admin@example.com",
+            api_key_profile_scope: {
+              kind: "all_profiles",
+            },
           },
         }}
       />
@@ -172,8 +175,12 @@ export const ApiKeyMachine: Story = {
         subject: "deploy-bot",
         groups: [],
         is_admin: false,
-        profile_id: "default",
         api_key_id: "key-7",
+        api_key_owner_subject: "admin@example.com",
+        api_key_profile_scope: {
+          kind: "selected_profiles",
+          profile_ids: ["default", "edge-jp"],
+        },
       },
     },
   },
