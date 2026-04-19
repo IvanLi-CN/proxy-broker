@@ -8,10 +8,10 @@ use uuid::Uuid;
 use crate::{
     models::{
         ApiKeyProfileScope, ApiKeyProfileScopeKind, ApiKeyRecord, IpRecord, ProbeRecord,
-        ProfileProxySettings, ProxyImportRecord, ProxyImportSourceIdentity,
-        ProxyImportSyncConfig, ProxyInventoryRecord, ProxyNode, ProxyScope, SessionRecord,
-        SubscriptionSource, TaskEventLevel, TaskListQuery, TaskRunEventRecord, TaskRunKind,
-        TaskRunRecord, TaskRunStage, TaskRunStatus, TaskRunTrigger,
+        ProfileProxySettings, ProxyImportRecord, ProxyImportSourceIdentity, ProxyImportSyncConfig,
+        ProxyInventoryRecord, ProxyNode, ProxyScope, SessionRecord, SubscriptionSource,
+        TaskEventLevel, TaskListQuery, TaskRunEventRecord, TaskRunKind, TaskRunRecord,
+        TaskRunStage, TaskRunStatus, TaskRunTrigger,
     },
     store::BrokerStore,
     tasks::matches_task_query,
@@ -2674,7 +2674,11 @@ mod tests {
             .list_proxy_imports()
             .await
             .expect("proxy imports should be listed after migration");
-        assert_eq!(imports.len(), 1, "legacy inventory should backfill one import");
+        assert_eq!(
+            imports.len(),
+            1,
+            "legacy inventory should backfill one import"
+        );
         assert_eq!(imports[0].import_id, expected_import_id);
         assert_eq!(imports[0].source_scope, expected_scope);
         assert_eq!(
