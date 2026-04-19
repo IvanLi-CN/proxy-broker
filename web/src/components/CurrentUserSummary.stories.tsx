@@ -94,7 +94,7 @@ export const StateGallery: Story = {
             subject: "smoke-bot",
             groups: [],
             is_admin: false,
-            api_key_id: "key-42",
+            api_key_id: "key-R2p8Ls4Dw7Hy1Ku6",
             api_key_owner_subject: "admin@example.com",
             api_key_profile_scope: {
               kind: "all_profiles",
@@ -175,7 +175,7 @@ export const ApiKeyMachine: Story = {
         subject: "deploy-bot",
         groups: [],
         is_admin: false,
-        api_key_id: "key-7",
+        api_key_id: "key-Q4w8Er2Ty6Ui1Op5",
         api_key_owner_subject: "admin@example.com",
         api_key_profile_scope: {
           kind: "selected_profiles",

@@ -8,11 +8,11 @@ use axum::{
     response::Response,
 };
 use sha2::{Digest, Sha256};
-use uuid::Uuid;
 
 use crate::{
     api::AppState,
     error::BrokerError,
+    ids,
     models::{
         ApiKeyProfileScope, ApiKeyRecord, AuthMeResponse, AuthPrincipalType, CreateApiKeyResponse,
         now_epoch_sec,
@@ -440,10 +440,10 @@ pub fn issue_api_key(
     created_by_subject: &str,
     profile_scope: ApiKeyProfileScope,
 ) -> IssuedApiKey {
-    let key_id = Uuid::new_v4().simple().to_string();
-    let random = Uuid::new_v4().simple().to_string();
+    let key_id = ids::random_key_id();
+    let random = ids::random_secret_fragment();
     let secret = format!("pbk_{key_id}_{random}");
-    let salt = Uuid::new_v4().simple().to_string();
+    let salt = ids::random_secret_fragment();
     let created_at = now_epoch_sec();
 
     IssuedApiKey {
@@ -471,7 +471,7 @@ pub fn parse_api_key_secret(secret: &str) -> Result<(&str, &str), BrokerError> {
 
     let rest = &trimmed[4..];
     let (key_id, _) = rest.split_once('_').ok_or(BrokerError::ApiKeyInvalid)?;
-    if key_id.is_empty() {
+    if !ids::is_prefixed_short_id(key_id, "key", ids::ENTITY_ID_BODY_LEN) {
         return Err(BrokerError::ApiKeyInvalid);
     }
 
@@ -627,8 +627,11 @@ mod tests {
     use axum::http::{HeaderMap, HeaderValue, header};
     use std::net::{IpAddr, Ipv4Addr};
 
+    use crate::models::ApiKeyProfileScope;
+
     use super::{
         AuthConfig, AuthConfigOptions, AuthMode, constant_time_eq, extract_api_key_secret,
+        issue_api_key, parse_api_key_secret,
     };
 
     fn sample_config(mode: &str) -> AuthConfig {
@@ -685,6 +688,40 @@ mod tests {
             .expect("header should parse")
             .expect("secret should exist");
         assert_eq!(secret, "pbk_left_secret");
+    }
+
+    #[test]
+    fn issue_api_key_uses_short_id_parts_and_round_trips_with_parser() {
+        let issued = issue_api_key(
+            "deploy-bot",
+            "admin@example.com",
+            ApiKeyProfileScope::selected(["default".to_string()]),
+        );
+        let (key_id, full_secret) =
+            parse_api_key_secret(&issued.secret).expect("generated secret should parse");
+        let random = issued
+            .secret
+            .strip_prefix(&format!("pbk_{key_id}_"))
+            .expect("secret should keep pbk_<key_id>_ prefix");
+
+        assert_eq!(key_id, issued.record.key_id);
+        assert_eq!(full_secret, issued.secret);
+        assert!(!key_id.contains('_'));
+        assert!(!random.contains('_'));
+        assert!(!issued.record.secret_salt.contains('_'));
+        assert!(key_id.starts_with("key-"));
+        assert_eq!(random.len(), crate::ids::SECRET_PART_BODY_LEN);
+        assert_eq!(
+            issued.record.secret_salt.len(),
+            crate::ids::SECRET_PART_BODY_LEN
+        );
+    }
+
+    #[test]
+    fn parse_api_key_secret_rejects_legacy_uuid_key_ids() {
+        let err = parse_api_key_secret("pbk_123e4567e89b12d3a456426614174000_deadbeef")
+            .expect_err("legacy uuid key ids should be rejected");
+        assert_eq!(err.code(), "api_key_invalid");
     }
 
     #[test]

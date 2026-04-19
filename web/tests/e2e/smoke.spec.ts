@@ -1,5 +1,25 @@
 import { expect, test } from "@playwright/test";
 
+const RUN_ID_LIVE_SYNC = "run-H6r2Lp8XmQ4Tn7Vc";
+const RUN_ID_POST_LOAD = "run-J5w3Ns9Qa1Ze6Ru2";
+const RUN_ID_FULL_OK = "run-P4v8Kb2Yt7Lm1Cx5";
+const EVENT_ID_LOADING = "evt-C8q3Ls7Vz1Np5Dx9";
+const EVENT_ID_PROBING = "evt-F2t6Mw0Rb4Kj8Yu3";
+const SESSION_ID_PRIMARY = "sess-A7c2Kp9LmQ4RsT1v";
+const SESSION_ID_SECONDARY = "sess-Q8n3Va1Zx5Mw2Lp7";
+const GLOBAL_IMPORT_ID = "imp-M7n2Qa8Wx4Rp7Ts1";
+const PROFILE_IMPORT_IDS: Record<string, string> = {
+  "edge-jp": "imp-V5k3Ld9Hq2Cx8Zm4",
+  "fresh-lab": "imp-T8p4Ls2Dw7Hy1Ku6",
+};
+const CREATED_API_KEY_ID = "key-Q4w8Er2Ty6Ui1Op5";
+const CREATED_API_KEY_SECRET = `pbk_${CREATED_API_KEY_ID}_A1b2C3d4E5f6G7h8J9kLm2No`;
+
+const importIdForProfile = (profileId: string) =>
+  PROFILE_IMPORT_IDS[profileId] ?? "imp-T8p4Ls2Dw7Hy1Ku6";
+
+const sessionIdFor = (index: 0 | 1) => (index === 0 ? SESSION_ID_PRIMARY : SESSION_ID_SECONDARY);
+
 test.beforeEach(async ({ page }) => {
   const recentTaskBaseSec = Math.floor(Date.now() / 1000) - 120;
   let profiles = ["default", "edge-jp"];
@@ -34,7 +54,7 @@ test.beforeEach(async ({ page }) => {
     },
     runs: [
       {
-        run_id: "run_live_sync",
+        run_id: RUN_ID_LIVE_SYNC,
         profile_id: "fresh-lab",
         kind: "subscription_sync",
         trigger: "schedule",
@@ -50,7 +70,7 @@ test.beforeEach(async ({ page }) => {
         error_message: null,
       },
       {
-        run_id: "run_post_load",
+        run_id: RUN_ID_POST_LOAD,
         profile_id: "fresh-lab",
         kind: "metadata_refresh_incremental",
         trigger: "post_load",
@@ -66,7 +86,7 @@ test.beforeEach(async ({ page }) => {
         error_message: null,
       },
       {
-        run_id: "run_full_ok",
+        run_id: RUN_ID_FULL_OK,
         profile_id: "edge-jp",
         kind: "metadata_refresh_full",
         trigger: "schedule",
@@ -93,8 +113,8 @@ test.beforeEach(async ({ page }) => {
     run: taskList.runs[0],
     events: [
       {
-        event_id: "evt_1",
-        run_id: "run_live_sync",
+        event_id: EVENT_ID_LOADING,
+        run_id: RUN_ID_LIVE_SYNC,
         at: recentTaskBaseSec - 9,
         level: "info",
         stage: "loading_subscription",
@@ -102,8 +122,8 @@ test.beforeEach(async ({ page }) => {
         payload_json: null,
       },
       {
-        event_id: "evt_2",
-        run_id: "run_live_sync",
+        event_id: EVENT_ID_PROBING,
+        run_id: RUN_ID_LIVE_SYNC,
         at: recentTaskBaseSec - 4,
         level: "info",
         stage: "probing",
@@ -125,7 +145,7 @@ test.beforeEach(async ({ page }) => {
   > = {
     default: [
       {
-        session_id: "sess_default_01",
+        session_id: SESSION_ID_PRIMARY,
         listen: "127.0.0.1:10080",
         port: 10080,
         selected_ip: "203.0.113.10",
@@ -277,7 +297,7 @@ test.beforeEach(async ({ page }) => {
     };
     proxyImports = [
       {
-        import_id: "import-global-1",
+        import_id: GLOBAL_IMPORT_ID,
         name: payload.name ?? "example.com",
         import_kind: "subscription",
         source_scope: { type: "global" },
@@ -379,12 +399,12 @@ test.beforeEach(async ({ page }) => {
     proxyImports = [
       ...proxyImports.filter((item) => item.source_scope.type === "global"),
       {
-        import_id: `import-profile-${profileId}`,
+        import_id: importIdForProfile(profileId),
         name: payload.name ?? (payload.content ? `${profileId}-entry` : "example.com"),
         import_kind: payload.content ? "single_node" : "subscription",
         source_scope: { type: "profile", profile_id: profileId },
         source_identity: payload.content
-          ? { source_type: "manual", source_value: `import-profile-${profileId}` }
+          ? { source_type: "manual", source_value: importIdForProfile(profileId) }
           : {
               source_type: payload.source?.type ?? "url",
               source_value:
@@ -426,9 +446,9 @@ test.beforeEach(async ({ page }) => {
         contentType: "application/json",
         body: JSON.stringify({
           api_key: {
-            key_id: "key_1",
+            key_id: CREATED_API_KEY_ID,
             name: "ops",
-            prefix: "pbk_mock",
+            prefix: CREATED_API_KEY_SECRET.slice(0, 18),
             created_by: "dev-admin",
             owner_subject: "dev-admin",
             profile_scope: {
@@ -440,7 +460,7 @@ test.beforeEach(async ({ page }) => {
             last_used_at: null,
             revoked_at: null,
           },
-          secret: "pbk_mock_secret",
+          secret: CREATED_API_KEY_SECRET,
         }),
       });
       return;
@@ -512,7 +532,7 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/api/v1/profiles/*/sessions/open", async (route) => {
     const profileId = extractProfileId(route.request().url());
     const session = {
-      session_id: `sess_${profileId}_01`,
+      session_id: sessionIdFor(0),
       listen: "127.0.0.1:10080",
       port: 10080,
       selected_ip: "203.0.113.10",
@@ -537,7 +557,7 @@ test.beforeEach(async ({ page }) => {
     const profileId = extractProfileId(route.request().url());
     const sessions = [
       {
-        session_id: `sess_${profileId}_01`,
+        session_id: sessionIdFor(0),
         listen: "127.0.0.1:10080",
         port: 10080,
         selected_ip: "203.0.113.10",
@@ -545,7 +565,7 @@ test.beforeEach(async ({ page }) => {
         created_at: 1741748460,
       },
       {
-        session_id: `sess_${profileId}_02`,
+        session_id: sessionIdFor(1),
         listen: "127.0.0.1:10081",
         port: 10081,
         selected_ip: "203.0.113.88",

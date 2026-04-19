@@ -901,7 +901,7 @@ mod tests {
     #[tokio::test]
     async fn delete_proxy_import_removes_in_memory_sync_config() {
         let store = MemoryStore::new();
-        let import_id = "import-delete";
+        let import_id = "imp-Z1x2C3v4B5n6M7q8";
 
         store
             .replace_proxy_inventory_import(
@@ -920,7 +920,7 @@ mod tests {
                 },
                 &[ProxyInventoryRecord {
                     import_id: import_id.to_string(),
-                    node_id: "node-1".to_string(),
+                    node_id: "node-N4m6P8q2R5s7T1u3".to_string(),
                     source_scope: ProxyScope::profile("edge-jp"),
                     allocation_scope: ProxyScope::profile("edge-jp"),
                     proxy_name: "proxy-1".to_string(),

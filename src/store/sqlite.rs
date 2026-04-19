@@ -1,11 +1,11 @@
-use std::path::Path;
+use std::{collections::HashSet, path::Path};
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use sqlx::{Row, SqlitePool, sqlite::SqliteConnectOptions, sqlite::SqlitePoolOptions};
-use uuid::Uuid;
 
 use crate::{
+    ids,
     models::{
         ApiKeyProfileScope, ApiKeyProfileScopeKind, ApiKeyRecord, IpRecord, ProbeRecord,
         ProfileProxySettings, ProxyImportRecord, ProxyImportSourceIdentity, ProxyImportSyncConfig,
@@ -351,6 +351,7 @@ impl SqliteStore {
 
         self.migrate_proxy_import_sync_configs().await?;
         self.backfill_proxy_imports_from_inventory().await?;
+        self.migrate_short_ids().await?;
 
         sqlx::query(
             r#"
@@ -360,6 +361,343 @@ impl SqliteStore {
         )
         .execute(&self.pool)
         .await?;
+        Ok(())
+    }
+
+    async fn migrate_short_ids(&self) -> anyhow::Result<()> {
+        let mut tx = self.pool.begin().await?;
+
+        let import_rows = sqlx::query(
+            r#"
+            SELECT import_id, name, import_kind, source_scope_type, source_scope_profile_id,
+                   source_type, source_value, allocation_scope_type, allocation_scope_profile_id,
+                   created_at, updated_at
+            FROM proxy_imports
+            ORDER BY created_at ASC, import_id ASC
+            "#,
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+        let mut reserved_import_ids = HashSet::new();
+        for row in import_rows {
+            let record = map_proxy_import_row(row)?;
+            let is_manual = record.source_identity.source_type == "manual";
+            let already_new_manual =
+                ids::is_prefixed_short_id(&record.import_id, "imp", ids::ENTITY_ID_BODY_LEN)
+                    && record.source_identity.source_value == record.import_id;
+            let next_import_id = if is_manual {
+                if already_new_manual {
+                    record.import_id.clone()
+                } else {
+                    reserve_unique_id(&mut reserved_import_ids, ids::random_import_id)
+                }
+            } else {
+                ids::stable_import_id(&record.source_scope.key(), &record.source_identity.key())
+            };
+            anyhow::ensure!(
+                reserved_import_ids.insert(next_import_id.clone()),
+                "proxy import short-id migration collision for {}",
+                record.import_id
+            );
+
+            let next_source_value = if is_manual {
+                next_import_id.clone()
+            } else {
+                record.source_identity.source_value.clone()
+            };
+
+            if next_import_id == record.import_id
+                && next_source_value == record.source_identity.source_value
+            {
+                continue;
+            }
+
+            sqlx::query(
+                r#"
+                UPDATE proxy_imports
+                SET import_id = ?1, source_type = ?2, source_value = ?3
+                WHERE import_id = ?4
+                "#,
+            )
+            .bind(&next_import_id)
+            .bind(&record.source_identity.source_type)
+            .bind(&next_source_value)
+            .bind(&record.import_id)
+            .execute(&mut *tx)
+            .await?;
+
+            sqlx::query(
+                r#"
+                UPDATE proxy_inventory_nodes
+                SET import_id = ?1, source_type = ?2, source_value = ?3
+                WHERE import_id = ?4
+                "#,
+            )
+            .bind(&next_import_id)
+            .bind(&record.source_identity.source_type)
+            .bind(&next_source_value)
+            .bind(&record.import_id)
+            .execute(&mut *tx)
+            .await?;
+
+            sqlx::query(
+                r#"
+                UPDATE proxy_import_sync_configs
+                SET import_id = ?1, source_type = ?2, source_value = ?3
+                WHERE import_id = ?4
+                "#,
+            )
+            .bind(&next_import_id)
+            .bind(&record.source_identity.source_type)
+            .bind(&next_source_value)
+            .bind(&record.import_id)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        let sync_rows = sqlx::query(
+            r#"
+            SELECT import_id, profile_id, source_type, source_value, enabled, sync_every_sec, full_refresh_every_sec,
+                   last_sync_due_at, last_sync_started_at, last_sync_finished_at,
+                   last_full_refresh_due_at, last_full_refresh_started_at, last_full_refresh_finished_at,
+                   updated_at
+            FROM proxy_import_sync_configs
+            ORDER BY profile_id ASC, import_id ASC
+            "#,
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+        for row in sync_rows {
+            let config = map_proxy_import_sync_config_row(row)?;
+            let source_identity = ProxyImportSourceIdentity::from_source(&config.source);
+            let next_import_id = ids::stable_import_id(
+                &ProxyScope::profile(&config.profile_id).key(),
+                &source_identity.key(),
+            );
+            if next_import_id == config.import_id {
+                continue;
+            }
+            let existing = sqlx::query(
+                r#"
+                SELECT import_id, profile_id, source_type, source_value, enabled, sync_every_sec, full_refresh_every_sec,
+                       last_sync_due_at, last_sync_started_at, last_sync_finished_at,
+                       last_full_refresh_due_at, last_full_refresh_started_at, last_full_refresh_finished_at,
+                       updated_at
+                FROM proxy_import_sync_configs
+                WHERE import_id = ?1
+                "#,
+            )
+            .bind(&next_import_id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .map(map_proxy_import_sync_config_row)
+            .transpose()?;
+
+            if let Some(existing) = existing {
+                let merged = merge_proxy_import_sync_configs(&existing, &config, &next_import_id);
+                let (source_type, source_value) = merged.source.parts();
+                sqlx::query(
+                    r#"
+                    UPDATE proxy_import_sync_configs
+                    SET profile_id = ?2,
+                        source_type = ?3,
+                        source_value = ?4,
+                        enabled = ?5,
+                        sync_every_sec = ?6,
+                        full_refresh_every_sec = ?7,
+                        last_sync_due_at = ?8,
+                        last_sync_started_at = ?9,
+                        last_sync_finished_at = ?10,
+                        last_full_refresh_due_at = ?11,
+                        last_full_refresh_started_at = ?12,
+                        last_full_refresh_finished_at = ?13,
+                        updated_at = ?14
+                    WHERE import_id = ?1
+                    "#,
+                )
+                .bind(&merged.import_id)
+                .bind(&merged.profile_id)
+                .bind(source_type)
+                .bind(source_value)
+                .bind(merged.enabled as i64)
+                .bind(merged.sync_every_sec as i64)
+                .bind(merged.full_refresh_every_sec as i64)
+                .bind(merged.last_sync_due_at)
+                .bind(merged.last_sync_started_at)
+                .bind(merged.last_sync_finished_at)
+                .bind(merged.last_full_refresh_due_at)
+                .bind(merged.last_full_refresh_started_at)
+                .bind(merged.last_full_refresh_finished_at)
+                .bind(merged.updated_at)
+                .execute(&mut *tx)
+                .await?;
+                sqlx::query("DELETE FROM proxy_import_sync_configs WHERE import_id = ?1")
+                    .bind(&config.import_id)
+                    .execute(&mut *tx)
+                    .await?;
+            } else {
+                sqlx::query(
+                    "UPDATE proxy_import_sync_configs SET import_id = ?1 WHERE import_id = ?2",
+                )
+                .bind(&next_import_id)
+                .bind(&config.import_id)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+
+        let inventory_rows = sqlx::query(
+            r#"
+            SELECT import_id, node_id, source_scope_type, source_scope_profile_id, source_type, source_value,
+                   allocation_scope_type, allocation_scope_profile_id,
+                   proxy_name, proxy_type, server, resolved_ips_json, raw_proxy_json,
+                   created_at, updated_at
+            FROM proxy_inventory_nodes
+            ORDER BY created_at ASC, node_id ASC
+            "#,
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+        let mut reserved_node_ids = HashSet::new();
+        for row in inventory_rows {
+            let record = map_proxy_inventory_row(row)?;
+            let next_node_id =
+                ids::stable_proxy_inventory_node_id(&record.import_id, &record.proxy_name);
+            anyhow::ensure!(
+                reserved_node_ids.insert(next_node_id.clone()),
+                "proxy inventory short-id migration collision for {}",
+                record.node_id
+            );
+            if next_node_id == record.node_id {
+                continue;
+            }
+            sqlx::query("UPDATE proxy_inventory_nodes SET node_id = ?1 WHERE node_id = ?2")
+                .bind(&next_node_id)
+                .bind(&record.node_id)
+                .execute(&mut *tx)
+                .await?;
+        }
+
+        let session_rows = sqlx::query(
+            "SELECT profile_id, session_id FROM sessions ORDER BY created_at ASC, session_id ASC",
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+        let mut reserved_session_ids = HashSet::new();
+        for row in session_rows {
+            let profile_id: String = row.try_get("profile_id")?;
+            let session_id: String = row.try_get("session_id")?;
+            let next_session_id =
+                if ids::is_prefixed_short_id(&session_id, "sess", ids::ENTITY_ID_BODY_LEN) {
+                    session_id.clone()
+                } else {
+                    reserve_unique_id(&mut reserved_session_ids, ids::random_session_id)
+                };
+            anyhow::ensure!(
+                reserved_session_ids.insert(next_session_id.clone()),
+                "session short-id migration collision for {}",
+                session_id
+            );
+            if next_session_id == session_id {
+                continue;
+            }
+            sqlx::query(
+                "UPDATE sessions SET session_id = ?1 WHERE profile_id = ?2 AND session_id = ?3",
+            )
+            .bind(&next_session_id)
+            .bind(&profile_id)
+            .bind(&session_id)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        let run_rows =
+            sqlx::query("SELECT run_id FROM task_runs ORDER BY created_at ASC, run_id ASC")
+                .fetch_all(&mut *tx)
+                .await?;
+        let mut reserved_run_ids = HashSet::new();
+        let mut run_id_updates = Vec::new();
+        for row in run_rows {
+            let run_id: String = row.try_get("run_id")?;
+            let next_run_id = if ids::is_prefixed_short_id(&run_id, "run", ids::ENTITY_ID_BODY_LEN)
+            {
+                run_id.clone()
+            } else {
+                reserve_unique_id(&mut reserved_run_ids, ids::random_task_run_id)
+            };
+            anyhow::ensure!(
+                reserved_run_ids.insert(next_run_id.clone()),
+                "task run short-id migration collision for {}",
+                run_id
+            );
+            if next_run_id != run_id {
+                run_id_updates.push((run_id, next_run_id));
+            }
+        }
+        for (run_id, next_run_id) in &run_id_updates {
+            sqlx::query("UPDATE task_runs SET run_id = ?1 WHERE run_id = ?2")
+                .bind(next_run_id)
+                .bind(run_id)
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query("UPDATE task_run_events SET run_id = ?1 WHERE run_id = ?2")
+                .bind(next_run_id)
+                .bind(run_id)
+                .execute(&mut *tx)
+                .await?;
+        }
+
+        let event_rows =
+            sqlx::query("SELECT event_id FROM task_run_events ORDER BY at ASC, event_id ASC")
+                .fetch_all(&mut *tx)
+                .await?;
+        let mut reserved_event_ids = HashSet::new();
+        for row in event_rows {
+            let event_id: String = row.try_get("event_id")?;
+            let next_event_id =
+                if ids::is_prefixed_short_id(&event_id, "evt", ids::ENTITY_ID_BODY_LEN) {
+                    event_id.clone()
+                } else {
+                    reserve_unique_id(&mut reserved_event_ids, ids::random_task_event_id)
+                };
+            anyhow::ensure!(
+                reserved_event_ids.insert(next_event_id.clone()),
+                "task event short-id migration collision for {}",
+                event_id
+            );
+            if next_event_id == event_id {
+                continue;
+            }
+            sqlx::query("UPDATE task_run_events SET event_id = ?1 WHERE event_id = ?2")
+                .bind(&next_event_id)
+                .bind(&event_id)
+                .execute(&mut *tx)
+                .await?;
+        }
+
+        let api_key_rows = sqlx::query("SELECT key_id FROM api_keys")
+            .fetch_all(&mut *tx)
+            .await?;
+        for row in api_key_rows {
+            let key_id: String = row.try_get("key_id")?;
+            if ids::is_prefixed_short_id(&key_id, "key", ids::ENTITY_ID_BODY_LEN) {
+                continue;
+            }
+            // API key secrets embed `key_id` inside `pbk_<key_id>_<random>`, while the database only
+            // stores `hash(full_secret)` plus salt/prefix metadata. UUID-era keys therefore cannot be
+            // rewritten to new short ids without reissuing the secret, so the migration intentionally
+            // drops them and relies on administrators to create replacement keys after upgrade.
+            sqlx::query("DELETE FROM api_key_profiles WHERE key_id = ?1")
+                .bind(&key_id)
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query("DELETE FROM api_keys WHERE key_id = ?1")
+                .bind(&key_id)
+                .execute(&mut *tx)
+                .await?;
+        }
+
+        tx.commit().await?;
         Ok(())
     }
 
@@ -2250,20 +2588,61 @@ fn map_proxy_import_sync_config_row(
     })
 }
 
+fn merge_proxy_import_sync_configs(
+    existing: &ProxyImportSyncConfig,
+    incoming: &ProxyImportSyncConfig,
+    import_id: &str,
+) -> ProxyImportSyncConfig {
+    let (preferred, fallback) = if incoming.updated_at >= existing.updated_at {
+        (incoming, existing)
+    } else {
+        (existing, incoming)
+    };
+
+    ProxyImportSyncConfig {
+        import_id: import_id.to_string(),
+        profile_id: preferred.profile_id.clone(),
+        source: preferred.source.clone(),
+        enabled: preferred.enabled,
+        sync_every_sec: preferred.sync_every_sec,
+        full_refresh_every_sec: preferred.full_refresh_every_sec,
+        last_sync_due_at: preferred.last_sync_due_at.or(fallback.last_sync_due_at),
+        last_sync_started_at: preferred
+            .last_sync_started_at
+            .or(fallback.last_sync_started_at),
+        last_sync_finished_at: preferred
+            .last_sync_finished_at
+            .or(fallback.last_sync_finished_at),
+        last_full_refresh_due_at: preferred
+            .last_full_refresh_due_at
+            .or(fallback.last_full_refresh_due_at),
+        last_full_refresh_started_at: preferred
+            .last_full_refresh_started_at
+            .or(fallback.last_full_refresh_started_at),
+        last_full_refresh_finished_at: preferred
+            .last_full_refresh_finished_at
+            .or(fallback.last_full_refresh_finished_at),
+        updated_at: preferred.updated_at.max(fallback.updated_at),
+    }
+}
+
 fn stable_proxy_import_id(
     source_scope: &ProxyScope,
     source_identity: &ProxyImportSourceIdentity,
 ) -> String {
-    Uuid::new_v5(
-        &Uuid::NAMESPACE_URL,
-        format!(
-            "proxy-broker:import:{}:{}",
-            source_scope.key(),
-            source_identity.key()
-        )
-        .as_bytes(),
-    )
-    .to_string()
+    ids::stable_import_id(&source_scope.key(), &source_identity.key())
+}
+
+fn reserve_unique_id<F>(reserved: &mut HashSet<String>, mut generate: F) -> String
+where
+    F: FnMut() -> String,
+{
+    loop {
+        let candidate = generate();
+        if !reserved.contains(&candidate) {
+            return candidate;
+        }
+    }
 }
 
 async fn persist_task_run(pool: &SqlitePool, run: &TaskRunRecord) -> anyhow::Result<()> {
@@ -2380,16 +2759,20 @@ mod tests {
     use super::{SqliteStore, stable_proxy_import_id};
     use crate::{
         auth::issue_api_key,
+        ids,
         models::{
-            ApiKeyProfileScope, ApiKeyProfileScopeKind, ProxyImportSourceIdentity, ProxyNode,
-            ProxyScope, SubscriptionSource,
+            ApiKeyProfileScope, ProxyImportSourceIdentity, ProxyNode, ProxyScope,
+            SubscriptionSource, TaskListQuery,
         },
         store::BrokerStore,
     };
     use sqlx::{Executor, sqlite::SqliteConnectOptions, sqlite::SqlitePoolOptions};
 
     fn temp_store_path() -> PathBuf {
-        std::env::temp_dir().join(format!("proxy-broker-store-{}.db", uuid::Uuid::new_v4()))
+        std::env::temp_dir().join(format!(
+            "proxy-broker-store-{}.db",
+            ids::random_temp_suffix()
+        ))
     }
 
     async fn open_temp_store() -> (SqliteStore, std::path::PathBuf) {
@@ -2520,6 +2903,195 @@ mod tests {
             .await
             .expect("legacy proxy inventory row should be seeded");
         }
+
+        pool.close().await;
+    }
+
+    async fn seed_current_schema_legacy_ids(path: &Path) {
+        let bootstrap = SqliteStore::open(path)
+            .await
+            .expect("current sqlite schema should bootstrap");
+        drop(bootstrap);
+
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(path)
+                    .create_if_missing(true),
+            )
+            .await
+            .expect("sqlite should open for legacy-id seeding");
+
+        sqlx::query("INSERT INTO profiles (profile_id, created_at) VALUES (?1, ?2)")
+            .bind("legacy-profile")
+            .bind(1_i64)
+            .execute(&pool)
+            .await
+            .expect("profile row should seed");
+
+        sqlx::query(
+            r#"
+            INSERT INTO sessions (profile_id, session_id, listen, port, selected_ip, proxy_name, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "#,
+        )
+        .bind("legacy-profile")
+        .bind("123e4567-e89b-12d3-a456-426614174000")
+        .bind("127.0.0.1")
+        .bind(12080_i64)
+        .bind("1.1.1.1")
+        .bind("node-a")
+        .bind(10_i64)
+        .execute(&pool)
+        .await
+        .expect("legacy session should seed");
+
+        sqlx::query(
+            r#"
+            INSERT INTO task_runs (
+              run_id, profile_id, kind, trigger, status, stage, progress_current, progress_total,
+              created_at, started_at, finished_at, summary_json, error_code, error_message, scope_json
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, NULL, ?7, NULL, NULL, NULL, NULL, NULL, ?8)
+            "#,
+        )
+        .bind("223e4567-e89b-12d3-a456-426614174000")
+        .bind("legacy-profile")
+        .bind("subscription_sync")
+        .bind("schedule")
+        .bind("queued")
+        .bind("queued")
+        .bind(11_i64)
+        .bind(serde_json::json!({ "type": "all" }).to_string())
+        .execute(&pool)
+        .await
+        .expect("legacy task run should seed");
+
+        sqlx::query(
+            r#"
+            INSERT INTO task_run_events (event_id, run_id, profile_id, at, level, stage, message, payload_json)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL)
+            "#,
+        )
+        .bind("323e4567-e89b-12d3-a456-426614174000")
+        .bind("223e4567-e89b-12d3-a456-426614174000")
+        .bind("legacy-profile")
+        .bind(12_i64)
+        .bind("info")
+        .bind("queued")
+        .bind("queued")
+        .execute(&pool)
+        .await
+        .expect("legacy task event should seed");
+
+        let old_manual_import_id = "423e4567-e89b-12d3-a456-426614174000";
+        sqlx::query(
+            r#"
+            INSERT INTO proxy_imports (
+              import_id, name, import_kind, source_scope_type, source_scope_profile_id,
+              source_type, source_value, allocation_scope_type, allocation_scope_profile_id,
+              created_at, updated_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            "#,
+        )
+        .bind(old_manual_import_id)
+        .bind("manual group")
+        .bind("single_node")
+        .bind("profile")
+        .bind("legacy-profile")
+        .bind("manual")
+        .bind(old_manual_import_id)
+        .bind("profile")
+        .bind("legacy-profile")
+        .bind(13_i64)
+        .bind(14_i64)
+        .execute(&pool)
+        .await
+        .expect("legacy manual import should seed");
+
+        sqlx::query(
+            r#"
+            INSERT INTO proxy_inventory_nodes (
+              node_id, import_id, source_scope_type, source_scope_profile_id, source_type, source_value,
+              allocation_scope_type, allocation_scope_profile_id,
+              proxy_name, proxy_type, server, resolved_ips_json, raw_proxy_json, created_at, updated_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+            "#,
+        )
+        .bind("523e4567-e89b-12d3-a456-426614174000")
+        .bind(old_manual_import_id)
+        .bind("profile")
+        .bind("legacy-profile")
+        .bind("manual")
+        .bind(old_manual_import_id)
+        .bind("profile")
+        .bind("legacy-profile")
+        .bind("manual-node")
+        .bind("socks5")
+        .bind("3.3.3.3")
+        .bind(serde_json::json!(["3.3.3.3"]).to_string())
+        .bind(
+            serde_json::json!({
+                "name": "manual-node",
+                "type": "socks5",
+                "server": "3.3.3.3"
+            })
+            .to_string(),
+        )
+        .bind(13_i64)
+        .bind(14_i64)
+        .execute(&pool)
+        .await
+        .expect("legacy manual inventory row should seed");
+
+        sqlx::query(
+            r#"
+            INSERT INTO proxy_import_sync_configs (
+              import_id, profile_id, source_type, source_value, enabled, sync_every_sec, full_refresh_every_sec,
+              last_sync_due_at, last_sync_started_at, last_sync_finished_at,
+              last_full_refresh_due_at, last_full_refresh_started_at, last_full_refresh_finished_at, updated_at
+            )
+            VALUES (?1, ?2, ?3, ?4, 1, 300, 3600, NULL, NULL, NULL, NULL, NULL, NULL, ?5)
+            "#,
+        )
+        .bind("623e4567-e89b-12d3-a456-426614174000")
+        .bind("legacy-profile")
+        .bind("url")
+        .bind("https://example.com/sync.yaml")
+        .bind(15_i64)
+        .execute(&pool)
+        .await
+        .expect("legacy sync config should seed");
+
+        sqlx::query(
+            r#"
+            INSERT INTO api_keys (
+              key_id, name, secret_prefix, secret_salt, secret_hash,
+              created_by_subject, scope_kind, created_at, last_used_at, revoked_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, NULL)
+            "#,
+        )
+        .bind("723e4567e89b12d3a456426614174000")
+        .bind("old key")
+        .bind("pbk_old")
+        .bind("823e4567e89b12d3a456426614174000")
+        .bind("hash")
+        .bind("admin@example.com")
+        .bind("selected_profiles")
+        .bind(16_i64)
+        .execute(&pool)
+        .await
+        .expect("legacy api key should seed");
+        sqlx::query("INSERT INTO api_key_profiles (key_id, profile_id) VALUES (?1, ?2)")
+            .bind("723e4567e89b12d3a456426614174000")
+            .bind("legacy-profile")
+            .execute(&pool)
+            .await
+            .expect("legacy api key profile scope should seed");
 
         pool.close().await;
     }
@@ -2695,7 +3267,10 @@ mod tests {
             .await
             .expect("inventory nodes should remain accessible after migration");
         assert_eq!(nodes.len(), 1);
-        assert_eq!(nodes[0].node_id, "legacy-node");
+        assert_eq!(
+            nodes[0].node_id,
+            ids::stable_proxy_inventory_node_id(&expected_import_id, "node-a")
+        );
         assert_eq!(nodes[0].import_id, expected_import_id);
         assert_eq!(nodes[0].server, "1.1.1.1");
 
@@ -2776,9 +3351,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn open_migrates_legacy_single_profile_api_keys() {
-        let path =
-            std::env::temp_dir().join(format!("proxy-broker-store-{}.db", uuid::Uuid::new_v4()));
+    async fn open_clears_legacy_single_profile_api_keys() {
+        let path = temp_store_path();
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
             .connect_with(
@@ -2829,15 +3403,224 @@ mod tests {
         let migrated = store
             .get_api_key("key_legacy")
             .await
-            .expect("get should succeed")
-            .expect("migrated api key should exist");
-
-        assert_eq!(migrated.created_by_subject, "admin@example.com");
-        assert_eq!(
-            migrated.profile_scope.kind,
-            ApiKeyProfileScopeKind::SelectedProfiles
+            .expect("lookup should succeed");
+        assert!(migrated.is_none(), "legacy api key should be invalidated");
+        let listed = store
+            .list_api_keys("admin@example.com")
+            .await
+            .expect("api key list should load");
+        assert!(
+            listed.is_empty(),
+            "legacy api key should not remain visible"
         );
-        assert_eq!(migrated.profile_scope.profile_ids, vec!["legacy-profile"]);
+        let profiles = store.list_profiles().await.expect("list should succeed");
+        assert!(
+            profiles.is_empty(),
+            "legacy api key migration should not leave orphaned profile scope rows"
+        );
+
+        let _ = tokio::fs::remove_file(path).await;
+    }
+
+    #[tokio::test]
+    async fn open_rewrites_legacy_random_ids_and_clears_legacy_api_keys() {
+        let path = temp_store_path();
+        seed_current_schema_legacy_ids(&path).await;
+
+        let store = SqliteStore::open(&path)
+            .await
+            .expect("legacy-id rows should migrate successfully");
+
+        let sessions = store
+            .list_sessions("legacy-profile")
+            .await
+            .expect("sessions should load");
+        assert_eq!(sessions.len(), 1);
+        assert!(ids::is_prefixed_short_id(
+            &sessions[0].session_id,
+            "sess",
+            ids::ENTITY_ID_BODY_LEN
+        ));
+
+        let runs = store
+            .list_task_runs(&TaskListQuery::default())
+            .await
+            .expect("task runs should load");
+        assert_eq!(runs.len(), 1);
+        assert!(ids::is_prefixed_short_id(
+            &runs[0].run_id,
+            "run",
+            ids::ENTITY_ID_BODY_LEN
+        ));
+        let events = store
+            .list_task_run_events(&runs[0].run_id)
+            .await
+            .expect("task events should load");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].run_id, runs[0].run_id);
+        assert!(ids::is_prefixed_short_id(
+            &events[0].event_id,
+            "evt",
+            ids::ENTITY_ID_BODY_LEN
+        ));
+
+        let imports = store
+            .list_proxy_imports()
+            .await
+            .expect("proxy imports should load");
+        assert_eq!(imports.len(), 1);
+        let migrated_import = &imports[0];
+        assert!(ids::is_prefixed_short_id(
+            &migrated_import.import_id,
+            "imp",
+            ids::ENTITY_ID_BODY_LEN
+        ));
+        assert_eq!(migrated_import.source_identity.source_type, "manual");
+        assert_eq!(
+            migrated_import.source_identity.source_value,
+            migrated_import.import_id
+        );
+
+        let nodes = store
+            .list_proxy_inventory_for_import(&migrated_import.import_id)
+            .await
+            .expect("migrated nodes should load");
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].import_id, migrated_import.import_id);
+        assert_eq!(
+            nodes[0].node_id,
+            ids::stable_proxy_inventory_node_id(&migrated_import.import_id, "manual-node")
+        );
+
+        let expected_sync_import_id = ids::stable_import_id(
+            &ProxyScope::profile("legacy-profile").key(),
+            &ProxyImportSourceIdentity::from_source(&SubscriptionSource::Url(
+                "https://example.com/sync.yaml".to_string(),
+            ))
+            .key(),
+        );
+        let sync_config = store
+            .get_proxy_import_sync_config(&expected_sync_import_id)
+            .await
+            .expect("sync config lookup should succeed")
+            .expect("stable sync config should migrate to new import id");
+        match sync_config.source {
+            SubscriptionSource::Url(value) => assert_eq!(value, "https://example.com/sync.yaml"),
+            other => panic!("unexpected sync source after migration: {other:?}"),
+        }
+
+        let api_keys = store
+            .list_api_keys("admin@example.com")
+            .await
+            .expect("api key list should load");
+        assert!(api_keys.is_empty(), "legacy api keys should be cleared");
+
+        let _ = tokio::fs::remove_file(path).await;
+    }
+
+    #[tokio::test]
+    async fn open_merges_legacy_proxy_import_sync_configs_on_short_id_conflict() {
+        let path = temp_store_path();
+        let bootstrap = SqliteStore::open(&path)
+            .await
+            .expect("current sqlite schema should bootstrap");
+        drop(bootstrap);
+
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(&path)
+                    .create_if_missing(true),
+            )
+            .await
+            .expect("sqlite should open for sync-config conflict seed");
+
+        sqlx::query("INSERT INTO profiles (profile_id, created_at) VALUES (?1, ?2)")
+            .bind("legacy-profile")
+            .bind(1_i64)
+            .execute(&pool)
+            .await
+            .expect("profile row should seed");
+
+        sqlx::query(
+            r#"
+            INSERT INTO profile_sync_configs (
+              profile_id, source_type, source_value, enabled, sync_every_sec, full_refresh_every_sec,
+              last_sync_due_at, last_sync_started_at, last_sync_finished_at,
+              last_full_refresh_due_at, last_full_refresh_started_at, last_full_refresh_finished_at,
+              updated_at
+            )
+            VALUES (?1, ?2, ?3, 1, 300, 3600, 50, NULL, NULL, 60, NULL, NULL, 70)
+            "#,
+        )
+        .bind("legacy-profile")
+        .bind("url")
+        .bind("https://example.com/sync.yaml")
+        .execute(&pool)
+        .await
+        .expect("legacy profile sync config should seed");
+
+        sqlx::query(
+            r#"
+            INSERT INTO proxy_import_sync_configs (
+              import_id, profile_id, source_type, source_value, enabled, sync_every_sec, full_refresh_every_sec,
+              last_sync_due_at, last_sync_started_at, last_sync_finished_at,
+              last_full_refresh_due_at, last_full_refresh_started_at, last_full_refresh_finished_at,
+              updated_at
+            )
+            VALUES (?1, ?2, ?3, ?4, 0, 600, 7200, 80, 81, 82, 90, 91, 92, 100)
+            "#,
+        )
+        .bind("723e4567-e89b-12d3-a456-426614174000")
+        .bind("legacy-profile")
+        .bind("url")
+        .bind("https://example.com/sync.yaml")
+        .execute(&pool)
+        .await
+        .expect("legacy import-keyed sync config should seed");
+
+        pool.close().await;
+
+        let store = SqliteStore::open(&path)
+            .await
+            .expect("sqlite store should merge duplicate sync configs during short-id migration");
+
+        let expected_import_id = ids::stable_import_id(
+            &ProxyScope::profile("legacy-profile").key(),
+            &ProxyImportSourceIdentity::from_source(&SubscriptionSource::Url(
+                "https://example.com/sync.yaml".to_string(),
+            ))
+            .key(),
+        );
+        let configs = store
+            .list_proxy_import_sync_configs_for_profile("legacy-profile")
+            .await
+            .expect("sync configs should list");
+        assert_eq!(
+            configs.len(),
+            1,
+            "migration should collapse legacy and stable sync configs into one row"
+        );
+        assert_eq!(configs[0].import_id, expected_import_id);
+        assert!(!configs[0].enabled);
+        assert_eq!(configs[0].sync_every_sec, 600);
+        assert_eq!(configs[0].full_refresh_every_sec, 7200);
+        assert_eq!(configs[0].last_sync_due_at, Some(80));
+        assert_eq!(configs[0].last_sync_started_at, Some(81));
+        assert_eq!(configs[0].last_sync_finished_at, Some(82));
+        assert_eq!(configs[0].last_full_refresh_due_at, Some(90));
+        assert_eq!(configs[0].last_full_refresh_started_at, Some(91));
+        assert_eq!(configs[0].last_full_refresh_finished_at, Some(92));
+        assert_eq!(configs[0].updated_at, 100);
+        assert!(
+            store
+                .get_proxy_import_sync_config("723e4567-e89b-12d3-a456-426614174000")
+                .await
+                .expect("legacy sync config lookup should succeed")
+                .is_none(),
+            "legacy import-keyed sync config should be removed after merge"
+        );
 
         let _ = tokio::fs::remove_file(path).await;
     }

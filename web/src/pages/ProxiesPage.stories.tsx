@@ -10,7 +10,7 @@ const profiles = ["default", "edge-jp", "lab-us"];
 const proxyImportsFixture = {
   items: [
     {
-      import_id: "import-global-1",
+      import_id: "imp-M7n2Qa8Wx4Rp7Ts1",
       name: "global-jp",
       import_kind: "subscription" as const,
       source_scope: { type: "global" as const },
@@ -26,13 +26,13 @@ const proxyImportsFixture = {
       updated_at: 1_713_309_000,
     },
     {
-      import_id: "import-profile-1",
+      import_id: "imp-V5k3Ld9Hq2Cx8Zm4",
       name: "edge-manual",
       import_kind: "single_node" as const,
       source_scope: { type: "profile" as const, profile_id: "edge-jp" },
       source_identity: {
         source_type: "manual",
-        source_value: "import-profile-1",
+        source_value: "imp-V5k3Ld9Hq2Cx8Zm4",
       },
       allocation_scope: { type: "profile" as const, profile_id: "edge-jp" },
       effective_profile_ids: ["edge-jp"],

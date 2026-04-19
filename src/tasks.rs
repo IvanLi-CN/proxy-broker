@@ -124,9 +124,17 @@ mod tests {
     use super::*;
     use crate::models::{TaskRunKind, TaskRunStage, TaskRunTrigger};
 
+    fn sample_run_id(profile_id: &str) -> &'static str {
+        match profile_id {
+            "default" => "run-H6r2Lp8XmQ4Tn7Vc",
+            "edge-jp" => "run-P4v8Kb2Yt7Lm1Cx5",
+            _ => "run-R6m2Hd8Wp3Qs9Ty4",
+        }
+    }
+
     fn sample_run(profile_id: &str, kind: TaskRunKind, status: TaskRunStatus) -> TaskRunSummary {
         TaskRunSummary {
-            run_id: format!("run-{profile_id}"),
+            run_id: sample_run_id(profile_id).to_string(),
             profile_id: profile_id.to_string(),
             kind,
             trigger: TaskRunTrigger::Schedule,
@@ -201,7 +209,7 @@ mod tests {
             &query,
             vec![
                 TaskRunSummary {
-                    run_id: "run-1".to_string(),
+                    run_id: "run-H6r2Lp8XmQ4Tn7Vc".to_string(),
                     created_at: 1,
                     ..sample_run(
                         "default",
@@ -210,7 +218,7 @@ mod tests {
                     )
                 },
                 TaskRunSummary {
-                    run_id: "run-2".to_string(),
+                    run_id: "run-J5w3Ns9Qa1Ze6Ru2".to_string(),
                     created_at: 2,
                     ..sample_run(
                         "default",
@@ -222,8 +230,11 @@ mod tests {
         );
 
         assert_eq!(response.runs.len(), 1);
-        assert_eq!(response.runs[0].run_id, "run-2");
-        assert_eq!(response.next_cursor.as_deref(), Some("run-2"));
+        assert_eq!(response.runs[0].run_id, "run-J5w3Ns9Qa1Ze6Ru2");
+        assert_eq!(
+            response.next_cursor.as_deref(),
+            Some("run-J5w3Ns9Qa1Ze6Ru2")
+        );
         assert_eq!(response.summary.total_runs, 2);
         assert_eq!(response.summary.running_runs, 1);
     }
