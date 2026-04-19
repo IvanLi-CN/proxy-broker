@@ -443,13 +443,11 @@ impl SqliteStore {
             sqlx::query(
                 r#"
                 UPDATE proxy_import_sync_configs
-                SET import_id = ?1, source_type = ?2, source_value = ?3
+                SET import_id = ?1
                 WHERE import_id = ?4
                 "#,
             )
             .bind(&next_import_id)
-            .bind(&record.source_identity.source_type)
-            .bind(&next_source_value)
             .bind(&record.import_id)
             .execute(&mut *tx)
             .await?;
@@ -3620,6 +3618,122 @@ mod tests {
                 .expect("legacy sync config lookup should succeed")
                 .is_none(),
             "legacy import-keyed sync config should be removed after merge"
+        );
+
+        let _ = tokio::fs::remove_file(path).await;
+    }
+
+    #[tokio::test]
+    async fn open_keeps_sync_config_source_when_legacy_inventory_import_rewrites_import_id() {
+        let path = temp_store_path();
+        let bootstrap = SqliteStore::open(&path)
+            .await
+            .expect("current sqlite schema should bootstrap");
+        drop(bootstrap);
+
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(&path)
+                    .create_if_missing(true),
+            )
+            .await
+            .expect("sqlite should open for legacy inventory sync seed");
+
+        sqlx::query("INSERT INTO profiles (profile_id, created_at) VALUES (?1, ?2)")
+            .bind("Tavily")
+            .bind(1_i64)
+            .execute(&pool)
+            .await
+            .expect("profile row should seed");
+
+        let legacy_import_id = "520ab27d-d226-59e7-9b29-47612c9c4fde";
+        let source_url = "https://example.com/tavily.yaml";
+        let stable_import_id = ids::stable_import_id(
+            &ProxyScope::profile("Tavily").key(),
+            &ProxyImportSourceIdentity::from_source(&SubscriptionSource::Url(
+                source_url.to_string(),
+            ))
+            .key(),
+        );
+
+        sqlx::query(
+            r#"
+            INSERT INTO proxy_imports (
+              import_id, name, import_kind, source_scope_type, source_scope_profile_id,
+              source_type, source_value, allocation_scope_type, allocation_scope_profile_id,
+              created_at, updated_at
+            )
+            VALUES (?1, NULL, 'subscription', 'profile', 'Tavily', 'inventory', ?1, 'profile', 'Tavily', 10, 20)
+            "#,
+        )
+        .bind(legacy_import_id)
+        .execute(&pool)
+        .await
+        .expect("legacy inventory import should seed");
+
+        sqlx::query(
+            r#"
+            INSERT INTO proxy_import_sync_configs (
+              import_id, profile_id, source_type, source_value, enabled, sync_every_sec, full_refresh_every_sec,
+              last_sync_due_at, last_sync_started_at, last_sync_finished_at,
+              last_full_refresh_due_at, last_full_refresh_started_at, last_full_refresh_finished_at,
+              updated_at
+            )
+            VALUES (?1, 'Tavily', 'url', ?2, 1, 600, 86400, 1, 2, 3, 4, 5, 6, 7)
+            "#,
+        )
+        .bind(legacy_import_id)
+        .bind(source_url)
+        .execute(&pool)
+        .await
+        .expect("legacy import-keyed sync config should seed");
+
+        sqlx::query(
+            r#"
+            INSERT INTO proxy_import_sync_configs (
+              import_id, profile_id, source_type, source_value, enabled, sync_every_sec, full_refresh_every_sec,
+              last_sync_due_at, last_sync_started_at, last_sync_finished_at,
+              last_full_refresh_due_at, last_full_refresh_started_at, last_full_refresh_finished_at,
+              updated_at
+            )
+            VALUES (?1, 'Tavily', 'url', ?2, 1, 600, 86400, 11, 12, 13, 14, 15, 16, 17)
+            "#,
+        )
+        .bind(&stable_import_id)
+        .bind(source_url)
+        .execute(&pool)
+        .await
+        .expect("stable sync config should seed");
+
+        pool.close().await;
+
+        let store = SqliteStore::open(&path)
+            .await
+            .expect("sqlite store should keep sync source parseable during short-id migration");
+
+        let configs = store
+            .list_proxy_import_sync_configs_for_profile("Tavily")
+            .await
+            .expect("sync configs should list");
+        assert_eq!(
+            configs.len(),
+            1,
+            "legacy import-keyed sync config should merge into stable short-id row"
+        );
+        assert_eq!(configs[0].import_id, stable_import_id);
+        match &configs[0].source {
+            SubscriptionSource::Url(value) => assert_eq!(value, source_url),
+            other => panic!("unexpected sync source after migration: {other:?}"),
+        }
+        assert!(
+            store
+                .get_proxy_import_sync_config(legacy_import_id)
+                .await
+                .expect("legacy sync config lookup should succeed")
+                .is_none(),
+            "legacy inventory-keyed sync config should be removed after merge"
         );
 
         let _ = tokio::fs::remove_file(path).await;
