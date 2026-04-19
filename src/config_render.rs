@@ -1,15 +1,13 @@
 use anyhow::Context;
 use std::{collections::HashMap, net::IpAddr};
-use uuid::Uuid;
 
-use crate::models::{ProxyNode, SessionRecord};
+use crate::{
+    ids,
+    models::{ProxyNode, SessionRecord},
+};
 
 pub(crate) fn dedicated_ip_proxy_name(proxy_name: &str, ip: &str) -> String {
-    let key = format!("{proxy_name}|{ip}");
-    let digest = Uuid::new_v5(&Uuid::NAMESPACE_URL, key.as_bytes())
-        .simple()
-        .to_string();
-    format!("broker-ip-{digest}")
+    ids::stable_dedicated_ip_proxy_name(proxy_name, ip)
 }
 
 pub fn render_payload(
@@ -104,7 +102,7 @@ mod tests {
 
     fn sample_session(listen: &str) -> SessionRecord {
         SessionRecord {
-            session_id: "session-1".to_string(),
+            session_id: "sess-A7c2Kp9LmQ4RsT1v".to_string(),
             listen: listen.to_string(),
             port: 20000,
             selected_ip: "1.1.1.1".to_string(),

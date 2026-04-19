@@ -6,6 +6,10 @@
 - Machine identity comes from owner-scoped API keys sent as:
   - `Authorization: Bearer pbk_<key_id>_<random>`
   - `X-API-Key: pbk_<key_id>_<random>`
+- Generated IDs are opaque short strings:
+  - `key_id`: `key-<16 alnum chars>`
+  - API key secret random fragment: `<24 alnum chars>` (underscore-safe)
+  - `session_id` / `run_id` / `event_id` / `import_id` / `node_id` use fixed prefixes plus a 16-character alnum body
 - `development` mode ignores incoming identity headers and forces the configured development principal.
 - When a human identity and an API key are both present on the same request, the service rejects the request with `authentication_required` (401).
 
@@ -131,6 +135,7 @@
   - this is the canonical admin list surface for `/proxies`
   - subscription imports are managed only at the import level, not per node
   - list primary labels should render `name` first and fall back to `import_id`
+  - `import_id` is an opaque short string (`imp-<16 alnum chars>`)
 - Error:
   - `authentication_required` (401)
   - `admin_required` (403)
@@ -158,6 +163,7 @@
 - Notes:
   - kept for compatibility and internal detail views
   - no longer the primary admin allocation surface
+  - `node_id` is an opaque short string (`node-<16 alnum chars>`)
 - Error:
   - `authentication_required` (401)
   - `admin_required` (403)
@@ -393,6 +399,7 @@
   - `session_id`, `listen`, `port`, `selected_ip`, `proxy_name`
   - `listen` echoes the configured session listener bind IP (`127.0.0.1` for
     local runs, `0.0.0.0` for wildcard deployments)
+  - `session_id` is an opaque short string (`sess-<16 alnum chars>`)
 - Error:
   - `authentication_required` (401)
   - `admin_required` (403) for non-admin human callers
@@ -482,6 +489,7 @@
   - `api_keys[]`
   - each item contains `key_id`, `name`, `prefix`, `created_by`, `owner_subject`, `profile_scope`, `created_at`, `last_used_at?`, `revoked_at?`
   - `profile_id?` is a compatibility field and only appears when `profile_scope.kind=selected_profiles` with exactly one selected profile
+  - `key_id` is an opaque short string (`key-<16 alnum chars>`)
 - Error:
   - `authentication_required` (401)
   - `admin_required` (403)
@@ -500,6 +508,7 @@
 - Notes:
   - the key owner is always the current `principal.subject`
   - `secret` is only returned on create
+  - returned secrets use `pbk_<key_id>_<random>` where `<random>` is a 24-character underscore-safe alnum fragment
 - Error:
   - `authentication_required` (401)
   - `admin_required` (403)

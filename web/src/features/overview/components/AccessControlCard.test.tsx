@@ -27,10 +27,10 @@ describe("AccessControlCard", () => {
         }}
         apiKeys={[
           {
-            key_id: "key-1",
+            key_id: "key-Q4w8Er2Ty6Ui1Op5",
             profile_id: "edge-jp",
             name: "deploy-bot",
-            prefix: "pbk_key-1_prefix",
+            prefix: "pbk_key-Q4w8Er2Ty6",
             created_by: "admin@example.com",
             owner_subject: "admin@example.com",
             profile_scope: {
@@ -63,7 +63,7 @@ describe("AccessControlCard", () => {
     });
 
     await user.click(screen.getByRole("button", { name: /revoke/i }));
-    expect(onRevokeApiKey).toHaveBeenCalledWith("key-1");
+    expect(onRevokeApiKey).toHaveBeenCalledWith("key-Q4w8Er2Ty6Ui1Op5");
   });
 
   it("creates all-profile keys when the checkbox is enabled", async () => {
@@ -129,10 +129,10 @@ describe("AccessControlCard", () => {
         }}
         apiKeys={[
           {
-            key_id: "key-1",
+            key_id: "key-L7k3Nm9Qa2Ws5Ed8",
             profile_id: null,
             name: "multi-bot",
-            prefix: "pbk_key-1_prefix",
+            prefix: "pbk_key-L7k3Nm9Qa2",
             created_by: "admin@example.com",
             owner_subject: "admin@example.com",
             profile_scope: {

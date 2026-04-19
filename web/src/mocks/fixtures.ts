@@ -54,7 +54,7 @@ export const ipResultsFixture: ExtractIpResponse = {
 };
 
 export const sessionFixture: OpenSessionResponse = {
-  session_id: "sess_tokyo_01",
+  session_id: "sess-A7c2Kp9LmQ4RsT1v",
   listen: "127.0.0.1:10080",
   port: 10080,
   selected_ip: "203.0.113.10",
@@ -65,7 +65,7 @@ export const batchFixture: OpenBatchResponse = {
   sessions: [
     sessionFixture,
     {
-      session_id: "sess_osaka_02",
+      session_id: "sess-Q8n3Va1Zx5Mw2Lp7",
       listen: "127.0.0.1:10081",
       port: 10081,
       selected_ip: "203.0.113.88",
@@ -77,7 +77,7 @@ export const batchFixture: OpenBatchResponse = {
 export const sessionsFixture: ListSessionsResponse = {
   sessions: [
     {
-      session_id: "sess_tokyo_01",
+      session_id: "sess-A7c2Kp9LmQ4RsT1v",
       listen: "127.0.0.1:10080",
       port: 10080,
       selected_ip: "203.0.113.10",
@@ -85,7 +85,7 @@ export const sessionsFixture: ListSessionsResponse = {
       created_at: 1_741_748_460,
     },
     {
-      session_id: "sess_osaka_02",
+      session_id: "sess-Q8n3Va1Zx5Mw2Lp7",
       listen: "127.0.0.1:10081",
       port: 10081,
       selected_ip: "203.0.113.88",
@@ -107,7 +107,7 @@ export const tasksFixture: TaskListResponse = {
   },
   runs: [
     {
-      run_id: "run_live_sync",
+      run_id: "run-H6r2Lp8XmQ4Tn7Vc",
       profile_id: "default",
       kind: "subscription_sync",
       trigger: "schedule",
@@ -123,7 +123,7 @@ export const tasksFixture: TaskListResponse = {
       error_message: null,
     },
     {
-      run_id: "run_post_load",
+      run_id: "run-J5w3Ns9Qa1Ze6Ru2",
       profile_id: "default",
       kind: "metadata_refresh_incremental",
       trigger: "post_load",
@@ -139,7 +139,7 @@ export const tasksFixture: TaskListResponse = {
       error_message: null,
     },
     {
-      run_id: "run_full_ok",
+      run_id: "run-P4v8Kb2Yt7Lm1Cx5",
       profile_id: "edge-jp",
       kind: "metadata_refresh_full",
       trigger: "schedule",
@@ -165,7 +165,7 @@ export const tasksFixture: TaskListResponse = {
 
 export const taskDetailFixture: TaskRunDetail = {
   run: tasksFixture.runs[0] ?? {
-    run_id: "run_fallback",
+    run_id: "run-R6m2Hd8Wp3Qs9Ty4",
     profile_id: "default",
     kind: "subscription_sync",
     trigger: "schedule",
@@ -182,8 +182,8 @@ export const taskDetailFixture: TaskRunDetail = {
   },
   events: [
     {
-      event_id: "evt_1",
-      run_id: "run_live_sync",
+      event_id: "evt-C8q3Ls7Vz1Np5Dx9",
+      run_id: "run-H6r2Lp8XmQ4Tn7Vc",
       at: recentTaskBaseSec - 9,
       level: "info",
       stage: "loading_subscription",
@@ -191,8 +191,8 @@ export const taskDetailFixture: TaskRunDetail = {
       payload_json: null,
     },
     {
-      event_id: "evt_2",
-      run_id: "run_live_sync",
+      event_id: "evt-F2t6Mw0Rb4Kj8Yu3",
+      run_id: "run-H6r2Lp8XmQ4Tn7Vc",
       at: recentTaskBaseSec - 4,
       level: "info",
       stage: "probing",

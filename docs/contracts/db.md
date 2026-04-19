@@ -47,6 +47,7 @@
   - `proxy_name TEXT NOT NULL`
   - `created_at INTEGER NOT NULL`
   - PK `(profile_id, session_id)`
+  - generated `session_id` values are opaque short strings: `sess-<16 alnum chars>`
 
 - `proxy_inventory_nodes`
   - `node_id TEXT PRIMARY KEY`
@@ -66,6 +67,7 @@
   - `updated_at INTEGER NOT NULL`
   - indexes on `(import_id)`, `(source_scope_kind, source_scope_profile_id)` and `(allocation_scope_kind, allocation_scope_profile_id)`
   - unique index on `(import_id, proxy_name)`
+  - generated `node_id` values are deterministic short strings: `node-<16 alnum chars>`
 
 - `proxy_imports`
   - `import_id TEXT PRIMARY KEY`
@@ -80,6 +82,7 @@
   - `created_at INTEGER NOT NULL`
   - `updated_at INTEGER NOT NULL`
   - indexes on `(source_scope_type, source_scope_profile_id)` and `(allocation_scope_type, allocation_scope_profile_id)`
+  - generated `import_id` values are opaque short strings: stable sources use deterministic `imp-<16 alnum chars>`, manual imports use a fresh random `imp-<16 alnum chars>`
 
 - `proxy_import_sync_configs`
   - `import_id TEXT PRIMARY KEY`
@@ -97,6 +100,7 @@
   - `last_full_refresh_finished_at INTEGER`
   - `updated_at INTEGER NOT NULL`
   - index on `(profile_id)`
+  - `import_id` follows the same short-ID contract as `proxy_imports.import_id`
 
 - `profile_proxy_settings`
   - `profile_id TEXT PRIMARY KEY`
@@ -113,6 +117,7 @@
   - `scope_kind TEXT NOT NULL`
   - `created_at INTEGER NOT NULL`
   - `last_used_at INTEGER`
+  - generated `key_id` values are opaque short strings: `key-<16 alnum chars>`
   - `revoked_at INTEGER`
   - unique index on `secret_hash`
 
@@ -130,6 +135,7 @@
 - `api_keys` 只保存 `secret_prefix`、`secret_salt` 与 `secret_hash`，不保存明文 secret。
 - `api_keys.created_by_subject` 是 API Key 的 canonical owner；`scope_kind + api_key_profiles` 共同表示授权范围。
 - 历史单 profile API Key 会在迁移时自动回填为 `scope_kind=selected_profiles`，并在 `api_key_profiles` 中补一条 legacy `profile_id` 关联。
+- 旧 UUID 形状的 `sessions` / `task_runs` / `task_run_events` / `proxy_imports` / `proxy_inventory_nodes` / `proxy_import_sync_configs` 会在升级时一次性改写到新短 ID；历史 API keys 会在升级时被清空并要求重发。
 - `last_used_at` 在成功完成 API Key 认证后更新，`revoked_at` 用于软撤销。
 
 - `proxy_imports` 是原始导入批次的真相源；`proxy_inventory_nodes` 是导入批次下的节点明细层，并通过 `import_id` 关联。

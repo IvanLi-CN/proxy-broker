@@ -17,7 +17,6 @@ use futures_util::{StreamExt, TryStreamExt, stream};
 use maxminddb::{Reader, geoip2};
 use serde::Deserialize;
 use tokio::sync::{Mutex as TokioMutex, broadcast};
-use uuid::Uuid;
 
 use crate::{
     auth::{Principal, constant_time_eq, hash_secret, issue_api_key, parse_api_key_secret},
@@ -28,6 +27,7 @@ use crate::{
         DEFAULT_PROBE_TIMEOUT_MS, DEFAULT_PROBE_TTL_SEC, DEFAULT_SESSION_LISTEN_IP,
     },
     error::{BrokerError, BrokerResult},
+    ids,
     models::{
         ApiKeyProfileScope, ApiKeyProfileScopeKind, CreateApiKeyRequest, CreateApiKeyResponse,
         CreateProfileResponse, ExtractIpItem, ExtractIpRequest, ExtractIpResponse, IpRecord,
@@ -903,7 +903,7 @@ impl BrokerService {
         scope: TaskRunScope,
     ) -> BrokerResult<TaskRunRecord> {
         let run = TaskRunRecord {
-            run_id: uuid::Uuid::new_v4().to_string(),
+            run_id: ids::random_task_run_id(),
             profile_id: profile_id.to_string(),
             kind,
             trigger,
@@ -962,7 +962,7 @@ impl BrokerService {
         payload_json: Option<serde_json::Value>,
     ) -> BrokerResult<()> {
         let event = TaskRunEventRecord {
-            event_id: uuid::Uuid::new_v4().to_string(),
+            event_id: ids::random_task_event_id(),
             run_id: run.run_id.clone(),
             profile_id: run.profile_id.clone(),
             at: now_epoch_sec(),
@@ -1264,24 +1264,11 @@ impl BrokerService {
         source_scope: &ProxyScope,
         source_identity: &ProxyImportSourceIdentity,
     ) -> String {
-        Uuid::new_v5(
-            &Uuid::NAMESPACE_URL,
-            format!(
-                "proxy-broker:import:{}:{}",
-                source_scope.key(),
-                source_identity.key()
-            )
-            .as_bytes(),
-        )
-        .to_string()
+        ids::stable_import_id(&source_scope.key(), &source_identity.key())
     }
 
     fn proxy_inventory_node_id(&self, import_id: &str, proxy_name: &str) -> String {
-        Uuid::new_v5(
-            &Uuid::NAMESPACE_URL,
-            format!("proxy-broker:import-node:{import_id}:{proxy_name}").as_bytes(),
-        )
-        .to_string()
+        ids::stable_proxy_inventory_node_id(import_id, proxy_name)
     }
 
     fn generated_manual_import_name(&self, nodes: &[ProxyNode]) -> Option<String> {
@@ -1472,7 +1459,7 @@ impl BrokerService {
         let (nodes, warnings) = subscription::load_from_content(content)
             .await
             .map_err(|_| BrokerError::SubscriptionInvalid)?;
-        let import_id = Uuid::new_v4().to_string();
+        let import_id = ids::random_import_id();
         self.persist_imported_inventory(
             source_scope,
             import_id.clone(),
@@ -2220,7 +2207,7 @@ impl BrokerService {
             .await
             .context("failed to read mmdb body")?;
 
-        let temp_file = geo_dir.join(format!("country.mmdb.tmp-{}", uuid::Uuid::new_v4()));
+        let temp_file = geo_dir.join(format!("country.mmdb.tmp-{}", ids::random_temp_suffix()));
         tokio::fs::write(&temp_file, bytes)
             .await
             .with_context(|| format!("failed to write temp mmdb: {}", temp_file.display()))?;
@@ -4255,7 +4242,7 @@ fn prepare_session(
     let now = now_epoch_sec();
 
     Ok(SessionRecord {
-        session_id: uuid::Uuid::new_v4().to_string(),
+        session_id: ids::random_session_id(),
         listen: listen_ip.to_string(),
         port,
         selected_ip: ip,
@@ -4801,7 +4788,7 @@ mod tests {
     async fn write_subscription_file(content: &str) -> String {
         let path = std::env::temp_dir().join(format!(
             "proxy-broker-subscription-{}.yaml",
-            uuid::Uuid::new_v4()
+            ids::random_temp_suffix()
         ));
         tokio::fs::write(&path, content)
             .await

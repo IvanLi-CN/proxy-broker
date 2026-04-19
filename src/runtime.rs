@@ -17,6 +17,8 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use tokio::{process::Child, process::Command, sync::Mutex, time::sleep};
 
+use crate::ids;
+
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
@@ -106,9 +108,7 @@ impl ManagedMihomoRuntime {
         if readable.is_empty() {
             readable = "profile".to_string();
         }
-        let stable_id = uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_URL, profile_id.as_bytes())
-            .simple()
-            .to_string();
+        let stable_id = ids::stable_profile_safe_suffix(profile_id);
         format!("{readable}-{stable_id}")
     }
 

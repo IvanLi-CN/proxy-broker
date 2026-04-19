@@ -699,7 +699,7 @@ mod tests {
         let now = now_epoch_sec();
         store
             .upsert_profile_sync_config(&ProfileSyncConfig {
-                import_id: "import::default".to_string(),
+                import_id: "imp-M7n2Qa8Wx4Rp7Ts1".to_string(),
                 profile_id: "default".to_string(),
                 source: SubscriptionSource::Url("https://example.com/sub".to_string()),
                 enabled: true,
@@ -717,7 +717,7 @@ mod tests {
             .expect("sync config seed should succeed");
         store
             .insert_task_run(&crate::models::TaskRunRecord {
-                run_id: "run_1".to_string(),
+                run_id: "run-H6r2Lp8XmQ4Tn7Vc".to_string(),
                 profile_id: "default".to_string(),
                 kind: TaskRunKind::SubscriptionSync,
                 trigger: TaskRunTrigger::Schedule,
@@ -794,7 +794,7 @@ mod tests {
     #[test]
     fn run_upsert_streaming_updates_currently_visible_rows() {
         let run = TaskRunSummary {
-            run_id: "run-1".to_string(),
+            run_id: "run-J5w3Ns9Qa1Ze6Ru2".to_string(),
             profile_id: "default".to_string(),
             kind: TaskRunKind::SubscriptionSync,
             trigger: TaskRunTrigger::Schedule,
@@ -819,7 +819,7 @@ mod tests {
     #[test]
     fn run_upsert_streaming_keeps_off_scope_runs_out_of_filtered_feed() {
         let run = TaskRunSummary {
-            run_id: "run-2".to_string(),
+            run_id: "run-P4v8Kb2Yt7Lm1Cx5".to_string(),
             profile_id: "other".to_string(),
             kind: TaskRunKind::SubscriptionSync,
             trigger: TaskRunTrigger::Schedule,
@@ -845,7 +845,7 @@ mod tests {
     fn snapshot_visible_run_ids_tracks_rebuilt_snapshot_rows() {
         let runs = vec![
             TaskRunSummary {
-                run_id: "run-1".to_string(),
+                run_id: "run-J5w3Ns9Qa1Ze6Ru2".to_string(),
                 profile_id: "default".to_string(),
                 kind: TaskRunKind::SubscriptionSync,
                 trigger: TaskRunTrigger::Schedule,
@@ -861,7 +861,7 @@ mod tests {
                 error_message: None,
             },
             TaskRunSummary {
-                run_id: "run-2".to_string(),
+                run_id: "run-P4v8Kb2Yt7Lm1Cx5".to_string(),
                 profile_id: "default".to_string(),
                 kind: TaskRunKind::MetadataRefreshFull,
                 trigger: TaskRunTrigger::Schedule,
@@ -881,8 +881,8 @@ mod tests {
         let visible_run_ids = snapshot_visible_run_ids(&runs);
 
         assert_eq!(visible_run_ids.len(), 2);
-        assert!(visible_run_ids.contains("run-1"));
-        assert!(visible_run_ids.contains("run-2"));
+        assert!(visible_run_ids.contains("run-J5w3Ns9Qa1Ze6Ru2"));
+        assert!(visible_run_ids.contains("run-P4v8Kb2Yt7Lm1Cx5"));
     }
 
     #[test]
@@ -892,7 +892,7 @@ mod tests {
             ..TaskListQuery::default()
         };
         let mut matching_runs = vec![TaskRunSummary {
-            run_id: "run-1".to_string(),
+            run_id: "run-J5w3Ns9Qa1Ze6Ru2".to_string(),
             profile_id: "default".to_string(),
             kind: TaskRunKind::SubscriptionSync,
             trigger: TaskRunTrigger::Schedule,
@@ -927,7 +927,7 @@ mod tests {
             ..TaskListQuery::default()
         };
         let mut matching_runs = vec![TaskRunSummary {
-            run_id: "run-1".to_string(),
+            run_id: "run-J5w3Ns9Qa1Ze6Ru2".to_string(),
             profile_id: "default".to_string(),
             kind: TaskRunKind::SubscriptionSync,
             trigger: TaskRunTrigger::Schedule,

@@ -83,6 +83,9 @@ Then call profile business endpoints with either:
 
 - `Authorization: Bearer pbk_<key_id>_<random>`
 - `X-API-Key: pbk_<key_id>_<random>`
+- Generated machine IDs are opaque short strings:
+  - `key_id`: `key-<16 alnum chars>`
+  - `<random>`: `24` underscore-safe alnum chars
 
 See [docs/deployment.md](docs/deployment.md) for the full route matrix, local
 development mode, and a Traefik Forward Auth example.
@@ -405,7 +408,7 @@ Use `"kind": "all_profiles"` to issue a key that can access both current and fut
 
 ```bash
 curl -X POST http://127.0.0.1:8080/api/v1/profiles/default/refresh \
-  -H "Authorization: Bearer pbk_<key_id>_<random>" \
+  -H "Authorization: Bearer pbk_key-Q4w8Er2Ty6Ui1Op5_A1b2C3d4E5f6G7h8J9kLm2No" \
   -H "Content-Type: application/json" \
   -d '{"force":true}'
 ```

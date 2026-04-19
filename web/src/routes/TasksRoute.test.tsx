@@ -152,7 +152,7 @@ describe("TasksRoute", () => {
           },
           runs: [
             {
-              run_id: "run-1",
+              run_id: "run-H6r2Lp8XmQ4Tn7Vc",
               profile_id: "default",
               kind: "subscription_sync",
               trigger: "schedule",
@@ -207,7 +207,7 @@ describe("TasksRoute", () => {
     try {
       vi.setSystemTime(new Date("2026-03-23T00:00:00Z"));
       const run = {
-        run_id: "run-1",
+        run_id: "run-H6r2Lp8XmQ4Tn7Vc",
         profile_id: "default",
         kind: "subscription_sync",
         trigger: "schedule",
@@ -253,7 +253,7 @@ describe("TasksRoute", () => {
       };
 
       render(<TasksRoute />);
-      expect(latestTasksPageProps?.selectedRunId).toBe("run-1");
+      expect(latestTasksPageProps?.selectedRunId).toBe("run-H6r2Lp8XmQ4Tn7Vc");
 
       act(() => {
         vi.advanceTimersByTime(60_000);
@@ -263,7 +263,7 @@ describe("TasksRoute", () => {
         profile_id: "default",
         since: 1773619200,
       });
-      expect(latestTasksPageProps?.selectedRunId).toBe("run-1");
+      expect(latestTasksPageProps?.selectedRunId).toBe("run-H6r2Lp8XmQ4Tn7Vc");
     } finally {
       vi.useRealTimers();
     }
@@ -304,7 +304,7 @@ describe("TasksRoute", () => {
     try {
       vi.setSystemTime(new Date("2026-03-23T00:00:00Z"));
       const run = {
-        run_id: "run-1",
+        run_id: "run-H6r2Lp8XmQ4Tn7Vc",
         profile_id: "default",
         kind: "subscription_sync",
         trigger: "schedule",
@@ -352,7 +352,7 @@ describe("TasksRoute", () => {
 
       const view = render(<TasksRoute />);
       await act(async () => {});
-      expect(latestTasksPageProps?.selectedRunId).toBe("run-1");
+      expect(latestTasksPageProps?.selectedRunId).toBe("run-H6r2Lp8XmQ4Tn7Vc");
       expect(latestTasksPageProps?.selectedRunDetail).toEqual({ run, events: [] });
 
       outletContext = {

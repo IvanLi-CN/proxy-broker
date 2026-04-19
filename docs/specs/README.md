@@ -28,3 +28,4 @@
 | jrhgg | 全局代理池、Profile 分配与 Proxies 工作区 | 已完成 | `jrhgg-global-proxy-pool-and-allocation/SPEC.md` | 2026-04-12 | inventory layer、Proxies 工作区、global/profile 分配、profile 级 use_global_proxies 与 Storybook 视觉证据 |
 | qvbmc | 代理订阅归属与原始导入级分配 | 已完成 | `qvbmc-proxy-import-allocation/SPEC.md` | 2026-04-19 | import-level allocation、multi-import coexistence、import sync config；补齐旧 SQLite 升级顺序热修复 |
 | wfy5z | 用户拥有的多 Profile / All Profiles API Key | 已实现（本地已验证） | `wfy5z-user-owned-api-key-scopes/SPEC.md` | 2026-04-12 | owner-scoped key model、selected/all profiles scope、全局 key-management API、视觉证据已生成 |
+| 2e86e | 短 ID / NanoID 方案切换并移除主动 UUID 使用 | 已完成 | `2e86e-short-id-without-uuid/SPEC.md` | 2026-04-19 | PR #37 已完成 review、CI 与 spec drift 收口，merge-ready |

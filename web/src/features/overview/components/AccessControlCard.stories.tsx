@@ -23,10 +23,10 @@ const meta = {
     },
     apiKeys: [
       {
-        key_id: "key-1",
+        key_id: "key-Q4w8Er2Ty6Ui1Op5",
         profile_id: "edge-jp",
         name: "deploy-bot",
-        prefix: "pbk_key-1_123456789",
+        prefix: "pbk_key-Q4w8Er2Ty6",
         created_by: "admin@example.com",
         owner_subject: "admin@example.com",
         profile_scope: {
@@ -94,10 +94,10 @@ export const AllProfiles: Story = {
   args: {
     apiKeys: [
       {
-        key_id: "key-3",
+        key_id: "key-Z4x6Cv8Bn1Mq3Rt5",
         profile_id: null,
         name: "fleet-bot",
-        prefix: "pbk_key-3_scopeall",
+        prefix: "pbk_key-Z4x6Cv8Bn1",
         created_by: "admin@example.com",
         owner_subject: "admin@example.com",
         profile_scope: {
@@ -131,10 +131,10 @@ export const WithFreshSecret: Story = {
   args: {
     latestCreatedKey: {
       api_key: {
-        key_id: "key-2",
+        key_id: "key-L7k3Nm9Qa2Ws5Ed8",
         profile_id: "edge-jp",
         name: "ci-runner",
-        prefix: "pbk_key-2_abcdefghi",
+        prefix: "pbk_key-L7k3Nm9Qa2",
         created_by: "admin@example.com",
         owner_subject: "admin@example.com",
         profile_scope: {
@@ -145,7 +145,7 @@ export const WithFreshSecret: Story = {
         last_used_at: null,
         revoked_at: null,
       },
-      secret: "pbk_key-2_abcd1234efgh5678",
+      secret: "pbk_key-L7k3Nm9Qa2Ws5Ed8_P2q4R6s8T0u2V4w6X8y0Za1B",
     },
   },
 };

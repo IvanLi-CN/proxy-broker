@@ -55,10 +55,10 @@ const meta = {
     },
     apiKeys: [
       {
-        key_id: "key-1",
+        key_id: "key-Z4x6Cv8Bn1Mq3Rt5",
         profile_id: "default",
         name: "deploy-bot",
-        prefix: "pbk_key-1_123456789",
+        prefix: "pbk_key-Z4x6Cv8Bn1",
         created_by: "admin@example.com",
         owner_subject: "admin@example.com",
         profile_scope: {
@@ -127,10 +127,10 @@ export const AllProfilesKeyState: Story = {
     },
     apiKeys: [
       {
-        key_id: "key-all",
+        key_id: "key-R2p8Ls4Dw7Hy1Ku6",
         profile_id: null,
         name: "fleet-bot",
-        prefix: "pbk_key-all_scopeall",
+        prefix: "pbk_key-R2p8Ls4Dw7",
         created_by: "dev@local",
         owner_subject: "dev@local",
         profile_scope: {
