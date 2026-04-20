@@ -370,6 +370,24 @@ impl SqliteStore {
     async fn migrate_short_ids(&self) -> anyhow::Result<()> {
         let mut tx = self.pool.begin().await?;
 
+        #[derive(Clone)]
+        struct SyncTargetImport {
+            target_import_id: String,
+            source_identity: ProxyImportSourceIdentity,
+        }
+
+        #[derive(Clone)]
+        struct PlannedImportMigration {
+            original_import_id: String,
+            next_record: ProxyImportRecord,
+        }
+
+        #[derive(Clone)]
+        struct PlannedInventoryMigration {
+            original_node_id: String,
+            next_record: ProxyInventoryRecord,
+        }
+
         let sync_config_rows = sqlx::query(
             r#"
             SELECT import_id, profile_id, source_type, source_value, enabled, sync_every_sec, full_refresh_every_sec,
@@ -385,11 +403,18 @@ impl SqliteStore {
         let mut sync_target_import_ids = HashMap::new();
         for row in sync_config_rows {
             let config = map_proxy_import_sync_config_row(row)?;
+            let source_identity = ProxyImportSourceIdentity::from_source(&config.source);
             let target_import_id = ids::stable_import_id(
                 &ProxyScope::profile(&config.profile_id).key(),
-                &ProxyImportSourceIdentity::from_source(&config.source).key(),
+                &source_identity.key(),
             );
-            sync_target_import_ids.insert(config.import_id, target_import_id);
+            sync_target_import_ids.insert(
+                config.import_id,
+                SyncTargetImport {
+                    target_import_id,
+                    source_identity,
+                },
+            );
         }
 
         let import_rows = sqlx::query(
@@ -403,89 +428,114 @@ impl SqliteStore {
         )
         .fetch_all(&mut *tx)
         .await?;
+        let import_records = import_rows
+            .into_iter()
+            .map(map_proxy_import_row)
+            .collect::<Result<Vec<_>, _>>()?;
         let mut reserved_import_ids = HashSet::new();
-        for row in import_rows {
-            let record = map_proxy_import_row(row)?;
+        for record in &import_records {
             let is_manual = record.source_identity.source_type == "manual";
             let already_new_manual =
                 ids::is_prefixed_short_id(&record.import_id, "imp", ids::ENTITY_ID_BODY_LEN)
                     && record.source_identity.source_value == record.import_id;
-            let next_import_id = if is_manual {
-                if already_new_manual {
-                    record.import_id.clone()
+            if is_manual && !already_new_manual {
+                continue;
+            }
+            let next_import_id =
+                if record.import_kind == crate::models::ProxyImportKind::Subscription {
+                    sync_target_import_ids
+                        .get(&record.import_id)
+                        .map(|target| target.target_import_id.clone())
+                        .unwrap_or_else(|| {
+                            ids::stable_import_id(
+                                &record.source_scope.key(),
+                                &record.source_identity.key(),
+                            )
+                        })
                 } else {
-                    reserve_unique_id(&mut reserved_import_ids, ids::random_import_id)
+                    ids::stable_import_id(&record.source_scope.key(), &record.source_identity.key())
+                };
+            reserved_import_ids.insert(next_import_id);
+        }
+
+        let mut import_migrations = HashMap::<String, Vec<PlannedImportMigration>>::new();
+        for record in import_records {
+            let is_manual = record.source_identity.source_type == "manual";
+            let already_new_manual =
+                ids::is_prefixed_short_id(&record.import_id, "imp", ids::ENTITY_ID_BODY_LEN)
+                    && record.source_identity.source_value == record.import_id;
+            let (next_import_id, next_source_identity) = if is_manual {
+                if already_new_manual {
+                    (record.import_id.clone(), record.source_identity.clone())
+                } else {
+                    (
+                        reserve_unique_id(&mut reserved_import_ids, ids::random_import_id),
+                        ProxyImportSourceIdentity {
+                            source_type: "manual".to_string(),
+                            source_value: String::new(),
+                        },
+                    )
                 }
             } else if record.import_kind == crate::models::ProxyImportKind::Subscription {
-                sync_target_import_ids
-                    .get(&record.import_id)
-                    .cloned()
-                    .unwrap_or_else(|| {
+                if let Some(target) = sync_target_import_ids.get(&record.import_id) {
+                    (
+                        target.target_import_id.clone(),
+                        target.source_identity.clone(),
+                    )
+                } else {
+                    (
                         ids::stable_import_id(
                             &record.source_scope.key(),
                             &record.source_identity.key(),
-                        )
-                    })
+                        ),
+                        record.source_identity.clone(),
+                    )
+                }
             } else {
-                ids::stable_import_id(&record.source_scope.key(), &record.source_identity.key())
+                (
+                    ids::stable_import_id(
+                        &record.source_scope.key(),
+                        &record.source_identity.key(),
+                    ),
+                    record.source_identity.clone(),
+                )
             };
-            anyhow::ensure!(
-                reserved_import_ids.insert(next_import_id.clone()),
-                "proxy import short-id migration collision for {}",
-                record.import_id
-            );
+            let mut next_record = record.clone();
+            next_record.import_id = next_import_id.clone();
+            next_record.source_identity = next_source_identity;
+            if is_manual {
+                next_record.source_identity.source_value = next_import_id.clone();
+            }
+            import_migrations
+                .entry(next_import_id)
+                .or_default()
+                .push(PlannedImportMigration {
+                    original_import_id: record.import_id,
+                    next_record,
+                });
+        }
 
-            let next_source_value = if is_manual {
-                next_import_id.clone()
-            } else {
-                record.source_identity.source_value.clone()
-            };
-
-            if next_import_id == record.import_id
-                && next_source_value == record.source_identity.source_value
-            {
-                continue;
+        let mut import_id_rewrites = HashMap::new();
+        for (target_import_id, plans) in import_migrations {
+            let mut merged = plans[0].next_record.clone();
+            for plan in plans.iter().skip(1) {
+                merged = merge_proxy_import_records(&merged, &plan.next_record, &target_import_id);
             }
 
-            sqlx::query(
-                r#"
-                UPDATE proxy_imports
-                SET import_id = ?1, source_type = ?2, source_value = ?3
-                WHERE import_id = ?4
-                "#,
-            )
-            .bind(&next_import_id)
-            .bind(&record.source_identity.source_type)
-            .bind(&next_source_value)
-            .bind(&record.import_id)
-            .execute(&mut *tx)
-            .await?;
+            persist_proxy_import(&mut tx, &merged).await?;
 
-            sqlx::query(
-                r#"
-                UPDATE proxy_inventory_nodes
-                SET import_id = ?1, source_type = ?2, source_value = ?3
-                WHERE import_id = ?4
-                "#,
-            )
-            .bind(&next_import_id)
-            .bind(&record.source_identity.source_type)
-            .bind(&next_source_value)
-            .bind(&record.import_id)
-            .execute(&mut *tx)
-            .await?;
+            for plan in plans {
+                import_id_rewrites
+                    .insert(plan.original_import_id.clone(), target_import_id.clone());
+                if plan.original_import_id == target_import_id {
+                    continue;
+                }
 
-            sqlx::query(
-                r#"
-                UPDATE proxy_import_sync_configs
-                SET import_id = ?1
-                WHERE import_id = ?4
-                "#,
-            )
-            .bind(&next_import_id)
-            .bind(&record.import_id)
-            .execute(&mut *tx)
-            .await?;
+                sqlx::query("DELETE FROM proxy_imports WHERE import_id = ?1")
+                    .bind(&plan.original_import_id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
         }
 
         let sync_rows = sqlx::query(
@@ -591,24 +641,86 @@ impl SqliteStore {
         )
         .fetch_all(&mut *tx)
         .await?;
-        let mut reserved_node_ids = HashSet::new();
+        let mut inventory_migrations = HashMap::<String, Vec<PlannedInventoryMigration>>::new();
         for row in inventory_rows {
             let record = map_proxy_inventory_row(row)?;
+            let next_import_id = import_id_rewrites
+                .get(&record.import_id)
+                .cloned()
+                .unwrap_or_else(|| record.import_id.clone());
             let next_node_id =
-                ids::stable_proxy_inventory_node_id(&record.import_id, &record.proxy_name);
-            anyhow::ensure!(
-                reserved_node_ids.insert(next_node_id.clone()),
-                "proxy inventory short-id migration collision for {}",
-                record.node_id
-            );
-            if next_node_id == record.node_id {
-                continue;
+                ids::stable_proxy_inventory_node_id(&next_import_id, &record.proxy_name);
+            let mut next_record = record.clone();
+            next_record.import_id = next_import_id;
+            next_record.node_id = next_node_id.clone();
+            inventory_migrations
+                .entry(next_node_id)
+                .or_default()
+                .push(PlannedInventoryMigration {
+                    original_node_id: record.node_id,
+                    next_record,
+                });
+        }
+
+        for (target_node_id, plans) in inventory_migrations {
+            let mut merged = plans[0].next_record.clone();
+            for plan in plans.iter().skip(1) {
+                merged = merge_proxy_inventory_records(&merged, &plan.next_record, &target_node_id);
             }
-            sqlx::query("UPDATE proxy_inventory_nodes SET node_id = ?1 WHERE node_id = ?2")
-                .bind(&next_node_id)
-                .bind(&record.node_id)
-                .execute(&mut *tx)
-                .await?;
+
+            let keeper_node_id = plans
+                .iter()
+                .find(|plan| plan.original_node_id == target_node_id)
+                .map(|plan| plan.original_node_id.clone())
+                .unwrap_or_else(|| plans[0].original_node_id.clone());
+
+            for plan in &plans {
+                if plan.original_node_id == keeper_node_id {
+                    continue;
+                }
+                sqlx::query("DELETE FROM proxy_inventory_nodes WHERE node_id = ?1")
+                    .bind(&plan.original_node_id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+
+            sqlx::query(
+                r#"
+                UPDATE proxy_inventory_nodes
+                SET import_id = ?1,
+                    node_id = ?2,
+                    source_scope_type = ?3,
+                    source_scope_profile_id = ?4,
+                    source_type = 'inventory',
+                    source_value = ?1,
+                    allocation_scope_type = ?5,
+                    allocation_scope_profile_id = ?6,
+                    proxy_name = ?7,
+                    proxy_type = ?8,
+                    server = ?9,
+                    resolved_ips_json = ?10,
+                    raw_proxy_json = ?11,
+                    created_at = ?12,
+                    updated_at = ?13
+                WHERE node_id = ?14
+                "#,
+            )
+            .bind(&merged.import_id)
+            .bind(&target_node_id)
+            .bind(merged.source_scope.kind())
+            .bind(merged.source_scope.profile_id())
+            .bind(merged.allocation_scope.kind())
+            .bind(merged.allocation_scope.profile_id())
+            .bind(&merged.proxy_name)
+            .bind(&merged.proxy_type)
+            .bind(&merged.server)
+            .bind(serde_json::to_string(&merged.resolved_ips)?)
+            .bind(serde_json::to_string(&merged.raw_proxy)?)
+            .bind(merged.created_at)
+            .bind(merged.updated_at)
+            .bind(&keeper_node_id)
+            .execute(&mut *tx)
+            .await?;
         }
 
         let session_rows = sqlx::query(
@@ -2621,6 +2733,61 @@ fn map_proxy_import_sync_config_row(
     })
 }
 
+fn merge_proxy_import_records(
+    existing: &ProxyImportRecord,
+    incoming: &ProxyImportRecord,
+    import_id: &str,
+) -> ProxyImportRecord {
+    let (preferred, fallback) = if incoming.updated_at >= existing.updated_at {
+        (incoming, existing)
+    } else {
+        (existing, incoming)
+    };
+
+    ProxyImportRecord {
+        import_id: import_id.to_string(),
+        name: preferred.name.clone().or_else(|| fallback.name.clone()),
+        import_kind: preferred.import_kind,
+        source_scope: preferred.source_scope.clone(),
+        source_identity: preferred.source_identity.clone(),
+        allocation_scope: preferred.allocation_scope.clone(),
+        created_at: existing.created_at.min(incoming.created_at),
+        updated_at: existing.updated_at.max(incoming.updated_at),
+    }
+}
+
+fn merge_proxy_inventory_records(
+    existing: &ProxyInventoryRecord,
+    incoming: &ProxyInventoryRecord,
+    node_id: &str,
+) -> ProxyInventoryRecord {
+    let (preferred, fallback) = if incoming.updated_at >= existing.updated_at {
+        (incoming, existing)
+    } else {
+        (existing, incoming)
+    };
+    let mut resolved_ips = preferred.resolved_ips.clone();
+    for ip in &fallback.resolved_ips {
+        if !resolved_ips.contains(ip) {
+            resolved_ips.push(ip.clone());
+        }
+    }
+
+    ProxyInventoryRecord {
+        import_id: preferred.import_id.clone(),
+        node_id: node_id.to_string(),
+        source_scope: preferred.source_scope.clone(),
+        allocation_scope: preferred.allocation_scope.clone(),
+        proxy_name: preferred.proxy_name.clone(),
+        proxy_type: preferred.proxy_type.clone(),
+        server: preferred.server.clone(),
+        resolved_ips,
+        raw_proxy: preferred.raw_proxy.clone(),
+        created_at: existing.created_at.min(incoming.created_at),
+        updated_at: existing.updated_at.max(incoming.updated_at),
+    }
+}
+
 fn merge_proxy_import_sync_configs(
     existing: &ProxyImportSyncConfig,
     incoming: &ProxyImportSyncConfig,
@@ -3785,6 +3952,8 @@ mod tests {
             .expect("proxy imports should list");
         assert_eq!(imports.len(), 1);
         assert_eq!(imports[0].import_id, stable_import_id);
+        assert_eq!(imports[0].source_identity.source_type, "url");
+        assert_eq!(imports[0].source_identity.source_value, source_url);
         let nodes = store
             .list_proxy_inventory_for_import(&stable_import_id)
             .await
@@ -3803,6 +3972,163 @@ mod tests {
                 .is_none(),
             "legacy inventory-keyed sync config should be removed after merge"
         );
+
+        let _ = tokio::fs::remove_file(path).await;
+    }
+    #[tokio::test]
+    async fn open_merges_partially_migrated_subscription_imports_without_collision() {
+        let path = temp_store_path();
+        let bootstrap = SqliteStore::open(&path)
+            .await
+            .expect("current sqlite schema should bootstrap");
+        drop(bootstrap);
+
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(&path)
+                    .create_if_missing(true),
+            )
+            .await
+            .expect("sqlite should open for partial migration seed");
+
+        sqlx::query("INSERT INTO profiles (profile_id, created_at) VALUES (?1, ?2)")
+            .bind("Tavily")
+            .bind(1_i64)
+            .execute(&pool)
+            .await
+            .expect("profile row should seed");
+
+        let legacy_import_id = "520ab27d-d226-59e7-9b29-47612c9c4fde";
+        let source_url = "https://example.com/tavily.yaml";
+        let stable_import_id = ids::stable_import_id(
+            &ProxyScope::profile("Tavily").key(),
+            &ProxyImportSourceIdentity::from_source(&SubscriptionSource::Url(
+                source_url.to_string(),
+            ))
+            .key(),
+        );
+        let stable_node_id = ids::stable_proxy_inventory_node_id(&stable_import_id, "tavily-node");
+
+        sqlx::query(
+            r#"
+            INSERT INTO proxy_imports (
+              import_id, name, import_kind, source_scope_type, source_scope_profile_id,
+              source_type, source_value, allocation_scope_type, allocation_scope_profile_id,
+              created_at, updated_at
+            )
+            VALUES (?1, NULL, 'subscription', 'profile', 'Tavily', 'inventory', ?1, 'profile', 'Tavily', 10, 20)
+            "#,
+        )
+        .bind(legacy_import_id)
+        .execute(&pool)
+        .await
+        .expect("legacy inventory import should seed");
+
+        sqlx::query(
+            r#"
+            INSERT INTO proxy_imports (
+              import_id, name, import_kind, source_scope_type, source_scope_profile_id,
+              source_type, source_value, allocation_scope_type, allocation_scope_profile_id,
+              created_at, updated_at
+            )
+            VALUES (?1, 'Tavily feed', 'subscription', 'profile', 'Tavily', 'url', ?2, 'profile', 'Tavily', 11, 30)
+            "#,
+        )
+        .bind(&stable_import_id)
+        .bind(source_url)
+        .execute(&pool)
+        .await
+        .expect("stable short-id import should seed");
+
+        sqlx::query(
+            r#"
+            INSERT INTO proxy_inventory_nodes (
+              import_id, node_id, source_scope_type, source_scope_profile_id, source_type, source_value,
+              allocation_scope_type, allocation_scope_profile_id,
+              proxy_name, proxy_type, server, resolved_ips_json, raw_proxy_json,
+              created_at, updated_at
+            )
+            VALUES (?1, ?2, 'profile', 'Tavily', 'inventory', ?1, 'profile', 'Tavily', 'tavily-node', 'socks5', '1.1.1.1', '["1.1.1.1"]', '{"name":"tavily-node","server":"1.1.1.1"}', 10, 20)
+            "#,
+        )
+        .bind(legacy_import_id)
+        .bind("11111111-1111-1111-1111-111111111111")
+        .execute(&pool)
+        .await
+        .expect("legacy inventory node should seed");
+
+        sqlx::query(
+            r#"
+            INSERT INTO proxy_inventory_nodes (
+              import_id, node_id, source_scope_type, source_scope_profile_id, source_type, source_value,
+              allocation_scope_type, allocation_scope_profile_id,
+              proxy_name, proxy_type, server, resolved_ips_json, raw_proxy_json,
+              created_at, updated_at
+            )
+            VALUES (?1, ?2, 'profile', 'Tavily', 'url', ?3, 'profile', 'Tavily', 'tavily-node', 'socks5', '2.2.2.2', '["2.2.2.2"]', '{"name":"tavily-node","server":"2.2.2.2"}', 11, 30)
+            "#,
+        )
+        .bind(&stable_import_id)
+        .bind(&stable_node_id)
+        .bind(source_url)
+        .execute(&pool)
+        .await
+        .expect("stable short-id inventory node should seed");
+
+        for import_id in [legacy_import_id, stable_import_id.as_str()] {
+            sqlx::query(
+                r#"
+                INSERT INTO proxy_import_sync_configs (
+                  import_id, profile_id, source_type, source_value, enabled, sync_every_sec, full_refresh_every_sec,
+                  last_sync_due_at, last_sync_started_at, last_sync_finished_at,
+                  last_full_refresh_due_at, last_full_refresh_started_at, last_full_refresh_finished_at,
+                  updated_at
+                )
+                VALUES (?1, 'Tavily', 'url', ?2, 1, 600, 86400, 1, 2, 3, 4, 5, 6, 7)
+                "#,
+            )
+            .bind(import_id)
+            .bind(source_url)
+            .execute(&pool)
+            .await
+            .expect("duplicate sync configs should seed");
+        }
+
+        pool.close().await;
+
+        let store = SqliteStore::open(&path)
+            .await
+            .expect("sqlite store should merge partially migrated imports without collision");
+
+        let imports = store
+            .list_proxy_imports()
+            .await
+            .expect("proxy imports should list");
+        assert_eq!(imports.len(), 1);
+        assert_eq!(imports[0].import_id, stable_import_id);
+        assert_eq!(imports[0].source_identity.source_type, "url");
+        assert_eq!(imports[0].source_identity.source_value, source_url);
+
+        let nodes = store
+            .list_proxy_inventory_for_import(&stable_import_id)
+            .await
+            .expect("merged inventory nodes should list");
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].node_id, stable_node_id);
+        assert_eq!(nodes[0].server, "2.2.2.2");
+        assert_eq!(
+            nodes[0].resolved_ips,
+            vec!["2.2.2.2".to_string(), "1.1.1.1".to_string()]
+        );
+
+        let configs = store
+            .list_proxy_import_sync_configs_for_profile("Tavily")
+            .await
+            .expect("sync configs should list");
+        assert_eq!(configs.len(), 1);
+        assert_eq!(configs[0].import_id, stable_import_id);
 
         let _ = tokio::fs::remove_file(path).await;
     }
