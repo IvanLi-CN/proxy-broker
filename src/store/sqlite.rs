@@ -1,4 +1,7 @@
-use std::{collections::HashSet, path::Path};
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+};
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
@@ -367,6 +370,28 @@ impl SqliteStore {
     async fn migrate_short_ids(&self) -> anyhow::Result<()> {
         let mut tx = self.pool.begin().await?;
 
+        let sync_config_rows = sqlx::query(
+            r#"
+            SELECT import_id, profile_id, source_type, source_value, enabled, sync_every_sec, full_refresh_every_sec,
+                   last_sync_due_at, last_sync_started_at, last_sync_finished_at,
+                   last_full_refresh_due_at, last_full_refresh_started_at, last_full_refresh_finished_at,
+                   updated_at
+            FROM proxy_import_sync_configs
+            ORDER BY profile_id ASC, import_id ASC
+            "#,
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+        let mut sync_target_import_ids = HashMap::new();
+        for row in sync_config_rows {
+            let config = map_proxy_import_sync_config_row(row)?;
+            let target_import_id = ids::stable_import_id(
+                &ProxyScope::profile(&config.profile_id).key(),
+                &ProxyImportSourceIdentity::from_source(&config.source).key(),
+            );
+            sync_target_import_ids.insert(config.import_id, target_import_id);
+        }
+
         let import_rows = sqlx::query(
             r#"
             SELECT import_id, name, import_kind, source_scope_type, source_scope_profile_id,
@@ -391,6 +416,16 @@ impl SqliteStore {
                 } else {
                     reserve_unique_id(&mut reserved_import_ids, ids::random_import_id)
                 }
+            } else if record.import_kind == crate::models::ProxyImportKind::Subscription {
+                sync_target_import_ids
+                    .get(&record.import_id)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        ids::stable_import_id(
+                            &record.source_scope.key(),
+                            &record.source_identity.key(),
+                        )
+                    })
             } else {
                 ids::stable_import_id(&record.source_scope.key(), &record.source_identity.key())
             };
@@ -3675,6 +3710,23 @@ mod tests {
 
         sqlx::query(
             r#"
+            INSERT INTO proxy_inventory_nodes (
+              import_id, node_id, source_scope_type, source_scope_profile_id, source_type, source_value,
+              allocation_scope_type, allocation_scope_profile_id,
+              proxy_name, proxy_type, server, resolved_ips_json, raw_proxy_json,
+              created_at, updated_at
+            )
+            VALUES (?1, ?2, 'profile', 'Tavily', 'inventory', ?1, 'profile', 'Tavily', 'tavily-node', 'socks5', '1.1.1.1', '["1.1.1.1"]', '{"name":"tavily-node"}', 10, 20)
+            "#,
+        )
+        .bind(legacy_import_id)
+        .bind("11111111-1111-1111-1111-111111111111")
+        .execute(&pool)
+        .await
+        .expect("legacy inventory node should seed");
+
+        sqlx::query(
+            r#"
             INSERT INTO proxy_import_sync_configs (
               import_id, profile_id, source_type, source_value, enabled, sync_every_sec, full_refresh_every_sec,
               last_sync_due_at, last_sync_started_at, last_sync_finished_at,
@@ -3727,6 +3779,22 @@ mod tests {
             SubscriptionSource::Url(value) => assert_eq!(value, source_url),
             other => panic!("unexpected sync source after migration: {other:?}"),
         }
+        let imports = store
+            .list_proxy_imports()
+            .await
+            .expect("proxy imports should list");
+        assert_eq!(imports.len(), 1);
+        assert_eq!(imports[0].import_id, stable_import_id);
+        let nodes = store
+            .list_proxy_inventory_for_import(&stable_import_id)
+            .await
+            .expect("migrated inventory nodes should list");
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].import_id, stable_import_id);
+        assert_eq!(
+            nodes[0].node_id,
+            ids::stable_proxy_inventory_node_id(&stable_import_id, "tavily-node")
+        );
         assert!(
             store
                 .get_proxy_import_sync_config(legacy_import_id)
