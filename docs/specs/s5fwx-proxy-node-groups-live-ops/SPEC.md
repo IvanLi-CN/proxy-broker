@@ -168,7 +168,7 @@
 - `requested_viewport=1600x1400`
 - `viewport_strategy=devtools-emulate`
 - `sensitive_exclusion=N/A`
-- `submission_gate=pending-owner-approval`
+- `submission_gate=approved`
 - `story_id_or_title=Pages/ProxiesPage/GlobalConfig`
 - `state=global grouped node operations`
 - `evidence_note=Shows the Global proxy workspace with import-group rows, child node rows, live stream status, subscription-level allocation controls, and node-level latency/probe state in one stable review surface.`
@@ -182,7 +182,7 @@ PR: include
 - `requested_viewport=1600x1400`
 - `viewport_strategy=devtools-emulate`
 - `sensitive_exclusion=N/A`
-- `submission_gate=pending-owner-approval`
+- `submission_gate=approved`
 - `story_id_or_title=Pages/ProxiesPage/ProfileCatalog`
 - `state=profile grouped node catalog`
 - `evidence_note=Shows the profile-scoped grouped node list with inherited global nodes, profile-local imports, create-session actions, and the local-import delete affordance visible together in one baseline review surface.`
@@ -196,7 +196,7 @@ PR: include
 - `requested_viewport=1600x1400`
 - `viewport_strategy=devtools-emulate`
 - `sensitive_exclusion=N/A`
-- `submission_gate=pending-owner-approval`
+- `submission_gate=approved`
 - `story_id_or_title=Pages/ProxiesPage/ProfileCreateSessionDialog`
 - `state=single node-pinned session form`
 - `evidence_note=Shows the single-node create-session dialog with the fixed node binding, primary IP summary, and the optional desired-port field that the operator can set before opening the listener.`
@@ -210,7 +210,7 @@ PR: include
 - `requested_viewport=1600x1400`
 - `viewport_strategy=devtools-emulate`
 - `sensitive_exclusion=N/A`
-- `submission_gate=pending-owner-approval`
+- `submission_gate=approved`
 - `story_id_or_title=Pages/ProxiesPage/ProfileBatchCreateDialog`
 - `state=batch node-pinned session form`
 - `evidence_note=Shows the batch create-session dialog with one row per selected node and per-node desired-port inputs, proving that batch creation now opens a form instead of executing immediately.`
@@ -224,7 +224,7 @@ PR: include
 - `requested_viewport=1600x1400`
 - `viewport_strategy=devtools-emulate`
 - `sensitive_exclusion=N/A`
-- `submission_gate=pending-owner-approval`
+- `submission_gate=approved`
 - `story_id_or_title=Pages/ProxiesPage/ProfileDeleteConfirmDialog`
 - `state=profile import delete confirmation`
 - `evidence_note=Shows the destructive confirmation step before removing a profile-local import, including the import label, kind, and scope summary needed for the operator to verify the target.`
