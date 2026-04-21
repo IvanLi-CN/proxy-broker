@@ -1,15 +1,44 @@
-use std::{collections::HashSet, net::IpAddr, sync::Arc};
+use std::{collections::HashSet, net::IpAddr, path::Path, sync::Arc};
 
 use anyhow::{Context, anyhow};
 use base64::Engine;
-use reqwest::header::USER_AGENT;
+use reqwest::header::{CONTENT_DISPOSITION, HeaderMap, USER_AGENT};
 use serde_yaml::Value;
 use thiserror::Error;
 
-use crate::{constants::DEFAULT_DNS_CONCURRENCY, models::ProxyNode};
+use crate::{
+    constants::DEFAULT_DNS_CONCURRENCY,
+    models::{ProxyNode, SubscriptionMetadata},
+};
 
 pub const SUBSCRIPTION_FETCH_USER_AGENTS: &[&str] =
     &["Clash.Meta/1.18.3", "mihomo/1.18.3", "Clash Verge/1.7.7"];
+const INFO_PROXY_KEYWORDS_EN: &[&str] = &[
+    "traffic",
+    "expire",
+    "expired",
+    "subscription",
+    "official",
+    "support",
+    "notice",
+];
+const INFO_PROXY_KEYWORDS_ZH: &[&str] = &[
+    "流量", "剩余", "过期", "到期", "官网", "订阅", "客服", "公告", "说明",
+];
+
+#[derive(Debug, Clone, Default)]
+pub struct LoadedSubscription {
+    pub nodes: Vec<ProxyNode>,
+    pub warnings: Vec<String>,
+    pub metadata: Option<SubscriptionMetadata>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ParsedResponseMetadata {
+    metadata: Option<SubscriptionMetadata>,
+    warnings: Vec<String>,
+    _profile_update_interval_sec: Option<u64>,
+}
 
 fn decode_base64_yaml(input: &str) -> anyhow::Result<String> {
     let compact: String = input.chars().filter(|c| !c.is_whitespace()).collect();
@@ -40,6 +69,15 @@ pub enum SubscriptionLoadError {
     SourceRead(String),
     #[error("subscription payload invalid: {0}")]
     InvalidPayload(String),
+}
+
+fn decode_base64_text(input: &str) -> anyhow::Result<String> {
+    let compact: String = input.chars().filter(|c| !c.is_whitespace()).collect();
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&compact)
+        .or_else(|_| base64::engine::general_purpose::STANDARD_NO_PAD.decode(&compact))
+        .context("base64 decode failed")?;
+    String::from_utf8(bytes).context("base64 payload is not utf-8")
 }
 
 fn to_json_value(value: &Value) -> anyhow::Result<serde_json::Value> {
@@ -111,10 +149,272 @@ fn payload_has_usable_proxy_entries(proxies: &[Value]) -> bool {
     })
 }
 
+fn find_header_value(
+    headers: &HeaderMap,
+    header_name: &str,
+    allow_meta_prefix: bool,
+) -> Option<String> {
+    let exact = headers
+        .get(header_name)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    if exact.is_some() {
+        return exact;
+    }
+    if !allow_meta_prefix {
+        return None;
+    }
+
+    headers.iter().find_map(|(name, value)| {
+        let name = name.as_str().to_ascii_lowercase();
+        if !name.starts_with("x-") || !name.ends_with(&format!("meta-{header_name}")) {
+            return None;
+        }
+        value
+            .to_str()
+            .ok()
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+            .map(ToOwned::to_owned)
+    })
+}
+
+fn percent_decode_lossy(value: &str) -> Option<String> {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'%' if index + 2 < bytes.len() => {
+                let hex = std::str::from_utf8(&bytes[index + 1..index + 3]).ok()?;
+                let byte = u8::from_str_radix(hex, 16).ok()?;
+                decoded.push(byte);
+                index += 3;
+            }
+            b'+' => {
+                decoded.push(b' ');
+                index += 1;
+            }
+            byte => {
+                decoded.push(byte);
+                index += 1;
+            }
+        }
+    }
+    String::from_utf8(decoded).ok()
+}
+
+fn clean_source_title(value: &str) -> Option<String> {
+    let trimmed = value.trim().trim_matches('"').trim_matches('\'').trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn decode_profile_title(value: &str) -> anyhow::Result<Option<String>> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    let decoded = if let Some(encoded) = trimmed.strip_prefix("base64:") {
+        decode_base64_text(encoded)?
+    } else {
+        trimmed.to_string()
+    };
+    Ok(clean_source_title(&decoded))
+}
+
+fn parse_rfc5987_filename(value: &str) -> Option<String> {
+    let raw = value.trim().trim_matches('"');
+    let (_, encoded) = raw.split_once("''")?;
+    percent_decode_lossy(encoded).and_then(|decoded| clean_source_title(&decoded))
+}
+
+fn parse_content_disposition_filename(value: &str) -> Option<String> {
+    let mut filename = None;
+    let mut filename_star = None;
+    for segment in value.split(';').skip(1) {
+        let (key, raw_value) = match segment.split_once('=') {
+            Some(pair) => pair,
+            None => continue,
+        };
+        let key = key.trim().to_ascii_lowercase();
+        let raw_value = raw_value.trim();
+        match key.as_str() {
+            "filename*" => {
+                filename_star = parse_rfc5987_filename(raw_value);
+            }
+            "filename" => {
+                filename = clean_source_title(raw_value);
+            }
+            _ => {}
+        }
+    }
+    filename_star.or(filename)
+}
+
+fn parse_subscription_userinfo(value: &str) -> Option<SubscriptionMetadata> {
+    let mut upload_bytes = None;
+    let mut download_bytes = None;
+    let mut total_bytes = None;
+    let mut expire_at = None;
+
+    for part in value.split([';', ',']) {
+        let (key, raw_value) = match part.split_once('=') {
+            Some(pair) => pair,
+            None => continue,
+        };
+        let key = key.trim().to_ascii_lowercase();
+        let raw_value = raw_value.trim();
+        match key.as_str() {
+            "upload" => upload_bytes = raw_value.parse::<u64>().ok(),
+            "download" => download_bytes = raw_value.parse::<u64>().ok(),
+            "total" => total_bytes = raw_value.parse::<u64>().ok(),
+            "expire" => expire_at = raw_value.parse::<i64>().ok(),
+            _ => {}
+        }
+    }
+
+    let used_bytes = if upload_bytes.is_some() || download_bytes.is_some() {
+        Some(
+            upload_bytes
+                .unwrap_or(0)
+                .saturating_add(download_bytes.unwrap_or(0)),
+        )
+    } else {
+        None
+    };
+    let remaining_bytes = total_bytes.map(|total| total.saturating_sub(used_bytes.unwrap_or(0)));
+
+    SubscriptionMetadata {
+        source_title: None,
+        upload_bytes,
+        download_bytes,
+        used_bytes,
+        total_bytes,
+        remaining_bytes,
+        expire_at,
+    }
+    .normalized()
+}
+
+fn parse_profile_update_interval(value: &str) -> Option<u64> {
+    value.trim().parse::<u64>().ok()
+}
+
+fn derive_title_from_file_path(path: &str) -> Option<String> {
+    let file_name = Path::new(path)
+        .file_name()?
+        .to_string_lossy()
+        .trim()
+        .to_string();
+    let stem = Path::new(&file_name)
+        .file_stem()
+        .map(|value| value.to_string_lossy().trim().to_string())
+        .filter(|value| !value.is_empty());
+    stem.or_else(|| clean_source_title(&file_name))
+}
+
+fn derive_title_from_url(url: &str) -> Option<String> {
+    let parsed = reqwest::Url::parse(url).ok()?;
+    let path_title = parsed
+        .path_segments()
+        .and_then(|segments| segments.filter(|segment| !segment.is_empty()).next_back())
+        .and_then(percent_decode_lossy)
+        .and_then(|value| {
+            Path::new(&value)
+                .file_stem()
+                .map(|stem| stem.to_string_lossy().trim().to_string())
+                .filter(|stem| !stem.is_empty())
+                .or_else(|| clean_source_title(&value))
+        });
+    path_title.or_else(|| clean_source_title(parsed.host_str().unwrap_or_default()))
+}
+
+fn is_information_proxy_name(name: &str) -> bool {
+    let lowered = name.trim().to_ascii_lowercase();
+    if lowered.is_empty() {
+        return false;
+    }
+    INFO_PROXY_KEYWORDS_EN
+        .iter()
+        .any(|keyword| lowered.contains(keyword))
+        || INFO_PROXY_KEYWORDS_ZH
+            .iter()
+            .any(|keyword| name.contains(keyword))
+}
+
+fn filter_information_proxies(proxies: Vec<Value>, warnings: &mut Vec<String>) -> Vec<Value> {
+    proxies
+        .into_iter()
+        .filter(|proxy| {
+            let name = proxy
+                .get("name")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            match name {
+                Some(name) if is_information_proxy_name(name) => {
+                    warnings.push(format!(
+                        "filtered informational subscription entry `{name}`"
+                    ));
+                    false
+                }
+                _ => true,
+            }
+        })
+        .collect()
+}
+
+fn parse_response_metadata(
+    headers: &HeaderMap,
+    fallback_title: Option<String>,
+) -> ParsedResponseMetadata {
+    let mut warnings = Vec::new();
+    let mut metadata = find_header_value(headers, "subscription-userinfo", true)
+        .and_then(|value| parse_subscription_userinfo(&value))
+        .unwrap_or_default();
+
+    let source_title = if let Some(raw_title) = find_header_value(headers, "profile-title", false) {
+        match decode_profile_title(&raw_title) {
+            Ok(title) => title,
+            Err(err) => {
+                warnings.push(format!("ignored invalid `profile-title` header: {err}"));
+                None
+            }
+        }
+    } else if let Some(content_disposition) = headers
+        .get(CONTENT_DISPOSITION)
+        .and_then(|value| value.to_str().ok())
+    {
+        match parse_content_disposition_filename(content_disposition) {
+            Some(title) => Some(title),
+            None => {
+                warnings.push("ignored invalid `Content-Disposition` filename".to_string());
+                None
+            }
+        }
+    } else {
+        fallback_title
+    };
+    metadata.source_title = source_title;
+
+    ParsedResponseMetadata {
+        metadata: metadata.normalized(),
+        warnings,
+        _profile_update_interval_sec: find_header_value(headers, "profile-update-interval", false)
+            .and_then(|value| parse_profile_update_interval(&value)),
+    }
+}
+
 async fn fetch_url_source(
     client: &reqwest::Client,
     url: &str,
-) -> Result<(Vec<Value>, Vec<String>), SubscriptionLoadError> {
+) -> Result<(Vec<Value>, Vec<String>, Option<SubscriptionMetadata>), SubscriptionLoadError> {
     let mut fetch_errors = Vec::new();
     let mut parse_errors = Vec::new();
     let mut received_success_body = false;
@@ -134,14 +434,9 @@ async fn fetch_url_source(
             Some(user_agent) => client.get(url).header(USER_AGENT, *user_agent),
             None => client.get(url),
         };
-        let raw = match request.send().await {
+        let response = match request.send().await {
             Ok(response) => match response.error_for_status() {
-                Ok(response) => response.text().await.map_err(|err| {
-                    SubscriptionLoadError::SourceRead(format!(
-                        "failed to read subscription response body with {}: {}",
-                        attempt_label, err
-                    ))
-                }),
+                Ok(response) => Ok(response),
                 Err(err) => Err(SubscriptionLoadError::SourceRead(format!(
                     "subscription url `{url}` returned non-2xx with {}: {}",
                     attempt_label, err
@@ -153,10 +448,10 @@ async fn fetch_url_source(
             ))),
         };
 
-        let raw = match raw {
-            Ok(raw) => {
+        let response = match response {
+            Ok(response) => {
                 received_success_body = true;
-                raw
+                response
             }
             Err(SubscriptionLoadError::SourceRead(message)) => {
                 fetch_errors.push(message);
@@ -164,6 +459,13 @@ async fn fetch_url_source(
             }
             Err(err) => return Err(err),
         };
+        let headers = response.headers().clone();
+        let raw = response.text().await.map_err(|err| {
+            SubscriptionLoadError::SourceRead(format!(
+                "failed to read subscription response body with {}: {}",
+                attempt_label, err
+            ))
+        })?;
 
         match parse_subscription_payload(&raw) {
             Ok(proxies) if payload_has_usable_proxy_entries(&proxies) => {
@@ -174,7 +476,9 @@ async fn fetch_url_source(
                         attempt_label
                     ));
                 }
-                return Ok((proxies, warnings));
+                let mut metadata = parse_response_metadata(&headers, derive_title_from_url(url));
+                warnings.append(&mut metadata.warnings);
+                return Ok((proxies, warnings, metadata.metadata));
             }
             Ok(_) => {
                 parse_errors.push(format!(
@@ -205,7 +509,7 @@ async fn fetch_url_source(
 async fn load_from_proxies(
     proxies: Vec<Value>,
     mut warnings: Vec<String>,
-) -> Result<(Vec<ProxyNode>, Vec<String>), SubscriptionLoadError> {
+) -> Result<LoadedSubscription, SubscriptionLoadError> {
     let sem = ArcSemaphore::new(DEFAULT_DNS_CONCURRENCY);
     let mut tasks = Vec::new();
     for yaml_proxy in proxies {
@@ -252,14 +556,18 @@ async fn load_from_proxies(
     }
 
     nodes.sort_by(|a, b| a.proxy_name.cmp(&b.proxy_name));
-    Ok((nodes, warnings))
+    Ok(LoadedSubscription {
+        nodes,
+        warnings,
+        metadata: None,
+    })
 }
 
 pub async fn load_from_source(
     client: &reqwest::Client,
     source: &crate::models::SubscriptionSource,
-) -> Result<(Vec<ProxyNode>, Vec<String>), SubscriptionLoadError> {
-    let (proxies, warnings) = match source {
+) -> Result<LoadedSubscription, SubscriptionLoadError> {
+    let (mut proxies, mut warnings, metadata) = match source {
         crate::models::SubscriptionSource::Url(url) => fetch_url_source(client, url).await?,
         crate::models::SubscriptionSource::File(path) => {
             let raw = tokio::fs::read_to_string(path).await.map_err(|err| {
@@ -267,15 +575,24 @@ pub async fn load_from_source(
                     "failed to read subscription file `{path}`: {err}"
                 ))
             })?;
-            (parse_subscription_payload(&raw)?, Vec::new())
+            (
+                parse_subscription_payload(&raw)?,
+                Vec::new(),
+                SubscriptionMetadata {
+                    source_title: derive_title_from_file_path(path),
+                    ..SubscriptionMetadata::default()
+                }
+                .normalized(),
+            )
         }
     };
-    load_from_proxies(proxies, warnings).await
+    proxies = filter_information_proxies(proxies, &mut warnings);
+    let mut loaded = load_from_proxies(proxies, warnings).await?;
+    loaded.metadata = metadata;
+    Ok(loaded)
 }
 
-pub async fn load_from_content(
-    raw: &str,
-) -> Result<(Vec<ProxyNode>, Vec<String>), SubscriptionLoadError> {
+pub async fn load_from_content(raw: &str) -> Result<LoadedSubscription, SubscriptionLoadError> {
     load_from_proxies(parse_subscription_payload(raw)?, Vec::new()).await
 }
 
@@ -303,7 +620,7 @@ mod tests {
     use axum::{
         Router,
         extract::State,
-        http::{HeaderMap, StatusCode},
+        http::{HeaderMap, HeaderValue, StatusCode},
         routing::get,
     };
     use std::sync::{
@@ -319,24 +636,34 @@ mod tests {
         accepted_user_agent: Option<Arc<str>>,
         success_payload: Arc<str>,
         fallback_status: Option<StatusCode>,
+        response_headers: HeaderMap,
     }
 
     async fn test_subscription_handler(
         State(state): State<TestSubscriptionServerState>,
         headers: HeaderMap,
-    ) -> (StatusCode, String) {
+    ) -> (StatusCode, HeaderMap, String) {
         let user_agent = headers
             .get(reqwest::header::USER_AGENT)
             .and_then(|value| value.to_str().ok());
         if user_agent == state.accepted_user_agent.as_deref() {
-            (StatusCode::OK, state.success_payload.to_string())
+            (
+                StatusCode::OK,
+                state.response_headers.clone(),
+                state.success_payload.to_string(),
+            )
         } else if user_agent.is_some() {
             (
                 state.fallback_status.unwrap_or(StatusCode::OK),
+                HeaderMap::new(),
                 "not-a-clash-subscription".to_string(),
             )
         } else {
-            (StatusCode::OK, "not-a-clash-subscription".to_string())
+            (
+                StatusCode::OK,
+                HeaderMap::new(),
+                "not-a-clash-subscription".to_string(),
+            )
         }
     }
 
@@ -359,6 +686,7 @@ proxies:
 "#,
                 ),
                 fallback_status: None,
+                response_headers: HeaderMap::new(),
             });
 
         let listener = TcpListener::bind(("127.0.0.1", 0))
@@ -397,10 +725,10 @@ proxies:
 
         server.abort();
 
-        assert_eq!(result.0.len(), 1);
-        assert_eq!(result.0[0].proxy_name, "ua-ok");
-        assert_eq!(result.1.len(), 1);
-        assert!(result.1[0].contains(SUBSCRIPTION_FETCH_USER_AGENTS[1]));
+        assert_eq!(result.nodes.len(), 1);
+        assert_eq!(result.nodes[0].proxy_name, "ua-ok");
+        assert_eq!(result.warnings.len(), 1);
+        assert!(result.warnings[0].contains(SUBSCRIPTION_FETCH_USER_AGENTS[1]));
     }
 
     #[tokio::test]
@@ -419,6 +747,7 @@ proxies:
 "#,
                 ),
                 fallback_status: None,
+                response_headers: HeaderMap::new(),
             });
         let listener = TcpListener::bind(("127.0.0.1", 0))
             .await
@@ -437,10 +766,10 @@ proxies:
 
         server.abort();
 
-        assert_eq!(result.0.len(), 1);
-        assert_eq!(result.0[0].proxy_name, "stub-recovered");
-        assert_eq!(result.1.len(), 1);
-        assert!(result.1[0].contains(SUBSCRIPTION_FETCH_USER_AGENTS[0]));
+        assert_eq!(result.nodes.len(), 1);
+        assert_eq!(result.nodes[0].proxy_name, "stub-recovered");
+        assert_eq!(result.warnings.len(), 1);
+        assert!(result.warnings[0].contains(SUBSCRIPTION_FETCH_USER_AGENTS[0]));
     }
 
     #[tokio::test]
@@ -459,6 +788,7 @@ proxies:
 "#,
                 ),
                 fallback_status: None,
+                response_headers: HeaderMap::new(),
             });
         let listener = TcpListener::bind(("127.0.0.1", 0))
             .await
@@ -477,9 +807,9 @@ proxies:
 
         server.abort();
 
-        assert_eq!(result.0.len(), 1);
-        assert_eq!(result.0[0].proxy_name, "default-ok");
-        assert!(result.1.is_empty());
+        assert_eq!(result.nodes.len(), 1);
+        assert_eq!(result.nodes[0].proxy_name, "default-ok");
+        assert!(result.warnings.is_empty());
     }
 
     #[tokio::test]
@@ -572,10 +902,13 @@ proxies:
             .expect("compatibility ua should recover after transport failure");
         server.abort();
 
-        assert_eq!(result.0.len(), 1);
-        assert_eq!(result.0[0].proxy_name, "recovered-after-transport-failure");
-        assert_eq!(result.1.len(), 1);
-        assert!(result.1[0].contains(SUBSCRIPTION_FETCH_USER_AGENTS[0]));
+        assert_eq!(result.nodes.len(), 1);
+        assert_eq!(
+            result.nodes[0].proxy_name,
+            "recovered-after-transport-failure"
+        );
+        assert_eq!(result.warnings.len(), 1);
+        assert!(result.warnings[0].contains(SUBSCRIPTION_FETCH_USER_AGENTS[0]));
         assert_eq!(accepts.load(Ordering::SeqCst), 2);
     }
 
@@ -595,6 +928,7 @@ proxies:
 "#,
                 ),
                 fallback_status: Some(StatusCode::FORBIDDEN),
+                response_headers: HeaderMap::new(),
             });
         let listener = TcpListener::bind(("127.0.0.1", 0))
             .await
@@ -615,6 +949,139 @@ proxies:
 
         assert!(
             matches!(err, SubscriptionLoadError::InvalidPayload(message) if message.contains("default request profile"))
+        );
+    }
+
+    #[tokio::test]
+    async fn url_source_parses_profile_title_and_subscription_userinfo_metadata() {
+        let client = reqwest::Client::new();
+        let mut response_headers = HeaderMap::new();
+        response_headers.insert(
+            "profile-title",
+            HeaderValue::from_static("base64:ZWRnZS1mZWVk"),
+        );
+        response_headers.insert(
+            "x-clash-meta-subscription-userinfo",
+            HeaderValue::from_static("upload=10; download=20; total=100; expire=1710000000"),
+        );
+        let app = Router::new()
+            .route("/subscription", get(test_subscription_handler))
+            .with_state(TestSubscriptionServerState {
+                accepted_user_agent: None,
+                success_payload: Arc::<str>::from(
+                    r#"
+proxies:
+  - name: jp-main
+    type: socks5
+    server: 1.1.1.1
+"#,
+                ),
+                fallback_status: None,
+                response_headers,
+            });
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("test listener should bind");
+        let addr = listener.local_addr().expect("listener addr should exist");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("test server should serve requests");
+        });
+        let source = SubscriptionSource::Url(format!("http://{addr}/subscription"));
+
+        let result = load_from_source(&client, &source)
+            .await
+            .expect("metadata response should load");
+
+        server.abort();
+
+        let metadata = result.metadata.expect("subscription metadata should exist");
+        assert_eq!(metadata.source_title.as_deref(), Some("edge-feed"));
+        assert_eq!(metadata.upload_bytes, Some(10));
+        assert_eq!(metadata.download_bytes, Some(20));
+        assert_eq!(metadata.used_bytes, Some(30));
+        assert_eq!(metadata.total_bytes, Some(100));
+        assert_eq!(metadata.remaining_bytes, Some(70));
+        assert_eq!(metadata.expire_at, Some(1_710_000_000));
+    }
+
+    #[tokio::test]
+    async fn url_source_filters_information_nodes_and_warns() {
+        let client = reqwest::Client::new();
+        let app = Router::new()
+            .route("/subscription", get(test_subscription_handler))
+            .with_state(TestSubscriptionServerState {
+                accepted_user_agent: None,
+                success_payload: Arc::<str>::from(
+                    r#"
+proxies:
+  - name: 剩余流量 12GB
+    type: socks5
+    server: 1.1.1.1
+  - name: jp-01
+    type: socks5
+    server: 8.8.8.8
+"#,
+                ),
+                fallback_status: None,
+                response_headers: HeaderMap::new(),
+            });
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("test listener should bind");
+        let addr = listener.local_addr().expect("listener addr should exist");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("test server should serve requests");
+        });
+        let source = SubscriptionSource::Url(format!("http://{addr}/subscription"));
+
+        let result = load_from_source(&client, &source)
+            .await
+            .expect("filtering should keep usable nodes");
+
+        server.abort();
+
+        assert_eq!(result.nodes.len(), 1);
+        assert_eq!(result.nodes[0].proxy_name, "jp-01");
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("filtered informational subscription entry"))
+        );
+    }
+
+    #[tokio::test]
+    async fn file_source_uses_file_stem_as_metadata_title() {
+        let client = reqwest::Client::new();
+        let path = std::env::temp_dir().join("proxy-broker-source-title.yaml");
+        tokio::fs::write(
+            &path,
+            r#"
+proxies:
+  - name: file-node
+    type: socks5
+    server: 9.9.9.9
+"#,
+        )
+        .await
+        .expect("subscription file should be written");
+
+        let result = load_from_source(
+            &client,
+            &SubscriptionSource::File(path.to_string_lossy().to_string()),
+        )
+        .await
+        .expect("file source should load");
+
+        let _ = tokio::fs::remove_file(&path).await;
+
+        assert_eq!(
+            result.metadata.and_then(|item| item.source_title),
+            Some("proxy-broker-source-title".to_string())
         );
     }
 }

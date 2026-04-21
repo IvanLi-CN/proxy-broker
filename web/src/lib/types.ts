@@ -21,6 +21,14 @@ export interface CreateProfileResponse {
 export interface LoadSubscriptionResponse {
   loaded_proxies: number;
   distinct_ips: number;
+  resolved_name?: string | null;
+  resolved_name_source?:
+    | "explicit_input"
+    | "existing_import"
+    | "parsed_source"
+    | "generated"
+    | null;
+  subscription_metadata?: SubscriptionMetadata | null;
   warnings: string[];
 }
 
@@ -148,6 +156,16 @@ export interface ProxyImportSourceIdentity {
   source_value: string;
 }
 
+export interface SubscriptionMetadata {
+  source_title?: string | null;
+  upload_bytes?: number | null;
+  download_bytes?: number | null;
+  used_bytes?: number | null;
+  total_bytes?: number | null;
+  remaining_bytes?: number | null;
+  expire_at?: number | null;
+}
+
 export interface ProxyImportItem {
   import_id: string;
   name?: string | null;
@@ -158,6 +176,7 @@ export interface ProxyImportItem {
   proxy_count: number;
   distinct_ip_count: number;
   effective_profile_ids: string[];
+  subscription_metadata?: SubscriptionMetadata | null;
   created_at: number;
   updated_at: number;
 }

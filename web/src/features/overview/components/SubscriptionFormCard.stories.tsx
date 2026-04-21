@@ -36,6 +36,16 @@ export const ErrorState: Story = {
   },
 };
 
+export const ParsedNameFallback: Story = {
+  args: {
+    response: {
+      ...subscriptionFixture,
+      resolved_name: "edge-feed",
+      resolved_name_source: "parsed_source",
+    },
+  },
+};
+
 export const Interaction: Story = {
   args: {
     response: null,

@@ -84,11 +84,12 @@
 
 - `ProxyImportRecord`
   - internal persisted import batch metadata
-  - fields: `import_id`, `name`, `import_kind`, `source_scope`, `source_identity`, `allocation_scope`, `created_at`, `updated_at`
+  - fields: `import_id`, `name`, `import_kind`, `source_scope`, `source_identity`, `allocation_scope`, `subscription_metadata?`, `created_at`, `updated_at`
+  - `subscription_metadata` is the import-level snapshot for source-derived title / quota / expiry metadata
 
 - `ProxyImportItem`
   - public API projection for `/api/v1/proxy-imports`
-  - fields: `import_id`, `name`, `import_kind`, `source_scope`, `source_identity`, `allocation_scope`, `proxy_count`, `distinct_ip_count`, `effective_profile_ids`, `created_at`, `updated_at`
+  - fields: `import_id`, `name`, `import_kind`, `source_scope`, `source_identity`, `allocation_scope`, `proxy_count`, `distinct_ip_count`, `effective_profile_ids`, `subscription_metadata?`, `created_at`, `updated_at`
 
 - `ProxyInventoryRecord` / `ProxyInventoryItem`
   - retain node-level detail for compatibility
@@ -102,3 +103,13 @@
   - fields: `name?`, `source?`, `content?`
   - exactly one of `source` or `content` must be present
   - `content` carries one manual node-group import payload and skips auto-sync registration
+
+- `LoadSubscriptionResponse`
+  - fields: `loaded_proxies`, `distinct_ips`, `resolved_name?`, `resolved_name_source?`, `subscription_metadata?`, `warnings[]`
+  - `resolved_name_source` follows the fixed precedence:
+    - `explicit_input`
+    - `existing_import`
+    - `parsed_source`
+    - `generated`
+  - source-based imports parse `profile-title`, `Content-Disposition filename/filename*`, URL/file fallback names, and `subscription-userinfo`
+  - source-based imports also filter informational pseudo-node names before inventory persistence and report those drops through `warnings[]`

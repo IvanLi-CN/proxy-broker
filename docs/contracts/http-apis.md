@@ -93,12 +93,26 @@
     - `source.value`: `string`
     - `content`: raw Clash-compatible `proxies:` YAML or plain proxy list for one manual node group
 - Success:
-  - `loaded_proxies`, `distinct_ips`, `warnings`
+  - `loaded_proxies`
+  - `distinct_ips`
+  - `resolved_name?`
+  - `resolved_name_source?`: `explicit_input|existing_import|parsed_source|generated`
+  - `subscription_metadata?`
+    - `source_title?`
+    - `upload_bytes?`
+    - `download_bytes?`
+    - `used_bytes?`
+    - `total_bytes?`
+    - `remaining_bytes?`
+    - `expire_at?`
+  - `warnings[]`
 - Notes:
   - upserts one original import inside the global inventory scope using normalized `source.type + source.value` as the source identity
   - when `content` is used, creates one manual node-group import without auto-sync registration
   - only replaces nodes that belong to the same original import batch
   - other global imports remain untouched
+  - source-based imports parse `profile-title`, `Content-Disposition filename/filename*`, URL/file fallback names, and `subscription-userinfo`
+  - source-based imports conservatively filter informational pseudo-nodes (for example traffic/expire/notice style names) and expose those drops via `warnings[]`
   - rebuilds effective pools for every profile with `use_global_proxies=true`
   - does not create or update profile auto-sync schedules
 - Error:
@@ -129,12 +143,21 @@
     - `proxy_count`
     - `distinct_ip_count`
     - `effective_profile_ids[]`
+    - `subscription_metadata?`
+      - `source_title?`
+      - `upload_bytes?`
+      - `download_bytes?`
+      - `used_bytes?`
+      - `total_bytes?`
+      - `remaining_bytes?`
+      - `expire_at?`
     - `created_at`
     - `updated_at`
 - Notes:
   - this is the canonical admin list surface for `/proxies`
   - subscription imports are managed only at the import level, not per node
   - list primary labels should render `name` first and fall back to `import_id`
+  - when `name` differs from `subscription_metadata.source_title`, clients may show the source title as secondary metadata
   - `import_id` is an opaque short string (`imp-<16 alnum chars>`)
 - Error:
   - `authentication_required` (401)
@@ -291,7 +314,19 @@
   - The request/response JSON contract does not change when the compatibility
     UA fallback is applied
 - Success:
-  - `loaded_proxies`, `distinct_ips`, `warnings`
+  - `loaded_proxies`
+  - `distinct_ips`
+  - `resolved_name?`
+  - `resolved_name_source?`: `explicit_input|existing_import|parsed_source|generated`
+  - `subscription_metadata?`
+    - `source_title?`
+    - `upload_bytes?`
+    - `download_bytes?`
+    - `used_bytes?`
+    - `total_bytes?`
+    - `remaining_bytes?`
+    - `expire_at?`
+  - `warnings[]`
 - Error:
   - `authentication_required` (401)
   - `admin_required` (403) for non-admin human callers

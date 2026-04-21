@@ -13,8 +13,9 @@ use crate::{
         ApiKeyProfileScope, ApiKeyProfileScopeKind, ApiKeyRecord, IpRecord, ProbeRecord,
         ProfileProxySettings, ProxyImportRecord, ProxyImportSourceIdentity, ProxyImportSyncConfig,
         ProxyInventoryRecord, ProxyNode, ProxyNodeMetadataRecord, ProxyScope, SessionRecord,
-        SubscriptionSource, TaskEventLevel, TaskListQuery, TaskRunEventRecord, TaskRunKind,
-        TaskRunRecord, TaskRunStage, TaskRunStatus, TaskRunTrigger,
+        SubscriptionMetadata, SubscriptionSource, TaskEventLevel, TaskListQuery,
+        TaskRunEventRecord, TaskRunKind, TaskRunRecord, TaskRunStage, TaskRunStatus,
+        TaskRunTrigger,
     },
     store::BrokerStore,
     tasks::matches_task_query,
@@ -193,6 +194,13 @@ impl SqliteStore {
               source_value TEXT NOT NULL,
               allocation_scope_type TEXT NOT NULL,
               allocation_scope_profile_id TEXT,
+              source_title TEXT,
+              upload_bytes INTEGER,
+              download_bytes INTEGER,
+              used_bytes INTEGER,
+              total_bytes INTEGER,
+              remaining_bytes INTEGER,
+              expire_at INTEGER,
               created_at INTEGER NOT NULL,
               updated_at INTEGER NOT NULL
             )
@@ -200,6 +208,8 @@ impl SqliteStore {
         )
         .execute(&self.pool)
         .await?;
+        self.migrate_proxy_import_subscription_metadata_schema()
+            .await?;
 
         sqlx::query(
             r#"
@@ -450,6 +460,8 @@ impl SqliteStore {
             r#"
             SELECT import_id, name, import_kind, source_scope_type, source_scope_profile_id,
                    source_type, source_value, allocation_scope_type, allocation_scope_profile_id,
+                   source_title, upload_bytes, download_bytes, used_bytes, total_bytes,
+                   remaining_bytes, expire_at,
                    created_at, updated_at
             FROM proxy_imports
             ORDER BY created_at ASC, import_id ASC
@@ -984,6 +996,29 @@ impl SqliteStore {
         Ok(())
     }
 
+    async fn migrate_proxy_import_subscription_metadata_schema(&self) -> anyhow::Result<()> {
+        let additive_columns = [
+            ("source_title", "TEXT"),
+            ("upload_bytes", "INTEGER"),
+            ("download_bytes", "INTEGER"),
+            ("used_bytes", "INTEGER"),
+            ("total_bytes", "INTEGER"),
+            ("remaining_bytes", "INTEGER"),
+            ("expire_at", "INTEGER"),
+        ];
+        for (column, kind) in additive_columns {
+            if self.table_has_column("proxy_imports", column).await? {
+                continue;
+            }
+            sqlx::query(&format!(
+                "ALTER TABLE proxy_imports ADD COLUMN {column} {kind}"
+            ))
+            .execute(&self.pool)
+            .await?;
+        }
+        Ok(())
+    }
+
     async fn migrate_proxy_import_sync_configs(&self) -> anyhow::Result<()> {
         let legacy_rows = sqlx::query(
             r#"
@@ -1158,6 +1193,7 @@ impl SqliteStore {
                         source_scope: source_scope.clone(),
                         source_identity: source_identity.clone(),
                         allocation_scope: allocation_scope.clone(),
+                        subscription_metadata: None,
                         created_at,
                         updated_at,
                     },
@@ -1589,6 +1625,8 @@ impl BrokerStore for SqliteStore {
             r#"
             SELECT import_id, name, import_kind, source_scope_type, source_scope_profile_id,
                    source_type, source_value, allocation_scope_type, allocation_scope_profile_id,
+                   source_title, upload_bytes, download_bytes, used_bytes, total_bytes,
+                   remaining_bytes, expire_at,
                    created_at, updated_at
             FROM proxy_imports
             ORDER BY created_at ASC, import_id ASC
@@ -1605,6 +1643,8 @@ impl BrokerStore for SqliteStore {
             r#"
             SELECT import_id, name, import_kind, source_scope_type, source_scope_profile_id,
                    source_type, source_value, allocation_scope_type, allocation_scope_profile_id,
+                   source_title, upload_bytes, download_bytes, used_bytes, total_bytes,
+                   remaining_bytes, expire_at,
                    created_at, updated_at
             FROM proxy_imports
             WHERE import_id = ?1
@@ -2701,9 +2741,10 @@ async fn persist_proxy_import(
         INSERT INTO proxy_imports (
           import_id, name, import_kind, source_scope_type, source_scope_profile_id,
           source_type, source_value, allocation_scope_type, allocation_scope_profile_id,
-          created_at, updated_at
+          source_title, upload_bytes, download_bytes, used_bytes, total_bytes, remaining_bytes,
+          expire_at, created_at, updated_at
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
         ON CONFLICT(import_id) DO UPDATE SET
           name = excluded.name,
           import_kind = excluded.import_kind,
@@ -2713,6 +2754,13 @@ async fn persist_proxy_import(
           source_value = excluded.source_value,
           allocation_scope_type = excluded.allocation_scope_type,
           allocation_scope_profile_id = excluded.allocation_scope_profile_id,
+          source_title = excluded.source_title,
+          upload_bytes = excluded.upload_bytes,
+          download_bytes = excluded.download_bytes,
+          used_bytes = excluded.used_bytes,
+          total_bytes = excluded.total_bytes,
+          remaining_bytes = excluded.remaining_bytes,
+          expire_at = excluded.expire_at,
           created_at = excluded.created_at,
           updated_at = excluded.updated_at
         "#,
@@ -2729,6 +2777,48 @@ async fn persist_proxy_import(
     .bind(&import_record.source_identity.source_value)
     .bind(import_record.allocation_scope.kind())
     .bind(import_record.allocation_scope.profile_id())
+    .bind(
+        import_record
+            .subscription_metadata
+            .as_ref()
+            .and_then(|item| item.source_title.as_ref()),
+    )
+    .bind(
+        import_record
+            .subscription_metadata
+            .as_ref()
+            .and_then(|item| item.upload_bytes.map(|value| value as i64)),
+    )
+    .bind(
+        import_record
+            .subscription_metadata
+            .as_ref()
+            .and_then(|item| item.download_bytes.map(|value| value as i64)),
+    )
+    .bind(
+        import_record
+            .subscription_metadata
+            .as_ref()
+            .and_then(|item| item.used_bytes.map(|value| value as i64)),
+    )
+    .bind(
+        import_record
+            .subscription_metadata
+            .as_ref()
+            .and_then(|item| item.total_bytes.map(|value| value as i64)),
+    )
+    .bind(
+        import_record
+            .subscription_metadata
+            .as_ref()
+            .and_then(|item| item.remaining_bytes.map(|value| value as i64)),
+    )
+    .bind(
+        import_record
+            .subscription_metadata
+            .as_ref()
+            .and_then(|item| item.expire_at),
+    )
     .bind(import_record.created_at)
     .bind(import_record.updated_at)
     .execute(&mut **tx)
@@ -2766,6 +2856,14 @@ fn map_proxy_inventory_row(row: sqlx::sqlite::SqliteRow) -> anyhow::Result<Proxy
     })
 }
 
+fn optional_i64_to_u64(value: Option<i64>, field: &str) -> anyhow::Result<Option<u64>> {
+    value
+        .map(|item| {
+            u64::try_from(item).with_context(|| format!("negative `{field}` value in sqlite row"))
+        })
+        .transpose()
+}
+
 fn map_proxy_import_row(row: sqlx::sqlite::SqliteRow) -> anyhow::Result<ProxyImportRecord> {
     let source_scope_type: String = row.try_get("source_scope_type")?;
     let allocation_scope_type: String = row.try_get("allocation_scope_type")?;
@@ -2774,6 +2872,16 @@ fn map_proxy_import_row(row: sqlx::sqlite::SqliteRow) -> anyhow::Result<ProxyImp
         "single_node" => crate::models::ProxyImportKind::SingleNode,
         other => return Err(anyhow!("unsupported proxy import kind: {other}")),
     };
+    let subscription_metadata = SubscriptionMetadata {
+        source_title: row.try_get("source_title")?,
+        upload_bytes: optional_i64_to_u64(row.try_get("upload_bytes")?, "upload_bytes")?,
+        download_bytes: optional_i64_to_u64(row.try_get("download_bytes")?, "download_bytes")?,
+        used_bytes: optional_i64_to_u64(row.try_get("used_bytes")?, "used_bytes")?,
+        total_bytes: optional_i64_to_u64(row.try_get("total_bytes")?, "total_bytes")?,
+        remaining_bytes: optional_i64_to_u64(row.try_get("remaining_bytes")?, "remaining_bytes")?,
+        expire_at: row.try_get("expire_at")?,
+    }
+    .normalized();
     Ok(ProxyImportRecord {
         import_id: row.try_get("import_id")?,
         name: row.try_get("name")?,
@@ -2796,6 +2904,7 @@ fn map_proxy_import_row(row: sqlx::sqlite::SqliteRow) -> anyhow::Result<ProxyImp
         .with_context(|| {
             format!("unsupported proxy import allocation scope type: {allocation_scope_type}")
         })?,
+        subscription_metadata,
         created_at: row.try_get("created_at")?,
         updated_at: row.try_get("updated_at")?,
     })
@@ -2895,6 +3004,10 @@ fn merge_proxy_import_records(
         source_scope: preferred.source_scope.clone(),
         source_identity: preferred.source_identity.clone(),
         allocation_scope: preferred.allocation_scope.clone(),
+        subscription_metadata: preferred
+            .subscription_metadata
+            .clone()
+            .or_else(|| fallback.subscription_metadata.clone()),
         created_at: existing.created_at.min(incoming.created_at),
         updated_at: existing.updated_at.max(incoming.updated_at),
     }
@@ -3118,8 +3231,9 @@ mod tests {
         auth::issue_api_key,
         ids,
         models::{
-            ApiKeyProfileScope, ProxyImportSourceIdentity, ProxyNode, ProxyScope,
-            SubscriptionSource, TaskListQuery,
+            ApiKeyProfileScope, ProxyImportKind, ProxyImportRecord, ProxyImportSourceIdentity,
+            ProxyInventoryRecord, ProxyNode, ProxyScope, SubscriptionMetadata, SubscriptionSource,
+            TaskListQuery,
         },
         store::BrokerStore,
     };
@@ -3554,6 +3668,84 @@ mod tests {
             .expect("get should succeed")
             .expect("api key should exist");
         assert_eq!(revoked_record.revoked_at, Some(99));
+
+        let _ = tokio::fs::remove_file(path).await;
+    }
+
+    #[tokio::test]
+    async fn proxy_imports_round_trip_subscription_metadata_columns() {
+        let (store, path) = open_temp_store().await;
+        let import_id = stable_proxy_import_id(
+            &ProxyScope::profile("alpha"),
+            &ProxyImportSourceIdentity::from_source(&SubscriptionSource::Url(
+                "https://example.com/subscription.yaml".to_string(),
+            )),
+        );
+        let import = ProxyImportRecord {
+            import_id: import_id.clone(),
+            name: Some("edge-feed".to_string()),
+            import_kind: ProxyImportKind::Subscription,
+            source_scope: ProxyScope::profile("alpha"),
+            source_identity: ProxyImportSourceIdentity::from_source(&SubscriptionSource::Url(
+                "https://example.com/subscription.yaml".to_string(),
+            )),
+            allocation_scope: ProxyScope::profile("alpha"),
+            subscription_metadata: Some(SubscriptionMetadata {
+                source_title: Some("edge-feed".to_string()),
+                upload_bytes: Some(10),
+                download_bytes: Some(20),
+                used_bytes: Some(30),
+                total_bytes: Some(100),
+                remaining_bytes: Some(70),
+                expire_at: Some(1_710_000_000),
+            }),
+            created_at: 10,
+            updated_at: 20,
+        };
+        let node = ProxyInventoryRecord {
+            import_id: import_id.clone(),
+            node_id: stable_proxy_inventory_node_id_for_test(
+                &import_id,
+                "edge-node",
+                "socks5",
+                "1.1.1.1",
+                serde_json::json!({
+                    "name": "edge-node",
+                    "type": "socks5",
+                    "server": "1.1.1.1",
+                }),
+            ),
+            source_scope: ProxyScope::profile("alpha"),
+            allocation_scope: ProxyScope::profile("alpha"),
+            proxy_name: "edge-node".to_string(),
+            proxy_type: "socks5".to_string(),
+            server: "1.1.1.1".to_string(),
+            resolved_ips: vec!["1.1.1.1".to_string()],
+            raw_proxy: serde_json::json!({
+                "name": "edge-node",
+                "type": "socks5",
+                "server": "1.1.1.1",
+            }),
+            created_at: 10,
+            updated_at: 20,
+        };
+
+        store
+            .replace_proxy_inventory_import(&import, &[node])
+            .await
+            .expect("import metadata should persist");
+
+        let fetched = store
+            .get_proxy_import(&import_id)
+            .await
+            .expect("import lookup should succeed")
+            .expect("import should exist");
+        let metadata = fetched
+            .subscription_metadata
+            .expect("subscription metadata should round-trip");
+        assert_eq!(metadata.source_title.as_deref(), Some("edge-feed"));
+        assert_eq!(metadata.remaining_bytes, Some(70));
+        assert_eq!(metadata.expire_at, Some(1_710_000_000));
 
         let _ = tokio::fs::remove_file(path).await;
     }

@@ -23,6 +23,12 @@ pub struct LoadSubscriptionRequest {
 pub struct LoadSubscriptionResponse {
     pub loaded_proxies: usize,
     pub distinct_ips: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved_name_source: Option<ResolvedImportNameSource>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subscription_metadata: Option<SubscriptionMetadata>,
     pub warnings: Vec<String>,
 }
 
@@ -179,6 +185,33 @@ pub struct ProxyImportSourceIdentity {
     pub source_value: String,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ResolvedImportNameSource {
+    ExplicitInput,
+    ExistingImport,
+    ParsedSource,
+    Generated,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SubscriptionMetadata {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upload_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub download_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub used_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remaining_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expire_at: Option<i64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyImportItem {
     pub import_id: String,
@@ -191,6 +224,8 @@ pub struct ProxyImportItem {
     pub proxy_count: usize,
     pub distinct_ip_count: usize,
     pub effective_profile_ids: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subscription_metadata: Option<SubscriptionMetadata>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -810,6 +845,7 @@ pub struct ProxyImportRecord {
     pub source_scope: ProxyScope,
     pub source_identity: ProxyImportSourceIdentity,
     pub allocation_scope: ProxyScope,
+    pub subscription_metadata: Option<SubscriptionMetadata>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -881,6 +917,28 @@ impl ProxyImportSourceIdentity {
             source_type: "manual".to_string(),
             source_value: import_id,
         }
+    }
+}
+
+impl SubscriptionMetadata {
+    pub fn is_empty(&self) -> bool {
+        self.source_title.is_none()
+            && self.upload_bytes.is_none()
+            && self.download_bytes.is_none()
+            && self.used_bytes.is_none()
+            && self.total_bytes.is_none()
+            && self.remaining_bytes.is_none()
+            && self.expire_at.is_none()
+    }
+
+    pub fn normalized(mut self) -> Option<Self> {
+        self.source_title = self
+            .source_title
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned);
+        if self.is_empty() { None } else { Some(self) }
     }
 }
 

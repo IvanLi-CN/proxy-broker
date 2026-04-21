@@ -19,7 +19,7 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useI18n } from "@/i18n";
-import { formatOperatorWarning } from "@/lib/format";
+import { buildSubscriptionMetadataBullets } from "@/lib/format";
 import type { LoadSubscriptionRequest, LoadSubscriptionResponse } from "@/lib/types";
 
 const loadCardSchema = z
@@ -65,23 +65,6 @@ interface ProxyLoadCardProps {
   onSubmit: (payload: LoadSubscriptionRequest) => void | Promise<void>;
 }
 
-function isAsciiHostname(hostname: string) {
-  return hostname.length > 0 && /^[A-Za-z0-9.-]+$/.test(hostname);
-}
-
-function deriveSubscriptionName(sourceType: "url" | "file", sourceValue: string) {
-  const trimmed = sourceValue.trim();
-  if (sourceType !== "url" || trimmed.length === 0) {
-    return undefined;
-  }
-  try {
-    const hostname = new URL(trimmed).hostname.trim();
-    return isAsciiHostname(hostname) ? hostname : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 export function ProxyLoadCard({
   eyebrow,
   title,
@@ -96,7 +79,7 @@ export function ProxyLoadCard({
   successDescription,
   onSubmit,
 }: ProxyLoadCardProps) {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const form = useForm<LoadCardFormValues, undefined, LoadCardSubmitValues>({
     resolver: zodResolver(loadCardSchema),
     defaultValues: {
@@ -109,11 +92,9 @@ export function ProxyLoadCard({
   });
   const importMode = form.watch("importMode");
   const sourceType = form.watch("sourceType");
-  const sourceValue = form.watch("sourceValue");
-  const suggestedName =
-    importMode === "subscription"
-      ? deriveSubscriptionName(sourceType, sourceValue ?? "")
-      : undefined;
+  const responseBullets = response
+    ? buildSubscriptionMetadataBullets(locale, t, response)
+    : undefined;
 
   return (
     <Card className="overflow-hidden border-border/70 bg-card/96 shadow-[0_20px_60px_-40px_rgba(15,23,42,0.5)]">
@@ -155,7 +136,7 @@ export function ProxyLoadCard({
             const payload: LoadSubscriptionRequest =
               values.importMode === "subscription"
                 ? {
-                    name: explicitName || suggestedName,
+                    name: explicitName || undefined,
                     source: {
                       type: values.sourceType,
                       value: values.sourceValue.trim(),
@@ -199,7 +180,7 @@ export function ProxyLoadCard({
                 {...form.register("name")}
                 placeholder={
                   importMode === "subscription"
-                    ? (suggestedName ?? t("Leave blank to use the source domain when possible"))
+                    ? t("Leave blank to parse the upstream subscription title automatically")
                     : t("Leave blank to group nodes by the first proxy name")
                 }
                 className="bg-card text-sm"
@@ -207,7 +188,7 @@ export function ProxyLoadCard({
               <p className="text-xs leading-5 text-muted-foreground">
                 {importMode === "subscription"
                   ? t(
-                      "Optional. Leave blank to auto-name from the ASCII domain on URL imports; otherwise the list falls back to the import ID.",
+                      "Optional. Leave blank to use the parsed subscription title when available; otherwise the list falls back to the saved name or import ID.",
                     )
                   : t(
                       "Optional. Leave blank to auto-name the node group from its first proxy; if that is unavailable, the list falls back to the import ID.",
@@ -317,9 +298,16 @@ export function ProxyLoadCard({
         {response ? (
           <ActionResponsePanel
             title={successTitle}
-            description={successDescription}
+            description={
+              response.resolved_name
+                ? t("{description} Final name: {name}.", {
+                    description: successDescription,
+                    name: response.resolved_name,
+                  })
+                : successDescription
+            }
             tone={response.warnings.length > 0 ? "warning" : "success"}
-            bullets={response.warnings.map((warning) => formatOperatorWarning(t, warning))}
+            bullets={responseBullets}
           />
         ) : null}
         {error ? (

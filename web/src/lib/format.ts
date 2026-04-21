@@ -4,6 +4,7 @@ import type {
   OpenSessionRequest,
   SessionSelectionMode,
   SortMode,
+  SubscriptionMetadata,
 } from "@/lib/types";
 
 const zhGeoLabels: Record<string, string> = {
@@ -89,6 +90,88 @@ export function formatLatency(locale: Locale, t: Translator, value?: number | nu
   return `${new Intl.NumberFormat(locale).format(value)} ms`;
 }
 
+export function formatDataSize(locale: Locale, t: Translator, value?: number | null) {
+  if (value == null) {
+    return null;
+  }
+  const units = ["B", "KB", "MB", "GB", "TB", "PB"];
+  let size = value;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  const formatted =
+    size >= 100 || unitIndex === 0
+      ? new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(size)
+      : new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(size);
+  return t("{value} {unit}", { value: formatted, unit: units[unitIndex] ?? "B" });
+}
+
+export function formatSubscriptionQuota(
+  locale: Locale,
+  t: Translator,
+  metadata?: SubscriptionMetadata | null,
+) {
+  if (!metadata) {
+    return null;
+  }
+  const remaining = formatDataSize(locale, t, metadata.remaining_bytes);
+  const total = formatDataSize(locale, t, metadata.total_bytes);
+  if (remaining && total) {
+    return t("Remaining {remaining} / {total}", { remaining, total });
+  }
+  const used = formatDataSize(locale, t, metadata.used_bytes);
+  if (used && total) {
+    return t("Used {used} / {total}", { used, total });
+  }
+  return total ? t("Total {total}", { total }) : null;
+}
+
+export function formatSubscriptionExpire(
+  locale: Locale,
+  t: Translator,
+  metadata?: SubscriptionMetadata | null,
+) {
+  if (!metadata?.expire_at) {
+    return null;
+  }
+  return t("Expires {time}", { time: formatTimestamp(locale, t, metadata.expire_at) });
+}
+
+export function buildSubscriptionMetadataBullets(
+  locale: Locale,
+  t: Translator,
+  response: {
+    resolved_name?: string | null;
+    resolved_name_source?: string | null;
+    subscription_metadata?: SubscriptionMetadata | null;
+    warnings?: string[];
+  },
+) {
+  const bullets: string[] = [];
+  const resolvedName = response.resolved_name?.trim();
+  if (resolvedName) {
+    bullets.push(t("Resolved name: {name}", { name: resolvedName }));
+  }
+  const sourceTitle = response.subscription_metadata?.source_title?.trim();
+  if (sourceTitle && sourceTitle !== resolvedName) {
+    bullets.push(t("Source title: {title}", { title: sourceTitle }));
+  }
+  const quota = formatSubscriptionQuota(locale, t, response.subscription_metadata);
+  if (quota) {
+    bullets.push(quota);
+  }
+  const expire = formatSubscriptionExpire(locale, t, response.subscription_metadata);
+  if (expire) {
+    bullets.push(expire);
+  }
+  for (const warning of response.warnings ?? []) {
+    bullets.push(formatOperatorWarning(t, warning));
+  }
+  return bullets;
+}
+
 export function formatListSummary(t: Translator, items: string[]) {
   if (items.length === 0) {
     return t("Not set");
@@ -146,6 +229,12 @@ export function formatOperatorWarning(t: Translator, warning: string) {
   if (reusedMatch) {
     const [, proxyName, count] = reusedMatch;
     return t("Proxy {proxyName} reused {count} cached IPs.", { proxyName, count });
+  }
+
+  const filteredInfoMatch = warning.match(/^filtered informational subscription entry `([^`]+)`$/i);
+  if (filteredInfoMatch) {
+    const [, name] = filteredInfoMatch;
+    return t("Filtered informational subscription entry {name}.", { name });
   }
 
   return warning;

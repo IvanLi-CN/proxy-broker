@@ -17,6 +17,15 @@ const meta = {
     response: {
       loaded_proxies: 6,
       distinct_ips: 4,
+      resolved_name: "edge-feed",
+      resolved_name_source: "parsed_source",
+      subscription_metadata: {
+        source_title: "edge-feed",
+        total_bytes: 100 * 1024 ** 3,
+        remaining_bytes: 70 * 1024 ** 3,
+        used_bytes: 30 * 1024 ** 3,
+        expire_at: 1_741_748_800,
+      },
       warnings: [],
     },
     error: null,
@@ -49,6 +58,41 @@ export const ErrorState: Story = {
   },
 };
 
+export const ManualNamePreferred: Story = {
+  args: {
+    response: {
+      loaded_proxies: 6,
+      distinct_ips: 4,
+      resolved_name: "ops-feed",
+      resolved_name_source: "existing_import",
+      subscription_metadata: {
+        source_title: "Tokyo Premium Feed",
+        total_bytes: 100 * 1024 ** 3,
+        remaining_bytes: 70 * 1024 ** 3,
+        expire_at: 1_741_748_800,
+      },
+      warnings: [],
+    },
+  },
+};
+
+export const FilterWarning: Story = {
+  args: {
+    response: {
+      loaded_proxies: 5,
+      distinct_ips: 4,
+      resolved_name: "edge-feed",
+      resolved_name_source: "parsed_source",
+      subscription_metadata: {
+        source_title: "edge-feed",
+        total_bytes: 100 * 1024 ** 3,
+        remaining_bytes: 68 * 1024 ** 3,
+      },
+      warnings: ["filtered informational subscription entry `剩余流量 68GB`"],
+    },
+  },
+};
+
 export const NodeGroupMode: Story = {
   args: {
     response: null,
@@ -71,10 +115,14 @@ export const Interaction: Story = {
   async play({ canvasElement, args }) {
     const canvas = within(canvasElement);
     await userEvent.clear(canvas.getByLabelText("Name"));
-    await userEvent.type(canvas.getByLabelText("Name"), "edge-jp");
     await userEvent.clear(canvas.getByLabelText("Value"));
     await userEvent.type(canvas.getByLabelText("Value"), "https://example.com/feed.yaml");
     await userEvent.click(canvas.getByRole("button", { name: /import profile pool/i }));
-    expect(args.onSubmit).toHaveBeenCalled();
+    expect(args.onSubmit).toHaveBeenCalledWith({
+      source: {
+        type: "url",
+        value: "https://example.com/feed.yaml",
+      },
+    });
   },
 };

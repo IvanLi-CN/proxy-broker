@@ -954,6 +954,7 @@ mod tests {
                         source_value: "/tmp/edge-jp.yaml".to_string(),
                     },
                     allocation_scope: ProxyScope::profile("edge-jp"),
+                    subscription_metadata: None,
                     created_at: 1,
                     updated_at: 1,
                 },
