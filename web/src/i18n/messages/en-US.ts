@@ -312,6 +312,9 @@ export const enUS: MessageCatalog = {
   "Queued metadata refresh": "Queued metadata refresh",
   "Queued latency probe": "Queued latency probe",
   "Run ID: {runId}": "Run ID: {runId}",
+  "Proxy metadata refresh": "Proxy metadata refresh",
+  "Proxy latency probe": "Proxy latency probe",
+  Operator: "Operator",
   "Listening on {listen} via {proxyName} ({selectedIp}).":
     "Listening on {listen} via {proxyName} ({selectedIp}).",
   "No resolved IPs": "No resolved IPs",

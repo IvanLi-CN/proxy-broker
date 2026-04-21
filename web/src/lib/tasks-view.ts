@@ -25,6 +25,10 @@ export function formatTaskKind(kind: TaskRunKind, t: Translator) {
       return t("Incremental refresh");
     case "metadata_refresh_full":
       return t("Full refresh");
+    case "proxy_metadata_refresh":
+      return t("Proxy metadata refresh");
+    case "proxy_latency_probe":
+      return t("Proxy latency probe");
   }
 }
 
@@ -34,6 +38,8 @@ export function formatTaskTrigger(trigger: TaskRunTrigger, t: Translator) {
       return t("Scheduled");
     case "post_load":
       return t("Post-load");
+    case "operator":
+      return t("Operator");
   }
 }
 

@@ -27,6 +27,8 @@ use crate::{
     web_ui::spa_fallback,
 };
 
+const GLOBAL_TASK_PROFILE_ID: &str = "__global__";
+
 #[derive(Clone)]
 pub struct AppState {
     pub service: Arc<BrokerService>,
@@ -302,7 +304,7 @@ async fn list_tasks(
     State(state): State<AppState>,
     Query(query): Query<TaskListQuery>,
 ) -> Result<Json<crate::models::TaskListResponse>, BrokerError> {
-    auth.require_admin()?;
+    authorize_task_query_access(&auth, &query)?;
     let resp = state.service.list_tasks(&query).await?;
     Ok(Json(resp))
 }
@@ -312,8 +314,8 @@ async fn get_task_run_detail(
     State(state): State<AppState>,
     Path(run_id): Path<String>,
 ) -> Result<Json<TaskRunDetail>, BrokerError> {
-    auth.require_admin()?;
     let resp = state.service.get_task_run_detail(&run_id).await?;
+    authorize_task_run_access(&auth, &resp.run)?;
     Ok(Json(resp))
 }
 
@@ -322,7 +324,7 @@ async fn stream_tasks(
     State(state): State<AppState>,
     Query(query): Query<TaskListQuery>,
 ) -> Result<Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>>, BrokerError> {
-    auth.require_admin()?;
+    authorize_task_query_access(&auth, &query)?;
 
     let mut receiver = state.service.subscribe_task_events();
     let stream_query = query.clone();
@@ -512,6 +514,33 @@ fn authorize_proxy_catalog_access(
                 "unsupported proxy catalog view `{other}`"
             )));
         }
+    }
+    Ok(())
+}
+
+fn authorize_task_query_access(
+    auth: &AuthContext,
+    query: &TaskListQuery,
+) -> Result<(), BrokerError> {
+    match query.profile_id.as_deref() {
+        Some(profile_id) if profile_id != "all" && profile_id != GLOBAL_TASK_PROFILE_ID => {
+            auth.require_profile_access(profile_id)?;
+        }
+        _ => {
+            auth.require_admin()?;
+        }
+    }
+    Ok(())
+}
+
+fn authorize_task_run_access(
+    auth: &AuthContext,
+    run: &crate::models::TaskRunSummary,
+) -> Result<(), BrokerError> {
+    if run.profile_id == GLOBAL_TASK_PROFILE_ID {
+        auth.require_admin()?;
+    } else {
+        auth.require_profile_access(&run.profile_id)?;
     }
     Ok(())
 }

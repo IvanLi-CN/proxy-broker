@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import { zhCN } from "@/i18n/messages/zh-CN";
 import {
   formatTaskEventMessage,
+  formatTaskKind,
   formatTaskPayloadKey,
+  formatTaskTrigger,
   localizeTaskPayload,
 } from "@/lib/tasks-view";
 
@@ -19,6 +21,14 @@ describe("formatTaskEventMessage", () => {
     expect(formatTaskEventMessage("Subscription sync finished with 12 new IP(s).", t)).toBe(
       "订阅同步完成，新增 12 个 IP。",
     );
+  });
+});
+
+describe("task labels", () => {
+  it("formats proxy task kinds and operator triggers", () => {
+    expect(formatTaskKind("proxy_metadata_refresh", t)).toBe("代理元信息刷新");
+    expect(formatTaskKind("proxy_latency_probe", t)).toBe("代理延迟探测");
+    expect(formatTaskTrigger("operator", t)).toBe("人工触发");
   });
 });
 

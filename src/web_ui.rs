@@ -92,7 +92,11 @@ mod tests {
         MihomoRuntime,
         auth::AuthContext,
         build_router,
-        models::{ProxyScope, SubscriptionSource},
+        models::{
+            ProxyScope, SubscriptionSource, TaskRunKind, TaskRunRecord, TaskRunScope, TaskRunStage,
+            TaskRunStatus, TaskRunTrigger,
+        },
+        store::BrokerStore,
     };
     use anyhow::anyhow;
     use async_trait::async_trait;
@@ -216,6 +220,33 @@ mod tests {
             .await
             .expect("subscription fixture should be written");
         path.to_string_lossy().into_owned()
+    }
+
+    async fn create_selected_profile_api_key(app: axum::Router, profile_id: &str) -> String {
+        let created_key = app
+            .oneshot(trusted_request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/api-keys")
+                    .header("content-type", "application/json")
+                    .header("x-forwarded-user", "admin@example.com")
+                    .body(Body::from(format!(
+                        r#"{{"name":"{profile_id}-bot","profile_scope":{{"kind":"selected_profiles","profile_ids":["{profile_id}"]}}}}"#
+                    )))
+                    .unwrap(),
+            ))
+            .await
+            .expect("key create should respond");
+        assert_eq!(created_key.status(), StatusCode::CREATED);
+        let created_key_body = to_bytes(created_key.into_body(), usize::MAX)
+            .await
+            .expect("body should be readable");
+        let created_key_json: serde_json::Value =
+            serde_json::from_slice(&created_key_body).expect("body should be json");
+        created_key_json["secret"]
+            .as_str()
+            .expect("secret should be present")
+            .to_string()
     }
 
     #[tokio::test]
@@ -808,6 +839,151 @@ mod tests {
             .await
             .expect("router should respond");
         assert_eq!(allowed.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn api_key_can_stream_selected_profile_task_events() {
+        let store = Arc::new(MemoryStore::new());
+        let runtime: Arc<dyn MihomoRuntime> = Arc::new(TestRuntime);
+        let service = Arc::new(BrokerService::new(
+            store.clone(),
+            runtime,
+            BrokerServiceOptions::default(),
+        ));
+        service
+            .create_profile("alpha")
+            .await
+            .expect("alpha profile should be created");
+        store
+            .insert_task_run(&TaskRunRecord {
+                run_id: "run-alpha-probe".to_string(),
+                profile_id: "alpha".to_string(),
+                kind: TaskRunKind::ProxyLatencyProbe,
+                trigger: TaskRunTrigger::Operator,
+                status: TaskRunStatus::Running,
+                stage: TaskRunStage::Probing,
+                progress_current: Some(1),
+                progress_total: Some(5),
+                created_at: 1,
+                started_at: Some(1),
+                finished_at: None,
+                summary_json: None,
+                error_code: None,
+                error_message: None,
+                scope: TaskRunScope::Nodes {
+                    node_ids: vec!["node-alpha".to_string()],
+                },
+            })
+            .await
+            .expect("task run should seed");
+
+        let app = enforce_router_with_service(service);
+        let secret = create_selected_profile_api_key(app.clone(), "alpha").await;
+
+        let allowed = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/tasks/events?profile_id=alpha")
+                    .header("authorization", format!("Bearer {secret}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("router should respond");
+        assert_eq!(allowed.status(), StatusCode::OK);
+        assert_eq!(
+            allowed
+                .headers()
+                .get(axum::http::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok()),
+            Some("text/event-stream")
+        );
+    }
+
+    #[tokio::test]
+    async fn api_key_cannot_stream_global_task_events() {
+        let app = enforce_router();
+
+        let created_profile = app
+            .clone()
+            .oneshot(trusted_request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/profiles")
+                    .header("content-type", "application/json")
+                    .header("x-forwarded-user", "admin@example.com")
+                    .body(Body::from(r#"{"profile_id":"alpha"}"#))
+                    .unwrap(),
+            ))
+            .await
+            .expect("create should respond");
+        assert_eq!(created_profile.status(), StatusCode::CREATED);
+
+        let secret = create_selected_profile_api_key(app.clone(), "alpha").await;
+
+        let denied = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/tasks/events?profile_id=__global__")
+                    .header("authorization", format!("Bearer {secret}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("router should respond");
+        assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn api_key_can_read_selected_profile_task_run_detail() {
+        let store = Arc::new(MemoryStore::new());
+        let runtime: Arc<dyn MihomoRuntime> = Arc::new(TestRuntime);
+        let service = Arc::new(BrokerService::new(
+            store.clone(),
+            runtime,
+            BrokerServiceOptions::default(),
+        ));
+        service
+            .create_profile("alpha")
+            .await
+            .expect("alpha profile should be created");
+        store
+            .insert_task_run(&TaskRunRecord {
+                run_id: "run-alpha-refresh".to_string(),
+                profile_id: "alpha".to_string(),
+                kind: TaskRunKind::ProxyMetadataRefresh,
+                trigger: TaskRunTrigger::Operator,
+                status: TaskRunStatus::Succeeded,
+                stage: TaskRunStage::Completed,
+                progress_current: Some(1),
+                progress_total: Some(1),
+                created_at: 1,
+                started_at: Some(1),
+                finished_at: Some(2),
+                summary_json: None,
+                error_code: None,
+                error_message: None,
+                scope: TaskRunScope::Nodes {
+                    node_ids: vec!["node-alpha".to_string()],
+                },
+            })
+            .await
+            .expect("task run should seed");
+
+        let app = enforce_router_with_service(service);
+        let secret = create_selected_profile_api_key(app.clone(), "alpha").await;
+
+        let allowed = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/tasks/run-alpha-refresh")
+                    .header("authorization", format!("Bearer {secret}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("router should respond");
+        assert_eq!(allowed.status(), StatusCode::OK);
     }
 
     #[tokio::test]
