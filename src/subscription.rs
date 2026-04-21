@@ -227,6 +227,7 @@ async fn load_from_proxies(
             };
             Ok::<(ProxyNode, Vec<String>), anyhow::Error>((
                 ProxyNode {
+                    node_id: None,
                     proxy_name: name,
                     proxy_type,
                     server,

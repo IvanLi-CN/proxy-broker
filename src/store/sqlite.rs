@@ -12,7 +12,8 @@ use crate::{
     models::{
         ApiKeyProfileScope, ApiKeyProfileScopeKind, ApiKeyRecord, IpRecord, ProbeRecord,
         ProfileProxySettings, ProxyImportRecord, ProxyImportSourceIdentity, ProxyImportSyncConfig,
-        ProxyInventoryRecord, ProxyNode, ProxyScope, SessionRecord, SubscriptionSource,
+        ProxyInventoryRecord, ProxyNode, ProxyNodeMetadataRecord, ProxyScope, SessionRecord,
+        SubscriptionSource,
         TaskEventLevel, TaskListQuery, TaskRunEventRecord, TaskRunKind, TaskRunRecord,
         TaskRunStage, TaskRunStatus, TaskRunTrigger,
     },
@@ -123,8 +124,34 @@ impl SqliteStore {
               port INTEGER NOT NULL,
               selected_ip TEXT NOT NULL,
               proxy_name TEXT NOT NULL,
+              node_id TEXT NOT NULL DEFAULT '',
               created_at INTEGER NOT NULL,
               PRIMARY KEY (profile_id, session_id)
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+        self.migrate_sessions_node_id_schema().await?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS proxy_node_metadata (
+              node_id TEXT NOT NULL,
+              ip TEXT NOT NULL,
+              country_code TEXT,
+              country_name TEXT,
+              region_name TEXT,
+              city TEXT,
+              geo_source TEXT,
+              probe_updated_at INTEGER,
+              geo_updated_at INTEGER,
+              last_probe_ok INTEGER,
+              last_latency_ms INTEGER,
+              median_latency_ms INTEGER,
+              last_probe_samples_json TEXT NOT NULL DEFAULT '[]',
+              updated_at INTEGER NOT NULL,
+              PRIMARY KEY (node_id, ip)
             )
             "#,
         )
@@ -891,6 +918,17 @@ impl SqliteStore {
         Ok(())
     }
 
+    async fn migrate_sessions_node_id_schema(&self) -> anyhow::Result<()> {
+        if self.table_has_column("sessions", "node_id").await? {
+            return Ok(());
+        }
+
+        sqlx::query("ALTER TABLE sessions ADD COLUMN node_id TEXT NOT NULL DEFAULT ''")
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     async fn table_has_column(&self, table: &str, column: &str) -> anyhow::Result<bool> {
         let query = format!("PRAGMA table_info({table})");
         let rows = sqlx::query(&query).fetch_all(&self.pool).await?;
@@ -1485,6 +1523,7 @@ impl BrokerStore for SqliteStore {
                 let resolved_ips_json: String = row.try_get("resolved_ips_json")?;
                 let raw_proxy_json: String = row.try_get("raw_proxy_json")?;
                 Ok(ProxyNode {
+                    node_id: None,
                     proxy_name: row.try_get("proxy_name")?,
                     proxy_type: row.try_get("proxy_type")?,
                     server: row.try_get("server")?,
@@ -1950,6 +1989,95 @@ impl BrokerStore for SqliteStore {
             .collect()
     }
 
+    async fn upsert_proxy_node_metadata(
+        &self,
+        records: &[ProxyNodeMetadataRecord],
+    ) -> anyhow::Result<()> {
+        let mut tx = self.pool.begin().await?;
+        for record in records {
+            sqlx::query(
+                r#"
+                INSERT INTO proxy_node_metadata (
+                  node_id, ip, country_code, country_name, region_name, city, geo_source,
+                  probe_updated_at, geo_updated_at, last_probe_ok, last_latency_ms,
+                  median_latency_ms, last_probe_samples_json, updated_at
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                ON CONFLICT(node_id, ip) DO UPDATE SET
+                  country_code = excluded.country_code,
+                  country_name = excluded.country_name,
+                  region_name = excluded.region_name,
+                  city = excluded.city,
+                  geo_source = excluded.geo_source,
+                  probe_updated_at = excluded.probe_updated_at,
+                  geo_updated_at = excluded.geo_updated_at,
+                  last_probe_ok = excluded.last_probe_ok,
+                  last_latency_ms = excluded.last_latency_ms,
+                  median_latency_ms = excluded.median_latency_ms,
+                  last_probe_samples_json = excluded.last_probe_samples_json,
+                  updated_at = excluded.updated_at
+                "#,
+            )
+            .bind(&record.node_id)
+            .bind(&record.ip)
+            .bind(&record.country_code)
+            .bind(&record.country_name)
+            .bind(&record.region_name)
+            .bind(&record.city)
+            .bind(&record.geo_source)
+            .bind(record.probe_updated_at)
+            .bind(record.geo_updated_at)
+            .bind(record.last_probe_ok.map(|value| i64::from(value as i32)))
+            .bind(record.last_latency_ms.map(|value| value as i64))
+            .bind(record.median_latency_ms.map(|value| value as i64))
+            .bind(serde_json::to_string(&record.last_probe_samples)?)
+            .bind(record.updated_at)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn list_proxy_node_metadata(&self) -> anyhow::Result<Vec<ProxyNodeMetadataRecord>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT node_id, ip, country_code, country_name, region_name, city, geo_source,
+                   probe_updated_at, geo_updated_at, last_probe_ok, last_latency_ms,
+                   median_latency_ms, last_probe_samples_json, updated_at
+            FROM proxy_node_metadata
+            ORDER BY node_id ASC, ip ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                let last_latency_ms: Option<i64> = row.try_get("last_latency_ms")?;
+                let median_latency_ms: Option<i64> = row.try_get("median_latency_ms")?;
+                let last_probe_ok: Option<i64> = row.try_get("last_probe_ok")?;
+                let last_probe_samples_json: String = row.try_get("last_probe_samples_json")?;
+                Ok(ProxyNodeMetadataRecord {
+                    node_id: row.try_get("node_id")?,
+                    ip: row.try_get("ip")?,
+                    country_code: row.try_get("country_code")?,
+                    country_name: row.try_get("country_name")?,
+                    region_name: row.try_get("region_name")?,
+                    city: row.try_get("city")?,
+                    geo_source: row.try_get("geo_source")?,
+                    probe_updated_at: row.try_get("probe_updated_at")?,
+                    geo_updated_at: row.try_get("geo_updated_at")?,
+                    last_probe_ok: last_probe_ok.map(|value| value != 0),
+                    last_latency_ms: last_latency_ms.map(|value| value as u64),
+                    median_latency_ms: median_latency_ms.map(|value| value as u64),
+                    last_probe_samples: serde_json::from_str(&last_probe_samples_json)?,
+                    updated_at: row.try_get("updated_at")?,
+                })
+            })
+            .collect()
+    }
+
     async fn insert_session(
         &self,
         profile_id: &str,
@@ -1968,13 +2096,16 @@ impl BrokerStore for SqliteStore {
         for session in sessions {
             sqlx::query(
                 r#"
-                INSERT INTO sessions (profile_id, session_id, listen, port, selected_ip, proxy_name, created_at)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                INSERT INTO sessions (
+                  profile_id, session_id, listen, port, selected_ip, proxy_name, node_id, created_at
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                 ON CONFLICT(profile_id, session_id) DO UPDATE SET
                   listen = excluded.listen,
                   port = excluded.port,
                   selected_ip = excluded.selected_ip,
                   proxy_name = excluded.proxy_name,
+                  node_id = excluded.node_id,
                   created_at = excluded.created_at
                 "#,
             )
@@ -1984,6 +2115,7 @@ impl BrokerStore for SqliteStore {
             .bind(session.port as i64)
             .bind(&session.selected_ip)
             .bind(&session.proxy_name)
+            .bind(&session.node_id)
             .bind(session.created_at)
             .execute(&mut *tx)
             .await?;
@@ -2002,13 +2134,16 @@ impl BrokerStore for SqliteStore {
         for session in sessions {
             sqlx::query(
                 r#"
-                INSERT INTO sessions (profile_id, session_id, listen, port, selected_ip, proxy_name, created_at)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                INSERT INTO sessions (
+                  profile_id, session_id, listen, port, selected_ip, proxy_name, node_id, created_at
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                 ON CONFLICT(profile_id, session_id) DO UPDATE SET
                   listen = excluded.listen,
                   port = excluded.port,
                   selected_ip = excluded.selected_ip,
                   proxy_name = excluded.proxy_name,
+                  node_id = excluded.node_id,
                   created_at = excluded.created_at
                 "#,
             )
@@ -2018,6 +2153,7 @@ impl BrokerStore for SqliteStore {
             .bind(session.port as i64)
             .bind(&session.selected_ip)
             .bind(&session.proxy_name)
+            .bind(&session.node_id)
             .bind(session.created_at)
             .execute(&mut *tx)
             .await?;
@@ -2054,7 +2190,7 @@ impl BrokerStore for SqliteStore {
     async fn list_sessions(&self, profile_id: &str) -> anyhow::Result<Vec<SessionRecord>> {
         let rows = sqlx::query(
             r#"
-            SELECT session_id, listen, port, selected_ip, proxy_name, created_at
+            SELECT session_id, listen, port, selected_ip, proxy_name, node_id, created_at
             FROM sessions
             WHERE profile_id = ?1
             ORDER BY created_at ASC, session_id ASC
@@ -2073,6 +2209,7 @@ impl BrokerStore for SqliteStore {
                     port: port as u16,
                     selected_ip: row.try_get("selected_ip")?,
                     proxy_name: row.try_get("proxy_name")?,
+                    node_id: row.try_get("node_id")?,
                     created_at: row.try_get("created_at")?,
                 })
             })
@@ -3298,6 +3435,7 @@ mod tests {
 
     fn sample_node(profile_name: &str, ip: &str) -> ProxyNode {
         ProxyNode {
+            node_id: Some(format!("node-{profile_name}")),
             proxy_name: profile_name.to_string(),
             proxy_type: "socks5".to_string(),
             server: ip.to_string(),

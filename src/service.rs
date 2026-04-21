@@ -33,10 +33,13 @@ use crate::{
         CreateProfileResponse, ExtractIpItem, ExtractIpRequest, ExtractIpResponse, IpRecord,
         ListApiKeysResponse, ListProfilesResponse, ListProxyImportResponse,
         ListProxyInventoryResponse, ListSessionsResponse, LoadSubscriptionRequest,
-        LoadSubscriptionResponse, OpenBatchRequest, OpenBatchResponse, OpenSessionRequest,
-        OpenSessionResponse, ProbeRecord, ProfileProxySettings, ProxyImportItem, ProxyImportKind,
-        ProxyImportRecord, ProxyImportSourceIdentity, ProxyImportSyncConfig, ProxyInventoryItem,
-        ProxyInventoryRecord, ProxyNode, ProxyScope, RefreshRequest, RefreshResponse,
+        LoadSubscriptionResponse, OpenBatchByNodeRequest, OpenBatchRequest, OpenBatchResponse,
+        OpenSessionByNodeRequest, OpenSessionRequest, OpenSessionResponse, ProbeRecord,
+        ProfileProxySettings, ProxyCatalogGroupItem, ProxyCatalogNodeItem, ProxyCatalogQuery,
+        ProxyCatalogResponse, ProxyImportItem, ProxyImportKind, ProxyImportRecord,
+        ProxyImportSourceIdentity, ProxyImportSyncConfig, ProxyInventoryItem,
+        ProxyInventoryRecord, ProxyNode, ProxyNodeMetadataRecord, ProxyOperationAcceptedResponse,
+        ProxyOperationRequest, ProxyScope, RefreshRequest, RefreshResponse,
         SearchSessionOptionsRequest, SearchSessionOptionsResponse, SessionOptionItem,
         SessionOptionKind, SessionRecord, SessionSelectionMode, SubscriptionSource,
         SuggestedPortResponse, TaskEventLevel, TaskListQuery, TaskListResponse, TaskRunDetail,
@@ -54,6 +57,8 @@ const DEFAULT_AUTO_FULL_REFRESH_EVERY_SEC: u64 = 86_400;
 const TASK_SCHEDULE_SCAN_SEC: u64 = 30;
 const TASK_DISPATCH_POLL_SEC: u64 = 1;
 const DEFAULT_SESSION_OPTIONS_LIMIT: usize = 25;
+const GLOBAL_RUNTIME_PROFILE_ID: &str = "__global__";
+const PROXY_PROBE_ROUNDS: usize = 5;
 
 #[derive(Debug, Clone)]
 pub struct BrokerServiceOptions {
@@ -281,16 +286,105 @@ impl BrokerService {
         }
     }
 
-    async fn cleanup_profile_runtime_if_idle(&self, profile_id: &str, sessions: &[SessionRecord]) {
+    async fn collect_all_sessions(
+        &self,
+        override_profile_id: Option<&str>,
+        override_sessions: Option<&[SessionRecord]>,
+    ) -> BrokerResult<Vec<SessionRecord>> {
+        let mut sessions = Vec::new();
+        for profile_id in self
+            .store
+            .list_profiles()
+            .await
+            .map_err(BrokerError::from)?
+        {
+            if override_profile_id == Some(profile_id.as_str()) {
+                sessions.extend(override_sessions.unwrap_or(&[]).iter().cloned());
+                continue;
+            }
+            sessions.extend(
+                self.store
+                    .list_sessions(&profile_id)
+                    .await
+                    .map_err(BrokerError::from)?,
+            );
+        }
+        sessions.sort_by(|left, right| {
+            left.created_at
+                .cmp(&right.created_at)
+                .then_with(|| left.session_id.cmp(&right.session_id))
+        });
+        Ok(sessions)
+    }
+
+    async fn collect_all_runtime_nodes(&self) -> BrokerResult<Vec<ProxyNode>> {
+        let mut nodes = self
+            .store
+            .list_proxy_inventory()
+            .await
+            .map_err(BrokerError::from)?
+            .into_iter()
+            .map(|item| ProxyNode {
+                node_id: Some(item.node_id),
+                proxy_name: item.proxy_name,
+                proxy_type: item.proxy_type,
+                server: item.server,
+                resolved_ips: item.resolved_ips,
+                raw_proxy: item.raw_proxy,
+            })
+            .collect::<Vec<_>>();
+        nodes.sort_by(|left, right| {
+            left.node_id
+                .cmp(&right.node_id)
+                .then_with(|| left.proxy_name.cmp(&right.proxy_name))
+        });
+        Ok(nodes)
+    }
+
+    async fn apply_shared_runtime_config(
+        &self,
+        override_profile_id: Option<&str>,
+        override_sessions: Option<&[SessionRecord]>,
+        start_without_sessions: bool,
+    ) -> BrokerResult<()> {
+        let nodes = self.collect_all_runtime_nodes().await?;
+        let sessions = self
+            .collect_all_sessions(override_profile_id, override_sessions)
+            .await?;
+        if nodes.is_empty() || (sessions.is_empty() && !start_without_sessions) {
+            self.cleanup_shared_runtime_if_idle().await;
+            return Ok(());
+        }
+
+        let (controller, secret) = self
+            .runtime
+            .controller_meta(GLOBAL_RUNTIME_PROFILE_ID)
+            .await
+            .map_err(|e| BrokerError::MihomoUnavailable(e.to_string()))?;
+        let payload = render_payload(&controller, secret.as_deref(), &nodes, &sessions)
+            .map_err(|e| BrokerError::MihomoUnavailable(e.to_string()))?;
+        self.runtime
+            .apply_config(GLOBAL_RUNTIME_PROFILE_ID, &payload)
+            .await
+            .map_err(|e| BrokerError::MihomoUnavailable(e.to_string()))
+    }
+
+    async fn cleanup_shared_runtime_if_idle(&self) {
+        let sessions = match self.collect_all_sessions(None, None).await {
+            Ok(sessions) => sessions,
+            Err(err) => {
+                tracing::warn!(error = %err, "failed to inspect shared runtime idleness");
+                return;
+            }
+        };
         if !sessions.is_empty() {
             return;
         }
 
-        if let Err(err) = self.runtime.shutdown_profile(profile_id).await {
+        if let Err(err) = self.runtime.shutdown_profile(GLOBAL_RUNTIME_PROFILE_ID).await {
             tracing::warn!(
-                profile_id,
                 error = %err,
-                "failed to shutdown idle profile runtime"
+                "failed to shutdown idle shared runtime"
             );
         }
     }
@@ -323,27 +417,21 @@ impl BrokerService {
             .map_err(BrokerError::from)?;
 
         let existing_sessions = self
-            .store
-            .list_sessions(profile_id)
-            .await
-            .map_err(BrokerError::from)?;
+            .list_sessions_backfilled(profile_id)
+            .await?;
         if existing_sessions.is_empty() {
-            self.cleanup_profile_runtime_if_idle(profile_id, &existing_sessions)
-                .await;
+            self.cleanup_shared_runtime_if_idle().await;
             return Ok(());
         }
 
         if nodes.is_empty() {
-            self.runtime
-                .shutdown_profile(profile_id)
-                .await
-                .map_err(|e| BrokerError::MihomoUnavailable(e.to_string()))?;
             for session in &existing_sessions {
                 self.store
                     .delete_session(profile_id, &session.session_id)
                     .await
                     .map_err(BrokerError::from)?;
             }
+            self.cleanup_shared_runtime_if_idle().await;
             return Ok(());
         }
 
@@ -352,7 +440,7 @@ impl BrokerService {
             .flat_map(|node| {
                 node.resolved_ips
                     .iter()
-                    .map(move |ip| (node.proxy_name.clone(), ip.clone()))
+                    .map(move |ip| (runtime_node_id(node), ip.clone()))
             })
             .collect();
 
@@ -360,7 +448,7 @@ impl BrokerService {
             .iter()
             .filter(|session| {
                 valid_proxy_ip_pairs
-                    .contains(&(session.proxy_name.clone(), session.selected_ip.clone()))
+                    .contains(&(session_runtime_key(session).to_string(), session.selected_ip.clone()))
             })
             .cloned()
             .collect();
@@ -376,25 +464,17 @@ impl BrokerService {
             .collect();
 
         if reconciled_sessions.is_empty() {
-            self.runtime
-                .shutdown_profile(profile_id)
-                .await
-                .map_err(|e| BrokerError::MihomoUnavailable(e.to_string()))?;
             for session_id in stale_ids {
                 self.store
                     .delete_session(profile_id, &session_id)
                     .await
                     .map_err(BrokerError::from)?;
             }
+            self.cleanup_shared_runtime_if_idle().await;
             return Ok(());
         }
 
-        self.runtime
-            .ensure_started(profile_id)
-            .await
-            .map_err(|e| BrokerError::MihomoUnavailable(e.to_string()))?;
-        self.apply_sessions_config(profile_id, &nodes, &reconciled_sessions)
-            .await?;
+        self.apply_sessions_config(profile_id, &reconciled_sessions).await?;
         for session_id in stale_ids {
             self.store
                 .delete_session(profile_id, &session_id)
@@ -606,6 +686,10 @@ impl BrokerService {
                 self.execute_incremental_refresh_task(&mut run).await
             }
             TaskRunKind::MetadataRefreshFull => self.execute_full_refresh_task(&mut run).await,
+            TaskRunKind::ProxyMetadataRefresh => {
+                self.execute_proxy_metadata_refresh_task(&mut run).await
+            }
+            TaskRunKind::ProxyLatencyProbe => self.execute_proxy_latency_probe_task(&mut run).await,
         };
 
         if let Err(err) = result {
@@ -817,6 +901,11 @@ impl BrokerService {
 
         let target_ips = match &run.scope {
             TaskRunScope::Ips { ips } => ips.clone(),
+            TaskRunScope::Nodes { .. } => {
+                return Err(BrokerError::InvalidRequest(
+                    "incremental refresh does not accept node scope".to_string(),
+                ));
+            }
             TaskRunScope::All => self
                 .store
                 .list_ip_records(&run.profile_id)
@@ -1038,7 +1127,9 @@ impl BrokerService {
                     self.mark_full_refresh_failed(&run.profile_id, failed_at)
                         .await?;
                 }
-                TaskRunKind::MetadataRefreshIncremental => {}
+                TaskRunKind::MetadataRefreshIncremental
+                | TaskRunKind::ProxyMetadataRefresh
+                | TaskRunKind::ProxyLatencyProbe => {}
             }
         }
         self.complete_task_run(
@@ -1476,6 +1567,26 @@ impl BrokerService {
         &self,
         profile_id: &str,
     ) -> BrokerResult<Vec<ProxyNode>> {
+        let records = self.compose_effective_proxy_inventory_records(profile_id).await?;
+        let mut nodes = records
+            .into_iter()
+            .map(|item| ProxyNode {
+                node_id: Some(item.node_id),
+                proxy_name: item.proxy_name,
+                proxy_type: item.proxy_type,
+                server: item.server,
+                resolved_ips: item.resolved_ips,
+                raw_proxy: item.raw_proxy,
+            })
+            .collect::<Vec<_>>();
+        nodes.sort_by(|left, right| left.proxy_name.cmp(&right.proxy_name));
+        Ok(nodes)
+    }
+
+    async fn compose_effective_proxy_inventory_records(
+        &self,
+        profile_id: &str,
+    ) -> BrokerResult<Vec<ProxyInventoryRecord>> {
         let settings = self
             .get_profile_proxy_settings_effective(profile_id)
             .await?;
@@ -1501,18 +1612,9 @@ impl BrokerService {
                 .or_insert(candidate);
         }
 
-        let mut nodes = by_name
-            .into_values()
-            .map(|item| ProxyNode {
-                proxy_name: item.proxy_name,
-                proxy_type: item.proxy_type,
-                server: item.server,
-                resolved_ips: item.resolved_ips,
-                raw_proxy: item.raw_proxy,
-            })
-            .collect::<Vec<_>>();
-        nodes.sort_by(|left, right| left.proxy_name.cmp(&right.proxy_name));
-        Ok(nodes)
+        let mut items = by_name.into_values().collect::<Vec<_>>();
+        items.sort_by(|left, right| left.proxy_name.cmp(&right.proxy_name));
+        Ok(items)
     }
 
     async fn rebuild_effective_profile_locked(
@@ -1520,11 +1622,6 @@ impl BrokerService {
         profile_id: &str,
     ) -> BrokerResult<Vec<String>> {
         let nodes = self.compose_effective_proxy_nodes(profile_id).await?;
-        let existing_nodes = self
-            .store
-            .list_subscription(profile_id)
-            .await
-            .map_err(BrokerError::from)?;
         let existing_ip_records = self
             .store
             .list_ip_records(profile_id)
@@ -1536,18 +1633,10 @@ impl BrokerService {
             .collect();
         let existing_ip_keys: HashSet<String> = existing_ip_map.keys().cloned().collect();
         let existing_sessions = self
-            .store
-            .list_sessions(profile_id)
-            .await
-            .map_err(BrokerError::from)?;
+            .list_sessions_backfilled(profile_id)
+            .await?;
 
         if nodes.is_empty() {
-            if !existing_sessions.is_empty() {
-                self.runtime
-                    .shutdown_profile(profile_id)
-                    .await
-                    .map_err(|e| BrokerError::MihomoUnavailable(e.to_string()))?;
-            }
             let removed_session_ids = existing_sessions
                 .iter()
                 .map(|session| session.session_id.clone())
@@ -1556,7 +1645,7 @@ impl BrokerService {
                 .apply_subscription_snapshot(profile_id, &[], &[], &[], &removed_session_ids)
                 .await
                 .map_err(BrokerError::from)?;
-            self.cleanup_profile_runtime_if_idle(profile_id, &[]).await;
+            self.cleanup_shared_runtime_if_idle().await;
             return Ok(vec![]);
         }
 
@@ -1588,14 +1677,14 @@ impl BrokerService {
             .flat_map(|node| {
                 node.resolved_ips
                     .iter()
-                    .map(move |ip| (node.proxy_name.clone(), ip.clone()))
+                    .map(move |ip| (runtime_node_id(node), ip.clone()))
             })
             .collect();
         let active_sessions: Vec<SessionRecord> = existing_sessions
             .iter()
             .filter(|session| {
                 valid_proxy_ip_pairs
-                    .contains(&(session.proxy_name.clone(), session.selected_ip.clone()))
+                    .contains(&(session_runtime_key(session).to_string(), session.selected_ip.clone()))
             })
             .cloned()
             .collect();
@@ -1603,7 +1692,7 @@ impl BrokerService {
             .iter()
             .filter(|session| {
                 !valid_proxy_ip_pairs
-                    .contains(&(session.proxy_name.clone(), session.selected_ip.clone()))
+                    .contains(&(session_runtime_key(session).to_string(), session.selected_ip.clone()))
             })
             .map(|session| session.session_id.clone())
             .collect();
@@ -1619,8 +1708,7 @@ impl BrokerService {
 
         let runtime_applied = !active_sessions.is_empty();
         if runtime_applied {
-            self.apply_sessions_config(profile_id, &nodes, &active_sessions)
-                .await?;
+            self.apply_sessions_config(profile_id, &active_sessions).await?;
         }
 
         if let Err(err) = self
@@ -1637,7 +1725,7 @@ impl BrokerService {
         {
             if runtime_applied
                 && let Err(rollback_err) = self
-                    .rollback_runtime_sessions(profile_id, &existing_nodes, &existing_sessions)
+                    .rollback_runtime_sessions(profile_id, &existing_sessions)
                     .await
             {
                 tracing::error!(
@@ -1645,14 +1733,13 @@ impl BrokerService {
                     error = %rollback_err,
                     "runtime rollback failed after subscription snapshot persistence error"
                 );
-                self.recover_runtime_desync(profile_id, &existing_nodes, &existing_sessions)
+                self.recover_runtime_desync(profile_id, &existing_sessions)
                     .await;
             }
             return Err(err);
         }
 
-        self.cleanup_profile_runtime_if_idle(profile_id, &active_sessions)
-            .await;
+        self.cleanup_shared_runtime_if_idle().await;
 
         let mut new_ips = valid_ips
             .difference(&existing_ip_keys)
@@ -1732,6 +1819,519 @@ impl BrokerService {
             created_at: record.created_at,
             updated_at: record.updated_at,
         })
+    }
+
+    async fn build_proxy_catalog_response(
+        &self,
+        view: &str,
+        profile_id: Option<&str>,
+        records: Vec<ProxyInventoryRecord>,
+    ) -> BrokerResult<ProxyCatalogResponse> {
+        let (profiles, settings) = self.list_profile_ids_with_settings().await?;
+        let import_records = self
+            .store
+            .list_proxy_imports()
+            .await
+            .map_err(BrokerError::from)?
+            .into_iter()
+            .map(|record| (record.import_id.clone(), record))
+            .collect::<HashMap<_, _>>();
+        let metadata_by_node = self
+            .store
+            .list_proxy_node_metadata()
+            .await
+            .map_err(BrokerError::from)?
+            .into_iter()
+            .fold(HashMap::<String, Vec<ProxyNodeMetadataRecord>>::new(), |mut acc, record| {
+                acc.entry(record.node_id.clone()).or_default().push(record);
+                acc
+            });
+
+        let mut records_by_import = HashMap::<String, Vec<ProxyInventoryRecord>>::new();
+        for record in records {
+            records_by_import
+                .entry(record.import_id.clone())
+                .or_default()
+                .push(record);
+        }
+
+        let mut groups = Vec::new();
+        let mut import_ids = records_by_import.keys().cloned().collect::<Vec<_>>();
+        import_ids.sort();
+        for import_id in import_ids {
+            let mut nodes = records_by_import.remove(&import_id).unwrap_or_default();
+            nodes.sort_by(|left, right| left.proxy_name.cmp(&right.proxy_name));
+
+            let Some(import_record) = import_records.get(&import_id).cloned() else {
+                continue;
+            };
+            let import_item = self.proxy_import_item_from_record(import_record).await?;
+            let node_items = nodes
+                .into_iter()
+                .map(|record| {
+                    let mut ip_metadata = metadata_by_node
+                        .get(&record.node_id)
+                        .cloned()
+                        .unwrap_or_default();
+                    ip_metadata.sort_by(|left, right| left.ip.cmp(&right.ip));
+                    let effective_profile_ids =
+                        self.effective_profile_ids_for_record(&record, &profiles, &settings);
+                    ProxyCatalogNodeItem {
+                        import_id: record.import_id,
+                        node_id: record.node_id,
+                        proxy_name: record.proxy_name,
+                        proxy_type: record.proxy_type,
+                        server: record.server,
+                        resolved_ips: record.resolved_ips.clone(),
+                        source_scope: record.source_scope,
+                        allocation_scope: record.allocation_scope,
+                        effective_profile_ids,
+                        primary_ip: record.resolved_ips.first().cloned(),
+                        ip_metadata,
+                        can_open_session: view == "profile",
+                    }
+                })
+                .collect::<Vec<_>>();
+            groups.push(ProxyCatalogGroupItem {
+                import: import_item,
+                nodes: node_items,
+            });
+        }
+
+        Ok(ProxyCatalogResponse {
+            view: view.to_string(),
+            profile_id: profile_id.map(ToOwned::to_owned),
+            groups,
+        })
+    }
+
+    pub async fn list_proxy_catalog(
+        &self,
+        query: &ProxyCatalogQuery,
+    ) -> BrokerResult<ProxyCatalogResponse> {
+        let view = query.view.as_deref().unwrap_or("global");
+        match view {
+            "global" => {
+                let records = self
+                    .store
+                    .list_proxy_inventory()
+                    .await
+                    .map_err(BrokerError::from)?;
+                self.build_proxy_catalog_response("global", None, records).await
+            }
+            "profile" => {
+                let Some(profile_id) = query.profile_id.as_deref() else {
+                    return Err(BrokerError::InvalidRequest(
+                        "profile_id is required when view=profile".to_string(),
+                    ));
+                };
+                self.require_profile_exists(profile_id).await?;
+                let records = self
+                    .compose_effective_proxy_inventory_records(profile_id)
+                    .await?;
+                self.build_proxy_catalog_response("profile", Some(profile_id), records)
+                    .await
+            }
+            other => Err(BrokerError::InvalidRequest(format!(
+                "unsupported proxy catalog view `{other}`"
+            ))),
+        }
+    }
+
+    async fn resolve_proxy_operation_nodes(
+        &self,
+        view: &str,
+        profile_id: Option<&str>,
+        node_ids: &[String],
+    ) -> BrokerResult<Vec<ProxyInventoryRecord>> {
+        if node_ids.is_empty() {
+            return Err(BrokerError::InvalidRequest(
+                "node_ids must not be empty".to_string(),
+            ));
+        }
+
+        let mut unique_node_ids = node_ids
+            .iter()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .collect::<Vec<_>>();
+        unique_node_ids.sort();
+        unique_node_ids.dedup();
+        if unique_node_ids.is_empty() {
+            return Err(BrokerError::InvalidRequest(
+                "node_ids must not be empty".to_string(),
+            ));
+        }
+
+        let records = match view {
+            "global" => self
+                .store
+                .list_proxy_inventory()
+                .await
+                .map_err(BrokerError::from)?,
+            "profile" => {
+                let Some(profile_id) = profile_id else {
+                    return Err(BrokerError::InvalidRequest(
+                        "profile_id is required when view=profile".to_string(),
+                    ));
+                };
+                self.require_profile_exists(profile_id).await?;
+                self.compose_effective_proxy_inventory_records(profile_id)
+                    .await?
+            }
+            other => {
+                return Err(BrokerError::InvalidRequest(format!(
+                    "unsupported proxy operation view `{other}`"
+                )));
+            }
+        };
+
+        let record_by_id = records
+            .into_iter()
+            .map(|record| (record.node_id.clone(), record))
+            .collect::<HashMap<_, _>>();
+        let mut resolved = Vec::with_capacity(unique_node_ids.len());
+        for node_id in unique_node_ids {
+            let Some(record) = record_by_id.get(&node_id) else {
+                return Err(BrokerError::ProxyInventoryNodeNotFound);
+            };
+            resolved.push(record.clone());
+        }
+        Ok(resolved)
+    }
+
+    fn proxy_operation_profile_id(view: &str, profile_id: Option<&str>) -> BrokerResult<String> {
+        match view {
+            "global" => Ok(GLOBAL_RUNTIME_PROFILE_ID.to_string()),
+            "profile" => profile_id
+                .map(ToOwned::to_owned)
+                .ok_or_else(|| BrokerError::InvalidRequest("profile_id is required when view=profile".to_string())),
+            other => Err(BrokerError::InvalidRequest(format!(
+                "unsupported proxy operation view `{other}`"
+            ))),
+        }
+    }
+
+    pub async fn queue_proxy_metadata_refresh(
+        &self,
+        request: &ProxyOperationRequest,
+    ) -> BrokerResult<ProxyOperationAcceptedResponse> {
+        let view = request.view.trim();
+        let records = self
+            .resolve_proxy_operation_nodes(view, request.profile_id.as_deref(), &request.node_ids)
+            .await?;
+        let run = self
+            .enqueue_task_run(
+                &Self::proxy_operation_profile_id(view, request.profile_id.as_deref())?,
+                TaskRunKind::ProxyMetadataRefresh,
+                TaskRunTrigger::Operator,
+                TaskRunScope::Nodes {
+                    node_ids: records.into_iter().map(|record| record.node_id).collect(),
+                },
+            )
+            .await?;
+        Ok(ProxyOperationAcceptedResponse { run_id: run.run_id })
+    }
+
+    pub async fn queue_proxy_latency_probe(
+        &self,
+        request: &ProxyOperationRequest,
+    ) -> BrokerResult<ProxyOperationAcceptedResponse> {
+        let view = request.view.trim();
+        let records = self
+            .resolve_proxy_operation_nodes(view, request.profile_id.as_deref(), &request.node_ids)
+            .await?;
+        let run = self
+            .enqueue_task_run(
+                &Self::proxy_operation_profile_id(view, request.profile_id.as_deref())?,
+                TaskRunKind::ProxyLatencyProbe,
+                TaskRunTrigger::Operator,
+                TaskRunScope::Nodes {
+                    node_ids: records.into_iter().map(|record| record.node_id).collect(),
+                },
+            )
+            .await?;
+        Ok(ProxyOperationAcceptedResponse { run_id: run.run_id })
+    }
+
+    async fn resolve_proxy_operation_nodes_for_run(
+        &self,
+        run: &TaskRunRecord,
+    ) -> BrokerResult<Vec<ProxyInventoryRecord>> {
+        let TaskRunScope::Nodes { node_ids } = &run.scope else {
+            return Err(BrokerError::InvalidRequest(
+                "proxy operation requires node scope".to_string(),
+            ));
+        };
+        let view = if run.profile_id == GLOBAL_RUNTIME_PROFILE_ID {
+            "global"
+        } else {
+            "profile"
+        };
+        self.resolve_proxy_operation_nodes(
+            view,
+            (view == "profile").then_some(run.profile_id.as_str()),
+            node_ids,
+        )
+        .await
+    }
+
+    async fn execute_proxy_metadata_refresh_task(
+        &self,
+        run: &mut TaskRunRecord,
+    ) -> BrokerResult<()> {
+        let nodes = self.resolve_proxy_operation_nodes_for_run(run).await?;
+        if nodes.is_empty() {
+            self.complete_task_run(
+                run,
+                TaskRunStatus::Skipped,
+                Some(serde_json::json!({ "reason": "no_target_nodes" })),
+                None,
+                None,
+            )
+            .await?;
+            return Ok(());
+        }
+
+        self.mark_task_running(
+            run,
+            TaskRunStage::GeoEnrichment,
+            Some(0),
+            Some(nodes.len() as u64),
+        )
+        .await?;
+
+        let existing = self
+            .store
+            .list_proxy_node_metadata()
+            .await
+            .map_err(BrokerError::from)?
+            .into_iter()
+            .map(|record| ((record.node_id.clone(), record.ip.clone()), record))
+            .collect::<HashMap<_, _>>();
+        let now = now_epoch_sec();
+
+        let mut ip_records = nodes
+            .iter()
+            .filter_map(|node| {
+                let ip = node.resolved_ips.first()?.clone();
+                let existing = existing.get(&(node.node_id.clone(), ip.clone()));
+                Some(IpRecord {
+                    ip,
+                    country_code: existing.and_then(|record| record.country_code.clone()),
+                    country_name: existing.and_then(|record| record.country_name.clone()),
+                    region_name: existing.and_then(|record| record.region_name.clone()),
+                    city: existing.and_then(|record| record.city.clone()),
+                    geo_source: existing.and_then(|record| record.geo_source.clone()),
+                    probe_updated_at: existing.and_then(|record| record.probe_updated_at),
+                    geo_updated_at: existing.and_then(|record| record.geo_updated_at),
+                    last_used_at: None,
+                })
+            })
+            .collect::<Vec<_>>();
+        let geo_updated = self
+            .refresh_geo_records(GLOBAL_RUNTIME_PROFILE_ID, true, now, &mut ip_records, None)
+            .await?;
+
+        let by_ip = ip_records
+            .into_iter()
+            .map(|record| (record.ip.clone(), record))
+            .collect::<HashMap<_, _>>();
+        let mut updated_records = Vec::new();
+        for (index, node) in nodes.iter().enumerate() {
+            let Some(primary_ip) = node.resolved_ips.first() else {
+                continue;
+            };
+            let geo = by_ip.get(primary_ip);
+            let previous = existing.get(&(node.node_id.clone(), primary_ip.clone()));
+            updated_records.push(ProxyNodeMetadataRecord {
+                node_id: node.node_id.clone(),
+                ip: primary_ip.clone(),
+                country_code: geo.and_then(|record| record.country_code.clone()),
+                country_name: geo.and_then(|record| record.country_name.clone()),
+                region_name: geo.and_then(|record| record.region_name.clone()),
+                city: geo.and_then(|record| record.city.clone()),
+                geo_source: geo.and_then(|record| record.geo_source.clone()),
+                probe_updated_at: previous.and_then(|record| record.probe_updated_at),
+                geo_updated_at: geo.and_then(|record| record.geo_updated_at),
+                last_probe_ok: previous.and_then(|record| record.last_probe_ok),
+                last_latency_ms: previous.and_then(|record| record.last_latency_ms),
+                median_latency_ms: previous.and_then(|record| record.median_latency_ms),
+                last_probe_samples: previous
+                    .map(|record| record.last_probe_samples.clone())
+                    .unwrap_or_default(),
+                updated_at: now,
+            });
+            run.progress_current = Some((index + 1) as u64);
+            self.update_task_run_and_emit(run).await?;
+            self.append_task_event(
+                run,
+                TaskEventLevel::Info,
+                TaskRunStage::GeoEnrichment,
+                format!("Refreshed node metadata for {}.", node.proxy_name),
+                Some(serde_json::json!({
+                    "node_id": node.node_id,
+                    "proxy_name": node.proxy_name,
+                    "ip": primary_ip,
+                })),
+            )
+            .await?;
+        }
+        self.store
+            .upsert_proxy_node_metadata(&updated_records)
+            .await
+            .map_err(BrokerError::from)?;
+        self.complete_task_run(
+            run,
+            TaskRunStatus::Succeeded,
+            Some(serde_json::json!({
+                "targeted_nodes": updated_records.len(),
+                "geo_updated": geo_updated,
+            })),
+            None,
+            None,
+        )
+        .await
+    }
+
+    async fn execute_proxy_latency_probe_task(
+        &self,
+        run: &mut TaskRunRecord,
+    ) -> BrokerResult<()> {
+        let nodes = self.resolve_proxy_operation_nodes_for_run(run).await?;
+        if nodes.is_empty() {
+            self.complete_task_run(
+                run,
+                TaskRunStatus::Skipped,
+                Some(serde_json::json!({ "reason": "no_target_nodes" })),
+                None,
+                None,
+            )
+            .await?;
+            return Ok(());
+        }
+
+        self.apply_shared_runtime_config(None, None, true).await?;
+        let total_samples = nodes.len() * PROXY_PROBE_ROUNDS;
+        self.mark_task_running(
+            run,
+            TaskRunStage::Probing,
+            Some(0),
+            Some(total_samples as u64),
+        )
+        .await?;
+
+        let existing = self
+            .store
+            .list_proxy_node_metadata()
+            .await
+            .map_err(BrokerError::from)?
+            .into_iter()
+            .map(|record| ((record.node_id.clone(), record.ip.clone()), record))
+            .collect::<HashMap<_, _>>();
+        let probe_target = self
+            .options
+            .probe_targets
+            .first()
+            .cloned()
+            .ok_or_else(|| BrokerError::InvalidRequest("probe target is not configured".to_string()))?;
+        let timeout_ms = self.options.probe_timeout_ms;
+        let now = now_epoch_sec();
+        let mut samples_by_node = HashMap::<String, Vec<Option<u64>>>::new();
+        let mut progress = 0u64;
+
+        for round in 0..PROXY_PROBE_ROUNDS {
+            for node in &nodes {
+                let sample = if let Some(primary_ip) = node.resolved_ips.first() {
+                    let runtime_alias = dedicated_ip_proxy_name(&node.node_id, primary_ip);
+                    self.runtime
+                        .measure_proxy_delay(
+                            GLOBAL_RUNTIME_PROFILE_ID,
+                            &runtime_alias,
+                            &probe_target,
+                            timeout_ms,
+                        )
+                        .await
+                        .map_err(|e| BrokerError::MihomoUnavailable(e.to_string()))?
+                } else {
+                    None
+                };
+                samples_by_node
+                    .entry(node.node_id.clone())
+                    .or_default()
+                    .push(sample);
+                progress += 1;
+                run.progress_current = Some(progress);
+                self.update_task_run_and_emit(run).await?;
+                self.append_task_event(
+                    run,
+                    TaskEventLevel::Info,
+                    TaskRunStage::Probing,
+                    format!("Round {} probe finished for {}.", round + 1, node.proxy_name),
+                    Some(serde_json::json!({
+                        "node_id": node.node_id,
+                        "proxy_name": node.proxy_name,
+                        "round": round + 1,
+                        "samples_total": PROXY_PROBE_ROUNDS,
+                        "sample_ms": sample,
+                        "progress_current": progress,
+                        "progress_total": total_samples,
+                    })),
+                )
+                .await?;
+            }
+        }
+
+        let mut updates = Vec::new();
+        let mut failed_nodes = 0usize;
+        for node in &nodes {
+            let Some(primary_ip) = node.resolved_ips.first() else {
+                failed_nodes += 1;
+                continue;
+            };
+            let previous = existing.get(&(node.node_id.clone(), primary_ip.clone()));
+            let samples = samples_by_node
+                .remove(&node.node_id)
+                .unwrap_or_else(|| vec![None; PROXY_PROBE_ROUNDS]);
+            let successes = samples.iter().flatten().copied().collect::<Vec<_>>();
+            if successes.is_empty() {
+                failed_nodes += 1;
+            }
+            updates.push(ProxyNodeMetadataRecord {
+                node_id: node.node_id.clone(),
+                ip: primary_ip.clone(),
+                country_code: previous.and_then(|record| record.country_code.clone()),
+                country_name: previous.and_then(|record| record.country_name.clone()),
+                region_name: previous.and_then(|record| record.region_name.clone()),
+                city: previous.and_then(|record| record.city.clone()),
+                geo_source: previous.and_then(|record| record.geo_source.clone()),
+                probe_updated_at: Some(now),
+                geo_updated_at: previous.and_then(|record| record.geo_updated_at),
+                last_probe_ok: Some(!successes.is_empty()),
+                last_latency_ms: samples.last().copied().flatten(),
+                median_latency_ms: median_success_latency(&successes),
+                last_probe_samples: samples,
+                updated_at: now,
+            });
+        }
+        self.store
+            .upsert_proxy_node_metadata(&updates)
+            .await
+            .map_err(BrokerError::from)?;
+        self.complete_task_run(
+            run,
+            TaskRunStatus::Succeeded,
+            Some(serde_json::json!({
+                "targeted_nodes": updates.len(),
+                "failed_nodes": failed_nodes,
+                "rounds": PROXY_PROBE_ROUNDS,
+            })),
+            None,
+            None,
+        )
+        .await?;
+        self.cleanup_shared_runtime_if_idle().await;
+        Ok(())
     }
 
     pub async fn load_subscription(
@@ -2001,16 +2601,12 @@ impl BrokerService {
                 )
                 .await?;
             }
-            self.runtime
-                .ensure_started(profile_id)
-                .await
-                .map_err(|e| BrokerError::MihomoUnavailable(e.to_string()))?;
             let sessions = self
                 .store
                 .list_sessions(profile_id)
                 .await
                 .map_err(BrokerError::from)?;
-            self.apply_sessions_config(profile_id, &nodes, &sessions)
+            self.apply_shared_runtime_config(Some(profile_id), Some(&sessions), true)
                 .await?;
             self.refresh_probe_records(profile_id, now, &nodes, Some(&scoped_ip_set))
                 .await?
@@ -2087,13 +2683,7 @@ impl BrokerService {
             );
         }
 
-        let sessions = self
-            .store
-            .list_sessions(profile_id)
-            .await
-            .map_err(BrokerError::from)?;
-        self.cleanup_profile_runtime_if_idle(profile_id, &sessions)
-            .await;
+        self.cleanup_shared_runtime_if_idle().await;
 
         let probed_ips: HashSet<String> =
             probe_records.into_iter().map(|record| record.ip).collect();
@@ -2107,7 +2697,7 @@ impl BrokerService {
 
     async fn refresh_probe_records(
         &self,
-        profile_id: &str,
+        _profile_id: &str,
         now: i64,
         nodes: &[ProxyNode],
         target_ips: Option<&HashSet<String>>,
@@ -2120,7 +2710,8 @@ impl BrokerService {
                 {
                     continue;
                 }
-                let probe_proxy_name = dedicated_ip_proxy_name(&node.proxy_name, ip);
+                let runtime_name = node.node_id.as_deref().unwrap_or(&node.proxy_name);
+                let probe_proxy_name = dedicated_ip_proxy_name(runtime_name, ip);
                 for target in &self.options.probe_targets {
                     tasks.push((
                         node.proxy_name.clone(),
@@ -2132,17 +2723,20 @@ impl BrokerService {
             }
         }
 
-        let profile_id = profile_id.to_string();
         let timeout_ms = self.options.probe_timeout_ms;
         let concurrency = self.options.probe_concurrency.max(1);
 
         let probed: Vec<((String, String, String), ProbeRecord)> = stream::iter(tasks)
             .map(|(proxy_name, ip, target, probe_proxy_name)| {
-                let profile_id = profile_id.clone();
                 async move {
                     let delay = self
                         .runtime
-                        .measure_proxy_delay(&profile_id, &probe_proxy_name, &target, timeout_ms)
+                        .measure_proxy_delay(
+                            GLOBAL_RUNTIME_PROFILE_ID,
+                            &probe_proxy_name,
+                            &target,
+                            timeout_ms,
+                        )
                         .await
                         .map_err(|e| BrokerError::MihomoUnavailable(e.to_string()))?;
                     let key = (proxy_name.clone(), ip.clone(), target.clone());
@@ -2439,29 +3033,18 @@ impl BrokerService {
     async fn apply_sessions_config(
         &self,
         profile_id: &str,
-        nodes: &[ProxyNode],
         sessions: &[SessionRecord],
     ) -> BrokerResult<()> {
-        let (controller, secret) = self
-            .runtime
-            .controller_meta(profile_id)
+        self.apply_shared_runtime_config(Some(profile_id), Some(sessions), false)
             .await
-            .map_err(|e| BrokerError::MihomoUnavailable(e.to_string()))?;
-        let payload = render_payload(&controller, secret.as_deref(), nodes, sessions)
-            .map_err(|e| BrokerError::MihomoUnavailable(e.to_string()))?;
-        self.runtime
-            .apply_config(profile_id, &payload)
-            .await
-            .map_err(|e| BrokerError::MihomoUnavailable(e.to_string()))
     }
 
     async fn rollback_runtime_sessions(
         &self,
         profile_id: &str,
-        nodes: &[ProxyNode],
         sessions: &[SessionRecord],
     ) -> anyhow::Result<()> {
-        self.apply_sessions_config(profile_id, nodes, sessions)
+        self.apply_sessions_config(profile_id, sessions)
             .await
             .map_err(|e| anyhow!(e.to_string()))
     }
@@ -2469,14 +3052,17 @@ impl BrokerService {
     async fn recover_runtime_desync(
         &self,
         profile_id: &str,
-        nodes: &[ProxyNode],
         sessions: &[SessionRecord],
     ) {
         tracing::warn!(
             profile_id,
             "attempting runtime recovery after rollback failure"
         );
-        if let Err(err) = self.runtime.shutdown_profile(profile_id).await {
+        if let Err(err) = self
+            .runtime
+            .shutdown_profile(GLOBAL_RUNTIME_PROFILE_ID)
+            .await
+        {
             tracing::warn!(
                 profile_id,
                 error = %err,
@@ -2490,7 +3076,7 @@ impl BrokerService {
 
         if let Err(err) = self
             .runtime
-            .ensure_started(profile_id)
+            .ensure_started(GLOBAL_RUNTIME_PROFILE_ID)
             .await
             .map_err(|e| BrokerError::MihomoUnavailable(e.to_string()))
         {
@@ -2502,10 +3088,7 @@ impl BrokerService {
             return;
         }
 
-        if let Err(err) = self
-            .apply_sessions_config(profile_id, nodes, sessions)
-            .await
-        {
+        if let Err(err) = self.apply_sessions_config(profile_id, sessions).await {
             tracing::warn!(
                 profile_id,
                 error = %err,
@@ -2567,10 +3150,8 @@ impl BrokerService {
             .await
             .map_err(BrokerError::from)?;
         let existing = self
-            .store
-            .list_sessions(profile_id)
-            .await
-            .map_err(BrokerError::from)?;
+            .list_sessions_backfilled(profile_id)
+            .await?;
 
         let retryable = request.desired_port.is_none();
         let max_attempts = if retryable { 3usize } else { 1usize };
@@ -2600,7 +3181,7 @@ impl BrokerService {
             merged.push(prepared.clone());
 
             if let Err(err) = self
-                .apply_sessions_config(profile_id, &nodes, &merged)
+                .apply_sessions_config(profile_id, &merged)
                 .await
             {
                 tracing::warn!(
@@ -2610,7 +3191,7 @@ impl BrokerService {
                     "session apply config failed"
                 );
                 if let Err(rollback_err) = self
-                    .rollback_runtime_sessions(profile_id, &nodes, &existing)
+                    .rollback_runtime_sessions(profile_id, &existing)
                     .await
                 {
                     tracing::error!(
@@ -2619,7 +3200,7 @@ impl BrokerService {
                         error = %rollback_err,
                         "runtime rollback failed after session apply failure"
                     );
-                    self.recover_runtime_desync(profile_id, &nodes, &existing)
+                    self.recover_runtime_desync(profile_id, &existing)
                         .await;
                 }
                 if retryable && attempt < max_attempts {
@@ -2641,7 +3222,7 @@ impl BrokerService {
                     "persist session failed after runtime apply, rolling back runtime"
                 );
                 if let Err(rollback_err) = self
-                    .rollback_runtime_sessions(profile_id, &nodes, &existing)
+                    .rollback_runtime_sessions(profile_id, &existing)
                     .await
                 {
                     tracing::error!(
@@ -2650,19 +3231,13 @@ impl BrokerService {
                         error = %rollback_err,
                         "runtime rollback failed after session insert failure"
                     );
-                    self.recover_runtime_desync(profile_id, &nodes, &existing)
+                    self.recover_runtime_desync(profile_id, &existing)
                         .await;
                 }
                 return Err(BrokerError::from(err));
             }
 
-            return Ok(OpenSessionResponse {
-                session_id: prepared.session_id,
-                listen: prepared.listen,
-                port: prepared.port,
-                selected_ip: prepared.selected_ip,
-                proxy_name: prepared.proxy_name,
-            });
+            return Ok(self.build_open_session_response(prepared));
         }
 
         Err(BrokerError::PortInUse)
@@ -2699,10 +3274,8 @@ impl BrokerService {
             .await
             .map_err(BrokerError::from)?;
         let existing = self
-            .store
-            .list_sessions(profile_id)
-            .await
-            .map_err(BrokerError::from)?;
+            .list_sessions_backfilled(profile_id)
+            .await?;
 
         let retryable = request.requests.iter().all(|r| r.desired_port.is_none());
         let max_attempts = if retryable { 3usize } else { 1usize };
@@ -2732,7 +3305,7 @@ impl BrokerService {
             merged.extend(staged.clone());
 
             if let Err(err) = self
-                .apply_sessions_config(profile_id, &nodes, &merged)
+                .apply_sessions_config(profile_id, &merged)
                 .await
             {
                 tracing::warn!(
@@ -2742,7 +3315,7 @@ impl BrokerService {
                     "batch apply config failed before persisting sessions"
                 );
                 if let Err(rollback_err) = self
-                    .rollback_runtime_sessions(profile_id, &nodes, &existing)
+                    .rollback_runtime_sessions(profile_id, &existing)
                     .await
                 {
                     tracing::error!(
@@ -2751,7 +3324,7 @@ impl BrokerService {
                         error = %rollback_err,
                         "runtime rollback failed after batch apply failure"
                     );
-                    self.recover_runtime_desync(profile_id, &nodes, &existing)
+                    self.recover_runtime_desync(profile_id, &existing)
                         .await;
                 }
                 if retryable && attempt < max_attempts {
@@ -2772,7 +3345,7 @@ impl BrokerService {
                     "batch persist failed after runtime apply, rolling back"
                 );
                 if let Err(rollback_err) = self
-                    .rollback_runtime_sessions(profile_id, &nodes, &existing)
+                    .rollback_runtime_sessions(profile_id, &existing)
                     .await
                 {
                     tracing::error!(
@@ -2780,7 +3353,7 @@ impl BrokerService {
                         error = %rollback_err,
                         "runtime rollback failed after batch persist failure"
                     );
-                    self.recover_runtime_desync(profile_id, &nodes, &existing)
+                    self.recover_runtime_desync(profile_id, &existing)
                         .await;
                 }
                 return Err(BrokerError::BatchOpenFailed);
@@ -2789,18 +3362,184 @@ impl BrokerService {
             return Ok(OpenBatchResponse {
                 sessions: staged
                     .into_iter()
-                    .map(|s| OpenSessionResponse {
-                        session_id: s.session_id,
-                        listen: s.listen,
-                        port: s.port,
-                        selected_ip: s.selected_ip,
-                        proxy_name: s.proxy_name,
-                    })
+                    .map(|s| self.build_open_session_response(s))
                     .collect(),
             });
         }
 
         Err(BrokerError::BatchOpenFailed)
+    }
+
+    async fn list_sessions_backfilled(&self, profile_id: &str) -> BrokerResult<Vec<SessionRecord>> {
+        let mut sessions = self
+            .store
+            .list_sessions(profile_id)
+            .await
+            .map_err(BrokerError::from)?;
+        let effective_nodes = self
+            .compose_effective_proxy_inventory_records(profile_id)
+            .await
+            .unwrap_or_default();
+        let mut repaired = Vec::new();
+        for session in &mut sessions {
+            if !session.node_id.trim().is_empty() {
+                continue;
+            }
+            let matches = effective_nodes
+                .iter()
+                .filter(|node| {
+                    node.proxy_name == session.proxy_name
+                        && node.resolved_ips.iter().any(|ip| ip == &session.selected_ip)
+                })
+                .collect::<Vec<_>>();
+            if matches.len() == 1 {
+                session.node_id = matches[0].node_id.clone();
+                repaired.push(session.clone());
+            }
+        }
+        if !repaired.is_empty() {
+            self.store
+                .insert_sessions(profile_id, &repaired)
+                .await
+                .map_err(BrokerError::from)?;
+        }
+        Ok(sessions)
+    }
+
+    fn build_open_session_response(&self, session: SessionRecord) -> OpenSessionResponse {
+        OpenSessionResponse {
+            session_id: session.session_id,
+            listen: session.listen,
+            port: session.port,
+            selected_ip: session.selected_ip,
+            proxy_name: session.proxy_name,
+            node_id: session.node_id,
+        }
+    }
+
+    pub async fn open_session_by_node(
+        &self,
+        profile_id: &str,
+        request: &OpenSessionByNodeRequest,
+    ) -> BrokerResult<OpenSessionResponse> {
+        let _profile_guard = self.lock_profile(profile_id).await;
+        let nodes = self
+            .compose_effective_proxy_inventory_records(profile_id)
+            .await?;
+        let Some(node) = nodes
+            .into_iter()
+            .find(|candidate| candidate.node_id == request.node_id)
+        else {
+            return Err(BrokerError::ProxyInventoryNodeNotFound);
+        };
+        let selected_ip = node
+            .resolved_ips
+            .first()
+            .cloned()
+            .ok_or(BrokerError::SubscriptionInvalid)?;
+        let mut existing = self.list_sessions_backfilled(profile_id).await?;
+        let port = allocate_port(
+            &existing,
+            request.desired_port,
+            self.options.session_listen_ip,
+            self.options.session_port_range,
+        )?;
+        let prepared = SessionRecord {
+            session_id: ids::random_session_id(),
+            listen: self.options.session_listen_ip.to_string(),
+            port,
+            selected_ip,
+            proxy_name: node.proxy_name,
+            node_id: node.node_id,
+            created_at: now_epoch_sec(),
+        };
+        let previous = existing.clone();
+        existing.push(prepared.clone());
+        self.apply_sessions_config(profile_id, &existing).await?;
+        if let Err(err) = self
+            .store
+            .insert_sessions_with_touch(profile_id, std::slice::from_ref(&prepared), now_epoch_sec())
+            .await
+        {
+            let _ = self.rollback_runtime_sessions(profile_id, &previous).await;
+            return Err(BrokerError::from(err));
+        }
+        Ok(self.build_open_session_response(prepared))
+    }
+
+    pub async fn open_batch_by_node(
+        &self,
+        profile_id: &str,
+        request: &OpenBatchByNodeRequest,
+    ) -> BrokerResult<OpenBatchResponse> {
+        let requests = if !request.requests.is_empty() {
+            request.requests.clone()
+        } else {
+            request
+                .node_ids
+                .iter()
+                .cloned()
+                .map(|node_id| OpenSessionByNodeRequest {
+                    node_id,
+                    desired_port: None,
+                })
+                .collect::<Vec<_>>()
+        };
+        if requests.is_empty() {
+            return Ok(OpenBatchResponse { sessions: Vec::new() });
+        }
+        let _profile_guard = self.lock_profile(profile_id).await;
+        let node_map = self
+            .compose_effective_proxy_inventory_records(profile_id)
+            .await?
+            .into_iter()
+            .map(|record| (record.node_id.clone(), record))
+            .collect::<HashMap<_, _>>();
+        let mut existing = self.list_sessions_backfilled(profile_id).await?;
+        let previous = existing.clone();
+        let mut staged = Vec::new();
+        for request in &requests {
+            let Some(node) = node_map.get(&request.node_id) else {
+                return Err(BrokerError::ProxyInventoryNodeNotFound);
+            };
+            let selected_ip = node
+                .resolved_ips
+                .first()
+                .cloned()
+                .ok_or(BrokerError::SubscriptionInvalid)?;
+            let port = allocate_port(
+                &existing,
+                request.desired_port,
+                self.options.session_listen_ip,
+                self.options.session_port_range,
+            )?;
+            let session = SessionRecord {
+                session_id: ids::random_session_id(),
+                listen: self.options.session_listen_ip.to_string(),
+                port,
+                selected_ip,
+                proxy_name: node.proxy_name.clone(),
+                node_id: node.node_id.clone(),
+                created_at: now_epoch_sec(),
+            };
+            existing.push(session.clone());
+            staged.push(session);
+        }
+        self.apply_sessions_config(profile_id, &existing).await?;
+        if let Err(err) = self
+            .store
+            .insert_sessions_with_touch(profile_id, &staged, now_epoch_sec())
+            .await
+        {
+            let _ = self.rollback_runtime_sessions(profile_id, &previous).await;
+            return Err(BrokerError::from(err));
+        }
+        Ok(OpenBatchResponse {
+            sessions: staged
+                .into_iter()
+                .map(|session| self.build_open_session_response(session))
+                .collect(),
+        })
     }
 
     pub async fn suggested_port(&self, profile_id: &str) -> BrokerResult<SuggestedPortResponse> {
@@ -2810,10 +3549,8 @@ impl BrokerService {
 
         let _profile_guard = self.lock_profile(profile_id).await;
         let existing = self
-            .store
-            .list_sessions(profile_id)
-            .await
-            .map_err(BrokerError::from)?;
+            .list_sessions_backfilled(profile_id)
+            .await?;
         let port = allocate_port(
             &existing,
             None,
@@ -3336,27 +4073,16 @@ impl BrokerService {
     }
 
     pub async fn list_sessions(&self, profile_id: &str) -> BrokerResult<ListSessionsResponse> {
-        let sessions = self
-            .store
-            .list_sessions(profile_id)
-            .await
-            .map_err(BrokerError::from)?;
+        let sessions = self.list_sessions_backfilled(profile_id).await?;
         Ok(ListSessionsResponse { sessions })
     }
 
     pub async fn close_session(&self, profile_id: &str, session_id: &str) -> BrokerResult<()> {
         let _profile_guard = self.lock_profile(profile_id).await;
 
-        let nodes = self
-            .store
-            .list_subscription(profile_id)
-            .await
-            .map_err(BrokerError::from)?;
         let mut sessions = self
-            .store
-            .list_sessions(profile_id)
-            .await
-            .map_err(BrokerError::from)?;
+            .list_sessions_backfilled(profile_id)
+            .await?;
         let previous_sessions = sessions.clone();
 
         let old_len = sessions.len();
@@ -3370,13 +4096,11 @@ impl BrokerService {
                 .delete_session(profile_id, session_id)
                 .await
                 .map_err(BrokerError::from)?;
-            self.cleanup_profile_runtime_if_idle(profile_id, &sessions)
-                .await;
+            self.cleanup_shared_runtime_if_idle().await;
             return Ok(());
         }
 
-        self.apply_sessions_config(profile_id, &nodes, &sessions)
-            .await?;
+        self.apply_sessions_config(profile_id, &sessions).await?;
 
         if let Err(err) = self.store.delete_session(profile_id, session_id).await {
             tracing::error!(
@@ -3385,24 +4109,20 @@ impl BrokerService {
                 error = %err,
                 "persist close-session failed, rolling back runtime"
             );
-            if let Err(rollback_err) = self
-                .rollback_runtime_sessions(profile_id, &nodes, &previous_sessions)
-                .await
-            {
+            if let Err(rollback_err) = self.rollback_runtime_sessions(profile_id, &previous_sessions).await {
                 tracing::error!(
                     profile_id,
                     session_id,
                     error = %rollback_err,
                     "runtime rollback failed after close-session persistence error"
                 );
-                self.recover_runtime_desync(profile_id, &nodes, &previous_sessions)
+                self.recover_runtime_desync(profile_id, &previous_sessions)
                     .await;
             }
             return Err(BrokerError::from(err));
         }
 
-        self.cleanup_profile_runtime_if_idle(profile_id, &sessions)
-            .await;
+        self.cleanup_shared_runtime_if_idle().await;
 
         Ok(())
     }
@@ -3920,6 +4640,7 @@ fn expand_incremental_task_scope(run: &mut TaskRunRecord, new_ips: &[String]) ->
             ips.dedup();
             (ips.len() != previous_len).then_some(ips.len())
         }
+        TaskRunScope::Nodes { .. } => None,
     }
 }
 
@@ -4107,11 +4828,11 @@ fn choose_ip_for_open(
         .ok_or(BrokerError::IpNotFound)
 }
 
-fn choose_proxy_for_ip(
+fn choose_node_for_ip(
     ip: &str,
     nodes: &[ProxyNode],
     probes: &[ProbeRecord],
-) -> BrokerResult<String> {
+) -> BrokerResult<ProxyNode> {
     let candidates: Vec<&ProxyNode> = nodes
         .iter()
         .filter(|node| node.resolved_ips.iter().any(|item| item == ip))
@@ -4120,7 +4841,7 @@ fn choose_proxy_for_ip(
         return Err(BrokerError::IpNotFound);
     }
     if candidates.len() == 1 {
-        return Ok(candidates[0].proxy_name.clone());
+        return Ok(candidates[0].clone());
     }
 
     let mut probe_by_proxy: HashMap<String, (bool, Option<u64>)> = HashMap::new();
@@ -4164,7 +4885,7 @@ fn choose_proxy_for_ip(
                 })
                 .then_with(|| a.proxy_name.cmp(&b.proxy_name))
         })
-        .map(|node| node.proxy_name.clone())
+        .cloned()
         .ok_or(BrokerError::IpNotFound)
 }
 
@@ -4237,7 +4958,7 @@ fn prepare_session(
     port_range: Option<(u16, u16)>,
 ) -> BrokerResult<SessionRecord> {
     let ip = choose_ip_for_open(request, ip_records, probes)?;
-    let proxy_name = choose_proxy_for_ip(&ip, nodes, probes)?;
+    let node = choose_node_for_ip(&ip, nodes, probes)?;
     let port = allocate_port(existing, request.desired_port, listen_ip, port_range)?;
     let now = now_epoch_sec();
 
@@ -4246,7 +4967,11 @@ fn prepare_session(
         listen: listen_ip.to_string(),
         port,
         selected_ip: ip,
-        proxy_name,
+        proxy_name: node.proxy_name.clone(),
+        node_id: node
+            .node_id
+            .clone()
+            .unwrap_or_else(|| ids::stable_proxy_inventory_node_id("legacy", &node.proxy_name)),
         created_at: now,
     })
 }
@@ -4290,6 +5015,29 @@ fn is_better_probe(candidate: &ProbeRecord, existing: &ProbeRecord) -> bool {
     }
 }
 
+fn median_success_latency(samples: &[u64]) -> Option<u64> {
+    if samples.is_empty() {
+        return None;
+    }
+    let mut values = samples.to_vec();
+    values.sort_unstable();
+    Some(values[values.len() / 2])
+}
+
+fn runtime_node_id(node: &ProxyNode) -> String {
+    node.node_id
+        .clone()
+        .unwrap_or_else(|| node.proxy_name.clone())
+}
+
+fn session_runtime_key(session: &SessionRecord) -> &str {
+    if session.node_id.trim().is_empty() {
+        session.proxy_name.as_str()
+    } else {
+        session.node_id.as_str()
+    }
+}
+
 fn has_duplicate_proxy_names(nodes: &[ProxyNode]) -> bool {
     let mut seen = HashSet::new();
     for node in nodes {
@@ -4329,6 +5077,8 @@ fn scheduled_dispatch_rank(kind: TaskRunKind) -> u8 {
         TaskRunKind::SubscriptionSync => 0,
         TaskRunKind::MetadataRefreshIncremental => 1,
         TaskRunKind::MetadataRefreshFull => 2,
+        TaskRunKind::ProxyMetadataRefresh => 3,
+        TaskRunKind::ProxyLatencyProbe => 4,
     }
 }
 
@@ -4339,8 +5089,8 @@ mod tests {
         models::{
             ApiKeyRecord, IpRecord, LoadSubscriptionRequest, ProbeRecord, ProfileProxySettings,
             ProfileSyncConfig, ProxyImportRecord, ProxyImportSyncConfig, ProxyInventoryRecord,
-            ProxyScope, SessionRecord, SortMode, SubscriptionSource, TaskListQuery,
-            TaskRunEventRecord, TaskRunRecord,
+            ProxyNodeMetadataRecord, ProxyScope, SessionRecord, SortMode, SubscriptionSource,
+            TaskListQuery, TaskRunEventRecord, TaskRunRecord,
         },
         runtime::MihomoRuntime,
         store::{BrokerStore, MemoryStore},
@@ -4549,6 +5299,17 @@ mod tests {
 
         async fn list_probe_records(&self, profile_id: &str) -> anyhow::Result<Vec<ProbeRecord>> {
             self.inner.list_probe_records(profile_id).await
+        }
+
+        async fn upsert_proxy_node_metadata(
+            &self,
+            records: &[ProxyNodeMetadataRecord],
+        ) -> anyhow::Result<()> {
+            self.inner.upsert_proxy_node_metadata(records).await
+        }
+
+        async fn list_proxy_node_metadata(&self) -> anyhow::Result<Vec<ProxyNodeMetadataRecord>> {
+            self.inner.list_proxy_node_metadata().await
         }
 
         async fn insert_session(
@@ -4798,6 +5559,7 @@ mod tests {
 
     fn make_node(proxy_name: &str, ip: &str) -> ProxyNode {
         ProxyNode {
+            node_id: Some(ids::stable_proxy_inventory_node_id("test-import", proxy_name)),
             proxy_name: proxy_name.to_string(),
             proxy_type: "socks5".to_string(),
             server: ip.to_string(),
@@ -4870,6 +5632,7 @@ mod tests {
             port: 18080,
             selected_ip: ip.to_string(),
             proxy_name: proxy_name.to_string(),
+            node_id: ids::stable_proxy_inventory_node_id("test-import", proxy_name),
             created_at,
         }
     }
@@ -5434,6 +6197,7 @@ proxies:
                     port: occupied_port,
                     selected_ip: "1.1.1.1".to_string(),
                     proxy_name: "node-a".to_string(),
+                    node_id: ids::stable_proxy_inventory_node_id("test-import", "node-a"),
                     created_at: 1,
                 },
             )
@@ -5578,6 +6342,7 @@ proxies:
 
     fn sample_node(proxy_name: &str, ip: &str) -> ProxyNode {
         ProxyNode {
+            node_id: Some(ids::stable_proxy_inventory_node_id("sample-import", proxy_name)),
             proxy_name: proxy_name.to_string(),
             proxy_type: "socks5".to_string(),
             server: ip.to_string(),
@@ -6632,6 +7397,7 @@ proxies:
                 assert!(ips.contains("3.3.3.3"));
             }
             TaskRunScope::All => panic!("post-load task should stay scoped to explicit IPs"),
+            TaskRunScope::Nodes { .. } => panic!("post-load task should not use node scope"),
         }
     }
 
@@ -6722,6 +7488,7 @@ proxies:
                 assert!(ips.contains("3.3.3.3"));
             }
             TaskRunScope::All => panic!("follow-up task should stay scoped to explicit IPs"),
+            TaskRunScope::Nodes { .. } => panic!("follow-up task should not use node scope"),
         }
     }
 

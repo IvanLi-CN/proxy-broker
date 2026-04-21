@@ -63,10 +63,26 @@ export interface OpenSessionResponse {
   port: number;
   selected_ip: string;
   proxy_name: string;
+  node_id: string;
 }
 
 export interface OpenBatchResponse {
   sessions: OpenSessionResponse[];
+}
+
+export interface OpenSessionByNodeRequest {
+  node_id: string;
+  desired_port?: number | null;
+}
+
+export interface OpenBatchByNodeItemRequest {
+  node_id: string;
+  desired_port?: number | null;
+}
+
+export interface OpenBatchByNodeRequest {
+  node_ids?: string[];
+  requests?: OpenBatchByNodeItemRequest[];
 }
 
 export interface SuggestedPortResponse {
@@ -112,6 +128,7 @@ export interface SessionRecord {
   port: number;
   selected_ip: string;
   proxy_name: string;
+  node_id: string;
   created_at: number;
 }
 
@@ -177,6 +194,55 @@ export interface ListProxyInventoryResponse {
 export interface ProxyInventoryListQuery {
   scope?: "all" | "global" | "profile";
   profile_id?: string;
+}
+
+export interface ProxyNodeMetadataRecord {
+  node_id: string;
+  ip: string;
+  country_code?: string | null;
+  country_name?: string | null;
+  region_name?: string | null;
+  city?: string | null;
+  geo_source?: string | null;
+  probe_updated_at?: number | null;
+  geo_updated_at?: number | null;
+  last_probe_ok?: boolean | null;
+  last_latency_ms?: number | null;
+  median_latency_ms?: number | null;
+  last_probe_samples: Array<number | null>;
+  updated_at: number;
+}
+
+export interface ProxyCatalogNodeItem extends ProxyInventoryItem {
+  primary_ip?: string | null;
+  ip_metadata: ProxyNodeMetadataRecord[];
+  can_open_session: boolean;
+}
+
+export interface ProxyCatalogGroupItem {
+  import: ProxyImportItem;
+  nodes: ProxyCatalogNodeItem[];
+}
+
+export interface ProxyCatalogResponse {
+  view: string;
+  profile_id?: string | null;
+  groups: ProxyCatalogGroupItem[];
+}
+
+export interface ProxyCatalogQuery {
+  view?: "global" | "profile";
+  profile_id?: string;
+}
+
+export interface ProxyOperationRequest {
+  view: "global" | "profile";
+  profile_id?: string;
+  node_ids: string[];
+}
+
+export interface ProxyOperationAcceptedResponse {
+  run_id: string;
 }
 
 export interface UpdateProxyAllocationRequest {
@@ -270,9 +336,11 @@ export interface ErrorResponse {
 export type TaskRunKind =
   | "subscription_sync"
   | "metadata_refresh_incremental"
-  | "metadata_refresh_full";
+  | "metadata_refresh_full"
+  | "proxy_metadata_refresh"
+  | "proxy_latency_probe";
 
-export type TaskRunTrigger = "schedule" | "post_load";
+export type TaskRunTrigger = "schedule" | "post_load" | "operator";
 
 export type TaskRunStatus = "queued" | "running" | "succeeded" | "failed" | "skipped";
 

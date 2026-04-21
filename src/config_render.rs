@@ -17,20 +17,27 @@ pub fn render_payload(
     sessions: &[SessionRecord],
 ) -> anyhow::Result<String> {
     let allow_lan = sessions.iter().any(session_exposes_lan);
-    let node_by_name: HashMap<&str, &ProxyNode> = nodes
+    let node_by_id: HashMap<&str, &ProxyNode> = nodes
         .iter()
-        .map(|node| (node.proxy_name.as_str(), node))
+        .filter_map(|node| node.node_id.as_deref().map(|node_id| (node_id, node)))
         .collect();
 
     let mut proxies = nodes
         .iter()
-        .map(|n| n.raw_proxy.clone())
+        .map(|n| {
+            let mut raw = n.raw_proxy.clone();
+            if let Some(node_id) = n.node_id.as_ref() {
+                raw["name"] = serde_json::Value::String(node_id.clone());
+            }
+            raw
+        })
         .collect::<Vec<_>>();
     for node in nodes {
         for ip in &node.resolved_ips {
             let mut dedicated = node.raw_proxy.clone();
+            let runtime_name = runtime_proxy_name(node);
             dedicated["name"] =
-                serde_json::Value::String(dedicated_ip_proxy_name(&node.proxy_name, ip));
+                serde_json::Value::String(dedicated_ip_proxy_name(&runtime_name, ip));
             dedicated["server"] = serde_json::Value::String(ip.clone());
             proxies.push(dedicated);
         }
@@ -39,10 +46,10 @@ pub fn render_payload(
     let listeners = sessions
         .iter()
         .map(|session| {
-            let session_proxy_name = if node_by_name.contains_key(session.proxy_name.as_str()) {
-                dedicated_ip_proxy_name(&session.proxy_name, &session.selected_ip)
+            let session_proxy_name = if node_by_id.contains_key(session.node_id.as_str()) {
+                dedicated_ip_proxy_name(&session.node_id, &session.selected_ip)
             } else {
-                session.proxy_name.clone()
+                session.node_id.clone()
             };
 
             serde_json::json!({
@@ -72,6 +79,12 @@ pub fn render_payload(
     serde_yaml::to_string(&root).context("failed to serialize mihomo payload")
 }
 
+fn runtime_proxy_name(node: &ProxyNode) -> String {
+    node.node_id
+        .clone()
+        .unwrap_or_else(|| node.proxy_name.clone())
+}
+
 fn session_exposes_lan(session: &SessionRecord) -> bool {
     session
         .listen
@@ -87,6 +100,7 @@ mod tests {
 
     fn sample_node() -> ProxyNode {
         ProxyNode {
+            node_id: Some("node-a".to_string()),
             proxy_name: "proxy-a".to_string(),
             proxy_type: "socks5".to_string(),
             server: "example.test".to_string(),
@@ -107,6 +121,7 @@ mod tests {
             port: 20000,
             selected_ip: "1.1.1.1".to_string(),
             proxy_name: "proxy-a".to_string(),
+            node_id: "node-a".to_string(),
             created_at: 0,
         }
     }

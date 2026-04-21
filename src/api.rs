@@ -15,8 +15,9 @@ use crate::{
     error::BrokerError,
     models::{
         CreateApiKeyRequest, CreateApiKeyResponse, CreateProfileRequest, CreateProfileResponse,
-        HealthResponse, LoadSubscriptionRequest, OpenBatchRequest, OpenSessionRequest,
-        ProfileProxySettings, ProxyImportListQuery, ProxyInventoryListQuery, RefreshRequest,
+        HealthResponse, LoadSubscriptionRequest, OpenBatchByNodeRequest, OpenBatchRequest,
+        OpenSessionByNodeRequest, OpenSessionRequest, ProfileProxySettings, ProxyCatalogQuery,
+        ProxyImportListQuery, ProxyInventoryListQuery, ProxyOperationRequest, RefreshRequest,
         SearchSessionOptionsRequest, SuggestedPortResponse, TaskListQuery, TaskRunDetail,
         TaskRunSummary, TaskStreamEnvelope, UpdateProfileProxySettingsRequest,
         UpdateProxyAllocationRequest, UpdateProxyImportAllocationRequest,
@@ -44,6 +45,9 @@ pub fn build_router(state: AppState) -> Router {
             post(load_global_subscription),
         )
         .route("/api/v1/proxy-imports", get(list_proxy_imports))
+        .route("/api/v1/proxy-catalog", get(list_proxy_catalog))
+        .route("/api/v1/proxy-ops/refresh", post(refresh_proxy_catalog_metadata))
+        .route("/api/v1/proxy-ops/probe", post(probe_proxy_catalog_latency))
         .route(
             "/api/v1/proxy-imports/{import_id}/allocation",
             patch(update_proxy_import_allocation),
@@ -91,6 +95,14 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/v1/profiles/{profile_id}/sessions/open-batch",
             post(open_batch),
+        )
+        .route(
+            "/api/v1/profiles/{profile_id}/sessions/open-by-node",
+            post(open_session_by_node),
+        )
+        .route(
+            "/api/v1/profiles/{profile_id}/sessions/open-batch-by-node",
+            post(open_batch_by_node),
         )
         .route(
             "/api/v1/profiles/{profile_id}/sessions/suggested-port",
@@ -177,6 +189,16 @@ async fn list_proxy_imports(
         .service
         .list_proxy_imports(query.scope.as_deref(), query.profile_id.as_deref())
         .await?;
+    Ok(Json(resp))
+}
+
+async fn list_proxy_catalog(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    Query(query): Query<ProxyCatalogQuery>,
+) -> Result<Json<crate::models::ProxyCatalogResponse>, BrokerError> {
+    auth.require_admin()?;
+    let resp = state.service.list_proxy_catalog(&query).await?;
     Ok(Json(resp))
 }
 
@@ -400,6 +422,28 @@ async fn refresh_profile(
     Ok(Json(resp))
 }
 
+async fn refresh_proxy_catalog_metadata(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    payload: Result<Json<ProxyOperationRequest>, JsonRejection>,
+) -> Result<(StatusCode, Json<crate::models::ProxyOperationAcceptedResponse>), BrokerError> {
+    auth.require_admin()?;
+    let request = parse_json_payload(payload, "refresh_proxy_catalog_metadata")?;
+    let resp = state.service.queue_proxy_metadata_refresh(&request).await?;
+    Ok((StatusCode::ACCEPTED, Json(resp)))
+}
+
+async fn probe_proxy_catalog_latency(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    payload: Result<Json<ProxyOperationRequest>, JsonRejection>,
+) -> Result<(StatusCode, Json<crate::models::ProxyOperationAcceptedResponse>), BrokerError> {
+    auth.require_admin()?;
+    let request = parse_json_payload(payload, "probe_proxy_catalog_latency")?;
+    let resp = state.service.queue_proxy_latency_probe(&request).await?;
+    Ok((StatusCode::ACCEPTED, Json(resp)))
+}
+
 fn decode_refresh_request(body: &[u8]) -> Result<RefreshRequest, BrokerError> {
     if body.is_empty() {
         return Ok(RefreshRequest { force: false });
@@ -501,6 +545,32 @@ async fn open_batch(
     state.service.require_profile_exists(&profile_id).await?;
     let request = parse_json_payload(payload, "open_batch")?;
     let resp = state.service.open_batch(&profile_id, &request).await?;
+    Ok(Json(resp))
+}
+
+async fn open_session_by_node(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    Path(profile_id): Path<String>,
+    payload: Result<Json<OpenSessionByNodeRequest>, JsonRejection>,
+) -> Result<Json<crate::models::OpenSessionResponse>, BrokerError> {
+    auth.require_profile_access(&profile_id)?;
+    state.service.require_profile_exists(&profile_id).await?;
+    let request = parse_json_payload(payload, "open_session_by_node")?;
+    let resp = state.service.open_session_by_node(&profile_id, &request).await?;
+    Ok(Json(resp))
+}
+
+async fn open_batch_by_node(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    Path(profile_id): Path<String>,
+    payload: Result<Json<OpenBatchByNodeRequest>, JsonRejection>,
+) -> Result<Json<crate::models::OpenBatchResponse>, BrokerError> {
+    auth.require_profile_access(&profile_id)?;
+    state.service.require_profile_exists(&profile_id).await?;
+    let request = parse_json_payload(payload, "open_batch_by_node")?;
+    let resp = state.service.open_batch_by_node(&profile_id, &request).await?;
     Ok(Json(resp))
 }
 

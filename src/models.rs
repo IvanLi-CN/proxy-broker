@@ -119,6 +119,7 @@ pub struct OpenSessionResponse {
     pub port: u16,
     pub selected_ip: String,
     pub proxy_name: String,
+    pub node_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -208,6 +209,37 @@ pub struct ProxyInventoryItem {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProxyCatalogNodeItem {
+    pub import_id: String,
+    pub node_id: String,
+    pub proxy_name: String,
+    pub proxy_type: String,
+    pub server: String,
+    pub resolved_ips: Vec<String>,
+    pub source_scope: ProxyScope,
+    pub allocation_scope: ProxyScope,
+    pub effective_profile_ids: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub primary_ip: Option<String>,
+    pub ip_metadata: Vec<ProxyNodeMetadataRecord>,
+    pub can_open_session: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProxyCatalogGroupItem {
+    pub import: ProxyImportItem,
+    pub nodes: Vec<ProxyCatalogNodeItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProxyCatalogResponse {
+    pub view: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile_id: Option<String>,
+    pub groups: Vec<ProxyCatalogGroupItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateProxyAllocationRequest {
     pub allocation_scope: ProxyScope,
 }
@@ -215,6 +247,20 @@ pub struct UpdateProxyAllocationRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateProxyImportAllocationRequest {
     pub allocation_scope: ProxyScope,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProxyOperationRequest {
+    pub view: String,
+    #[serde(default)]
+    pub profile_id: Option<String>,
+    #[serde(default)]
+    pub node_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProxyOperationAcceptedResponse {
+    pub run_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -231,6 +277,20 @@ pub struct UpdateProfileProxySettingsRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenBatchResponse {
     pub sessions: Vec<OpenSessionResponse>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenSessionByNodeRequest {
+    pub node_id: String,
+    pub desired_port: Option<u16>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenBatchByNodeRequest {
+    #[serde(default)]
+    pub node_ids: Vec<String>,
+    #[serde(default)]
+    pub requests: Vec<OpenSessionByNodeRequest>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -431,6 +491,8 @@ pub enum TaskRunKind {
     SubscriptionSync,
     MetadataRefreshIncremental,
     MetadataRefreshFull,
+    ProxyMetadataRefresh,
+    ProxyLatencyProbe,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -438,6 +500,7 @@ pub enum TaskRunKind {
 pub enum TaskRunTrigger {
     Schedule,
     PostLoad,
+    Operator,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -496,6 +559,9 @@ pub enum TaskRunScope {
     All,
     Ips {
         ips: Vec<String>,
+    },
+    Nodes {
+        node_ids: Vec<String>,
     },
 }
 
@@ -638,6 +704,12 @@ pub struct ProxyImportListQuery {
     pub profile_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ProxyCatalogQuery {
+    pub view: Option<String>,
+    pub profile_id: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskRunDetail {
     pub run: TaskRunSummary,
@@ -653,6 +725,8 @@ pub struct TaskStreamEnvelope {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyNode {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<String>,
     pub proxy_name: String,
     pub proxy_type: String,
     pub server: String,
@@ -705,7 +779,27 @@ pub struct SessionRecord {
     pub port: u16,
     pub selected_ip: String,
     pub proxy_name: String,
+    pub node_id: String,
     pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProxyNodeMetadataRecord {
+    pub node_id: String,
+    pub ip: String,
+    pub country_code: Option<String>,
+    pub country_name: Option<String>,
+    pub region_name: Option<String>,
+    pub city: Option<String>,
+    pub geo_source: Option<String>,
+    pub probe_updated_at: Option<i64>,
+    pub geo_updated_at: Option<i64>,
+    pub last_probe_ok: Option<bool>,
+    pub last_latency_ms: Option<u64>,
+    pub median_latency_ms: Option<u64>,
+    #[serde(default)]
+    pub last_probe_samples: Vec<Option<u64>>,
+    pub updated_at: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -869,11 +963,14 @@ impl_task_enum_codec!(TaskRunKind {
     SubscriptionSync => "subscription_sync",
     MetadataRefreshIncremental => "metadata_refresh_incremental",
     MetadataRefreshFull => "metadata_refresh_full",
+    ProxyMetadataRefresh => "proxy_metadata_refresh",
+    ProxyLatencyProbe => "proxy_latency_probe",
 });
 
 impl_task_enum_codec!(TaskRunTrigger {
     Schedule => "schedule",
     PostLoad => "post_load",
+    Operator => "operator",
 });
 
 impl_task_enum_codec!(TaskRunStatus {

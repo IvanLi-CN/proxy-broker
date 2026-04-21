@@ -9,8 +9,9 @@ use async_trait::async_trait;
 use crate::{
     models::{
         ApiKeyRecord, IpRecord, ProbeRecord, ProfileProxySettings, ProfileSnapshot,
-        ProxyImportRecord, ProxyImportSyncConfig, ProxyInventoryRecord, ProxyNode, ProxyScope,
-        SessionRecord, TaskListQuery, TaskRunEventRecord, TaskRunRecord,
+        ProxyImportRecord, ProxyImportSyncConfig, ProxyInventoryRecord, ProxyNode,
+        ProxyNodeMetadataRecord, ProxyScope, SessionRecord, TaskListQuery, TaskRunEventRecord,
+        TaskRunRecord,
     },
     store::BrokerStore,
     tasks::matches_task_query,
@@ -21,6 +22,7 @@ struct MemoryStoreState {
     profiles: HashMap<String, ProfileSnapshot>,
     proxy_imports: HashMap<String, ProxyImportRecord>,
     proxy_inventory: HashMap<String, ProxyInventoryRecord>,
+    proxy_node_metadata: HashMap<(String, String), ProxyNodeMetadataRecord>,
     proxy_import_sync_configs: HashMap<String, ProxyImportSyncConfig>,
     profile_proxy_settings: HashMap<String, ProfileProxySettings>,
     api_keys: HashMap<String, ApiKeyRecord>,
@@ -412,6 +414,36 @@ impl BrokerStore for MemoryStore {
 
     async fn list_probe_records(&self, profile_id: &str) -> anyhow::Result<Vec<ProbeRecord>> {
         self.with_profile(profile_id, |profile| profile.probe_records.clone())
+    }
+
+    async fn upsert_proxy_node_metadata(
+        &self,
+        records: &[ProxyNodeMetadataRecord],
+    ) -> anyhow::Result<()> {
+        let mut guard = self
+            .inner
+            .write()
+            .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
+        for record in records {
+            guard
+                .proxy_node_metadata
+                .insert((record.node_id.clone(), record.ip.clone()), record.clone());
+        }
+        Ok(())
+    }
+
+    async fn list_proxy_node_metadata(&self) -> anyhow::Result<Vec<ProxyNodeMetadataRecord>> {
+        let guard = self
+            .inner
+            .read()
+            .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
+        let mut items = guard.proxy_node_metadata.values().cloned().collect::<Vec<_>>();
+        items.sort_by(|left, right| {
+            left.node_id
+                .cmp(&right.node_id)
+                .then_with(|| left.ip.cmp(&right.ip))
+        });
+        Ok(items)
     }
 
     async fn insert_session(
@@ -861,6 +893,7 @@ mod tests {
                 port: 18081,
                 selected_ip: "1.1.1.1".to_string(),
                 proxy_name: "proxy-b".to_string(),
+                node_id: "node-b".to_string(),
                 created_at: 2,
             },
             SessionRecord {
@@ -869,6 +902,7 @@ mod tests {
                 port: 18080,
                 selected_ip: "1.1.1.2".to_string(),
                 proxy_name: "proxy-a".to_string(),
+                node_id: "node-a".to_string(),
                 created_at: 2,
             },
             SessionRecord {
@@ -877,6 +911,7 @@ mod tests {
                 port: 18082,
                 selected_ip: "1.1.1.3".to_string(),
                 proxy_name: "proxy-c".to_string(),
+                node_id: "node-c".to_string(),
                 created_at: 1,
             },
         ];

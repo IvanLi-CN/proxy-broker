@@ -1,11 +1,29 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, fn, within } from "storybook/test";
+import { useState } from "react";
+import { toast } from "sonner";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 
+import { ActionResponsePanel } from "@/components/ActionResponsePanel";
 import { AppShell } from "@/components/AppShell";
+import { Toaster } from "@/components/ui/sonner";
+import type { ProxyNodeLiveState } from "@/hooks/use-proxy-operation-events";
 import { GLOBAL_PROFILE_ID } from "@/lib/profile-selection";
-import { ProxiesPage } from "@/pages/ProxiesPage";
+import type { CurrentUserState, ProfileProxySettings, ProxyCatalogResponse } from "@/lib/types";
+import { ProxiesPage, type ProxiesPageProps } from "@/pages/ProxiesPage";
 
 const profiles = ["default", "edge-jp", "lab-us"];
+
+const currentUser: CurrentUserState = {
+  status: "resolved",
+  identity: {
+    authenticated: true,
+    principal_type: "human",
+    subject: "admin@example.com",
+    email: "admin@example.com",
+    groups: ["admins", "ops"],
+    is_admin: true,
+  },
+};
 
 const proxyImportsFixture = {
   items: [
@@ -44,16 +62,127 @@ const proxyImportsFixture = {
   ],
 };
 
-const currentUser = {
-  status: "resolved" as const,
-  identity: {
-    authenticated: true,
-    principal_type: "human" as const,
-    subject: "admin@example.com",
-    email: "admin@example.com",
-    groups: ["admins", "ops"],
-    is_admin: true,
+const globalCatalogFixture: ProxyCatalogResponse = {
+  view: "global",
+  profile_id: null,
+  groups: [
+    {
+      import: proxyImportsFixture.items[0],
+      nodes: [
+        {
+          import_id: "imp-M7n2Qa8Wx4Rp7Ts1",
+          node_id: "node-jp-tokyo-entry",
+          proxy_name: "JP-Tokyo-Entry",
+          proxy_type: "vmess",
+          server: "tokyo-a.example.com:443",
+          resolved_ips: ["203.0.113.10"],
+          source_scope: { type: "global" },
+          allocation_scope: { type: "global" },
+          effective_profile_ids: ["default", "edge-jp", "lab-us"],
+          primary_ip: "203.0.113.10",
+          can_open_session: false,
+          ip_metadata: [
+            {
+              node_id: "node-jp-tokyo-entry",
+              ip: "203.0.113.10",
+              country_code: "JP",
+              country_name: "Japan",
+              region_name: "Tokyo",
+              city: "Chiyoda",
+              geo_source: "geoip",
+              probe_updated_at: 1_713_309_300,
+              geo_updated_at: 1_713_309_200,
+              last_probe_ok: true,
+              last_latency_ms: 88,
+              median_latency_ms: 92,
+              last_probe_samples: [90, 88, 92, 95, 91],
+              updated_at: 1_713_309_300,
+            },
+          ],
+        },
+        {
+          import_id: "imp-M7n2Qa8Wx4Rp7Ts1",
+          node_id: "node-jp-osaka-edge",
+          proxy_name: "JP-Osaka-Edge",
+          proxy_type: "trojan",
+          server: "osaka-b.example.com:443",
+          resolved_ips: ["203.0.113.88"],
+          source_scope: { type: "global" },
+          allocation_scope: { type: "global" },
+          effective_profile_ids: ["default", "edge-jp"],
+          primary_ip: "203.0.113.88",
+          can_open_session: false,
+          ip_metadata: [
+            {
+              node_id: "node-jp-osaka-edge",
+              ip: "203.0.113.88",
+              country_code: "JP",
+              country_name: "Japan",
+              region_name: "Osaka",
+              city: "Osaka",
+              geo_source: "geoip",
+              probe_updated_at: 1_713_309_320,
+              geo_updated_at: 1_713_309_200,
+              last_probe_ok: false,
+              last_latency_ms: null,
+              median_latency_ms: null,
+              last_probe_samples: [null, null, null, null, null],
+              updated_at: 1_713_309_320,
+            },
+          ],
+        },
+      ],
+    },
+    {
+      import: proxyImportsFixture.items[1],
+      nodes: [
+        {
+          import_id: "imp-V5k3Ld9Hq2Cx8Zm4",
+          node_id: "node-edge-manual-1",
+          proxy_name: "Edge-Manual-1",
+          proxy_type: "ss",
+          server: "edge-jp.example.com:8443",
+          resolved_ips: ["198.51.100.42"],
+          source_scope: { type: "profile", profile_id: "edge-jp" },
+          allocation_scope: { type: "profile", profile_id: "edge-jp" },
+          effective_profile_ids: ["edge-jp"],
+          primary_ip: "198.51.100.42",
+          can_open_session: false,
+          ip_metadata: [],
+        },
+      ],
+    },
+  ],
+};
+
+const profileCatalogFixture: ProxyCatalogResponse = {
+  view: "profile",
+  profile_id: "edge-jp",
+  groups: globalCatalogFixture.groups.map((group) => ({
+    import: group.import,
+    nodes: group.nodes.map((node) => ({
+      ...node,
+      can_open_session: true,
+    })),
+  })),
+};
+
+const liveNodeStates: Record<string, ProxyNodeLiveState> = {
+  "node-jp-osaka-edge": {
+    kind: "proxy_latency_probe",
+    runId: "run-probe-001",
+    nodeId: "node-jp-osaka-edge",
+    samplesTotal: 5,
+    latestRound: 3,
+    latestSampleMs: null,
+    at: 1_713_309_350,
+    message: "probe round 3 timeout",
   },
+};
+
+const profileSettingsFixture: ProfileProxySettings = {
+  profile_id: "edge-jp",
+  use_global_proxies: true,
 };
 
 const meta = {
@@ -65,7 +194,7 @@ const meta = {
     docs: {
       description: {
         component:
-          "Unified proxy workspace that follows the current config selector. Pick Global to manage the shared pool and allocations, or pick a profile to manage local imports and global-pool usage.",
+          "Unified proxy workspace that follows the current config selector. Pick Global to manage the shared pool and allocations, or pick a profile to manage local imports, grouped nodes, and node-pinned session creation.",
       },
     },
   },
@@ -73,6 +202,367 @@ const meta = {
 
 export default meta;
 type Story = StoryObj<typeof meta>;
+
+function createProfileCatalogFixture(): ProxyCatalogResponse {
+  return {
+    view: profileCatalogFixture.view,
+    profile_id: profileCatalogFixture.profile_id,
+    groups: profileCatalogFixture.groups.map((group) => ({
+      import: {
+        ...group.import,
+        source_scope: { ...group.import.source_scope },
+        source_identity: { ...group.import.source_identity },
+        allocation_scope: { ...group.import.allocation_scope },
+        effective_profile_ids: [...group.import.effective_profile_ids],
+      },
+      nodes: group.nodes.map((node) => ({
+        ...node,
+        source_scope: { ...node.source_scope },
+        allocation_scope: { ...node.allocation_scope },
+        effective_profile_ids: [...node.effective_profile_ids],
+        resolved_ips: [...node.resolved_ips],
+        ip_metadata: node.ip_metadata.map((metadata) => ({
+          ...metadata,
+          last_probe_samples: [...metadata.last_probe_samples],
+        })),
+      })),
+    })),
+  };
+}
+
+function createLiveNodeStates(): Record<string, ProxyNodeLiveState> {
+  return Object.fromEntries(
+    Object.entries(liveNodeStates).map(([nodeId, state]) => [nodeId, { ...state }]),
+  );
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function InteractiveProfileStory(args: Extract<ProxiesPageProps, { mode: "profile" }>) {
+  const [proxyCatalog, setProxyCatalog] = useState<ProxyCatalogResponse>(
+    createProfileCatalogFixture,
+  );
+  const [proxySettings, setProxySettings] = useState<ProfileProxySettings>(profileSettingsFixture);
+  const [liveState, setLiveState] =
+    useState<Record<string, ProxyNodeLiveState>>(createLiveNodeStates);
+  const [queueingOperation, setQueueingOperation] = useState(false);
+  const [openingSessionNodeId, setOpeningSessionNodeId] = useState<string | null>(null);
+  const [openingBatch, setOpeningBatch] = useState(false);
+  const [deletingImportId, setDeletingImportId] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{
+    title: string;
+    description: string;
+    tone: "success" | "warning";
+  } | null>({
+    title: "Interactive mock controls",
+    description:
+      "Use this story like a mini control room: local imports can be deleted, probe refreshes node state, and create-session buttons surface mock operator feedback inline.",
+    tone: "warning",
+  });
+
+  const patchNodeMetadata = (nodeIds: string[], mutator: (nodeId: string) => number | null) => {
+    setProxyCatalog((current) => ({
+      ...current,
+      groups: current.groups.map((group) => ({
+        ...group,
+        nodes: group.nodes.map((node) => {
+          if (!nodeIds.includes(node.node_id)) {
+            return node;
+          }
+          const latency = mutator(node.node_id);
+          const updatedAt = 1_713_309_900;
+          const samples =
+            latency == null
+              ? [null, null, null, null, null]
+              : [latency - 5, latency, latency + 3, latency + 1, latency - 2];
+
+          const metadata = node.ip_metadata[0]
+            ? {
+                ...node.ip_metadata[0],
+                updated_at: updatedAt,
+                probe_updated_at: updatedAt,
+                median_latency_ms: latency,
+                last_latency_ms: latency,
+                last_probe_ok: latency != null,
+                last_probe_samples: samples,
+              }
+            : {
+                node_id: node.node_id,
+                ip: node.primary_ip ?? node.resolved_ips[0] ?? "198.51.100.42",
+                country_code: "JP",
+                country_name: "Japan",
+                region_name: node.node_id === "node-edge-manual-1" ? "Tokyo" : "Osaka",
+                city: node.node_id === "node-edge-manual-1" ? "Shibuya" : "Osaka",
+                geo_source: "storybook",
+                probe_updated_at: updatedAt,
+                geo_updated_at: updatedAt,
+                last_probe_ok: latency != null,
+                last_latency_ms: latency,
+                median_latency_ms: latency,
+                last_probe_samples: samples,
+                updated_at: updatedAt,
+              };
+
+          return {
+            ...node,
+            ip_metadata: [metadata],
+          };
+        }),
+      })),
+    }));
+  };
+
+  return (
+    <AppShell
+      profileId="edge-jp"
+      profiles={profiles}
+      profilesLoading={false}
+      profilesCreating={false}
+      profilesError={null}
+      healthStatus="ok"
+      currentUser={currentUser}
+      onProfileIdChange={() => undefined}
+      onCreateProfile={async (value: string) => value}
+      onRetryProfiles={() => undefined}
+    >
+      <div className="space-y-5">
+        <Toaster richColors position="top-right" />
+        {feedback ? (
+          <ActionResponsePanel
+            title={feedback.title}
+            description={feedback.description}
+            tone={feedback.tone}
+          />
+        ) : null}
+        <ProxiesPage
+          {...args}
+          proxyCatalog={proxyCatalog}
+          proxySettings={proxySettings}
+          liveNodeStates={liveState}
+          queueingOperation={queueingOperation}
+          deletingImportId={deletingImportId}
+          openingSessionNodeId={openingSessionNodeId}
+          openingBatch={openingBatch}
+          suggestedPort={10080}
+          onToggleUseGlobalProxies={async (nextValue) => {
+            setProxySettings((current) => ({ ...current, use_global_proxies: nextValue }));
+            toast.success(nextValue ? "Global pool enabled" : "Global pool disabled", {
+              description: nextValue
+                ? "edge-jp now composes inherited global nodes together with its local imports."
+                : "edge-jp now restricts the effective pool to profile-local imports only.",
+            });
+            setFeedback({
+              title: nextValue ? "Global pool enabled" : "Global pool disabled",
+              description: nextValue
+                ? "edge-jp now composes inherited global nodes together with its local imports."
+                : "edge-jp now restricts the effective pool to profile-local imports only.",
+              tone: "success",
+            });
+          }}
+          onRefreshNodes={async (nodeIds) => {
+            setQueueingOperation(true);
+            setLiveState((current) =>
+              Object.fromEntries(
+                Object.entries(current).filter(([nodeId]) => !nodeIds.includes(nodeId)),
+              ),
+            );
+            setFeedback({
+              title: "Metadata refresh queued",
+              description: `Refreshing metadata for ${nodeIds.length} selected node(s).`,
+              tone: "warning",
+            });
+            toast.loading(`Refreshing ${nodeIds.length} node(s)…`, {
+              description: "Mock metadata refresh is running inside this story.",
+              id: "profile-refresh",
+            });
+            await sleep(220);
+            patchNodeMetadata(nodeIds, (nodeId) =>
+              nodeId === "node-edge-manual-1" ? 118 : nodeId === "node-jp-tokyo-entry" ? 89 : null,
+            );
+            setQueueingOperation(false);
+            toast.success("Metadata refresh applied", {
+              description: "Selected nodes now show refreshed metadata.",
+              id: "profile-refresh",
+            });
+            setFeedback({
+              title: "Metadata refresh applied",
+              description:
+                "Selected nodes now show refreshed geo metadata and the latest mock probe median.",
+              tone: "success",
+            });
+          }}
+          onProbeNodes={async (nodeIds) => {
+            setQueueingOperation(true);
+            toast.loading(`Probing ${nodeIds.length} node(s)…`, {
+              description: "Watch the status column update while mock rounds progress.",
+              id: "profile-probe",
+            });
+            setLiveState(
+              Object.fromEntries(
+                nodeIds.map((nodeId) => [
+                  nodeId,
+                  {
+                    kind: "proxy_latency_probe",
+                    runId: `run-${nodeId}`,
+                    nodeId,
+                    samplesTotal: 5,
+                    latestRound: 1,
+                    latestSampleMs: nodeId === "node-jp-osaka-edge" ? null : 101,
+                    at: 1_713_309_600,
+                    message: "probe round 1 sample",
+                  },
+                ]),
+              ),
+            );
+            setFeedback({
+              title: "Latency probe running",
+              description:
+                "The node status column updates in place while the mock breadth-first rounds progress.",
+              tone: "warning",
+            });
+            await sleep(220);
+            setLiveState(
+              Object.fromEntries(
+                nodeIds.map((nodeId) => [
+                  nodeId,
+                  {
+                    kind: "proxy_latency_probe",
+                    runId: `run-${nodeId}`,
+                    nodeId,
+                    samplesTotal: 5,
+                    latestRound: 5,
+                    latestSampleMs: nodeId === "node-jp-osaka-edge" ? null : 97,
+                    at: 1_713_309_800,
+                    message:
+                      nodeId === "node-jp-osaka-edge"
+                        ? "probe round 5 timeout"
+                        : "probe round 5 ok",
+                  },
+                ]),
+              ),
+            );
+            await sleep(220);
+            patchNodeMetadata(nodeIds, (nodeId) =>
+              nodeId === "node-jp-osaka-edge" ? null : nodeId === "node-edge-manual-1" ? 114 : 97,
+            );
+            setLiveState({});
+            setQueueingOperation(false);
+            toast.success("Latency probe finished", {
+              description:
+                "Successful nodes keep the final median; timeout-only nodes remain failed.",
+              id: "profile-probe",
+            });
+            setFeedback({
+              title: "Latency probe finished",
+              description:
+                "Mock rounds completed. Successful nodes keep the final median while timeout-only nodes stay failed.",
+              tone: "success",
+            });
+          }}
+          onDeleteImport={async (importId) => {
+            setDeletingImportId(importId);
+            await sleep(220);
+            setProxyCatalog((current) => ({
+              ...current,
+              groups: current.groups.filter((group) => group.import.import_id !== importId),
+            }));
+            setDeletingImportId(null);
+            toast.success("Local import removed", {
+              description: `${importId} was removed from this profile-only story state.`,
+            });
+            setFeedback({
+              title: "Local import removed",
+              description:
+                "The local node-group import was deleted from this profile view. Inherited global imports remain protected here.",
+              tone: "success",
+            });
+          }}
+          onOpenSessionByNode={async ({ node_id: nodeId, desired_port: desiredPort }) => {
+            setOpeningSessionNodeId(nodeId);
+            toast.loading("Creating node-pinned session…", {
+              description:
+                desiredPort != null
+                  ? `${nodeId} is opening on its primary resolved IP via port ${desiredPort}.`
+                  : `${nodeId} is opening on its primary resolved IP.`,
+              id: "open-session",
+            });
+            await sleep(220);
+            setOpeningSessionNodeId(null);
+            toast.success("Session created", {
+              description:
+                desiredPort != null
+                  ? `${nodeId} now has a mock live listener on port ${desiredPort}.`
+                  : `${nodeId} now has a mock live listener bound to its primary IP.`,
+              id: "open-session",
+            });
+            setFeedback({
+              title: "Node-pinned session created",
+              description:
+                desiredPort != null
+                  ? `Mock listener opened for ${nodeId} on requested port ${desiredPort}.`
+                  : `Mock listener opened for ${nodeId} using the primary resolved IP.`,
+              tone: "success",
+            });
+          }}
+          onOpenBatchByNode={async (payload) => {
+            const requests =
+              payload.requests ?? (payload.node_ids ?? []).map((nodeId) => ({ node_id: nodeId }));
+            setOpeningBatch(true);
+            toast.loading("Creating batch sessions…", {
+              description: `Opening ${requests.length} node-pinned listener(s).`,
+              id: "open-batch",
+            });
+            await sleep(220);
+            setOpeningBatch(false);
+            toast.success("Batch sessions created", {
+              description: `Opened ${requests.length} mock listener(s), one per selected node.`,
+              id: "open-batch",
+            });
+            setFeedback({
+              title: "Batch sessions created",
+              description: `Opened ${requests.length} mock listener(s), one per selected node.`,
+              tone: "success",
+            });
+          }}
+          onLoadProfile={async () => {
+            toast.success("Local import form submitted", {
+              description:
+                "The form stays non-destructive in Storybook, but the grouped-node controls below are fully interactive.",
+            });
+            setFeedback({
+              title: "Local import form submitted",
+              description:
+                "This story keeps the import form non-destructive, but the surrounding grouped-node controls remain fully interactive.",
+              tone: "success",
+            });
+          }}
+        />
+      </div>
+    </AppShell>
+  );
+}
+
+function renderInShell(storyArgs: Story["args"]) {
+  const profileId = storyArgs?.mode === "profile" ? storyArgs.profileId : GLOBAL_PROFILE_ID;
+  return (
+    <AppShell
+      profileId={profileId}
+      profiles={profiles}
+      profilesLoading={false}
+      profilesCreating={false}
+      profilesError={null}
+      healthStatus="ok"
+      currentUser={currentUser}
+      onProfileIdChange={() => undefined}
+      onCreateProfile={async (value: string) => value}
+      onRetryProfiles={() => undefined}
+    >
+      <ProxiesPage {...storyArgs} />
+    </AppShell>
+  );
+}
 
 export const GlobalConfig: Story = {
   args: {
@@ -93,32 +583,25 @@ export const GlobalConfig: Story = {
     proxyImportsError: null,
     reallocatingImportId: null,
     deletingImportId: null,
+    proxyCatalog: globalCatalogFixture,
+    proxyCatalogLoading: false,
+    proxyCatalogError: null,
+    liveConnectionState: "connected",
+    liveNodeStates,
+    queueingOperation: false,
     onLoadGlobal: fn(),
     onReassignImport: fn(),
     onDeleteImport: fn(),
+    onRefreshNodes: fn(),
+    onProbeNodes: fn(),
   },
-  render: (args) => (
-    <AppShell
-      profileId={GLOBAL_PROFILE_ID}
-      profiles={profiles}
-      profilesLoading={false}
-      profilesCreating={false}
-      profilesError={null}
-      healthStatus="ok"
-      currentUser={currentUser}
-      onProfileIdChange={() => undefined}
-      onCreateProfile={async (value: string) => value}
-      onRetryProfiles={() => undefined}
-    >
-      <ProxiesPage {...args} />
-    </AppShell>
-  ),
+  render: renderInShell,
   async play({ canvasElement }) {
     const canvas = within(canvasElement);
-    await expect(await canvas.findByText(/import global proxy pool/i)).toBeVisible();
-    await expect(
-      await canvas.findByText(/global pool and configuration allocations/i),
-    ).toBeVisible();
+    await expect(await canvas.findByText(/Grouped proxy catalog/i)).toBeVisible();
+    await expect(await canvas.findByText(/global-jp/i)).toBeVisible();
+    await expect(await canvas.findByText(/JP-Tokyo-Entry/i)).toBeVisible();
+    await expect(await canvas.findByText(/Probe selected/i)).toBeVisible();
   },
 };
 
@@ -142,29 +625,58 @@ export const ProfileConfig: Story = {
     proxySettingsError: null,
     updatingSettings: false,
     showProxyPolicy: true,
+    proxyCatalog: profileCatalogFixture,
+    proxyCatalogLoading: false,
+    proxyCatalogError: null,
+    liveConnectionState: "connected",
+    liveNodeStates,
+    queueingOperation: false,
+    suggestedPort: 10080,
+    openingSessionNodeId: null,
+    openingBatch: false,
     onLoadProfile: fn(),
     onToggleUseGlobalProxies: fn(),
+    onRefreshNodes: fn(),
+    onProbeNodes: fn(),
+    onDeleteImport: fn(),
+    onOpenSessionByNode: fn(),
+    onOpenBatchByNode: fn(),
+    deletingImportId: null,
   },
   render: (args) => (
-    <AppShell
-      profileId="edge-jp"
-      profiles={profiles}
-      profilesLoading={false}
-      profilesCreating={false}
-      profilesError={null}
-      healthStatus="ok"
-      currentUser={currentUser}
-      onProfileIdChange={() => undefined}
-      onCreateProfile={async (value: string) => value}
-      onRetryProfiles={() => undefined}
-    >
-      <ProxiesPage {...args} />
-    </AppShell>
+    <InteractiveProfileStory {...(args as Extract<ProxiesPageProps, { mode: "profile" }>)} />
   ),
   async play({ canvasElement }) {
     const canvas = within(canvasElement);
-    await expect(await canvas.findByText(/import local proxy pool/i)).toBeVisible();
-    await expect(await canvas.findByText(/use global pool for edge-jp/i)).toBeVisible();
+    const dialog = within(canvasElement.ownerDocument.body);
+    await expect(await canvas.findByText(/Current profile grouped nodes/i)).toBeVisible();
+    await expect(await canvas.findByRole("button", { name: /^Create sessions$/i })).toBeVisible();
+    await expect((await canvas.findAllByRole("button", { name: /^Delete$/i })).length).toBe(1);
+    await userEvent.click(await canvas.findByRole("button", { name: /^Delete$/i }));
+    await expect(await dialog.findByText(/Confirm deletion/i)).toBeVisible();
+    await userEvent.click(await dialog.findByRole("button", { name: /^Cancel$/i }));
+    await waitFor(() => {
+      expect(dialog.queryByRole("dialog", { name: /Confirm deletion/i })).not.toBeInTheDocument();
+    });
+    await userEvent.click(await canvas.findByRole("button", { name: /^Delete$/i }));
+    await userEvent.click(await dialog.findByRole("button", { name: /^Delete$/i }));
+    await waitFor(() => {
+      expect(canvas.queryByText(/^edge-manual$/i)).not.toBeInTheDocument();
+    });
+    const createSessionButtons = await canvas.findAllByRole("button", {
+      name: /^Create session$/i,
+    });
+    await expect(createSessionButtons.length).toBeGreaterThan(0);
+    const firstCreateSessionButton = createSessionButtons[0];
+    if (!firstCreateSessionButton) {
+      throw new Error("Expected at least one Create session button");
+    }
+    await userEvent.click(firstCreateSessionButton);
+    const desiredPortInput = await dialog.findByLabelText(/Desired port \(optional\)/i);
+    await userEvent.clear(desiredPortInput);
+    await userEvent.type(desiredPortInput, "10088");
+    await userEvent.click(await dialog.findByRole("button", { name: /^Create session$/i }));
+    await expect(await canvas.findByText(/Node-pinned session created/i)).toBeVisible();
   },
 };
 
@@ -175,8 +687,36 @@ export const ZhCN: Story = {
   },
   async play({ canvasElement }) {
     const canvas = within(canvasElement);
-    await expect(await canvas.findByText(/导入全局代理池/i)).toBeVisible();
-    await expect(await canvas.findByText(/全局池与配置级分配/i)).toBeVisible();
+    await expect(await canvas.findByText(/分组代理目录/i)).toBeVisible();
+    await expect(await canvas.findByText(/刷新所选/i)).toBeVisible();
+    await expect(await canvas.findByText(/global-jp/i)).toBeVisible();
+  },
+};
+
+export const ProfileBatchActions: Story = {
+  ...ProfileConfig,
+  render: (args) => (
+    <InteractiveProfileStory {...(args as Extract<ProxiesPageProps, { mode: "profile" }>)} />
+  ),
+  async play({ canvasElement }) {
+    const canvas = within(canvasElement);
+    const dialog = within(canvasElement.ownerDocument.body);
+    const groupCheckbox = await canvas.findByLabelText(/Select import group global-jp/i);
+    await userEvent.click(groupCheckbox);
+    const selectedBadges = await canvas.findAllByText(/Selected 2 nodes/i);
+    await expect(selectedBadges.length).toBeGreaterThan(0);
+    await expect(await canvas.findByRole("button", { name: /Create sessions/i })).toBeEnabled();
+    await userEvent.click(await canvas.findByRole("button", { name: /Create sessions/i }));
+    const desiredPortInputs = await dialog.findAllByLabelText(/Desired port \(optional\)/i);
+    const firstDesiredPortInput = desiredPortInputs[0];
+    const secondDesiredPortInput = desiredPortInputs[1];
+    if (!firstDesiredPortInput || !secondDesiredPortInput) {
+      throw new Error("Expected desired port inputs for the selected batch nodes");
+    }
+    await userEvent.type(firstDesiredPortInput, "10080");
+    await userEvent.type(secondDesiredPortInput, "10081");
+    await userEvent.click(await dialog.findByRole("button", { name: /^Create sessions$/i }));
+    await expect(await canvas.findByText(/Batch sessions created/i)).toBeVisible();
   },
 };
 
@@ -193,26 +733,19 @@ export const AccessDenied: Story = {
     proxyImports: null,
     proxyImportsLoading: false,
     proxyImportsError: null,
+    proxyCatalog: null,
+    proxyCatalogLoading: false,
+    proxyCatalogError: null,
+    liveConnectionState: "idle",
+    liveNodeStates: {},
+    queueingOperation: false,
     onLoadGlobal: fn(),
     onReassignImport: fn(),
     onDeleteImport: fn(),
+    onRefreshNodes: fn(),
+    onProbeNodes: fn(),
   },
-  render: (args) => (
-    <AppShell
-      profileId={GLOBAL_PROFILE_ID}
-      profiles={profiles}
-      profilesLoading={false}
-      profilesCreating={false}
-      profilesError={null}
-      healthStatus="ok"
-      currentUser={currentUser}
-      onProfileIdChange={() => undefined}
-      onCreateProfile={async (value: string) => value}
-      onRetryProfiles={() => undefined}
-    >
-      <ProxiesPage {...args} />
-    </AppShell>
-  ),
+  render: renderInShell,
   async play({ canvasElement }) {
     const canvas = within(canvasElement);
     await expect(await canvas.findByText(/admin access required/i)).toBeVisible();

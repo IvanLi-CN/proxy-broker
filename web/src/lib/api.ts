@@ -16,13 +16,19 @@ import type {
   ListSessionsResponse,
   LoadSubscriptionRequest,
   LoadSubscriptionResponse,
+  OpenBatchByNodeRequest,
   OpenBatchRequest,
   OpenBatchResponse,
+  OpenSessionByNodeRequest,
   OpenSessionRequest,
   OpenSessionResponse,
   ProfileProxySettings,
+  ProxyCatalogQuery,
+  ProxyCatalogResponse,
   ProxyImportListQuery,
   ProxyInventoryListQuery,
+  ProxyOperationAcceptedResponse,
+  ProxyOperationRequest,
   RefreshRequest,
   RefreshResponse,
   SearchSessionOptionsRequest,
@@ -123,6 +129,22 @@ const withProxyImportSearch = (path: string, query?: ProxyImportListQuery) => {
   return suffix ? `${path}?${suffix}` : path;
 };
 
+const withProxyCatalogSearch = (path: string, query?: ProxyCatalogQuery) => {
+  if (!query) {
+    return path;
+  }
+
+  const params = new URLSearchParams();
+  if (query.view) {
+    params.set("view", query.view);
+  }
+  if (query.profile_id) {
+    params.set("profile_id", query.profile_id);
+  }
+  const suffix = params.toString();
+  return suffix ? `${path}?${suffix}` : path;
+};
+
 export { ApiError };
 
 export const api = {
@@ -153,6 +175,18 @@ export const api = {
     }),
   listProxyImports: (query?: ProxyImportListQuery) =>
     request<ListProxyImportResponse>(withProxyImportSearch("/api/v1/proxy-imports", query)),
+  listProxyCatalog: (query?: ProxyCatalogQuery) =>
+    request<ProxyCatalogResponse>(withProxyCatalogSearch("/api/v1/proxy-catalog", query)),
+  refreshProxyCatalogMetadata: (payload: ProxyOperationRequest) =>
+    request<ProxyOperationAcceptedResponse>("/api/v1/proxy-ops/refresh", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  probeProxyCatalogLatency: (payload: ProxyOperationRequest) =>
+    request<ProxyOperationAcceptedResponse>("/api/v1/proxy-ops/probe", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
   updateProxyImportAllocation: (importId: string, payload: UpdateProxyImportAllocationRequest) =>
     request<void>(`/api/v1/proxy-imports/${encodeURIComponent(importId)}/allocation`, {
       method: "PATCH",
@@ -197,6 +231,16 @@ export const api = {
     }),
   openBatch: (profileId: string, payload: OpenBatchRequest) =>
     request<OpenBatchResponse>(profilePath(profileId, "/sessions/open-batch"), {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  openSessionByNode: (profileId: string, payload: OpenSessionByNodeRequest) =>
+    request<OpenSessionResponse>(profilePath(profileId, "/sessions/open-by-node"), {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  openBatchByNode: (profileId: string, payload: OpenBatchByNodeRequest) =>
+    request<OpenBatchResponse>(profilePath(profileId, "/sessions/open-batch-by-node"), {
       method: "POST",
       body: JSON.stringify(payload),
     }),
