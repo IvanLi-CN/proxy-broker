@@ -382,10 +382,13 @@ impl SqliteStore {
         self.backfill_proxy_imports_from_inventory().await?;
         self.migrate_short_ids().await?;
 
+        sqlx::query("DROP INDEX IF EXISTS idx_proxy_inventory_import_proxy_name")
+            .execute(&self.pool)
+            .await?;
         sqlx::query(
             r#"
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_proxy_inventory_import_proxy_name
-            ON proxy_inventory_nodes(import_id, proxy_name)
+            CREATE INDEX IF NOT EXISTS idx_proxy_inventory_import_proxy_name
+            ON proxy_inventory_nodes(import_id, proxy_name, node_id)
             "#,
         )
         .execute(&self.pool)
@@ -674,8 +677,13 @@ impl SqliteStore {
                 .get(&record.import_id)
                 .cloned()
                 .unwrap_or_else(|| record.import_id.clone());
-            let next_node_id =
-                ids::stable_proxy_inventory_node_id(&next_import_id, &record.proxy_name);
+            let next_node_id = ids::stable_proxy_inventory_node_id_for_proxy(
+                &next_import_id,
+                &record.proxy_name,
+                &record.proxy_type,
+                &record.server,
+                &record.raw_proxy,
+            );
             let mut next_record = record.clone();
             next_record.import_id = next_import_id;
             next_record.node_id = next_node_id.clone();
@@ -2969,6 +2977,19 @@ fn stable_proxy_import_id(
     ids::stable_import_id(&source_scope.key(), &source_identity.key())
 }
 
+#[cfg(test)]
+fn stable_proxy_inventory_node_id_for_test(
+    import_id: &str,
+    proxy_name: &str,
+    proxy_type: &str,
+    server: &str,
+    raw_proxy: serde_json::Value,
+) -> String {
+    ids::stable_proxy_inventory_node_id_for_proxy(
+        import_id, proxy_name, proxy_type, server, &raw_proxy,
+    )
+}
+
 fn reserve_unique_id<F>(reserved: &mut HashSet<String>, mut generate: F) -> String
 where
     F: FnMut() -> String,
@@ -3092,7 +3113,7 @@ fn map_task_run_event_row(row: sqlx::sqlite::SqliteRow) -> anyhow::Result<TaskRu
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use super::{SqliteStore, stable_proxy_import_id};
+    use super::{SqliteStore, stable_proxy_import_id, stable_proxy_inventory_node_id_for_test};
     use crate::{
         auth::issue_api_key,
         ids,
@@ -3606,7 +3627,17 @@ mod tests {
         assert_eq!(nodes.len(), 1);
         assert_eq!(
             nodes[0].node_id,
-            ids::stable_proxy_inventory_node_id(&expected_import_id, "node-a")
+            stable_proxy_inventory_node_id_for_test(
+                &expected_import_id,
+                "node-a",
+                "socks5",
+                "1.1.1.1",
+                serde_json::json!({
+                    "name": "node-a",
+                    "type": "socks5",
+                    "server": "1.1.1.1",
+                }),
+            )
         );
         assert_eq!(nodes[0].import_id, expected_import_id);
         assert_eq!(nodes[0].server, "1.1.1.1");
@@ -3826,7 +3857,17 @@ mod tests {
         assert_eq!(nodes[0].import_id, migrated_import.import_id);
         assert_eq!(
             nodes[0].node_id,
-            ids::stable_proxy_inventory_node_id(&migrated_import.import_id, "manual-node")
+            stable_proxy_inventory_node_id_for_test(
+                &migrated_import.import_id,
+                "manual-node",
+                "socks5",
+                "3.3.3.3",
+                serde_json::json!({
+                    "name": "manual-node",
+                    "type": "socks5",
+                    "server": "3.3.3.3",
+                }),
+            )
         );
 
         let expected_sync_import_id = ids::stable_import_id(
@@ -4099,7 +4140,15 @@ mod tests {
         assert_eq!(nodes[0].import_id, stable_import_id);
         assert_eq!(
             nodes[0].node_id,
-            ids::stable_proxy_inventory_node_id(&stable_import_id, "tavily-node")
+            stable_proxy_inventory_node_id_for_test(
+                &stable_import_id,
+                "tavily-node",
+                "socks5",
+                "1.1.1.1",
+                serde_json::json!({
+                    "name": "tavily-node",
+                }),
+            )
         );
         assert!(
             store
@@ -4146,7 +4195,16 @@ mod tests {
             ))
             .key(),
         );
-        let stable_node_id = ids::stable_proxy_inventory_node_id(&stable_import_id, "tavily-node");
+        let stable_node_id = stable_proxy_inventory_node_id_for_test(
+            &stable_import_id,
+            "tavily-node",
+            "socks5",
+            "2.2.2.2",
+            serde_json::json!({
+                "name": "tavily-node",
+                "server": "2.2.2.2",
+            }),
+        );
 
         sqlx::query(
             r#"
@@ -4252,12 +4310,35 @@ mod tests {
             .list_proxy_inventory_for_import(&stable_import_id)
             .await
             .expect("merged inventory nodes should list");
-        assert_eq!(nodes.len(), 1);
-        assert_eq!(nodes[0].node_id, stable_node_id);
-        assert_eq!(nodes[0].server, "2.2.2.2");
+        assert_eq!(nodes.len(), 2);
+        let actual_node_ids = nodes
+            .iter()
+            .map(|node| node.node_id.clone())
+            .collect::<std::collections::BTreeSet<_>>();
+        let expected_legacy_node_id = stable_proxy_inventory_node_id_for_test(
+            &stable_import_id,
+            "tavily-node",
+            "socks5",
+            "1.1.1.1",
+            serde_json::json!({
+                "name": "tavily-node",
+                "server": "1.1.1.1",
+            }),
+        );
+        let expected_node_ids = [stable_node_id.clone(), expected_legacy_node_id]
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(actual_node_ids, expected_node_ids);
+
+        let servers = nodes
+            .iter()
+            .map(|node| node.server.clone())
+            .collect::<std::collections::BTreeSet<_>>();
         assert_eq!(
-            nodes[0].resolved_ips,
-            vec!["2.2.2.2".to_string(), "1.1.1.1".to_string()]
+            servers,
+            ["1.1.1.1".to_string(), "2.2.2.2".to_string()]
+                .into_iter()
+                .collect::<std::collections::BTreeSet<_>>()
         );
 
         let configs = store

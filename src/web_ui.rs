@@ -893,6 +893,88 @@ proxies:
     }
 
     #[tokio::test]
+    async fn api_key_cannot_delete_global_import_reallocated_to_profile() {
+        let store = Arc::new(MemoryStore::new());
+        let runtime: Arc<dyn MihomoRuntime> = Arc::new(TestRuntime);
+        let service = Arc::new(BrokerService::new(
+            store,
+            runtime,
+            BrokerServiceOptions::default(),
+        ));
+        service
+            .create_profile("alpha")
+            .await
+            .expect("alpha profile should be created");
+
+        let source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: global-node
+    type: socks5
+    server: 5.5.5.5
+"#,
+        )
+        .await;
+        service
+            .load_global_subscription(&SubscriptionSource::File(source_path.clone()))
+            .await
+            .expect("global import should succeed");
+        let _ = tokio::fs::remove_file(&source_path).await;
+
+        let import_id = service
+            .list_proxy_imports(Some("all"), None)
+            .await
+            .expect("imports should list")
+            .items[0]
+            .import_id
+            .clone();
+        service
+            .update_proxy_import_allocation(&import_id, &ProxyScope::profile("alpha"))
+            .await
+            .expect("import should be reassigned to alpha");
+
+        let app = enforce_router_with_service(service);
+
+        let created_key = app
+            .clone()
+            .oneshot(trusted_request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/api-keys")
+                    .header("content-type", "application/json")
+                    .header("x-forwarded-user", "admin@example.com")
+                    .body(Body::from(
+                        r#"{"name":"alpha-bot","profile_scope":{"kind":"selected_profiles","profile_ids":["alpha"]}}"#,
+                    ))
+                    .unwrap(),
+            ))
+            .await
+            .expect("key create should respond");
+        assert_eq!(created_key.status(), StatusCode::CREATED);
+        let created_key_body = to_bytes(created_key.into_body(), usize::MAX)
+            .await
+            .expect("body should be readable");
+        let created_key_json: serde_json::Value =
+            serde_json::from_slice(&created_key_body).expect("body should be json");
+        let secret = created_key_json["secret"]
+            .as_str()
+            .expect("secret should be present");
+
+        let denied = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::DELETE)
+                    .uri(format!("/api/v1/proxy-imports/{import_id}"))
+                    .header("authorization", format!("Bearer {secret}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("router should respond");
+        assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
     async fn non_admin_human_cannot_access_profile_proxy_settings_route() {
         let app = enforce_router();
 
