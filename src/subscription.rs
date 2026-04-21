@@ -17,14 +17,17 @@ const INFO_PROXY_KEYWORDS_EN: &[&str] = &[
     "traffic",
     "expire",
     "expired",
+    "notice",
+];
+const INFO_PROXY_KEYWORDS_EN_WEAK: &[&str] = &[
     "subscription",
     "official",
     "support",
-    "notice",
 ];
 const INFO_PROXY_KEYWORDS_ZH: &[&str] = &[
-    "流量", "剩余", "过期", "到期", "官网", "订阅", "客服", "公告", "说明",
+    "流量", "剩余", "过期", "到期", "公告", "说明",
 ];
+const INFO_PROXY_KEYWORDS_ZH_WEAK: &[&str] = &["官网", "订阅", "客服"];
 
 #[derive(Debug, Clone, Default)]
 pub struct LoadedSubscription {
@@ -193,10 +196,6 @@ fn percent_decode_lossy(value: &str) -> Option<String> {
                 decoded.push(byte);
                 index += 3;
             }
-            b'+' => {
-                decoded.push(b' ');
-                index += 1;
-            }
             byte => {
                 decoded.push(byte);
                 index += 1;
@@ -230,7 +229,10 @@ fn decode_profile_title(value: &str) -> anyhow::Result<Option<String>> {
 
 fn parse_rfc5987_filename(value: &str) -> Option<String> {
     let raw = value.trim().trim_matches('"');
-    let (_, encoded) = raw.split_once("''")?;
+    let mut parts = raw.splitn(3, '\'');
+    let _charset = parts.next()?;
+    let _language = parts.next()?;
+    let encoded = parts.next()?;
     percent_decode_lossy(encoded).and_then(|decoded| clean_source_title(&decoded))
 }
 
@@ -255,6 +257,20 @@ fn parse_content_disposition_filename(value: &str) -> Option<String> {
         }
     }
     filename_star.or(filename)
+}
+
+fn content_disposition_mentions_filename(value: &str) -> bool {
+    value.split(';').skip(1).any(|segment| {
+        segment
+            .split_once('=')
+            .map(|(key, _)| {
+                matches!(
+                    key.trim().to_ascii_lowercase().as_str(),
+                    "filename" | "filename*"
+                )
+            })
+            .unwrap_or(false)
+    })
 }
 
 fn parse_subscription_userinfo(value: &str) -> Option<SubscriptionMetadata> {
@@ -340,12 +356,34 @@ fn is_information_proxy_name(name: &str) -> bool {
     if lowered.is_empty() {
         return false;
     }
-    INFO_PROXY_KEYWORDS_EN
+
+    if INFO_PROXY_KEYWORDS_EN
         .iter()
         .any(|keyword| lowered.contains(keyword))
         || INFO_PROXY_KEYWORDS_ZH
             .iter()
             .any(|keyword| name.contains(keyword))
+    {
+        return true;
+    }
+
+    let english_tokens = lowered
+        .split(|ch: char| !ch.is_ascii_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .collect::<Vec<_>>();
+    let english_weak_hits = INFO_PROXY_KEYWORDS_EN_WEAK
+        .iter()
+        .filter(|keyword| english_tokens.iter().any(|token| token == *keyword))
+        .count();
+    if english_weak_hits >= 2 {
+        return true;
+    }
+
+    INFO_PROXY_KEYWORDS_ZH_WEAK
+        .iter()
+        .filter(|keyword| name.contains(**keyword))
+        .count()
+        >= 2
 }
 
 fn filter_information_proxies(proxies: Vec<Value>, warnings: &mut Vec<String>) -> Vec<Value> {
@@ -379,28 +417,35 @@ fn parse_response_metadata(
         .and_then(|value| parse_subscription_userinfo(&value))
         .unwrap_or_default();
 
-    let source_title = if let Some(raw_title) = find_header_value(headers, "profile-title", false) {
+    let mut source_title = None;
+    if let Some(raw_title) = find_header_value(headers, "profile-title", false) {
         match decode_profile_title(&raw_title) {
-            Ok(title) => title,
+            Ok(title) => source_title = title,
             Err(err) => {
                 warnings.push(format!("ignored invalid `profile-title` header: {err}"));
-                None
             }
         }
-    } else if let Some(content_disposition) = headers
-        .get(CONTENT_DISPOSITION)
-        .and_then(|value| value.to_str().ok())
+    }
+
+    if source_title.is_none()
+        && let Some(content_disposition) = headers
+            .get(CONTENT_DISPOSITION)
+            .and_then(|value| value.to_str().ok())
     {
         match parse_content_disposition_filename(content_disposition) {
-            Some(title) => Some(title),
+            Some(title) => source_title = Some(title),
             None => {
-                warnings.push("ignored invalid `Content-Disposition` filename".to_string());
-                None
+                if content_disposition_mentions_filename(content_disposition) {
+                    warnings.push("ignored invalid `Content-Disposition` filename".to_string());
+                }
             }
         }
-    } else {
-        fallback_title
-    };
+    }
+
+    if source_title.is_none() {
+        source_title = fallback_title;
+    }
+
     metadata.source_title = source_title;
 
     ParsedResponseMetadata {
@@ -470,6 +515,14 @@ async fn fetch_url_source(
         match parse_subscription_payload(&raw) {
             Ok(proxies) if payload_has_usable_proxy_entries(&proxies) => {
                 let mut warnings = Vec::new();
+                let filtered_proxies = filter_information_proxies(proxies, &mut warnings);
+                if !payload_has_usable_proxy_entries(&filtered_proxies) {
+                    parse_errors.push(format!(
+                        "{}: payload only contained informational entries after filtering",
+                        attempt_label
+                    ));
+                    continue;
+                }
                 if index > 0 {
                     warnings.push(format!(
                         "subscription payload required fallback {}",
@@ -478,7 +531,7 @@ async fn fetch_url_source(
                 }
                 let mut metadata = parse_response_metadata(&headers, derive_title_from_url(url));
                 warnings.append(&mut metadata.warnings);
-                return Ok((proxies, warnings, metadata.metadata));
+                return Ok((filtered_proxies, warnings, metadata.metadata));
             }
             Ok(_) => {
                 parse_errors.push(format!(
@@ -615,7 +668,10 @@ impl ArcSemaphore {
 
 #[cfg(test)]
 mod tests {
-    use super::{SUBSCRIPTION_FETCH_USER_AGENTS, SubscriptionLoadError, load_from_source};
+    use super::{
+        SUBSCRIPTION_FETCH_USER_AGENTS, SubscriptionLoadError, load_from_source,
+        parse_content_disposition_filename, parse_response_metadata, percent_decode_lossy,
+    };
     use crate::models::SubscriptionSource;
     use axum::{
         Router,
@@ -813,6 +869,80 @@ proxies:
     }
 
     #[tokio::test]
+    async fn url_source_retries_when_default_payload_only_contains_information_nodes() {
+        #[derive(Clone)]
+        struct InfoFallbackState {
+            accepted_user_agent: Arc<str>,
+        }
+
+        async fn info_fallback_handler(
+            State(state): State<InfoFallbackState>,
+            headers: HeaderMap,
+        ) -> (StatusCode, HeaderMap, String) {
+            let user_agent = headers
+                .get(reqwest::header::USER_AGENT)
+                .and_then(|value| value.to_str().ok());
+            if user_agent == Some(state.accepted_user_agent.as_ref()) {
+                return (
+                    StatusCode::OK,
+                    HeaderMap::new(),
+                    r#"
+proxies:
+  - name: real-node
+    type: socks5
+    server: 6.6.6.6
+"#
+                    .to_string(),
+                );
+            }
+
+            (
+                StatusCode::OK,
+                HeaderMap::new(),
+                r#"
+proxies:
+  - name: 剩余流量 12GB
+    type: socks5
+    server: 1.1.1.1
+"#
+                .to_string(),
+            )
+        }
+
+        let client = reqwest::Client::new();
+        let app = Router::new()
+            .route("/subscription", get(info_fallback_handler))
+            .with_state(InfoFallbackState {
+                accepted_user_agent: Arc::<str>::from(SUBSCRIPTION_FETCH_USER_AGENTS[0]),
+            });
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("test listener should bind");
+        let addr = listener.local_addr().expect("listener addr should exist");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("test server should serve requests");
+        });
+        let source = SubscriptionSource::Url(format!("http://{addr}/subscription"));
+
+        let result = load_from_source(&client, &source)
+            .await
+            .expect("info-only default payload should still allow compatibility fallback");
+
+        server.abort();
+
+        assert_eq!(result.nodes.len(), 1);
+        assert_eq!(result.nodes[0].proxy_name, "real-node");
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|warning| warning.contains(SUBSCRIPTION_FETCH_USER_AGENTS[0]))
+        );
+    }
+
+    #[tokio::test]
     async fn url_source_reports_fetch_error_on_non_2xx_response() {
         let client = reqwest::Client::new();
         let (base_url, server) = spawn_test_server().await;
@@ -1006,6 +1136,100 @@ proxies:
         assert_eq!(metadata.expire_at, Some(1_710_000_000));
     }
 
+    #[test]
+    fn response_metadata_falls_back_to_content_disposition_when_profile_title_is_invalid() {
+        let mut headers = HeaderMap::new();
+        headers.insert("profile-title", HeaderValue::from_static("base64:not-valid-base64"));
+        headers.insert(
+            reqwest::header::CONTENT_DISPOSITION,
+            HeaderValue::from_static("attachment; filename*=UTF-8''fallback-name.yaml"),
+        );
+
+        let parsed = parse_response_metadata(&headers, Some("url-fallback".to_string()));
+
+        let metadata = parsed.metadata.expect("content disposition title should survive");
+        assert_eq!(
+            metadata.source_title.as_deref(),
+            Some("fallback-name.yaml")
+        );
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("ignored invalid `profile-title` header"))
+        );
+    }
+
+    #[test]
+    fn response_metadata_falls_back_to_url_title_when_higher_priority_headers_are_invalid() {
+        let mut headers = HeaderMap::new();
+        headers.insert("profile-title", HeaderValue::from_static("base64:not-valid-base64"));
+        headers.insert(
+            reqwest::header::CONTENT_DISPOSITION,
+            HeaderValue::from_static("attachment; filename*=UTF-8''%ZZ"),
+        );
+
+        let parsed = parse_response_metadata(&headers, Some("url-fallback".to_string()));
+
+        let metadata = parsed.metadata.expect("url fallback title should survive");
+        assert_eq!(metadata.source_title.as_deref(), Some("url-fallback"));
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("ignored invalid `profile-title` header"))
+        );
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("ignored invalid `Content-Disposition` filename"))
+        );
+    }
+
+    #[test]
+    fn percent_decode_keeps_literal_plus_characters() {
+        assert_eq!(percent_decode_lossy("A+B.yaml").as_deref(), Some("A+B.yaml"));
+        assert_eq!(percent_decode_lossy("A%20B.yaml").as_deref(), Some("A B.yaml"));
+    }
+
+    #[test]
+    fn content_disposition_filename_star_preserves_plus_characters() {
+        assert_eq!(
+            parse_content_disposition_filename("attachment; filename*=UTF-8''A+B.yaml").as_deref(),
+            Some("A+B.yaml")
+        );
+    }
+
+    #[test]
+    fn content_disposition_filename_star_accepts_language_tag() {
+        assert_eq!(
+            parse_content_disposition_filename("attachment; filename*=UTF-8'en'A+B.yaml")
+                .as_deref(),
+            Some("A+B.yaml")
+        );
+    }
+
+    #[test]
+    fn response_metadata_ignores_bare_content_disposition_without_warning() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            reqwest::header::CONTENT_DISPOSITION,
+            HeaderValue::from_static("attachment"),
+        );
+
+        let parsed = parse_response_metadata(&headers, Some("url-fallback".to_string()));
+
+        let metadata = parsed.metadata.expect("fallback title should survive");
+        assert_eq!(metadata.source_title.as_deref(), Some("url-fallback"));
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .all(|warning| !warning.contains("Content-Disposition"))
+        );
+    }
+
     #[tokio::test]
     async fn url_source_filters_information_nodes_and_warns() {
         let client = reqwest::Client::new();
@@ -1051,6 +1275,51 @@ proxies:
                 .warnings
                 .iter()
                 .any(|warning| warning.contains("filtered informational subscription entry"))
+        );
+    }
+
+    #[tokio::test]
+    async fn url_source_keeps_legitimate_nodes_with_single_weak_branding_keyword() {
+        let client = reqwest::Client::new();
+        let app = Router::new()
+            .route("/subscription", get(test_subscription_handler))
+            .with_state(TestSubscriptionServerState {
+                accepted_user_agent: None,
+                success_payload: Arc::<str>::from(
+                    r#"
+proxies:
+  - name: Official-US-01
+    type: socks5
+    server: 8.8.4.4
+"#,
+                ),
+                fallback_status: None,
+                response_headers: HeaderMap::new(),
+            });
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("test listener should bind");
+        let addr = listener.local_addr().expect("listener addr should exist");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("test server should serve requests");
+        });
+        let source = SubscriptionSource::Url(format!("http://{addr}/subscription"));
+
+        let result = load_from_source(&client, &source)
+            .await
+            .expect("single weak keyword should not make the node informational");
+
+        server.abort();
+
+        assert_eq!(result.nodes.len(), 1);
+        assert_eq!(result.nodes[0].proxy_name, "Official-US-01");
+        assert!(
+            result
+                .warnings
+                .iter()
+                .all(|warning| !warning.contains("filtered informational subscription entry"))
         );
     }
 

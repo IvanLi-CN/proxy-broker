@@ -2787,31 +2787,31 @@ async fn persist_proxy_import(
         import_record
             .subscription_metadata
             .as_ref()
-            .and_then(|item| item.upload_bytes.map(|value| value as i64)),
+            .and_then(|item| optional_u64_to_i64(item.upload_bytes)),
     )
     .bind(
         import_record
             .subscription_metadata
             .as_ref()
-            .and_then(|item| item.download_bytes.map(|value| value as i64)),
+            .and_then(|item| optional_u64_to_i64(item.download_bytes)),
     )
     .bind(
         import_record
             .subscription_metadata
             .as_ref()
-            .and_then(|item| item.used_bytes.map(|value| value as i64)),
+            .and_then(|item| optional_u64_to_i64(item.used_bytes)),
     )
     .bind(
         import_record
             .subscription_metadata
             .as_ref()
-            .and_then(|item| item.total_bytes.map(|value| value as i64)),
+            .and_then(|item| optional_u64_to_i64(item.total_bytes)),
     )
     .bind(
         import_record
             .subscription_metadata
             .as_ref()
-            .and_then(|item| item.remaining_bytes.map(|value| value as i64)),
+            .and_then(|item| optional_u64_to_i64(item.remaining_bytes)),
     )
     .bind(
         import_record
@@ -2824,6 +2824,10 @@ async fn persist_proxy_import(
     .execute(&mut **tx)
     .await?;
     Ok(())
+}
+
+fn optional_u64_to_i64(value: Option<u64>) -> Option<i64> {
+    value.map(|item| item.min(i64::MAX as u64) as i64)
 }
 
 fn map_proxy_inventory_row(row: sqlx::sqlite::SqliteRow) -> anyhow::Result<ProxyInventoryRecord> {
@@ -3746,6 +3750,86 @@ mod tests {
         assert_eq!(metadata.source_title.as_deref(), Some("edge-feed"));
         assert_eq!(metadata.remaining_bytes, Some(70));
         assert_eq!(metadata.expire_at, Some(1_710_000_000));
+
+        let _ = tokio::fs::remove_file(path).await;
+    }
+
+    #[tokio::test]
+    async fn proxy_imports_clamp_oversized_subscription_metadata_counters() {
+        let (store, path) = open_temp_store().await;
+        let import_id = stable_proxy_import_id(
+            &ProxyScope::profile("alpha"),
+            &ProxyImportSourceIdentity::from_source(&SubscriptionSource::Url(
+                "https://example.com/oversized.yaml".to_string(),
+            )),
+        );
+        let import = ProxyImportRecord {
+            import_id: import_id.clone(),
+            name: Some("oversized-feed".to_string()),
+            import_kind: ProxyImportKind::Subscription,
+            source_scope: ProxyScope::profile("alpha"),
+            source_identity: ProxyImportSourceIdentity::from_source(&SubscriptionSource::Url(
+                "https://example.com/oversized.yaml".to_string(),
+            )),
+            allocation_scope: ProxyScope::profile("alpha"),
+            subscription_metadata: Some(SubscriptionMetadata {
+                source_title: Some("oversized-feed".to_string()),
+                upload_bytes: Some(u64::MAX),
+                download_bytes: Some(u64::MAX),
+                used_bytes: Some(u64::MAX),
+                total_bytes: Some(u64::MAX),
+                remaining_bytes: Some(u64::MAX),
+                expire_at: Some(1_710_000_000),
+            }),
+            created_at: 10,
+            updated_at: 20,
+        };
+        let node = ProxyInventoryRecord {
+            import_id: import_id.clone(),
+            node_id: stable_proxy_inventory_node_id_for_test(
+                &import_id,
+                "oversized-node",
+                "socks5",
+                "9.9.9.9",
+                serde_json::json!({
+                    "name": "oversized-node",
+                    "type": "socks5",
+                    "server": "9.9.9.9",
+                }),
+            ),
+            source_scope: ProxyScope::profile("alpha"),
+            allocation_scope: ProxyScope::profile("alpha"),
+            proxy_name: "oversized-node".to_string(),
+            proxy_type: "socks5".to_string(),
+            server: "9.9.9.9".to_string(),
+            resolved_ips: vec!["9.9.9.9".to_string()],
+            raw_proxy: serde_json::json!({
+                "name": "oversized-node",
+                "type": "socks5",
+                "server": "9.9.9.9",
+            }),
+            created_at: 10,
+            updated_at: 20,
+        };
+
+        store
+            .replace_proxy_inventory_import(&import, &[node])
+            .await
+            .expect("oversized metadata should persist safely");
+
+        let fetched = store
+            .get_proxy_import(&import_id)
+            .await
+            .expect("import lookup should succeed")
+            .expect("import should exist");
+        let metadata = fetched
+            .subscription_metadata
+            .expect("subscription metadata should round-trip");
+        assert_eq!(metadata.upload_bytes, Some(i64::MAX as u64));
+        assert_eq!(metadata.download_bytes, Some(i64::MAX as u64));
+        assert_eq!(metadata.used_bytes, Some(i64::MAX as u64));
+        assert_eq!(metadata.total_bytes, Some(i64::MAX as u64));
+        assert_eq!(metadata.remaining_bytes, Some(i64::MAX as u64));
 
         let _ = tokio::fs::remove_file(path).await;
     }
