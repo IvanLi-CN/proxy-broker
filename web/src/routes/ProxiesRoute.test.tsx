@@ -14,10 +14,11 @@ const { mockOutletContext, mockUseMutation, mockUseQuery, mockUseQueryClient } =
 let latestProxiesPageProps: ComponentProps<
   typeof import("@/pages/ProxiesPage").ProxiesPage
 > | null = null;
+let observedQueryOptions: Array<{ queryKey?: unknown; enabled?: boolean }> = [];
 
 vi.mock("@tanstack/react-query", () => ({
   useMutation: () => mockUseMutation(),
-  useQuery: () => mockUseQuery(),
+  useQuery: (options: unknown) => mockUseQuery(options),
   useQueryClient: () => mockUseQueryClient(),
 }));
 
@@ -42,6 +43,7 @@ vi.mock("sonner", () => ({
 describe("ProxiesRoute", () => {
   beforeEach(() => {
     latestProxiesPageProps = null;
+    observedQueryOptions = [];
     mockOutletContext.mockReset();
     mockUseMutation.mockReset();
     mockUseQuery.mockReset();
@@ -58,11 +60,17 @@ describe("ProxiesRoute", () => {
       variables: undefined,
       error: null,
     });
-    mockUseQuery.mockReturnValue({
-      data: null,
-      error: null,
-      isError: false,
-      isLoading: false,
+    mockUseQuery.mockImplementation((options) => {
+      observedQueryOptions.push({
+        queryKey: options?.queryKey,
+        enabled: options?.enabled,
+      });
+      return {
+        data: null,
+        error: null,
+        isError: false,
+        isLoading: false,
+      };
     });
   });
 
@@ -141,5 +149,34 @@ describe("ProxiesRoute", () => {
       profileId: "edge-jp",
       showProxyPolicy: true,
     });
+  });
+
+  it("loads the profile catalog for non-admin users on profile configs", () => {
+    mockOutletContext.mockReturnValue({
+      profileId: "edge-jp",
+      activeProfileId: "edge-jp",
+      isGlobalConfig: false,
+      profiles: ["default", "edge-jp"],
+      authMe: { is_admin: false },
+      currentUser: {
+        status: "resolved",
+        identity: { is_admin: false },
+      },
+    });
+
+    render(<ProxiesRoute />);
+
+    expect(observedQueryOptions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          queryKey: ["proxy-catalog", "profile", "edge-jp"],
+          enabled: true,
+        }),
+        expect.objectContaining({
+          queryKey: ["suggested-port", "edge-jp"],
+          enabled: true,
+        }),
+      ]),
+    );
   });
 });

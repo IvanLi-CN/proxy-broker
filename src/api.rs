@@ -15,16 +15,19 @@ use crate::{
     error::BrokerError,
     models::{
         CreateApiKeyRequest, CreateApiKeyResponse, CreateProfileRequest, CreateProfileResponse,
-        HealthResponse, LoadSubscriptionRequest, OpenBatchRequest, OpenSessionRequest,
-        ProfileProxySettings, ProxyImportListQuery, ProxyInventoryListQuery, RefreshRequest,
-        SearchSessionOptionsRequest, SuggestedPortResponse, TaskListQuery, TaskRunDetail,
-        TaskRunSummary, TaskStreamEnvelope, UpdateProfileProxySettingsRequest,
+        HealthResponse, LoadSubscriptionRequest, OpenBatchByNodeRequest, OpenBatchRequest,
+        OpenSessionByNodeRequest, OpenSessionRequest, ProfileProxySettings, ProxyCatalogQuery,
+        ProxyImportListQuery, ProxyInventoryListQuery, ProxyOperationRequest, ProxyScope,
+        RefreshRequest, SearchSessionOptionsRequest, SuggestedPortResponse, TaskListQuery,
+        TaskRunDetail, TaskRunSummary, TaskStreamEnvelope, UpdateProfileProxySettingsRequest,
         UpdateProxyAllocationRequest, UpdateProxyImportAllocationRequest,
     },
     service::BrokerService,
     tasks::{TaskBusEvent, build_task_list_response, matches_task_query},
     web_ui::spa_fallback,
 };
+
+const GLOBAL_TASK_PROFILE_ID: &str = "__global__";
 
 #[derive(Clone)]
 pub struct AppState {
@@ -44,6 +47,12 @@ pub fn build_router(state: AppState) -> Router {
             post(load_global_subscription),
         )
         .route("/api/v1/proxy-imports", get(list_proxy_imports))
+        .route("/api/v1/proxy-catalog", get(list_proxy_catalog))
+        .route(
+            "/api/v1/proxy-ops/refresh",
+            post(refresh_proxy_catalog_metadata),
+        )
+        .route("/api/v1/proxy-ops/probe", post(probe_proxy_catalog_latency))
         .route(
             "/api/v1/proxy-imports/{import_id}/allocation",
             patch(update_proxy_import_allocation),
@@ -91,6 +100,14 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/v1/profiles/{profile_id}/sessions/open-batch",
             post(open_batch),
+        )
+        .route(
+            "/api/v1/profiles/{profile_id}/sessions/open-by-node",
+            post(open_session_by_node),
+        )
+        .route(
+            "/api/v1/profiles/{profile_id}/sessions/open-batch-by-node",
+            post(open_batch_by_node),
         )
         .route(
             "/api/v1/profiles/{profile_id}/sessions/suggested-port",
@@ -180,6 +197,16 @@ async fn list_proxy_imports(
     Ok(Json(resp))
 }
 
+async fn list_proxy_catalog(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    Query(query): Query<ProxyCatalogQuery>,
+) -> Result<Json<crate::models::ProxyCatalogResponse>, BrokerError> {
+    authorize_proxy_catalog_access(&auth, &query)?;
+    let resp = state.service.list_proxy_catalog(&query).await?;
+    Ok(Json(resp))
+}
+
 async fn update_proxy_allocation(
     auth: AuthContext,
     State(state): State<AppState>,
@@ -225,7 +252,21 @@ async fn delete_proxy_import(
     State(state): State<AppState>,
     Path(import_id): Path<String>,
 ) -> Result<StatusCode, BrokerError> {
-    auth.require_admin()?;
+    let record = state.service.get_proxy_import(&import_id).await?;
+    match (&record.source_scope, &record.allocation_scope) {
+        (ProxyScope::Global, _) => auth.require_admin()?,
+        (
+            ProxyScope::Profile {
+                profile_id: source_profile_id,
+            },
+            ProxyScope::Profile {
+                profile_id: allocation_profile_id,
+            },
+        ) if source_profile_id == allocation_profile_id => {
+            auth.require_profile_access(source_profile_id)?
+        }
+        _ => auth.require_admin()?,
+    };
     state.service.delete_proxy_import(&import_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -263,7 +304,7 @@ async fn list_tasks(
     State(state): State<AppState>,
     Query(query): Query<TaskListQuery>,
 ) -> Result<Json<crate::models::TaskListResponse>, BrokerError> {
-    auth.require_admin()?;
+    authorize_task_query_access(&auth, &query)?;
     let resp = state.service.list_tasks(&query).await?;
     Ok(Json(resp))
 }
@@ -273,8 +314,8 @@ async fn get_task_run_detail(
     State(state): State<AppState>,
     Path(run_id): Path<String>,
 ) -> Result<Json<TaskRunDetail>, BrokerError> {
-    auth.require_admin()?;
     let resp = state.service.get_task_run_detail(&run_id).await?;
+    authorize_task_run_access(&auth, &resp.run)?;
     Ok(Json(resp))
 }
 
@@ -283,7 +324,7 @@ async fn stream_tasks(
     State(state): State<AppState>,
     Query(query): Query<TaskListQuery>,
 ) -> Result<Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>>, BrokerError> {
-    auth.require_admin()?;
+    authorize_task_query_access(&auth, &query)?;
 
     let mut receiver = state.service.subscribe_task_events();
     let stream_query = query.clone();
@@ -400,6 +441,40 @@ async fn refresh_profile(
     Ok(Json(resp))
 }
 
+async fn refresh_proxy_catalog_metadata(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    payload: Result<Json<ProxyOperationRequest>, JsonRejection>,
+) -> Result<
+    (
+        StatusCode,
+        Json<crate::models::ProxyOperationAcceptedResponse>,
+    ),
+    BrokerError,
+> {
+    let request = parse_json_payload(payload, "refresh_proxy_catalog_metadata")?;
+    authorize_proxy_operation_access(&auth, &request)?;
+    let resp = state.service.queue_proxy_metadata_refresh(&request).await?;
+    Ok((StatusCode::ACCEPTED, Json(resp)))
+}
+
+async fn probe_proxy_catalog_latency(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    payload: Result<Json<ProxyOperationRequest>, JsonRejection>,
+) -> Result<
+    (
+        StatusCode,
+        Json<crate::models::ProxyOperationAcceptedResponse>,
+    ),
+    BrokerError,
+> {
+    let request = parse_json_payload(payload, "probe_proxy_catalog_latency")?;
+    authorize_proxy_operation_access(&auth, &request)?;
+    let resp = state.service.queue_proxy_latency_probe(&request).await?;
+    Ok((StatusCode::ACCEPTED, Json(resp)))
+}
+
 fn decode_refresh_request(body: &[u8]) -> Result<RefreshRequest, BrokerError> {
     if body.is_empty() {
         return Ok(RefreshRequest { force: false });
@@ -418,6 +493,79 @@ fn parse_json_payload<T>(
             err.body_text()
         ))
     })
+}
+
+fn authorize_proxy_catalog_access(
+    auth: &AuthContext,
+    query: &ProxyCatalogQuery,
+) -> Result<(), BrokerError> {
+    match query.view.as_deref().unwrap_or("global") {
+        "global" => {
+            auth.require_admin()?;
+        }
+        "profile" => {
+            let profile_id = query.profile_id.as_deref().ok_or_else(|| {
+                BrokerError::InvalidRequest("profile_id is required when view=profile".to_string())
+            })?;
+            auth.require_profile_access(profile_id)?;
+        }
+        other => {
+            return Err(BrokerError::InvalidRequest(format!(
+                "unsupported proxy catalog view `{other}`"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn authorize_task_query_access(
+    auth: &AuthContext,
+    query: &TaskListQuery,
+) -> Result<(), BrokerError> {
+    match query.profile_id.as_deref() {
+        Some(profile_id) if profile_id != "all" && profile_id != GLOBAL_TASK_PROFILE_ID => {
+            auth.require_profile_access(profile_id)?;
+        }
+        _ => {
+            auth.require_admin()?;
+        }
+    }
+    Ok(())
+}
+
+fn authorize_task_run_access(
+    auth: &AuthContext,
+    run: &crate::models::TaskRunSummary,
+) -> Result<(), BrokerError> {
+    if run.profile_id == GLOBAL_TASK_PROFILE_ID {
+        auth.require_admin()?;
+    } else {
+        auth.require_profile_access(&run.profile_id)?;
+    }
+    Ok(())
+}
+
+fn authorize_proxy_operation_access(
+    auth: &AuthContext,
+    request: &ProxyOperationRequest,
+) -> Result<(), BrokerError> {
+    match request.view.as_str() {
+        "global" => {
+            auth.require_admin()?;
+        }
+        "profile" => {
+            let profile_id = request.profile_id.as_deref().ok_or_else(|| {
+                BrokerError::InvalidRequest("profile_id is required when view=profile".to_string())
+            })?;
+            auth.require_profile_access(profile_id)?;
+        }
+        other => {
+            return Err(BrokerError::InvalidRequest(format!(
+                "unsupported proxy catalog view `{other}`"
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn sse_event(event_type: &str, data: Result<serde_json::Value, serde_json::Error>) -> Event {
@@ -501,6 +649,38 @@ async fn open_batch(
     state.service.require_profile_exists(&profile_id).await?;
     let request = parse_json_payload(payload, "open_batch")?;
     let resp = state.service.open_batch(&profile_id, &request).await?;
+    Ok(Json(resp))
+}
+
+async fn open_session_by_node(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    Path(profile_id): Path<String>,
+    payload: Result<Json<OpenSessionByNodeRequest>, JsonRejection>,
+) -> Result<Json<crate::models::OpenSessionResponse>, BrokerError> {
+    auth.require_profile_access(&profile_id)?;
+    state.service.require_profile_exists(&profile_id).await?;
+    let request = parse_json_payload(payload, "open_session_by_node")?;
+    let resp = state
+        .service
+        .open_session_by_node(&profile_id, &request)
+        .await?;
+    Ok(Json(resp))
+}
+
+async fn open_batch_by_node(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    Path(profile_id): Path<String>,
+    payload: Result<Json<OpenBatchByNodeRequest>, JsonRejection>,
+) -> Result<Json<crate::models::OpenBatchResponse>, BrokerError> {
+    auth.require_profile_access(&profile_id)?;
+    state.service.require_profile_exists(&profile_id).await?;
+    let request = parse_json_payload(payload, "open_batch_by_node")?;
+    let resp = state
+        .service
+        .open_batch_by_node(&profile_id, &request)
+        .await?;
     Ok(Json(resp))
 }
 

@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     fs,
     io::Read,
     net::TcpListener,
@@ -16,8 +15,6 @@ use reqwest::header::{AUTHORIZATION, USER_AGENT};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use tokio::{process::Child, process::Command, sync::Mutex, time::sleep};
-
-use crate::ids;
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -72,7 +69,7 @@ struct RuntimeInstance {
 pub struct ManagedMihomoRuntime {
     options: MihomoRuntimeOptions,
     http: reqwest::Client,
-    instances: Arc<Mutex<HashMap<String, RuntimeInstance>>>,
+    instance: Arc<Mutex<Option<RuntimeInstance>>>,
     binary_cache: Arc<Mutex<Option<PathBuf>>>,
     ensure_lock: Arc<Mutex<()>>,
 }
@@ -87,29 +84,10 @@ impl ManagedMihomoRuntime {
         Self {
             options,
             http,
-            instances: Arc::new(Mutex::new(HashMap::new())),
+            instance: Arc::new(Mutex::new(None)),
             binary_cache: Arc::new(Mutex::new(None)),
             ensure_lock: Arc::new(Mutex::new(())),
         }
-    }
-
-    fn profile_safe_name(profile_id: &str) -> String {
-        let mut readable: String = profile_id
-            .chars()
-            .map(|c| {
-                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                    c
-                } else {
-                    '_'
-                }
-            })
-            .collect();
-        readable.truncate(24);
-        if readable.is_empty() {
-            readable = "profile".to_string();
-        }
-        let stable_id = ids::stable_profile_safe_suffix(profile_id);
-        format!("{readable}-{stable_id}")
     }
 
     fn pick_controller_port(seed: &str) -> anyhow::Result<u16> {
@@ -361,11 +339,11 @@ impl ManagedMihomoRuntime {
         serde_yaml::to_string(&root).map_err(|e| anyhow!(e))
     }
 
-    async fn start_profile(&self, profile_id: &str) -> anyhow::Result<RuntimeInstance> {
+    async fn start_profile(&self, _profile_id: &str) -> anyhow::Result<RuntimeInstance> {
         let binary = self.resolve_binary().await?;
 
-        let safe_profile = Self::profile_safe_name(profile_id);
-        let home_dir = self.options.work_dir.join("profiles").join(&safe_profile);
+        let safe_profile = "shared-runtime";
+        let home_dir = self.options.work_dir.join("profiles").join(safe_profile);
         tokio::fs::create_dir_all(&home_dir)
             .await
             .with_context(|| {
@@ -380,7 +358,7 @@ impl ManagedMihomoRuntime {
         let mut last_err: Option<anyhow::Error> = None;
 
         for attempt in 0..startup_retries {
-            let port_seed = format!("{profile_id}-{attempt}");
+            let port_seed = format!("shared-runtime-{attempt}");
             let port = Self::pick_controller_port(&port_seed)?;
             let controller_addr = format!("127.0.0.1:{port}");
             let bootstrap = Self::make_bootstrap_yaml(&controller_addr, &self.options.secret)?;
@@ -420,7 +398,7 @@ impl ManagedMihomoRuntime {
                 let _ = instance.child.start_kill();
                 let _ = instance.child.wait().await;
                 last_err = Some(err.context(format!(
-                    "mihomo controller is not ready for profile={profile_id}, addr={controller_addr}, attempt={}",
+                    "mihomo controller is not ready for shared-runtime, addr={controller_addr}, attempt={}",
                     attempt + 1
                 )));
                 if attempt + 1 < startup_retries {
@@ -475,15 +453,14 @@ impl ManagedMihomoRuntime {
         let _ensure_guard = self.ensure_lock.lock().await;
 
         {
-            let mut guard = self.instances.lock().await;
-            if let Some(instance) = guard.get_mut(profile_id) {
+            let mut guard = self.instance.lock().await;
+            if let Some(instance) = guard.as_mut() {
                 if let Some(status) = instance.child.try_wait()? {
                     tracing::warn!(
-                        profile_id,
                         status = ?status,
-                        "existing mihomo child exited, restarting"
+                        "existing shared mihomo child exited, restarting"
                     );
-                    guard.remove(profile_id);
+                    guard.take();
                 } else {
                     return Ok(());
                 }
@@ -491,25 +468,22 @@ impl ManagedMihomoRuntime {
         }
 
         let instance = self.start_profile(profile_id).await?;
-        let mut guard = self.instances.lock().await;
-        guard.insert(profile_id.to_string(), instance);
+        let mut guard = self.instance.lock().await;
+        *guard = Some(instance);
         Ok(())
     }
 
     async fn instance_meta(&self, profile_id: &str) -> anyhow::Result<(String, Option<String>)> {
         self.ensure_instance(profile_id).await?;
-        let guard = self.instances.lock().await;
+        let guard = self.instance.lock().await;
         let instance = guard
-            .get(profile_id)
+            .as_ref()
             .ok_or_else(|| anyhow!("runtime instance missing after start"))?;
         Ok((instance.controller_addr.clone(), instance.secret.clone()))
     }
 
-    async fn shutdown_instance(&self, profile_id: &str) -> anyhow::Result<()> {
-        let removed = {
-            let mut guard = self.instances.lock().await;
-            guard.remove(profile_id)
-        };
+    async fn shutdown_instance(&self, _profile_id: &str) -> anyhow::Result<()> {
+        let removed = { self.instance.lock().await.take() };
         if let Some(mut instance) = removed {
             let _ = instance.child.start_kill();
             let _ = tokio::time::timeout(Duration::from_secs(3), instance.child.wait()).await;
@@ -596,10 +570,10 @@ impl MihomoRuntime for ManagedMihomoRuntime {
 
 impl Drop for ManagedMihomoRuntime {
     fn drop(&mut self) {
-        if let Ok(mut guard) = self.instances.try_lock() {
-            for (_profile, instance) in guard.iter_mut() {
-                let _ = instance.child.start_kill();
-            }
+        if let Ok(mut guard) = self.instance.try_lock()
+            && let Some(instance) = guard.as_mut()
+        {
+            let _ = instance.child.start_kill();
         }
     }
 }

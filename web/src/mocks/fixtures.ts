@@ -59,6 +59,7 @@ export const sessionFixture: OpenSessionResponse = {
   port: 10080,
   selected_ip: "203.0.113.10",
   proxy_name: "JP-Tokyo-Entry",
+  node_id: "node-jp-tokyo-entry",
 };
 
 export const batchFixture: OpenBatchResponse = {
@@ -70,6 +71,7 @@ export const batchFixture: OpenBatchResponse = {
       port: 10081,
       selected_ip: "203.0.113.88",
       proxy_name: "JP-Osaka-Edge",
+      node_id: "node-jp-osaka-edge",
     },
   ],
 };
@@ -82,6 +84,7 @@ export const sessionsFixture: ListSessionsResponse = {
       port: 10080,
       selected_ip: "203.0.113.10",
       proxy_name: "JP-Tokyo-Entry",
+      node_id: "node-jp-tokyo-entry",
       created_at: 1_741_748_460,
     },
     {
@@ -90,6 +93,7 @@ export const sessionsFixture: ListSessionsResponse = {
       port: 10081,
       selected_ip: "203.0.113.88",
       proxy_name: "JP-Osaka-Edge",
+      node_id: "node-jp-osaka-edge",
       created_at: 1_741_748_520,
     },
   ],

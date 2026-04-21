@@ -89,7 +89,14 @@ mod tests {
     use super::spa_fallback;
     use crate::{
         AppState, AuthConfig, AuthConfigOptions, BrokerService, BrokerServiceOptions, MemoryStore,
-        MihomoRuntime, auth::AuthContext, build_router,
+        MihomoRuntime,
+        auth::AuthContext,
+        build_router,
+        models::{
+            ProxyScope, SubscriptionSource, TaskRunKind, TaskRunRecord, TaskRunScope, TaskRunStage,
+            TaskRunStatus, TaskRunTrigger,
+        },
+        store::BrokerStore,
     };
     use anyhow::anyhow;
     use async_trait::async_trait;
@@ -101,6 +108,7 @@ mod tests {
     use std::{
         net::{Ipv4Addr, SocketAddr},
         sync::Arc,
+        time::{SystemTime, UNIX_EPOCH},
     };
     use tower::ServiceExt;
 
@@ -188,11 +196,57 @@ mod tests {
         })
     }
 
+    fn enforce_router_with_service(service: Arc<BrokerService>) -> axum::Router {
+        build_router(AppState {
+            service,
+            auth: Arc::new(auth_config("enforce", "admin@example.com")),
+        })
+    }
+
     fn trusted_request(mut request: Request<Body>) -> Request<Body> {
         request
             .extensions_mut()
             .insert(ConnectInfo(SocketAddr::from((Ipv4Addr::LOCALHOST, 41234))));
         request
+    }
+
+    async fn write_subscription_file(content: &str) -> String {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after unix epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("proxy-broker-web-ui-{stamp}.yaml"));
+        tokio::fs::write(&path, content)
+            .await
+            .expect("subscription fixture should be written");
+        path.to_string_lossy().into_owned()
+    }
+
+    async fn create_selected_profile_api_key(app: axum::Router, profile_id: &str) -> String {
+        let created_key = app
+            .oneshot(trusted_request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/api-keys")
+                    .header("content-type", "application/json")
+                    .header("x-forwarded-user", "admin@example.com")
+                    .body(Body::from(format!(
+                        r#"{{"name":"{profile_id}-bot","profile_scope":{{"kind":"selected_profiles","profile_ids":["{profile_id}"]}}}}"#
+                    )))
+                    .unwrap(),
+            ))
+            .await
+            .expect("key create should respond");
+        assert_eq!(created_key.status(), StatusCode::CREATED);
+        let created_key_body = to_bytes(created_key.into_body(), usize::MAX)
+            .await
+            .expect("body should be readable");
+        let created_key_json: serde_json::Value =
+            serde_json::from_slice(&created_key_body).expect("body should be json");
+        created_key_json["secret"]
+            .as_str()
+            .expect("secret should be present")
+            .to_string()
     }
 
     #[tokio::test]
@@ -660,6 +714,433 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri("/api/v1/proxies?scope=all")
+                    .header("authorization", format!("Bearer {secret}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("router should respond");
+        assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn api_key_can_access_profile_proxy_catalog_for_selected_profile() {
+        let app = enforce_router();
+
+        let created_profile = app
+            .clone()
+            .oneshot(trusted_request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/profiles")
+                    .header("content-type", "application/json")
+                    .header("x-forwarded-user", "admin@example.com")
+                    .body(Body::from(r#"{"profile_id":"alpha"}"#))
+                    .unwrap(),
+            ))
+            .await
+            .expect("create should respond");
+        assert_eq!(created_profile.status(), StatusCode::CREATED);
+
+        let created_key = app
+            .clone()
+            .oneshot(trusted_request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/api-keys")
+                    .header("content-type", "application/json")
+                    .header("x-forwarded-user", "admin@example.com")
+                    .body(Body::from(
+                        r#"{"name":"profile-bot","profile_scope":{"kind":"selected_profiles","profile_ids":["alpha"]}}"#,
+                    ))
+                    .unwrap(),
+            ))
+            .await
+            .expect("key create should respond");
+        assert_eq!(created_key.status(), StatusCode::CREATED);
+        let created_key_body = to_bytes(created_key.into_body(), usize::MAX)
+            .await
+            .expect("body should be readable");
+        let created_key_json: serde_json::Value =
+            serde_json::from_slice(&created_key_body).expect("body should be json");
+        let secret = created_key_json["secret"]
+            .as_str()
+            .expect("secret should be present");
+
+        let allowed = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/proxy-catalog?view=profile&profile_id=alpha")
+                    .header("authorization", format!("Bearer {secret}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("router should respond");
+        assert_eq!(allowed.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn api_key_can_queue_profile_proxy_ops_for_selected_profile() {
+        let app = enforce_router();
+
+        let created_profile = app
+            .clone()
+            .oneshot(trusted_request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/profiles")
+                    .header("content-type", "application/json")
+                    .header("x-forwarded-user", "admin@example.com")
+                    .body(Body::from(r#"{"profile_id":"alpha"}"#))
+                    .unwrap(),
+            ))
+            .await
+            .expect("create should respond");
+        assert_eq!(created_profile.status(), StatusCode::CREATED);
+
+        let created_key = app
+            .clone()
+            .oneshot(trusted_request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/api-keys")
+                    .header("content-type", "application/json")
+                    .header("x-forwarded-user", "admin@example.com")
+                    .body(Body::from(
+                        r#"{"name":"profile-bot","profile_scope":{"kind":"selected_profiles","profile_ids":["alpha"]}}"#,
+                    ))
+                    .unwrap(),
+            ))
+            .await
+            .expect("key create should respond");
+        assert_eq!(created_key.status(), StatusCode::CREATED);
+        let created_key_body = to_bytes(created_key.into_body(), usize::MAX)
+            .await
+            .expect("body should be readable");
+        let created_key_json: serde_json::Value =
+            serde_json::from_slice(&created_key_body).expect("body should be json");
+        let secret = created_key_json["secret"]
+            .as_str()
+            .expect("secret should be present");
+
+        let allowed = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/proxy-ops/refresh")
+                    .header("authorization", format!("Bearer {secret}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"view":"profile","profile_id":"alpha","node_ids":[]}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .expect("router should respond");
+        assert_eq!(allowed.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn api_key_can_stream_selected_profile_task_events() {
+        let store = Arc::new(MemoryStore::new());
+        let runtime: Arc<dyn MihomoRuntime> = Arc::new(TestRuntime);
+        let service = Arc::new(BrokerService::new(
+            store.clone(),
+            runtime,
+            BrokerServiceOptions::default(),
+        ));
+        service
+            .create_profile("alpha")
+            .await
+            .expect("alpha profile should be created");
+        store
+            .insert_task_run(&TaskRunRecord {
+                run_id: "run-alpha-probe".to_string(),
+                profile_id: "alpha".to_string(),
+                kind: TaskRunKind::ProxyLatencyProbe,
+                trigger: TaskRunTrigger::Operator,
+                status: TaskRunStatus::Running,
+                stage: TaskRunStage::Probing,
+                progress_current: Some(1),
+                progress_total: Some(5),
+                created_at: 1,
+                started_at: Some(1),
+                finished_at: None,
+                summary_json: None,
+                error_code: None,
+                error_message: None,
+                scope: TaskRunScope::Nodes {
+                    node_ids: vec!["node-alpha".to_string()],
+                },
+            })
+            .await
+            .expect("task run should seed");
+
+        let app = enforce_router_with_service(service);
+        let secret = create_selected_profile_api_key(app.clone(), "alpha").await;
+
+        let allowed = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/tasks/events?profile_id=alpha")
+                    .header("authorization", format!("Bearer {secret}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("router should respond");
+        assert_eq!(allowed.status(), StatusCode::OK);
+        assert_eq!(
+            allowed
+                .headers()
+                .get(axum::http::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok()),
+            Some("text/event-stream")
+        );
+    }
+
+    #[tokio::test]
+    async fn api_key_cannot_stream_global_task_events() {
+        let app = enforce_router();
+
+        let created_profile = app
+            .clone()
+            .oneshot(trusted_request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/profiles")
+                    .header("content-type", "application/json")
+                    .header("x-forwarded-user", "admin@example.com")
+                    .body(Body::from(r#"{"profile_id":"alpha"}"#))
+                    .unwrap(),
+            ))
+            .await
+            .expect("create should respond");
+        assert_eq!(created_profile.status(), StatusCode::CREATED);
+
+        let secret = create_selected_profile_api_key(app.clone(), "alpha").await;
+
+        let denied = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/tasks/events?profile_id=__global__")
+                    .header("authorization", format!("Bearer {secret}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("router should respond");
+        assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn api_key_can_read_selected_profile_task_run_detail() {
+        let store = Arc::new(MemoryStore::new());
+        let runtime: Arc<dyn MihomoRuntime> = Arc::new(TestRuntime);
+        let service = Arc::new(BrokerService::new(
+            store.clone(),
+            runtime,
+            BrokerServiceOptions::default(),
+        ));
+        service
+            .create_profile("alpha")
+            .await
+            .expect("alpha profile should be created");
+        store
+            .insert_task_run(&TaskRunRecord {
+                run_id: "run-alpha-refresh".to_string(),
+                profile_id: "alpha".to_string(),
+                kind: TaskRunKind::ProxyMetadataRefresh,
+                trigger: TaskRunTrigger::Operator,
+                status: TaskRunStatus::Succeeded,
+                stage: TaskRunStage::Completed,
+                progress_current: Some(1),
+                progress_total: Some(1),
+                created_at: 1,
+                started_at: Some(1),
+                finished_at: Some(2),
+                summary_json: None,
+                error_code: None,
+                error_message: None,
+                scope: TaskRunScope::Nodes {
+                    node_ids: vec!["node-alpha".to_string()],
+                },
+            })
+            .await
+            .expect("task run should seed");
+
+        let app = enforce_router_with_service(service);
+        let secret = create_selected_profile_api_key(app.clone(), "alpha").await;
+
+        let allowed = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/tasks/run-alpha-refresh")
+                    .header("authorization", format!("Bearer {secret}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("router should respond");
+        assert_eq!(allowed.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn api_key_cannot_delete_import_reallocated_to_global_pool() {
+        let store = Arc::new(MemoryStore::new());
+        let runtime: Arc<dyn MihomoRuntime> = Arc::new(TestRuntime);
+        let service = Arc::new(BrokerService::new(
+            store,
+            runtime,
+            BrokerServiceOptions::default(),
+        ));
+        service
+            .create_profile("alpha")
+            .await
+            .expect("alpha profile should be created");
+
+        let source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: alpha-node
+    type: socks5
+    server: 4.4.4.4
+"#,
+        )
+        .await;
+        service
+            .load_subscription("alpha", &SubscriptionSource::File(source_path.clone()))
+            .await
+            .expect("alpha import should succeed");
+        let _ = tokio::fs::remove_file(&source_path).await;
+
+        let import_id = service
+            .list_proxy_imports(Some("all"), None)
+            .await
+            .expect("imports should list")
+            .items[0]
+            .import_id
+            .clone();
+        service
+            .update_proxy_import_allocation(&import_id, &ProxyScope::global())
+            .await
+            .expect("import should be reassigned to global");
+
+        let app = enforce_router_with_service(service);
+
+        let created_key = app
+            .clone()
+            .oneshot(trusted_request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/api-keys")
+                    .header("content-type", "application/json")
+                    .header("x-forwarded-user", "admin@example.com")
+                    .body(Body::from(
+                        r#"{"name":"alpha-bot","profile_scope":{"kind":"selected_profiles","profile_ids":["alpha"]}}"#,
+                    ))
+                    .unwrap(),
+            ))
+            .await
+            .expect("key create should respond");
+        assert_eq!(created_key.status(), StatusCode::CREATED);
+        let created_key_body = to_bytes(created_key.into_body(), usize::MAX)
+            .await
+            .expect("body should be readable");
+        let created_key_json: serde_json::Value =
+            serde_json::from_slice(&created_key_body).expect("body should be json");
+        let secret = created_key_json["secret"]
+            .as_str()
+            .expect("secret should be present");
+
+        let denied = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::DELETE)
+                    .uri(format!("/api/v1/proxy-imports/{import_id}"))
+                    .header("authorization", format!("Bearer {secret}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("router should respond");
+        assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn api_key_cannot_delete_global_import_reallocated_to_profile() {
+        let store = Arc::new(MemoryStore::new());
+        let runtime: Arc<dyn MihomoRuntime> = Arc::new(TestRuntime);
+        let service = Arc::new(BrokerService::new(
+            store,
+            runtime,
+            BrokerServiceOptions::default(),
+        ));
+        service
+            .create_profile("alpha")
+            .await
+            .expect("alpha profile should be created");
+
+        let source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: global-node
+    type: socks5
+    server: 5.5.5.5
+"#,
+        )
+        .await;
+        service
+            .load_global_subscription(&SubscriptionSource::File(source_path.clone()))
+            .await
+            .expect("global import should succeed");
+        let _ = tokio::fs::remove_file(&source_path).await;
+
+        let import_id = service
+            .list_proxy_imports(Some("all"), None)
+            .await
+            .expect("imports should list")
+            .items[0]
+            .import_id
+            .clone();
+        service
+            .update_proxy_import_allocation(&import_id, &ProxyScope::profile("alpha"))
+            .await
+            .expect("import should be reassigned to alpha");
+
+        let app = enforce_router_with_service(service);
+
+        let created_key = app
+            .clone()
+            .oneshot(trusted_request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/api-keys")
+                    .header("content-type", "application/json")
+                    .header("x-forwarded-user", "admin@example.com")
+                    .body(Body::from(
+                        r#"{"name":"alpha-bot","profile_scope":{"kind":"selected_profiles","profile_ids":["alpha"]}}"#,
+                    ))
+                    .unwrap(),
+            ))
+            .await
+            .expect("key create should respond");
+        assert_eq!(created_key.status(), StatusCode::CREATED);
+        let created_key_body = to_bytes(created_key.into_body(), usize::MAX)
+            .await
+            .expect("body should be readable");
+        let created_key_json: serde_json::Value =
+            serde_json::from_slice(&created_key_body).expect("body should be json");
+        let secret = created_key_json["secret"]
+            .as_str()
+            .expect("secret should be present");
+
+        let denied = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::DELETE)
+                    .uri(format!("/api/v1/proxy-imports/{import_id}"))
                     .header("authorization", format!("Bearer {secret}"))
                     .body(Body::empty())
                     .unwrap(),

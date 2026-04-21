@@ -1,4 +1,5 @@
 use nanoid::nanoid;
+use serde_json::{Map as JsonMap, Value as JsonValue};
 use sha2::{Digest, Sha256};
 
 pub const ID_ALPHABET: [char; 62] = [
@@ -56,12 +57,20 @@ pub fn stable_proxy_inventory_node_id(import_id: &str, proxy_name: &str) -> Stri
     )
 }
 
-pub fn stable_profile_safe_suffix(profile_id: &str) -> String {
-    stable_body(
-        "proxy-broker:runtime-profile",
-        profile_id,
-        ENTITY_ID_BODY_LEN,
-    )
+pub fn stable_proxy_inventory_node_id_for_proxy(
+    import_id: &str,
+    proxy_name: &str,
+    proxy_type: &str,
+    server: &str,
+    raw_proxy: &JsonValue,
+) -> String {
+    let material = serde_json::json!({
+        "proxy_name": proxy_name,
+        "proxy_type": proxy_type,
+        "server": server,
+        "raw_proxy": canonicalize_json(raw_proxy),
+    });
+    stable_proxy_inventory_node_id(import_id, &material.to_string())
 }
 
 pub fn stable_dedicated_ip_proxy_name(proxy_name: &str, ip: &str) -> String {
@@ -99,6 +108,24 @@ pub fn stable_body(namespace: &str, material: &str, len: usize) -> String {
     }
     encoded.truncate(len);
     encoded
+}
+
+fn canonicalize_json(value: &JsonValue) -> JsonValue {
+    match value {
+        JsonValue::Object(map) => {
+            let mut keys = map.keys().cloned().collect::<Vec<_>>();
+            keys.sort();
+            let mut canonical = JsonMap::new();
+            for key in keys {
+                if let Some(entry) = map.get(&key) {
+                    canonical.insert(key, canonicalize_json(entry));
+                }
+            }
+            JsonValue::Object(canonical)
+        }
+        JsonValue::Array(items) => JsonValue::Array(items.iter().map(canonicalize_json).collect()),
+        _ => value.clone(),
+    }
 }
 
 pub fn is_prefixed_short_id(value: &str, prefix: &str, body_len: usize) -> bool {

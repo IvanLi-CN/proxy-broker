@@ -1,15 +1,28 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { toast } from "sonner";
 
+import { useProxyOperationEvents } from "@/hooks/use-proxy-operation-events";
 import { useI18n } from "@/i18n";
 import { api } from "@/lib/api";
 import { formatApiErrorMessage } from "@/lib/error-messages";
 import { isGlobalProfileId } from "@/lib/profile-selection";
-import type { LoadSubscriptionResponse, ProfileProxySettings, ProxyScope } from "@/lib/types";
+import type {
+  LoadSubscriptionResponse,
+  ProfileProxySettings,
+  ProxyOperationRequest,
+  ProxyScope,
+  TaskRunSummary,
+} from "@/lib/types";
 import { ProxiesPage } from "@/pages/ProxiesPage";
 import type { RootOutletContext } from "@/routes/RootRoute";
+
+const GLOBAL_TASK_PROFILE_ID = "__global__";
+
+function isTerminalTask(run: TaskRunSummary) {
+  return run.status === "succeeded" || run.status === "failed" || run.status === "skipped";
+}
 
 export function ProxiesRoute() {
   const { t } = useI18n();
@@ -18,6 +31,7 @@ export function ProxiesRoute() {
   const { profileId, profiles, authMe, currentUser } = outlet;
   const isGlobalConfig = outlet.isGlobalConfig ?? isGlobalProfileId(profileId);
   const activeProfileId = outlet.activeProfileId ?? (isGlobalConfig ? null : profileId);
+  const taskProfileId = isGlobalConfig ? GLOBAL_TASK_PROFILE_ID : activeProfileId;
   const [globalLoadResponse, setGlobalLoadResponse] = useState<LoadSubscriptionResponse | null>(
     null,
   );
@@ -37,11 +51,17 @@ export function ProxiesRoute() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["proxy-imports"] }),
       queryClient.invalidateQueries({ queryKey: ["proxy-inventory"] }),
+      queryClient.invalidateQueries({ queryKey: ["proxy-catalog"] }),
       queryClient.invalidateQueries({ queryKey: ["sessions"] }),
       queryClient.invalidateQueries({ queryKey: ["profiles"] }),
       requestedProfileId
         ? queryClient.invalidateQueries({
             queryKey: ["profile-proxy-settings", requestedProfileId],
+          })
+        : Promise.resolve(),
+      requestedProfileId
+        ? queryClient.invalidateQueries({
+            queryKey: ["suggested-port", requestedProfileId],
           })
         : Promise.resolve(),
     ]);
@@ -52,11 +72,42 @@ export function ProxiesRoute() {
     queryFn: () => api.listProxyImports({ scope: "all" }),
     enabled: isGlobalConfig && canManageGlobal,
   });
+  const globalCatalogQuery = useQuery({
+    queryKey: ["proxy-catalog", "global"],
+    queryFn: () => api.listProxyCatalog({ view: "global" }),
+    enabled: isGlobalConfig && canManageGlobal,
+  });
+  const profileCatalogQuery = useQuery({
+    queryKey: ["proxy-catalog", "profile", activeProfileId],
+    queryFn: () => api.listProxyCatalog({ view: "profile", profile_id: activeProfileId ?? "" }),
+    enabled: Boolean(activeProfileId),
+  });
   const profileProxySettingsQuery = useQuery({
     queryKey: ["profile-proxy-settings", activeProfileId],
     queryFn: () => api.getProfileProxySettings(activeProfileId ?? ""),
     enabled: Boolean(activeProfileId) && canManageGlobal,
   });
+  const suggestedPortQuery = useQuery({
+    queryKey: ["suggested-port", activeProfileId],
+    queryFn: () => api.getSuggestedPort(activeProfileId ?? ""),
+    enabled: Boolean(activeProfileId),
+  });
+
+  const proxyOperationEvents = useProxyOperationEvents({
+    profileId: taskProfileId,
+    enabled: Boolean(taskProfileId) && (!isGlobalConfig || canManageGlobal),
+  });
+  const seenTerminalRunIds = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    for (const run of Object.values(proxyOperationEvents.runsById)) {
+      if (!isTerminalTask(run) || seenTerminalRunIds.current.has(run.run_id)) {
+        continue;
+      }
+      seenTerminalRunIds.current.add(run.run_id);
+      void queryClient.invalidateQueries({ queryKey: ["proxy-catalog"] });
+    }
+  }, [proxyOperationEvents.runsById, queryClient]);
 
   const globalLoadMutation = useMutation({
     mutationFn: api.loadGlobalSubscription,
@@ -133,6 +184,64 @@ export function ProxiesRoute() {
     onError: (error) => toast.error(formatApiErrorMessage(error, t)),
   });
 
+  const proxyOperationMutation = useMutation({
+    mutationFn: ({
+      kind,
+      payload,
+    }: {
+      kind: "refresh" | "probe";
+      payload: ProxyOperationRequest;
+    }) =>
+      kind === "refresh"
+        ? api.refreshProxyCatalogMetadata(payload)
+        : api.probeProxyCatalogLatency(payload),
+    onSuccess: (response, variables) => {
+      toast.success(
+        variables.kind === "refresh" ? t("Queued metadata refresh") : t("Queued latency probe"),
+        {
+          description: t("Run ID: {runId}", { runId: response.run_id }),
+        },
+      );
+    },
+    onError: (error) => toast.error(formatApiErrorMessage(error, t)),
+  });
+
+  const openSessionByNodeMutation = useMutation({
+    mutationFn: ({
+      requestedProfileId,
+      payload,
+    }: {
+      requestedProfileId: string;
+      payload: Parameters<typeof api.openSessionByNode>[1];
+    }) => api.openSessionByNode(requestedProfileId, payload),
+    onSuccess: async (response, { requestedProfileId }) => {
+      toast.success(
+        t("Listening on {listen} via {proxyName} ({selectedIp}).", {
+          listen: response.listen,
+          proxyName: response.proxy_name,
+          selectedIp: response.selected_ip,
+        }),
+      );
+      await refreshProxyQueries(requestedProfileId);
+    },
+    onError: (error) => toast.error(formatApiErrorMessage(error, t)),
+  });
+
+  const openBatchByNodeMutation = useMutation({
+    mutationFn: ({
+      requestedProfileId,
+      payload,
+    }: {
+      requestedProfileId: string;
+      payload: Parameters<typeof api.openBatchByNode>[1];
+    }) => api.openBatchByNode(requestedProfileId, payload),
+    onSuccess: async (response, { requestedProfileId }) => {
+      toast.success(t("Opened {count} sessions in batch", { count: response.sessions.length }));
+      await refreshProxyQueries(requestedProfileId);
+    },
+    onError: (error) => toast.error(formatApiErrorMessage(error, t)),
+  });
+
   if (!isGlobalConfig && activeProfileId) {
     return (
       <ProxiesPage
@@ -152,6 +261,7 @@ export function ProxiesRoute() {
           });
         }}
         profileId={activeProfileId}
+        suggestedPort={suggestedPortQuery.data?.port ?? null}
         profileLoadError={
           profileLoadMutation.isError ? formatApiErrorMessage(profileLoadMutation.error, t) : null
         }
@@ -165,6 +275,48 @@ export function ProxiesRoute() {
         proxySettingsLoading={profileProxySettingsQuery.isLoading}
         showProxyPolicy={canManageGlobal}
         updatingSettings={proxySettingsMutation.isPending}
+        proxyCatalog={profileCatalogQuery.data ?? null}
+        proxyCatalogLoading={profileCatalogQuery.isLoading}
+        proxyCatalogError={
+          profileCatalogQuery.isError ? formatApiErrorMessage(profileCatalogQuery.error, t) : null
+        }
+        liveConnectionState={proxyOperationEvents.connectionState}
+        liveNodeStates={proxyOperationEvents.activeRunByNodeId}
+        queueingOperation={proxyOperationMutation.isPending}
+        onRefreshNodes={async (nodeIds) => {
+          await proxyOperationMutation.mutateAsync({
+            kind: "refresh",
+            payload: { view: "profile", profile_id: activeProfileId, node_ids: nodeIds },
+          });
+        }}
+        onProbeNodes={async (nodeIds) => {
+          await proxyOperationMutation.mutateAsync({
+            kind: "probe",
+            payload: { view: "profile", profile_id: activeProfileId, node_ids: nodeIds },
+          });
+        }}
+        onDeleteImport={async (importId) => {
+          await deleteMutation.mutateAsync(importId);
+        }}
+        onOpenSessionByNode={async (payload) => {
+          await openSessionByNodeMutation.mutateAsync({
+            requestedProfileId: activeProfileId,
+            payload,
+          });
+        }}
+        onOpenBatchByNode={async (payload) => {
+          await openBatchByNodeMutation.mutateAsync({
+            requestedProfileId: activeProfileId,
+            payload,
+          });
+        }}
+        deletingImportId={deleteMutation.isPending ? (deleteMutation.variables ?? null) : null}
+        openingSessionNodeId={
+          openSessionByNodeMutation.isPending
+            ? (openSessionByNodeMutation.variables?.payload.node_id ?? null)
+            : null
+        }
+        openingBatch={openBatchByNodeMutation.isPending}
       />
     );
   }
@@ -197,6 +349,26 @@ export function ProxiesRoute() {
       reallocatingImportId={
         reassignMutation.isPending ? (reassignMutation.variables?.importId ?? null) : null
       }
+      proxyCatalog={globalCatalogQuery.data ?? null}
+      proxyCatalogLoading={globalCatalogQuery.isLoading}
+      proxyCatalogError={
+        globalCatalogQuery.isError ? formatApiErrorMessage(globalCatalogQuery.error, t) : null
+      }
+      liveConnectionState={proxyOperationEvents.connectionState}
+      liveNodeStates={proxyOperationEvents.activeRunByNodeId}
+      queueingOperation={proxyOperationMutation.isPending}
+      onRefreshNodes={async (nodeIds) => {
+        await proxyOperationMutation.mutateAsync({
+          kind: "refresh",
+          payload: { view: "global", node_ids: nodeIds },
+        });
+      }}
+      onProbeNodes={async (nodeIds) => {
+        await proxyOperationMutation.mutateAsync({
+          kind: "probe",
+          payload: { view: "global", node_ids: nodeIds },
+        });
+      }}
     />
   );
 }

@@ -5,8 +5,8 @@ use async_trait::async_trait;
 
 use crate::models::{
     ApiKeyRecord, IpRecord, ProbeRecord, ProfileProxySettings, ProxyImportRecord,
-    ProxyImportSyncConfig, ProxyInventoryRecord, ProxyNode, ProxyScope, SessionRecord,
-    TaskListQuery, TaskRunEventRecord, TaskRunRecord,
+    ProxyImportSyncConfig, ProxyInventoryRecord, ProxyNode, ProxyNodeMetadataRecord, ProxyScope,
+    SessionRecord, TaskListQuery, TaskRunEventRecord, TaskRunRecord,
 };
 
 pub use memory::MemoryStore;
@@ -94,6 +94,12 @@ pub trait BrokerStore: Send + Sync {
         records: &[ProbeRecord],
     ) -> anyhow::Result<()>;
     async fn list_probe_records(&self, profile_id: &str) -> anyhow::Result<Vec<ProbeRecord>>;
+
+    async fn upsert_proxy_node_metadata(
+        &self,
+        records: &[ProxyNodeMetadataRecord],
+    ) -> anyhow::Result<()>;
+    async fn list_proxy_node_metadata(&self) -> anyhow::Result<Vec<ProxyNodeMetadataRecord>>;
 
     async fn insert_session(&self, profile_id: &str, session: &SessionRecord)
     -> anyhow::Result<()>;

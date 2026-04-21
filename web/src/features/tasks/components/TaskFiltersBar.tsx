@@ -30,9 +30,11 @@ const taskKinds: TaskRunKind[] = [
   "subscription_sync",
   "metadata_refresh_incremental",
   "metadata_refresh_full",
+  "proxy_metadata_refresh",
+  "proxy_latency_probe",
 ];
 const taskStatuses: TaskRunStatus[] = ["queued", "running", "succeeded", "failed", "skipped"];
-const taskTriggers: TaskRunTrigger[] = ["schedule", "post_load"];
+const taskTriggers: TaskRunTrigger[] = ["schedule", "post_load", "operator"];
 
 export function TaskFiltersBar({
   scope,
