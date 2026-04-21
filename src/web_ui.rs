@@ -89,7 +89,10 @@ mod tests {
     use super::spa_fallback;
     use crate::{
         AppState, AuthConfig, AuthConfigOptions, BrokerService, BrokerServiceOptions, MemoryStore,
-        MihomoRuntime, auth::AuthContext, build_router,
+        MihomoRuntime,
+        auth::AuthContext,
+        build_router,
+        models::{ProxyScope, SubscriptionSource},
     };
     use anyhow::anyhow;
     use async_trait::async_trait;
@@ -101,6 +104,7 @@ mod tests {
     use std::{
         net::{Ipv4Addr, SocketAddr},
         sync::Arc,
+        time::{SystemTime, UNIX_EPOCH},
     };
     use tower::ServiceExt;
 
@@ -188,11 +192,30 @@ mod tests {
         })
     }
 
+    fn enforce_router_with_service(service: Arc<BrokerService>) -> axum::Router {
+        build_router(AppState {
+            service,
+            auth: Arc::new(auth_config("enforce", "admin@example.com")),
+        })
+    }
+
     fn trusted_request(mut request: Request<Body>) -> Request<Body> {
         request
             .extensions_mut()
             .insert(ConnectInfo(SocketAddr::from((Ipv4Addr::LOCALHOST, 41234))));
         request
+    }
+
+    async fn write_subscription_file(content: &str) -> String {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after unix epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("proxy-broker-web-ui-{stamp}.yaml"));
+        tokio::fs::write(&path, content)
+            .await
+            .expect("subscription fixture should be written");
+        path.to_string_lossy().into_owned()
     }
 
     #[tokio::test]
@@ -785,6 +808,88 @@ mod tests {
             .await
             .expect("router should respond");
         assert_eq!(allowed.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn api_key_cannot_delete_import_reallocated_to_global_pool() {
+        let store = Arc::new(MemoryStore::new());
+        let runtime: Arc<dyn MihomoRuntime> = Arc::new(TestRuntime);
+        let service = Arc::new(BrokerService::new(
+            store,
+            runtime,
+            BrokerServiceOptions::default(),
+        ));
+        service
+            .create_profile("alpha")
+            .await
+            .expect("alpha profile should be created");
+
+        let source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: alpha-node
+    type: socks5
+    server: 4.4.4.4
+"#,
+        )
+        .await;
+        service
+            .load_subscription("alpha", &SubscriptionSource::File(source_path.clone()))
+            .await
+            .expect("alpha import should succeed");
+        let _ = tokio::fs::remove_file(&source_path).await;
+
+        let import_id = service
+            .list_proxy_imports(Some("all"), None)
+            .await
+            .expect("imports should list")
+            .items[0]
+            .import_id
+            .clone();
+        service
+            .update_proxy_import_allocation(&import_id, &ProxyScope::global())
+            .await
+            .expect("import should be reassigned to global");
+
+        let app = enforce_router_with_service(service);
+
+        let created_key = app
+            .clone()
+            .oneshot(trusted_request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/api-keys")
+                    .header("content-type", "application/json")
+                    .header("x-forwarded-user", "admin@example.com")
+                    .body(Body::from(
+                        r#"{"name":"alpha-bot","profile_scope":{"kind":"selected_profiles","profile_ids":["alpha"]}}"#,
+                    ))
+                    .unwrap(),
+            ))
+            .await
+            .expect("key create should respond");
+        assert_eq!(created_key.status(), StatusCode::CREATED);
+        let created_key_body = to_bytes(created_key.into_body(), usize::MAX)
+            .await
+            .expect("body should be readable");
+        let created_key_json: serde_json::Value =
+            serde_json::from_slice(&created_key_body).expect("body should be json");
+        let secret = created_key_json["secret"]
+            .as_str()
+            .expect("secret should be present");
+
+        let denied = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::DELETE)
+                    .uri(format!("/api/v1/proxy-imports/{import_id}"))
+                    .header("authorization", format!("Bearer {secret}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("router should respond");
+        assert_eq!(denied.status(), StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]

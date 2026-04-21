@@ -251,7 +251,7 @@ async fn delete_proxy_import(
     Path(import_id): Path<String>,
 ) -> Result<StatusCode, BrokerError> {
     let record = state.service.get_proxy_import(&import_id).await?;
-    match &record.source_scope {
+    match &record.allocation_scope {
         ProxyScope::Global => auth.require_admin()?,
         ProxyScope::Profile { profile_id } => auth.require_profile_access(profile_id)?,
     };

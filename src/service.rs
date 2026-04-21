@@ -302,12 +302,7 @@ impl BrokerService {
                 sessions.extend(override_sessions.unwrap_or(&[]).iter().cloned());
                 continue;
             }
-            sessions.extend(
-                self.store
-                    .list_sessions(&profile_id)
-                    .await
-                    .map_err(BrokerError::from)?,
-            );
+            sessions.extend(self.list_sessions_backfilled(&profile_id).await?);
         }
         sessions.sort_by(|left, right| {
             left.created_at

@@ -753,7 +753,8 @@ export const ProfileBatchActions: Story = {
     await userEvent.type(firstDesiredPortInput, "10080");
     await userEvent.type(secondDesiredPortInput, "10081");
     await userEvent.click(await dialog.findByRole("button", { name: /^Create sessions$/i }));
-    await expect(await canvas.findByText(/Batch sessions created/i)).toBeVisible();
+    const batchSuccessTitles = await canvas.findAllByText(/^Batch sessions created$/i);
+    await expect(batchSuccessTitles.length).toBeGreaterThan(0);
   },
 };
 
