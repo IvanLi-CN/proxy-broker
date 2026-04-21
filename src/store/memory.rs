@@ -437,7 +437,11 @@ impl BrokerStore for MemoryStore {
             .inner
             .read()
             .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
-        let mut items = guard.proxy_node_metadata.values().cloned().collect::<Vec<_>>();
+        let mut items = guard
+            .proxy_node_metadata
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
         items.sort_by(|left, right| {
             left.node_id
                 .cmp(&right.node_id)

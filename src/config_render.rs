@@ -48,8 +48,10 @@ pub fn render_payload(
         .map(|session| {
             let session_proxy_name = if node_by_id.contains_key(session.node_id.as_str()) {
                 dedicated_ip_proxy_name(&session.node_id, &session.selected_ip)
-            } else {
+            } else if !session.node_id.is_empty() {
                 session.node_id.clone()
+            } else {
+                session.proxy_name.clone()
             };
 
             serde_json::json!({
@@ -136,6 +138,21 @@ mod tests {
         )
         .expect("payload should render");
         assert!(payload.contains("allow-lan: false"));
+    }
+
+    #[test]
+    fn render_payload_falls_back_to_proxy_name_for_sessions_without_node_id() {
+        let payload = render_payload(
+            "127.0.0.1:9090",
+            None,
+            &[sample_node()],
+            &[SessionRecord {
+                node_id: String::new(),
+                ..sample_session("127.0.0.1")
+            }],
+        )
+        .expect("payload should render");
+        assert!(payload.contains("proxy: proxy-a"));
     }
 
     #[test]

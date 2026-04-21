@@ -37,14 +37,14 @@ use crate::{
         OpenSessionByNodeRequest, OpenSessionRequest, OpenSessionResponse, ProbeRecord,
         ProfileProxySettings, ProxyCatalogGroupItem, ProxyCatalogNodeItem, ProxyCatalogQuery,
         ProxyCatalogResponse, ProxyImportItem, ProxyImportKind, ProxyImportRecord,
-        ProxyImportSourceIdentity, ProxyImportSyncConfig, ProxyInventoryItem,
-        ProxyInventoryRecord, ProxyNode, ProxyNodeMetadataRecord, ProxyOperationAcceptedResponse,
-        ProxyOperationRequest, ProxyScope, RefreshRequest, RefreshResponse,
-        SearchSessionOptionsRequest, SearchSessionOptionsResponse, SessionOptionItem,
-        SessionOptionKind, SessionRecord, SessionSelectionMode, SubscriptionSource,
-        SuggestedPortResponse, TaskEventLevel, TaskListQuery, TaskListResponse, TaskRunDetail,
-        TaskRunEventRecord, TaskRunKind, TaskRunRecord, TaskRunScope, TaskRunStage, TaskRunStatus,
-        TaskRunSummary, TaskRunTrigger, now_epoch_sec,
+        ProxyImportSourceIdentity, ProxyImportSyncConfig, ProxyInventoryItem, ProxyInventoryRecord,
+        ProxyNode, ProxyNodeMetadataRecord, ProxyOperationAcceptedResponse, ProxyOperationRequest,
+        ProxyScope, RefreshRequest, RefreshResponse, SearchSessionOptionsRequest,
+        SearchSessionOptionsResponse, SessionOptionItem, SessionOptionKind, SessionRecord,
+        SessionSelectionMode, SubscriptionSource, SuggestedPortResponse, TaskEventLevel,
+        TaskListQuery, TaskListResponse, TaskRunDetail, TaskRunEventRecord, TaskRunKind,
+        TaskRunRecord, TaskRunScope, TaskRunStage, TaskRunStatus, TaskRunSummary, TaskRunTrigger,
+        now_epoch_sec,
     },
     runtime::MihomoRuntime,
     store::BrokerStore,
@@ -381,7 +381,11 @@ impl BrokerService {
             return;
         }
 
-        if let Err(err) = self.runtime.shutdown_profile(GLOBAL_RUNTIME_PROFILE_ID).await {
+        if let Err(err) = self
+            .runtime
+            .shutdown_profile(GLOBAL_RUNTIME_PROFILE_ID)
+            .await
+        {
             tracing::warn!(
                 error = %err,
                 "failed to shutdown idle shared runtime"
@@ -416,9 +420,7 @@ impl BrokerService {
             .await
             .map_err(BrokerError::from)?;
 
-        let existing_sessions = self
-            .list_sessions_backfilled(profile_id)
-            .await?;
+        let existing_sessions = self.list_sessions_backfilled(profile_id).await?;
         if existing_sessions.is_empty() {
             self.cleanup_shared_runtime_if_idle().await;
             return Ok(());
@@ -447,8 +449,10 @@ impl BrokerService {
         let reconciled_sessions: Vec<SessionRecord> = existing_sessions
             .iter()
             .filter(|session| {
-                valid_proxy_ip_pairs
-                    .contains(&(session_runtime_key(session).to_string(), session.selected_ip.clone()))
+                valid_proxy_ip_pairs.contains(&(
+                    session_runtime_key(session).to_string(),
+                    session.selected_ip.clone(),
+                ))
             })
             .cloned()
             .collect();
@@ -474,7 +478,8 @@ impl BrokerService {
             return Ok(());
         }
 
-        self.apply_sessions_config(profile_id, &reconciled_sessions).await?;
+        self.apply_sessions_config(profile_id, &reconciled_sessions)
+            .await?;
         for session_id in stale_ids {
             self.store
                 .delete_session(profile_id, &session_id)
@@ -1567,7 +1572,9 @@ impl BrokerService {
         &self,
         profile_id: &str,
     ) -> BrokerResult<Vec<ProxyNode>> {
-        let records = self.compose_effective_proxy_inventory_records(profile_id).await?;
+        let records = self
+            .compose_effective_proxy_inventory_records(profile_id)
+            .await?;
         let mut nodes = records
             .into_iter()
             .map(|item| ProxyNode {
@@ -1632,9 +1639,7 @@ impl BrokerService {
             .map(|record| (record.ip.clone(), record))
             .collect();
         let existing_ip_keys: HashSet<String> = existing_ip_map.keys().cloned().collect();
-        let existing_sessions = self
-            .list_sessions_backfilled(profile_id)
-            .await?;
+        let existing_sessions = self.list_sessions_backfilled(profile_id).await?;
 
         if nodes.is_empty() {
             let removed_session_ids = existing_sessions
@@ -1683,16 +1688,20 @@ impl BrokerService {
         let active_sessions: Vec<SessionRecord> = existing_sessions
             .iter()
             .filter(|session| {
-                valid_proxy_ip_pairs
-                    .contains(&(session_runtime_key(session).to_string(), session.selected_ip.clone()))
+                valid_proxy_ip_pairs.contains(&(
+                    session_runtime_key(session).to_string(),
+                    session.selected_ip.clone(),
+                ))
             })
             .cloned()
             .collect();
         let stale_session_ids: Vec<String> = existing_sessions
             .iter()
             .filter(|session| {
-                !valid_proxy_ip_pairs
-                    .contains(&(session_runtime_key(session).to_string(), session.selected_ip.clone()))
+                !valid_proxy_ip_pairs.contains(&(
+                    session_runtime_key(session).to_string(),
+                    session.selected_ip.clone(),
+                ))
             })
             .map(|session| session.session_id.clone())
             .collect();
@@ -1708,7 +1717,8 @@ impl BrokerService {
 
         let runtime_applied = !active_sessions.is_empty();
         if runtime_applied {
-            self.apply_sessions_config(profile_id, &active_sessions).await?;
+            self.apply_sessions_config(profile_id, &active_sessions)
+                .await?;
         }
 
         if let Err(err) = self
@@ -1842,10 +1852,13 @@ impl BrokerService {
             .await
             .map_err(BrokerError::from)?
             .into_iter()
-            .fold(HashMap::<String, Vec<ProxyNodeMetadataRecord>>::new(), |mut acc, record| {
-                acc.entry(record.node_id.clone()).or_default().push(record);
-                acc
-            });
+            .fold(
+                HashMap::<String, Vec<ProxyNodeMetadataRecord>>::new(),
+                |mut acc, record| {
+                    acc.entry(record.node_id.clone()).or_default().push(record);
+                    acc
+                },
+            );
 
         let mut records_by_import = HashMap::<String, Vec<ProxyInventoryRecord>>::new();
         for record in records {
@@ -1917,7 +1930,8 @@ impl BrokerService {
                     .list_proxy_inventory()
                     .await
                     .map_err(BrokerError::from)?;
-                self.build_proxy_catalog_response("global", None, records).await
+                self.build_proxy_catalog_response("global", None, records)
+                    .await
             }
             "profile" => {
                 let Some(profile_id) = query.profile_id.as_deref() else {
@@ -2003,9 +2017,9 @@ impl BrokerService {
     fn proxy_operation_profile_id(view: &str, profile_id: Option<&str>) -> BrokerResult<String> {
         match view {
             "global" => Ok(GLOBAL_RUNTIME_PROFILE_ID.to_string()),
-            "profile" => profile_id
-                .map(ToOwned::to_owned)
-                .ok_or_else(|| BrokerError::InvalidRequest("profile_id is required when view=profile".to_string())),
+            "profile" => profile_id.map(ToOwned::to_owned).ok_or_else(|| {
+                BrokerError::InvalidRequest("profile_id is required when view=profile".to_string())
+            }),
             other => Err(BrokerError::InvalidRequest(format!(
                 "unsupported proxy operation view `{other}`"
             ))),
@@ -2194,10 +2208,7 @@ impl BrokerService {
         .await
     }
 
-    async fn execute_proxy_latency_probe_task(
-        &self,
-        run: &mut TaskRunRecord,
-    ) -> BrokerResult<()> {
+    async fn execute_proxy_latency_probe_task(&self, run: &mut TaskRunRecord) -> BrokerResult<()> {
         let nodes = self.resolve_proxy_operation_nodes_for_run(run).await?;
         if nodes.is_empty() {
             self.complete_task_run(
@@ -2229,12 +2240,9 @@ impl BrokerService {
             .into_iter()
             .map(|record| ((record.node_id.clone(), record.ip.clone()), record))
             .collect::<HashMap<_, _>>();
-        let probe_target = self
-            .options
-            .probe_targets
-            .first()
-            .cloned()
-            .ok_or_else(|| BrokerError::InvalidRequest("probe target is not configured".to_string()))?;
+        let probe_target = self.options.probe_targets.first().cloned().ok_or_else(|| {
+            BrokerError::InvalidRequest("probe target is not configured".to_string())
+        })?;
         let timeout_ms = self.options.probe_timeout_ms;
         let now = now_epoch_sec();
         let mut samples_by_node = HashMap::<String, Vec<Option<u64>>>::new();
@@ -2267,7 +2275,11 @@ impl BrokerService {
                     run,
                     TaskEventLevel::Info,
                     TaskRunStage::Probing,
-                    format!("Round {} probe finished for {}.", round + 1, node.proxy_name),
+                    format!(
+                        "Round {} probe finished for {}.",
+                        round + 1,
+                        node.proxy_name
+                    ),
                     Some(serde_json::json!({
                         "node_id": node.node_id,
                         "proxy_name": node.proxy_name,
@@ -2727,29 +2739,27 @@ impl BrokerService {
         let concurrency = self.options.probe_concurrency.max(1);
 
         let probed: Vec<((String, String, String), ProbeRecord)> = stream::iter(tasks)
-            .map(|(proxy_name, ip, target, probe_proxy_name)| {
-                async move {
-                    let delay = self
-                        .runtime
-                        .measure_proxy_delay(
-                            GLOBAL_RUNTIME_PROFILE_ID,
-                            &probe_proxy_name,
-                            &target,
-                            timeout_ms,
-                        )
-                        .await
-                        .map_err(|e| BrokerError::MihomoUnavailable(e.to_string()))?;
-                    let key = (proxy_name.clone(), ip.clone(), target.clone());
-                    let record = ProbeRecord {
-                        proxy_name,
-                        ip,
-                        target_url: target,
-                        ok: delay.is_some(),
-                        latency_ms: delay,
-                        updated_at: now,
-                    };
-                    Ok::<_, BrokerError>((key, record))
-                }
+            .map(|(proxy_name, ip, target, probe_proxy_name)| async move {
+                let delay = self
+                    .runtime
+                    .measure_proxy_delay(
+                        GLOBAL_RUNTIME_PROFILE_ID,
+                        &probe_proxy_name,
+                        &target,
+                        timeout_ms,
+                    )
+                    .await
+                    .map_err(|e| BrokerError::MihomoUnavailable(e.to_string()))?;
+                let key = (proxy_name.clone(), ip.clone(), target.clone());
+                let record = ProbeRecord {
+                    proxy_name,
+                    ip,
+                    target_url: target,
+                    ok: delay.is_some(),
+                    latency_ms: delay,
+                    updated_at: now,
+                };
+                Ok::<_, BrokerError>((key, record))
             })
             .buffer_unordered(concurrency)
             .try_collect()
@@ -3049,11 +3059,7 @@ impl BrokerService {
             .map_err(|e| anyhow!(e.to_string()))
     }
 
-    async fn recover_runtime_desync(
-        &self,
-        profile_id: &str,
-        sessions: &[SessionRecord],
-    ) {
+    async fn recover_runtime_desync(&self, profile_id: &str, sessions: &[SessionRecord]) {
         tracing::warn!(
             profile_id,
             "attempting runtime recovery after rollback failure"
@@ -3149,9 +3155,7 @@ impl BrokerService {
             .list_probe_records(profile_id)
             .await
             .map_err(BrokerError::from)?;
-        let existing = self
-            .list_sessions_backfilled(profile_id)
-            .await?;
+        let existing = self.list_sessions_backfilled(profile_id).await?;
 
         let retryable = request.desired_port.is_none();
         let max_attempts = if retryable { 3usize } else { 1usize };
@@ -3180,19 +3184,15 @@ impl BrokerService {
             let mut merged = existing.clone();
             merged.push(prepared.clone());
 
-            if let Err(err) = self
-                .apply_sessions_config(profile_id, &merged)
-                .await
-            {
+            if let Err(err) = self.apply_sessions_config(profile_id, &merged).await {
                 tracing::warn!(
                     profile_id,
                     attempt,
                     error = %err,
                     "session apply config failed"
                 );
-                if let Err(rollback_err) = self
-                    .rollback_runtime_sessions(profile_id, &existing)
-                    .await
+                if let Err(rollback_err) =
+                    self.rollback_runtime_sessions(profile_id, &existing).await
                 {
                     tracing::error!(
                         profile_id,
@@ -3200,8 +3200,7 @@ impl BrokerService {
                         error = %rollback_err,
                         "runtime rollback failed after session apply failure"
                     );
-                    self.recover_runtime_desync(profile_id, &existing)
-                        .await;
+                    self.recover_runtime_desync(profile_id, &existing).await;
                 }
                 if retryable && attempt < max_attempts {
                     continue;
@@ -3221,9 +3220,8 @@ impl BrokerService {
                     error = %err,
                     "persist session failed after runtime apply, rolling back runtime"
                 );
-                if let Err(rollback_err) = self
-                    .rollback_runtime_sessions(profile_id, &existing)
-                    .await
+                if let Err(rollback_err) =
+                    self.rollback_runtime_sessions(profile_id, &existing).await
                 {
                     tracing::error!(
                         profile_id,
@@ -3231,8 +3229,7 @@ impl BrokerService {
                         error = %rollback_err,
                         "runtime rollback failed after session insert failure"
                     );
-                    self.recover_runtime_desync(profile_id, &existing)
-                        .await;
+                    self.recover_runtime_desync(profile_id, &existing).await;
                 }
                 return Err(BrokerError::from(err));
             }
@@ -3273,9 +3270,7 @@ impl BrokerService {
             .list_probe_records(profile_id)
             .await
             .map_err(BrokerError::from)?;
-        let existing = self
-            .list_sessions_backfilled(profile_id)
-            .await?;
+        let existing = self.list_sessions_backfilled(profile_id).await?;
 
         let retryable = request.requests.iter().all(|r| r.desired_port.is_none());
         let max_attempts = if retryable { 3usize } else { 1usize };
@@ -3304,19 +3299,15 @@ impl BrokerService {
             let mut merged = existing.clone();
             merged.extend(staged.clone());
 
-            if let Err(err) = self
-                .apply_sessions_config(profile_id, &merged)
-                .await
-            {
+            if let Err(err) = self.apply_sessions_config(profile_id, &merged).await {
                 tracing::warn!(
                     profile_id,
                     attempt,
                     error = %err,
                     "batch apply config failed before persisting sessions"
                 );
-                if let Err(rollback_err) = self
-                    .rollback_runtime_sessions(profile_id, &existing)
-                    .await
+                if let Err(rollback_err) =
+                    self.rollback_runtime_sessions(profile_id, &existing).await
                 {
                     tracing::error!(
                         profile_id,
@@ -3324,8 +3315,7 @@ impl BrokerService {
                         error = %rollback_err,
                         "runtime rollback failed after batch apply failure"
                     );
-                    self.recover_runtime_desync(profile_id, &existing)
-                        .await;
+                    self.recover_runtime_desync(profile_id, &existing).await;
                 }
                 if retryable && attempt < max_attempts {
                     continue;
@@ -3344,17 +3334,15 @@ impl BrokerService {
                     error = %err,
                     "batch persist failed after runtime apply, rolling back"
                 );
-                if let Err(rollback_err) = self
-                    .rollback_runtime_sessions(profile_id, &existing)
-                    .await
+                if let Err(rollback_err) =
+                    self.rollback_runtime_sessions(profile_id, &existing).await
                 {
                     tracing::error!(
                         profile_id,
                         error = %rollback_err,
                         "runtime rollback failed after batch persist failure"
                     );
-                    self.recover_runtime_desync(profile_id, &existing)
-                        .await;
+                    self.recover_runtime_desync(profile_id, &existing).await;
                 }
                 return Err(BrokerError::BatchOpenFailed);
             }
@@ -3389,7 +3377,10 @@ impl BrokerService {
                 .iter()
                 .filter(|node| {
                     node.proxy_name == session.proxy_name
-                        && node.resolved_ips.iter().any(|ip| ip == &session.selected_ip)
+                        && node
+                            .resolved_ips
+                            .iter()
+                            .any(|ip| ip == &session.selected_ip)
                 })
                 .collect::<Vec<_>>();
             if matches.len() == 1 {
@@ -3437,34 +3428,93 @@ impl BrokerService {
             .first()
             .cloned()
             .ok_or(BrokerError::SubscriptionInvalid)?;
-        let mut existing = self.list_sessions_backfilled(profile_id).await?;
-        let port = allocate_port(
-            &existing,
-            request.desired_port,
-            self.options.session_listen_ip,
-            self.options.session_port_range,
-        )?;
-        let prepared = SessionRecord {
-            session_id: ids::random_session_id(),
-            listen: self.options.session_listen_ip.to_string(),
-            port,
-            selected_ip,
-            proxy_name: node.proxy_name,
-            node_id: node.node_id,
-            created_at: now_epoch_sec(),
-        };
-        let previous = existing.clone();
-        existing.push(prepared.clone());
-        self.apply_sessions_config(profile_id, &existing).await?;
-        if let Err(err) = self
-            .store
-            .insert_sessions_with_touch(profile_id, std::slice::from_ref(&prepared), now_epoch_sec())
-            .await
-        {
-            let _ = self.rollback_runtime_sessions(profile_id, &previous).await;
-            return Err(BrokerError::from(err));
+        let existing = self.list_sessions_backfilled(profile_id).await?;
+        let retryable = request.desired_port.is_none();
+        let max_attempts = if retryable { 3usize } else { 1usize };
+
+        for attempt in 1..=max_attempts {
+            let port = match allocate_port(
+                &existing,
+                request.desired_port,
+                self.options.session_listen_ip,
+                self.options.session_port_range,
+            ) {
+                Ok(port) => port,
+                Err(err)
+                    if retryable
+                        && attempt < max_attempts
+                        && matches!(&err, BrokerError::PortInUse) =>
+                {
+                    continue;
+                }
+                Err(err) => return Err(err),
+            };
+            let prepared = SessionRecord {
+                session_id: ids::random_session_id(),
+                listen: self.options.session_listen_ip.to_string(),
+                port,
+                selected_ip: selected_ip.clone(),
+                proxy_name: node.proxy_name.clone(),
+                node_id: node.node_id.clone(),
+                created_at: now_epoch_sec(),
+            };
+            let mut merged = existing.clone();
+            merged.push(prepared.clone());
+
+            if let Err(err) = self.apply_sessions_config(profile_id, &merged).await {
+                tracing::warn!(
+                    profile_id,
+                    attempt,
+                    error = %err,
+                    "node-pinned session apply config failed"
+                );
+                if let Err(rollback_err) =
+                    self.rollback_runtime_sessions(profile_id, &existing).await
+                {
+                    tracing::error!(
+                        profile_id,
+                        attempt,
+                        error = %rollback_err,
+                        "runtime rollback failed after node-pinned session apply failure"
+                    );
+                    self.recover_runtime_desync(profile_id, &existing).await;
+                }
+                if retryable && attempt < max_attempts {
+                    continue;
+                }
+                return Err(err);
+            }
+
+            let now = now_epoch_sec();
+            if let Err(err) = self
+                .store
+                .insert_sessions_with_touch(profile_id, std::slice::from_ref(&prepared), now)
+                .await
+            {
+                tracing::error!(
+                    profile_id,
+                    session_id = %prepared.session_id,
+                    error = %err,
+                    "persist node-pinned session failed after runtime apply"
+                );
+                if let Err(rollback_err) =
+                    self.rollback_runtime_sessions(profile_id, &existing).await
+                {
+                    tracing::error!(
+                        profile_id,
+                        session_id = %prepared.session_id,
+                        error = %rollback_err,
+                        "runtime rollback failed after node-pinned session insert failure"
+                    );
+                    self.recover_runtime_desync(profile_id, &existing).await;
+                }
+                return Err(BrokerError::from(err));
+            }
+
+            return Ok(self.build_open_session_response(prepared));
         }
-        Ok(self.build_open_session_response(prepared))
+
+        Err(BrokerError::PortInUse)
     }
 
     pub async fn open_batch_by_node(
@@ -3486,7 +3536,9 @@ impl BrokerService {
                 .collect::<Vec<_>>()
         };
         if requests.is_empty() {
-            return Ok(OpenBatchResponse { sessions: Vec::new() });
+            return Ok(OpenBatchResponse {
+                sessions: Vec::new(),
+            });
         }
         let _profile_guard = self.lock_profile(profile_id).await;
         let node_map = self
@@ -3495,51 +3547,115 @@ impl BrokerService {
             .into_iter()
             .map(|record| (record.node_id.clone(), record))
             .collect::<HashMap<_, _>>();
-        let mut existing = self.list_sessions_backfilled(profile_id).await?;
-        let previous = existing.clone();
-        let mut staged = Vec::new();
-        for request in &requests {
-            let Some(node) = node_map.get(&request.node_id) else {
-                return Err(BrokerError::ProxyInventoryNodeNotFound);
-            };
-            let selected_ip = node
-                .resolved_ips
-                .first()
-                .cloned()
-                .ok_or(BrokerError::SubscriptionInvalid)?;
-            let port = allocate_port(
-                &existing,
-                request.desired_port,
-                self.options.session_listen_ip,
-                self.options.session_port_range,
-            )?;
-            let session = SessionRecord {
-                session_id: ids::random_session_id(),
-                listen: self.options.session_listen_ip.to_string(),
-                port,
-                selected_ip,
-                proxy_name: node.proxy_name.clone(),
-                node_id: node.node_id.clone(),
-                created_at: now_epoch_sec(),
-            };
-            existing.push(session.clone());
-            staged.push(session);
+        let existing = self.list_sessions_backfilled(profile_id).await?;
+        let retryable = requests.iter().all(|item| item.desired_port.is_none());
+        let max_attempts = if retryable { 3usize } else { 1usize };
+
+        for attempt in 1..=max_attempts {
+            let mut merged = existing.clone();
+            let mut staged = Vec::new();
+            for request in &requests {
+                let Some(node) = node_map.get(&request.node_id) else {
+                    return Err(BrokerError::ProxyInventoryNodeNotFound);
+                };
+                let selected_ip = node
+                    .resolved_ips
+                    .first()
+                    .cloned()
+                    .ok_or(BrokerError::SubscriptionInvalid)?;
+                let port = match allocate_port(
+                    &merged,
+                    request.desired_port,
+                    self.options.session_listen_ip,
+                    self.options.session_port_range,
+                ) {
+                    Ok(port) => port,
+                    Err(err)
+                        if retryable
+                            && attempt < max_attempts
+                            && matches!(&err, BrokerError::PortInUse) =>
+                    {
+                        staged.clear();
+                        merged = existing.clone();
+                        continue;
+                    }
+                    Err(err) => return Err(err),
+                };
+                let session = SessionRecord {
+                    session_id: ids::random_session_id(),
+                    listen: self.options.session_listen_ip.to_string(),
+                    port,
+                    selected_ip,
+                    proxy_name: node.proxy_name.clone(),
+                    node_id: node.node_id.clone(),
+                    created_at: now_epoch_sec(),
+                };
+                merged.push(session.clone());
+                staged.push(session);
+            }
+            if staged.len() != requests.len() {
+                continue;
+            }
+
+            if let Err(err) = self.apply_sessions_config(profile_id, &merged).await {
+                tracing::warn!(
+                    profile_id,
+                    attempt,
+                    error = %err,
+                    "node-pinned batch apply config failed before persisting sessions"
+                );
+                if let Err(rollback_err) =
+                    self.rollback_runtime_sessions(profile_id, &existing).await
+                {
+                    tracing::error!(
+                        profile_id,
+                        attempt,
+                        error = %rollback_err,
+                        "runtime rollback failed after node-pinned batch apply failure"
+                    );
+                    self.recover_runtime_desync(profile_id, &existing).await;
+                }
+                if retryable && attempt < max_attempts {
+                    continue;
+                }
+                return Err(BrokerError::BatchOpenFailed);
+            }
+
+            let now = now_epoch_sec();
+            if let Err(err) = self
+                .store
+                .insert_sessions_with_touch(profile_id, &staged, now)
+                .await
+            {
+                tracing::error!(
+                    profile_id,
+                    attempt,
+                    error = %err,
+                    "persist node-pinned batch failed after runtime apply"
+                );
+                if let Err(rollback_err) =
+                    self.rollback_runtime_sessions(profile_id, &existing).await
+                {
+                    tracing::error!(
+                        profile_id,
+                        attempt,
+                        error = %rollback_err,
+                        "runtime rollback failed after node-pinned batch insert failure"
+                    );
+                    self.recover_runtime_desync(profile_id, &existing).await;
+                }
+                return Err(BrokerError::BatchOpenFailed);
+            }
+
+            return Ok(OpenBatchResponse {
+                sessions: staged
+                    .into_iter()
+                    .map(|session| self.build_open_session_response(session))
+                    .collect(),
+            });
         }
-        self.apply_sessions_config(profile_id, &existing).await?;
-        if let Err(err) = self
-            .store
-            .insert_sessions_with_touch(profile_id, &staged, now_epoch_sec())
-            .await
-        {
-            let _ = self.rollback_runtime_sessions(profile_id, &previous).await;
-            return Err(BrokerError::from(err));
-        }
-        Ok(OpenBatchResponse {
-            sessions: staged
-                .into_iter()
-                .map(|session| self.build_open_session_response(session))
-                .collect(),
-        })
+
+        Err(BrokerError::BatchOpenFailed)
     }
 
     pub async fn suggested_port(&self, profile_id: &str) -> BrokerResult<SuggestedPortResponse> {
@@ -3548,9 +3664,7 @@ impl BrokerService {
         }
 
         let _profile_guard = self.lock_profile(profile_id).await;
-        let existing = self
-            .list_sessions_backfilled(profile_id)
-            .await?;
+        let existing = self.list_sessions_backfilled(profile_id).await?;
         let port = allocate_port(
             &existing,
             None,
@@ -4080,9 +4194,7 @@ impl BrokerService {
     pub async fn close_session(&self, profile_id: &str, session_id: &str) -> BrokerResult<()> {
         let _profile_guard = self.lock_profile(profile_id).await;
 
-        let mut sessions = self
-            .list_sessions_backfilled(profile_id)
-            .await?;
+        let mut sessions = self.list_sessions_backfilled(profile_id).await?;
         let previous_sessions = sessions.clone();
 
         let old_len = sessions.len();
@@ -4109,7 +4221,10 @@ impl BrokerService {
                 error = %err,
                 "persist close-session failed, rolling back runtime"
             );
-            if let Err(rollback_err) = self.rollback_runtime_sessions(profile_id, &previous_sessions).await {
+            if let Err(rollback_err) = self
+                .rollback_runtime_sessions(profile_id, &previous_sessions)
+                .await
+            {
                 tracing::error!(
                     profile_id,
                     session_id,
@@ -5559,7 +5674,10 @@ mod tests {
 
     fn make_node(proxy_name: &str, ip: &str) -> ProxyNode {
         ProxyNode {
-            node_id: Some(ids::stable_proxy_inventory_node_id("test-import", proxy_name)),
+            node_id: Some(ids::stable_proxy_inventory_node_id(
+                "test-import",
+                proxy_name,
+            )),
             proxy_name: proxy_name.to_string(),
             proxy_type: "socks5".to_string(),
             server: ip.to_string(),
@@ -6342,7 +6460,10 @@ proxies:
 
     fn sample_node(proxy_name: &str, ip: &str) -> ProxyNode {
         ProxyNode {
-            node_id: Some(ids::stable_proxy_inventory_node_id("sample-import", proxy_name)),
+            node_id: Some(ids::stable_proxy_inventory_node_id(
+                "sample-import",
+                proxy_name,
+            )),
             proxy_name: proxy_name.to_string(),
             proxy_type: "socks5".to_string(),
             server: ip.to_string(),
