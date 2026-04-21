@@ -2,7 +2,7 @@ use std::{
     cmp::Ordering as CmpOrdering,
     collections::{HashMap, HashSet},
     hash::{Hash, Hasher},
-    net::{IpAddr, Ipv4Addr},
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     path::PathBuf,
     str::FromStr,
     sync::{
@@ -1573,7 +1573,7 @@ impl BrokerService {
         profile_id: &str,
     ) -> BrokerResult<Vec<ProxyNode>> {
         let records = self
-            .compose_effective_proxy_inventory_records(profile_id)
+            .compose_effective_proxy_runtime_records(profile_id)
             .await?;
         let mut nodes = records
             .into_iter()
@@ -1610,6 +1610,22 @@ impl BrokerService {
                 } => allocated_profile_id == profile_id,
             })
             .collect::<Vec<_>>();
+        candidates.sort_by(|left, right| {
+            left.proxy_name
+                .cmp(&right.proxy_name)
+                .then_with(|| compare_inventory_preference(profile_id, left, right))
+                .then_with(|| left.node_id.cmp(&right.node_id))
+        });
+        Ok(candidates)
+    }
+
+    async fn compose_effective_proxy_runtime_records(
+        &self,
+        profile_id: &str,
+    ) -> BrokerResult<Vec<ProxyInventoryRecord>> {
+        let mut candidates = self
+            .compose_effective_proxy_inventory_records(profile_id)
+            .await?;
         candidates.sort_by(|left, right| compare_inventory_preference(profile_id, left, right));
 
         let mut by_name = HashMap::new();
@@ -3400,7 +3416,7 @@ impl BrokerService {
     fn build_open_session_response(&self, session: SessionRecord) -> OpenSessionResponse {
         OpenSessionResponse {
             session_id: session.session_id,
-            listen: session.listen,
+            listen: format_listen_endpoint(&session.listen, session.port),
             port: session.port,
             selected_ip: session.selected_ip,
             proxy_name: session.proxy_name,
@@ -5153,6 +5169,13 @@ fn runtime_node_id(node: &ProxyNode) -> String {
         .unwrap_or_else(|| node.proxy_name.clone())
 }
 
+fn format_listen_endpoint(listen: &str, port: u16) -> String {
+    listen
+        .parse::<IpAddr>()
+        .map(|ip| SocketAddr::new(ip, port).to_string())
+        .unwrap_or_else(|_| format!("{listen}:{port}"))
+}
+
 fn session_runtime_key(session: &SessionRecord) -> &str {
     if session.node_id.trim().is_empty() {
         session.proxy_name.as_str()
@@ -6205,6 +6228,70 @@ proxies:
         assert_eq!(default_nodes[0].server, "7.7.7.7");
         assert_eq!(edge_nodes.len(), 1);
         assert_eq!(edge_nodes[0].server, "1.1.1.1");
+
+        let catalog = service
+            .list_proxy_catalog(&ProxyCatalogQuery {
+                view: Some("profile".to_string()),
+                profile_id: Some("edge-jp".to_string()),
+            })
+            .await
+            .expect("profile catalog should list");
+        let shared_nodes = catalog
+            .groups
+            .into_iter()
+            .flat_map(|group| group.nodes.into_iter())
+            .filter(|node| node.proxy_name == "shared-node")
+            .collect::<Vec<_>>();
+        assert_eq!(shared_nodes.len(), 2);
+        assert_ne!(shared_nodes[0].node_id, shared_nodes[1].node_id);
+    }
+
+    #[tokio::test]
+    async fn open_session_by_node_returns_full_listen_endpoint() {
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
+        service
+            .create_profile("edge-jp")
+            .await
+            .expect("edge profile should be created");
+
+        let source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: edge-node
+    type: socks5
+    server: 1.1.1.1
+"#,
+        )
+        .await;
+        service
+            .load_subscription("edge-jp", &SubscriptionSource::File(source_path.clone()))
+            .await
+            .expect("local import should succeed");
+        let _ = tokio::fs::remove_file(&source_path).await;
+
+        let catalog = service
+            .list_proxy_catalog(&ProxyCatalogQuery {
+                view: Some("profile".to_string()),
+                profile_id: Some("edge-jp".to_string()),
+            })
+            .await
+            .expect("profile catalog should list");
+        let node_id = catalog.groups[0].nodes[0].node_id.clone();
+
+        let response = service
+            .open_session_by_node(
+                "edge-jp",
+                &OpenSessionByNodeRequest {
+                    node_id,
+                    desired_port: Some(10080),
+                },
+            )
+            .await
+            .expect("node-pinned open should succeed");
+
+        assert_eq!(response.listen, "127.0.0.1:10080");
     }
 
     #[tokio::test]

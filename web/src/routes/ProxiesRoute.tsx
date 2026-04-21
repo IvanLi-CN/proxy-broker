@@ -217,7 +217,7 @@ export function ProxiesRoute() {
     onSuccess: async (response, { requestedProfileId }) => {
       toast.success(
         t("Listening on {listen} via {proxyName} ({selectedIp}).", {
-          listen: `${response.listen}:${response.port}`,
+          listen: response.listen,
           proxyName: response.proxy_name,
           selectedIp: response.selected_ip,
         }),
