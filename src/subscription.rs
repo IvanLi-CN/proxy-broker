@@ -13,20 +13,9 @@ use crate::{
 
 pub const SUBSCRIPTION_FETCH_USER_AGENTS: &[&str] =
     &["Clash.Meta/1.18.3", "mihomo/1.18.3", "Clash Verge/1.7.7"];
-const INFO_PROXY_KEYWORDS_EN: &[&str] = &[
-    "traffic",
-    "expire",
-    "expired",
-    "notice",
-];
-const INFO_PROXY_KEYWORDS_EN_WEAK: &[&str] = &[
-    "subscription",
-    "official",
-    "support",
-];
-const INFO_PROXY_KEYWORDS_ZH: &[&str] = &[
-    "流量", "剩余", "过期", "到期", "公告", "说明",
-];
+const INFO_PROXY_KEYWORDS_EN: &[&str] = &["traffic", "expire", "expired", "notice"];
+const INFO_PROXY_KEYWORDS_EN_WEAK: &[&str] = &["subscription", "official", "support"];
+const INFO_PROXY_KEYWORDS_ZH: &[&str] = &["流量", "剩余", "过期", "到期", "公告", "说明"];
 const INFO_PROXY_KEYWORDS_ZH_WEAK: &[&str] = &["官网", "订阅", "客服"];
 
 #[derive(Debug, Clone, Default)]
@@ -1139,7 +1128,10 @@ proxies:
     #[test]
     fn response_metadata_falls_back_to_content_disposition_when_profile_title_is_invalid() {
         let mut headers = HeaderMap::new();
-        headers.insert("profile-title", HeaderValue::from_static("base64:not-valid-base64"));
+        headers.insert(
+            "profile-title",
+            HeaderValue::from_static("base64:not-valid-base64"),
+        );
         headers.insert(
             reqwest::header::CONTENT_DISPOSITION,
             HeaderValue::from_static("attachment; filename*=UTF-8''fallback-name.yaml"),
@@ -1147,11 +1139,10 @@ proxies:
 
         let parsed = parse_response_metadata(&headers, Some("url-fallback".to_string()));
 
-        let metadata = parsed.metadata.expect("content disposition title should survive");
-        assert_eq!(
-            metadata.source_title.as_deref(),
-            Some("fallback-name.yaml")
-        );
+        let metadata = parsed
+            .metadata
+            .expect("content disposition title should survive");
+        assert_eq!(metadata.source_title.as_deref(), Some("fallback-name.yaml"));
         assert!(
             parsed
                 .warnings
@@ -1163,7 +1154,10 @@ proxies:
     #[test]
     fn response_metadata_falls_back_to_url_title_when_higher_priority_headers_are_invalid() {
         let mut headers = HeaderMap::new();
-        headers.insert("profile-title", HeaderValue::from_static("base64:not-valid-base64"));
+        headers.insert(
+            "profile-title",
+            HeaderValue::from_static("base64:not-valid-base64"),
+        );
         headers.insert(
             reqwest::header::CONTENT_DISPOSITION,
             HeaderValue::from_static("attachment; filename*=UTF-8''%ZZ"),
@@ -1189,8 +1183,14 @@ proxies:
 
     #[test]
     fn percent_decode_keeps_literal_plus_characters() {
-        assert_eq!(percent_decode_lossy("A+B.yaml").as_deref(), Some("A+B.yaml"));
-        assert_eq!(percent_decode_lossy("A%20B.yaml").as_deref(), Some("A B.yaml"));
+        assert_eq!(
+            percent_decode_lossy("A+B.yaml").as_deref(),
+            Some("A+B.yaml")
+        );
+        assert_eq!(
+            percent_decode_lossy("A%20B.yaml").as_deref(),
+            Some("A B.yaml")
+        );
     }
 
     #[test]
