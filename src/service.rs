@@ -4002,6 +4002,14 @@ impl BrokerService {
         self.delete_proxy_import(&before.import_id).await
     }
 
+    pub async fn get_proxy_import(&self, import_id: &str) -> BrokerResult<ProxyImportRecord> {
+        self.store
+            .get_proxy_import(import_id)
+            .await
+            .map_err(BrokerError::from)?
+            .ok_or(BrokerError::ProxyInventoryNodeNotFound)
+    }
+
     pub async fn delete_proxy_import(&self, import_id: &str) -> BrokerResult<()> {
         let before = self
             .store

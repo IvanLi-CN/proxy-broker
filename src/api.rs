@@ -17,9 +17,9 @@ use crate::{
         CreateApiKeyRequest, CreateApiKeyResponse, CreateProfileRequest, CreateProfileResponse,
         HealthResponse, LoadSubscriptionRequest, OpenBatchByNodeRequest, OpenBatchRequest,
         OpenSessionByNodeRequest, OpenSessionRequest, ProfileProxySettings, ProxyCatalogQuery,
-        ProxyImportListQuery, ProxyInventoryListQuery, ProxyOperationRequest, RefreshRequest,
-        SearchSessionOptionsRequest, SuggestedPortResponse, TaskListQuery, TaskRunDetail,
-        TaskRunSummary, TaskStreamEnvelope, UpdateProfileProxySettingsRequest,
+        ProxyImportListQuery, ProxyInventoryListQuery, ProxyOperationRequest, ProxyScope,
+        RefreshRequest, SearchSessionOptionsRequest, SuggestedPortResponse, TaskListQuery,
+        TaskRunDetail, TaskRunSummary, TaskStreamEnvelope, UpdateProfileProxySettingsRequest,
         UpdateProxyAllocationRequest, UpdateProxyImportAllocationRequest,
     },
     service::BrokerService,
@@ -200,7 +200,7 @@ async fn list_proxy_catalog(
     State(state): State<AppState>,
     Query(query): Query<ProxyCatalogQuery>,
 ) -> Result<Json<crate::models::ProxyCatalogResponse>, BrokerError> {
-    auth.require_admin()?;
+    authorize_proxy_catalog_access(&auth, &query)?;
     let resp = state.service.list_proxy_catalog(&query).await?;
     Ok(Json(resp))
 }
@@ -250,7 +250,11 @@ async fn delete_proxy_import(
     State(state): State<AppState>,
     Path(import_id): Path<String>,
 ) -> Result<StatusCode, BrokerError> {
-    auth.require_admin()?;
+    let record = state.service.get_proxy_import(&import_id).await?;
+    match &record.source_scope {
+        ProxyScope::Global => auth.require_admin()?,
+        ProxyScope::Profile { profile_id } => auth.require_profile_access(profile_id)?,
+    };
     state.service.delete_proxy_import(&import_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -436,8 +440,8 @@ async fn refresh_proxy_catalog_metadata(
     ),
     BrokerError,
 > {
-    auth.require_admin()?;
     let request = parse_json_payload(payload, "refresh_proxy_catalog_metadata")?;
+    authorize_proxy_operation_access(&auth, &request)?;
     let resp = state.service.queue_proxy_metadata_refresh(&request).await?;
     Ok((StatusCode::ACCEPTED, Json(resp)))
 }
@@ -453,8 +457,8 @@ async fn probe_proxy_catalog_latency(
     ),
     BrokerError,
 > {
-    auth.require_admin()?;
     let request = parse_json_payload(payload, "probe_proxy_catalog_latency")?;
+    authorize_proxy_operation_access(&auth, &request)?;
     let resp = state.service.queue_proxy_latency_probe(&request).await?;
     Ok((StatusCode::ACCEPTED, Json(resp)))
 }
@@ -477,6 +481,52 @@ fn parse_json_payload<T>(
             err.body_text()
         ))
     })
+}
+
+fn authorize_proxy_catalog_access(
+    auth: &AuthContext,
+    query: &ProxyCatalogQuery,
+) -> Result<(), BrokerError> {
+    match query.view.as_deref().unwrap_or("global") {
+        "global" => {
+            auth.require_admin()?;
+        }
+        "profile" => {
+            let profile_id = query.profile_id.as_deref().ok_or_else(|| {
+                BrokerError::InvalidRequest("profile_id is required when view=profile".to_string())
+            })?;
+            auth.require_profile_access(profile_id)?;
+        }
+        other => {
+            return Err(BrokerError::InvalidRequest(format!(
+                "unsupported proxy catalog view `{other}`"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn authorize_proxy_operation_access(
+    auth: &AuthContext,
+    request: &ProxyOperationRequest,
+) -> Result<(), BrokerError> {
+    match request.view.as_str() {
+        "global" => {
+            auth.require_admin()?;
+        }
+        "profile" => {
+            let profile_id = request.profile_id.as_deref().ok_or_else(|| {
+                BrokerError::InvalidRequest("profile_id is required when view=profile".to_string())
+            })?;
+            auth.require_profile_access(profile_id)?;
+        }
+        other => {
+            return Err(BrokerError::InvalidRequest(format!(
+                "unsupported proxy catalog view `{other}`"
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn sse_event(event_type: &str, data: Result<serde_json::Value, serde_json::Error>) -> Event {

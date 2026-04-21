@@ -80,7 +80,7 @@ export function ProxiesRoute() {
   const profileCatalogQuery = useQuery({
     queryKey: ["proxy-catalog", "profile", activeProfileId],
     queryFn: () => api.listProxyCatalog({ view: "profile", profile_id: activeProfileId ?? "" }),
-    enabled: Boolean(activeProfileId) && canManageGlobal,
+    enabled: Boolean(activeProfileId),
   });
   const profileProxySettingsQuery = useQuery({
     queryKey: ["profile-proxy-settings", activeProfileId],
@@ -90,7 +90,7 @@ export function ProxiesRoute() {
   const suggestedPortQuery = useQuery({
     queryKey: ["suggested-port", activeProfileId],
     queryFn: () => api.getSuggestedPort(activeProfileId ?? ""),
-    enabled: Boolean(activeProfileId) && canManageGlobal,
+    enabled: Boolean(activeProfileId),
   });
 
   const proxyOperationEvents = useProxyOperationEvents({

@@ -56,14 +56,6 @@ pub fn stable_proxy_inventory_node_id(import_id: &str, proxy_name: &str) -> Stri
     )
 }
 
-pub fn stable_profile_safe_suffix(profile_id: &str) -> String {
-    stable_body(
-        "proxy-broker:runtime-profile",
-        profile_id,
-        ENTITY_ID_BODY_LEN,
-    )
-}
-
 pub fn stable_dedicated_ip_proxy_name(proxy_name: &str, ip: &str) -> String {
     let body = stable_body(
         "proxy-broker:dedicated-ip-proxy",

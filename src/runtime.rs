@@ -343,7 +343,7 @@ impl ManagedMihomoRuntime {
         let binary = self.resolve_binary().await?;
 
         let safe_profile = "shared-runtime";
-        let home_dir = self.options.work_dir.join("profiles").join(&safe_profile);
+        let home_dir = self.options.work_dir.join("profiles").join(safe_profile);
         tokio::fs::create_dir_all(&home_dir)
             .await
             .with_context(|| {

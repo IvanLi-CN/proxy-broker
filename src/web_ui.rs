@@ -670,6 +670,124 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn api_key_can_access_profile_proxy_catalog_for_selected_profile() {
+        let app = enforce_router();
+
+        let created_profile = app
+            .clone()
+            .oneshot(trusted_request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/profiles")
+                    .header("content-type", "application/json")
+                    .header("x-forwarded-user", "admin@example.com")
+                    .body(Body::from(r#"{"profile_id":"alpha"}"#))
+                    .unwrap(),
+            ))
+            .await
+            .expect("create should respond");
+        assert_eq!(created_profile.status(), StatusCode::CREATED);
+
+        let created_key = app
+            .clone()
+            .oneshot(trusted_request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/api-keys")
+                    .header("content-type", "application/json")
+                    .header("x-forwarded-user", "admin@example.com")
+                    .body(Body::from(
+                        r#"{"name":"profile-bot","profile_scope":{"kind":"selected_profiles","profile_ids":["alpha"]}}"#,
+                    ))
+                    .unwrap(),
+            ))
+            .await
+            .expect("key create should respond");
+        assert_eq!(created_key.status(), StatusCode::CREATED);
+        let created_key_body = to_bytes(created_key.into_body(), usize::MAX)
+            .await
+            .expect("body should be readable");
+        let created_key_json: serde_json::Value =
+            serde_json::from_slice(&created_key_body).expect("body should be json");
+        let secret = created_key_json["secret"]
+            .as_str()
+            .expect("secret should be present");
+
+        let allowed = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/proxy-catalog?view=profile&profile_id=alpha")
+                    .header("authorization", format!("Bearer {secret}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("router should respond");
+        assert_eq!(allowed.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn api_key_can_queue_profile_proxy_ops_for_selected_profile() {
+        let app = enforce_router();
+
+        let created_profile = app
+            .clone()
+            .oneshot(trusted_request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/profiles")
+                    .header("content-type", "application/json")
+                    .header("x-forwarded-user", "admin@example.com")
+                    .body(Body::from(r#"{"profile_id":"alpha"}"#))
+                    .unwrap(),
+            ))
+            .await
+            .expect("create should respond");
+        assert_eq!(created_profile.status(), StatusCode::CREATED);
+
+        let created_key = app
+            .clone()
+            .oneshot(trusted_request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/api-keys")
+                    .header("content-type", "application/json")
+                    .header("x-forwarded-user", "admin@example.com")
+                    .body(Body::from(
+                        r#"{"name":"profile-bot","profile_scope":{"kind":"selected_profiles","profile_ids":["alpha"]}}"#,
+                    ))
+                    .unwrap(),
+            ))
+            .await
+            .expect("key create should respond");
+        assert_eq!(created_key.status(), StatusCode::CREATED);
+        let created_key_body = to_bytes(created_key.into_body(), usize::MAX)
+            .await
+            .expect("body should be readable");
+        let created_key_json: serde_json::Value =
+            serde_json::from_slice(&created_key_body).expect("body should be json");
+        let secret = created_key_json["secret"]
+            .as_str()
+            .expect("secret should be present");
+
+        let allowed = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/proxy-ops/refresh")
+                    .header("authorization", format!("Bearer {secret}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"view":"profile","profile_id":"alpha","node_ids":[]}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .expect("router should respond");
+        assert_eq!(allowed.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
     async fn non_admin_human_cannot_access_profile_proxy_settings_route() {
         let app = enforce_router();
 

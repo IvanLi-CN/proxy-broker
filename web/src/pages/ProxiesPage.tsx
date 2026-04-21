@@ -141,7 +141,8 @@ function NodeStatusCell({
   liveState?: ProxyNodeLiveState;
 }) {
   const { locale, t } = useI18n();
-  const metadata = node.ip_metadata[0] ?? null;
+  const metadata =
+    node.ip_metadata.find((record) => record.ip === node.primary_ip) ?? node.ip_metadata[0] ?? null;
   const country = formatCountryName(locale, metadata?.country_code, metadata?.country_name);
   const city = metadata?.city ?? metadata?.region_name ?? null;
   const successCount = metadata?.last_probe_samples.filter(
