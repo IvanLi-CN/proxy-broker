@@ -164,12 +164,12 @@
 
 - `source_type=storybook_canvas`
 - `target_program=mock-only`
-- `capture_scope=element`
+- `capture_scope=browser-viewport`
 - `requested_viewport=1600x1400`
 - `viewport_strategy=devtools-emulate`
 - `sensitive_exclusion=N/A`
 - `submission_gate=pending-owner-approval`
-- `story_id_or_title=Pages/ProxiesPage/ZhCN`
+- `story_id_or_title=Pages/ProxiesPage/GlobalConfig`
 - `state=global grouped node operations`
 - `evidence_note=Shows the Global proxy workspace with import-group rows, child node rows, live stream status, subscription-level allocation controls, and node-level latency/probe state in one stable review surface.`
 
@@ -178,17 +178,59 @@ PR: include
 
 - `source_type=storybook_canvas`
 - `target_program=mock-only`
-- `capture_scope=element`
+- `capture_scope=browser-viewport`
 - `requested_viewport=1600x1400`
 - `viewport_strategy=devtools-emulate`
 - `sensitive_exclusion=N/A`
 - `submission_gate=pending-owner-approval`
-- `story_id_or_title=Pages/ProxiesPage/ProfileBatchActions`
-- `state=profile batch session creation`
-- `evidence_note=Shows the profile-scoped grouped node list with selected nodes, enabled batch refresh/probe actions, and the new batch create-session control alongside node-level create-session actions.`
+- `story_id_or_title=Pages/ProxiesPage/ProfileCatalog`
+- `state=profile grouped node catalog`
+- `evidence_note=Shows the profile-scoped grouped node list with inherited global nodes, profile-local imports, create-session actions, and the local-import delete affordance visible together in one baseline review surface.`
 
 PR: include
-![Profile grouped nodes with batch create-session action](./assets/proxies-profile-batch-sessions.png)
+![Profile grouped node catalog](./assets/proxies-profile-catalog.png)
+
+- `source_type=storybook_canvas`
+- `target_program=mock-only`
+- `capture_scope=browser-viewport`
+- `requested_viewport=1600x1400`
+- `viewport_strategy=devtools-emulate`
+- `sensitive_exclusion=N/A`
+- `submission_gate=pending-owner-approval`
+- `story_id_or_title=Pages/ProxiesPage/ProfileCreateSessionDialog`
+- `state=single node-pinned session form`
+- `evidence_note=Shows the single-node create-session dialog with the fixed node binding, primary IP summary, and the optional desired-port field that the operator can set before opening the listener.`
+
+PR: include
+![Profile single node create-session dialog](./assets/proxies-profile-create-session-dialog.png)
+
+- `source_type=storybook_canvas`
+- `target_program=mock-only`
+- `capture_scope=browser-viewport`
+- `requested_viewport=1600x1400`
+- `viewport_strategy=devtools-emulate`
+- `sensitive_exclusion=N/A`
+- `submission_gate=pending-owner-approval`
+- `story_id_or_title=Pages/ProxiesPage/ProfileBatchCreateDialog`
+- `state=batch node-pinned session form`
+- `evidence_note=Shows the batch create-session dialog with one row per selected node and per-node desired-port inputs, proving that batch creation now opens a form instead of executing immediately.`
+
+PR: include
+![Profile batch create-session dialog](./assets/proxies-profile-batch-create-dialog.png)
+
+- `source_type=storybook_canvas`
+- `target_program=mock-only`
+- `capture_scope=browser-viewport`
+- `requested_viewport=1600x1400`
+- `viewport_strategy=devtools-emulate`
+- `sensitive_exclusion=N/A`
+- `submission_gate=pending-owner-approval`
+- `story_id_or_title=Pages/ProxiesPage/ProfileDeleteConfirmDialog`
+- `state=profile import delete confirmation`
+- `evidence_note=Shows the destructive confirmation step before removing a profile-local import, including the import label, kind, and scope summary needed for the operator to verify the target.`
+
+PR: include
+![Profile delete confirmation dialog](./assets/proxies-profile-delete-confirm-dialog.png)
 
 ## 资产晋升（Asset promotion）
 

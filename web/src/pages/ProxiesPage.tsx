@@ -186,7 +186,7 @@ function NodeStatusCell({
   );
 }
 
-function NodePinnedSessionDialog({
+export function NodePinnedSessionDialog({
   open,
   node,
   suggestedPort,
@@ -276,7 +276,7 @@ function NodePinnedSessionDialog({
   );
 }
 
-function NodePinnedBatchDialog({
+export function NodePinnedBatchDialog({
   open,
   nodes,
   suggestedPort,
@@ -377,7 +377,7 @@ function NodePinnedBatchDialog({
   );
 }
 
-function DeleteImportConfirmDialog({
+export function DeleteImportConfirmDialog({
   open,
   item,
   isPending,

@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 
@@ -9,7 +9,13 @@ import { Toaster } from "@/components/ui/sonner";
 import type { ProxyNodeLiveState } from "@/hooks/use-proxy-operation-events";
 import { GLOBAL_PROFILE_ID } from "@/lib/profile-selection";
 import type { CurrentUserState, ProfileProxySettings, ProxyCatalogResponse } from "@/lib/types";
-import { ProxiesPage, type ProxiesPageProps } from "@/pages/ProxiesPage";
+import {
+  DeleteImportConfirmDialog,
+  NodePinnedBatchDialog,
+  NodePinnedSessionDialog,
+  ProxiesPage,
+  type ProxiesPageProps,
+} from "@/pages/ProxiesPage";
 
 const profiles = ["default", "edge-jp", "lab-us"];
 
@@ -564,6 +570,31 @@ function renderInShell(storyArgs: Story["args"]) {
   );
 }
 
+function renderProfileSurface(
+  storyArgs: Extract<ProxiesPageProps, { mode: "profile" }>,
+  overlay?: ReactNode,
+) {
+  return (
+    <AppShell
+      profileId={storyArgs.profileId}
+      profiles={profiles}
+      profilesLoading={false}
+      profilesCreating={false}
+      profilesError={null}
+      healthStatus="ok"
+      currentUser={currentUser}
+      onProfileIdChange={() => undefined}
+      onCreateProfile={async (value: string) => value}
+      onRetryProfiles={() => undefined}
+    >
+      <div className="contents">
+        <ProxiesPage {...storyArgs} />
+        {overlay}
+      </div>
+    </AppShell>
+  );
+}
+
 export const GlobalConfig: Story = {
   args: {
     mode: "global",
@@ -693,6 +724,12 @@ export const ZhCN: Story = {
   },
 };
 
+export const ProfileCatalog: Story = {
+  args: { ...ProfileConfig.args },
+  name: "Profile Catalog",
+  render: (args) => renderInShell(args),
+};
+
 export const ProfileBatchActions: Story = {
   ...ProfileConfig,
   render: (args) => (
@@ -718,6 +755,56 @@ export const ProfileBatchActions: Story = {
     await userEvent.click(await dialog.findByRole("button", { name: /^Create sessions$/i }));
     await expect(await canvas.findByText(/Batch sessions created/i)).toBeVisible();
   },
+};
+
+export const ProfileCreateSessionDialog: Story = {
+  args: { ...ProfileConfig.args },
+  name: "Profile Create Session Dialog",
+  render: (args) =>
+    renderProfileSurface(
+      args as Extract<ProxiesPageProps, { mode: "profile" }>,
+      <NodePinnedSessionDialog
+        open
+        node={profileCatalogFixture.groups[0]?.nodes[0] ?? null}
+        suggestedPort={10080}
+        isPending={false}
+        onOpenChange={() => undefined}
+        onSubmit={async () => undefined}
+      />,
+    ),
+};
+
+export const ProfileBatchCreateDialog: Story = {
+  args: { ...ProfileConfig.args },
+  name: "Profile Batch Create Dialog",
+  render: (args) =>
+    renderProfileSurface(
+      args as Extract<ProxiesPageProps, { mode: "profile" }>,
+      <NodePinnedBatchDialog
+        open
+        nodes={profileCatalogFixture.groups[0]?.nodes.slice(0, 2) ?? []}
+        suggestedPort={10080}
+        isPending={false}
+        onOpenChange={() => undefined}
+        onSubmit={async () => undefined}
+      />,
+    ),
+};
+
+export const ProfileDeleteConfirmDialog: Story = {
+  args: { ...ProfileConfig.args },
+  name: "Profile Delete Confirm Dialog",
+  render: (args) =>
+    renderProfileSurface(
+      args as Extract<ProxiesPageProps, { mode: "profile" }>,
+      <DeleteImportConfirmDialog
+        open
+        item={proxyImportsFixture.items[1]}
+        isPending={false}
+        onOpenChange={() => undefined}
+        onConfirm={async () => undefined}
+      />,
+    ),
 };
 
 export const AccessDenied: Story = {
