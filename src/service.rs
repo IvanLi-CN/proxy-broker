@@ -3177,8 +3177,7 @@ impl BrokerService {
                 if let Some(country) = country
                     && let Some(info) = country.country
                 {
-                    let mmdb_country_code =
-                        normalize_country_code(info.iso_code.map(|value| value.as_ref()));
+                    let mmdb_country_code = normalize_country_code(info.iso_code);
                     let mmdb_country_name =
                         info.names.and_then(|m| m.get("en").map(|x| x.to_string()));
                     if mmdb_country_code.is_some() {
@@ -3390,10 +3389,7 @@ impl BrokerService {
             .store
             .list_ip_records(profile_id)
             .await
-            .map_err(BrokerError::from)?
-            .into_iter()
-            .map(sanitize_ip_record)
-            .collect::<Vec<_>>();
+            .map_err(BrokerError::from)?;
         let probe_records = self
             .store
             .list_probe_records(profile_id)
@@ -3428,10 +3424,7 @@ impl BrokerService {
             .store
             .list_ip_records(profile_id)
             .await
-            .map_err(BrokerError::from)?
-            .into_iter()
-            .map(sanitize_ip_record)
-            .collect::<Vec<_>>();
+            .map_err(BrokerError::from)?;
         let probe_records = self
             .store
             .list_probe_records(profile_id)
@@ -4595,6 +4588,14 @@ fn normalize_country_code(value: Option<&str>) -> Option<String> {
     None
 }
 
+fn normalize_city_country_token(value: Option<&str>) -> Option<String> {
+    let trimmed = value?.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    normalize_country_code(Some(trimmed)).or_else(|| Some(trimmed.to_ascii_uppercase()))
+}
+
 fn sanitize_ip_record(mut record: IpRecord) -> IpRecord {
     record.country_code = normalize_country_code(record.country_code.as_deref());
     record
@@ -4654,7 +4655,7 @@ fn normalize_city_filters(values: &[String]) -> HashSet<(Option<String>, String)
                     continue;
                 }
                 (
-                    normalize_country_code(Some(country.trim())),
+                    normalize_city_country_token(Some(country.trim())),
                     city.to_ascii_lowercase(),
                 )
             }
@@ -4816,6 +4817,8 @@ fn search_session_options(
             for record in ip_records {
                 let normalized_country_code =
                     normalize_country_code(record.country_code.as_deref());
+                let city_country_token =
+                    normalize_city_country_token(record.country_code.as_deref());
                 if !country_filters.is_empty() {
                     let Some(code) = normalized_country_code.as_ref() else {
                         continue;
@@ -4832,7 +4835,17 @@ fn search_session_options(
                 if city_value.is_empty() {
                     continue;
                 }
-                let country_code = normalized_country_code.unwrap_or_default();
+                let country_code = normalized_country_code
+                    .clone()
+                    .or_else(|| {
+                        record
+                            .country_code
+                            .as_deref()
+                            .map(str::trim)
+                            .filter(|value| !value.is_empty())
+                            .map(str::to_string)
+                    })
+                    .unwrap_or_default();
                 let country_name = record.country_name.clone().unwrap_or_default();
                 let meta = match (country_code.trim(), country_name.trim()) {
                     ("", "") => None,
@@ -4840,20 +4853,18 @@ fn search_session_options(
                     (code, "") => Some(code.to_string()),
                     (code, name) => Some(format!("{name} ({code})")),
                 };
-                let value = if country_code.trim().is_empty() {
-                    city_value.clone()
-                } else {
-                    format!(
-                        "{}::{}",
-                        country_code.trim().to_ascii_uppercase(),
-                        city_value
-                    )
-                };
+                let value = city_country_token.as_ref().map_or_else(
+                    || city_value.clone(),
+                    |country_code| format!("{country_code}::{city_value}"),
+                );
                 let key = value.to_ascii_lowercase();
                 let haystack = format!(
                     "{} {} {}",
                     city_value.to_ascii_lowercase(),
-                    country_code.to_ascii_lowercase(),
+                    city_country_token
+                        .as_deref()
+                        .unwrap_or(country_code.as_str())
+                        .to_ascii_lowercase(),
                     country_name.to_ascii_lowercase()
                 );
                 if !query.is_empty() && !haystack.contains(&query) {
@@ -4879,6 +4890,8 @@ fn search_session_options(
                 .filter(|record| {
                     let normalized_country_code =
                         normalize_country_code(record.country_code.as_deref());
+                    let city_country_token =
+                        normalize_city_country_token(record.country_code.as_deref());
                     if !country_filters.is_empty() {
                         let Some(code) = normalized_country_code.as_ref() else {
                             return false;
@@ -4896,7 +4909,7 @@ fn search_session_options(
                             city_name == *city_filter
                                 && match country_filter {
                                     Some(code) => {
-                                        normalized_country_code.as_deref() == Some(code.as_str())
+                                        city_country_token.as_deref() == Some(code.as_str())
                                     }
                                     None => true,
                                 }
@@ -4911,8 +4924,11 @@ fn search_session_options(
                     let haystack = format!(
                         "{} {} {} {}",
                         record.ip.to_ascii_lowercase(),
-                        normalized_country_code
-                            .unwrap_or_default()
+                        city_country_token
+                            .as_deref()
+                            .unwrap_or_else(|| {
+                                normalized_country_code.as_deref().unwrap_or_default()
+                            })
                             .to_ascii_lowercase(),
                         record
                             .country_name
@@ -4923,7 +4939,7 @@ fn search_session_options(
                             .city
                             .as_deref()
                             .unwrap_or_default()
-                            .to_ascii_lowercase()
+                            .to_ascii_lowercase(),
                     );
                     haystack.contains(&query)
                 })
@@ -5172,6 +5188,7 @@ fn filter_ip_records(
     for record in ip_records {
         let record_ip_key = normalize_ip_text(&record.ip);
         let normalized_country_code = normalize_country_code(record.country_code.as_deref());
+        let city_country_token = normalize_city_country_token(record.country_code.as_deref());
 
         if blacklist.contains(&record_ip_key) {
             continue;
@@ -5198,7 +5215,7 @@ fn filter_ip_records(
                 city_filters.iter().any(|(country_filter, city_filter)| {
                     city_name == *city_filter
                         && match country_filter {
-                            Some(code) => normalized_country_code.as_deref() == Some(code.as_str()),
+                            Some(code) => city_country_token.as_deref() == Some(code.as_str()),
                             None => true,
                         }
                 })
@@ -8073,38 +8090,68 @@ proxies:
     }
 
     #[test]
-    fn search_session_options_city_filters_ignore_invalid_country_prefixes() {
+    fn search_session_options_city_values_preserve_invalid_country_prefixes() {
         let mut invalid_country = sample_ip("1.1.1.1", None);
         invalid_country.city = Some("Tokyo".to_string());
         invalid_country.country_code = Some("global".to_string());
         invalid_country.country_name = Some("Japan".to_string());
 
         let request = SearchSessionOptionsRequest {
-            kind: SessionOptionKind::Ip,
+            kind: SessionOptionKind::City,
             query: None,
             country_codes: vec![],
-            cities: vec!["global::Tokyo".to_string()],
+            cities: vec![],
             limit: None,
         };
 
         let items = search_session_options(&[invalid_country], &request)
+            .expect("city options should preserve opaque legacy tokens");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].value, "GLOBAL::Tokyo");
+        assert_eq!(items[0].label, "Tokyo");
+    }
+
+    #[test]
+    fn search_session_options_city_filters_preserve_invalid_country_prefixes() {
+        let mut invalid_country = sample_ip("1.1.1.1", None);
+        invalid_country.city = Some("Paris".to_string());
+        invalid_country.country_code = Some("global".to_string());
+        invalid_country.country_name = Some("Japan".to_string());
+        let mut valid_country = sample_ip("2.2.2.2", None);
+        valid_country.city = Some("Paris".to_string());
+        valid_country.country_code = Some("FR".to_string());
+        valid_country.country_name = Some("France".to_string());
+
+        let request = SearchSessionOptionsRequest {
+            kind: SessionOptionKind::Ip,
+            query: None,
+            country_codes: vec![],
+            cities: vec!["global::Paris".to_string()],
+            limit: None,
+        };
+
+        let items = search_session_options(&[invalid_country, valid_country], &request)
             .expect("legacy malformed city filters should still match");
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].value, "1.1.1.1");
     }
 
     #[test]
-    fn filter_ip_records_city_filters_ignore_invalid_country_prefixes() {
+    fn filter_ip_records_city_filters_preserve_invalid_country_prefixes() {
         let mut invalid_country = sample_ip("1.1.1.1", None);
-        invalid_country.city = Some("Tokyo".to_string());
+        invalid_country.city = Some("Paris".to_string());
         invalid_country.country_code = Some("global".to_string());
         invalid_country.country_name = Some("Japan".to_string());
+        let mut valid_country = sample_ip("2.2.2.2", None);
+        valid_country.city = Some("Paris".to_string());
+        valid_country.country_code = Some("FR".to_string());
+        valid_country.country_name = Some("France".to_string());
 
         let items = filter_ip_records(
-            vec![invalid_country],
+            vec![invalid_country, valid_country],
             &[],
             &ExtractIpRequest {
-                cities: vec!["global::Tokyo".to_string()],
+                cities: vec!["global::Paris".to_string()],
                 ..Default::default()
             },
         )
