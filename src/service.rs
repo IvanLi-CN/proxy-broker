@@ -46,6 +46,7 @@ use crate::{
         TaskRunDetail, TaskRunEventRecord, TaskRunKind, TaskRunRecord, TaskRunScope, TaskRunStage,
         TaskRunStatus, TaskRunSummary, TaskRunTrigger, now_epoch_sec,
     },
+    proxy_node_validation::{filter_malformed_proxy_nodes, malformed_proxy_reason},
     runtime::MihomoRuntime,
     store::BrokerStore,
     subscription,
@@ -326,12 +327,45 @@ impl BrokerService {
         Ok(sessions)
     }
 
+    fn filter_malformed_inventory_records(
+        &self,
+        profile_id: &str,
+        records: Vec<ProxyInventoryRecord>,
+        log_message: &'static str,
+    ) -> Vec<ProxyInventoryRecord> {
+        records
+            .into_iter()
+            .filter(|item| {
+                if let Some(reason) = malformed_proxy_reason(&item.proxy_type, &item.raw_proxy) {
+                    tracing::warn!(
+                        profile_id,
+                        import_id = %item.import_id,
+                        node_id = %item.node_id,
+                        source_scope = %item.source_scope.key(),
+                        allocation_scope = %item.allocation_scope.key(),
+                        proxy_name = %item.proxy_name,
+                        proxy_type = %item.proxy_type,
+                        error = %reason,
+                        "{log_message}"
+                    );
+                    false
+                } else {
+                    true
+                }
+            })
+            .collect()
+    }
+
     async fn collect_all_runtime_nodes(&self) -> BrokerResult<Vec<ProxyNode>> {
         let mut nodes = self
-            .store
-            .list_proxy_inventory()
-            .await
-            .map_err(BrokerError::from)?
+            .filter_malformed_inventory_records(
+                GLOBAL_RUNTIME_PROFILE_ID,
+                self.store
+                    .list_proxy_inventory()
+                    .await
+                    .map_err(BrokerError::from)?,
+                "malformed proxy inventory node skipped from shared runtime payload",
+            )
             .into_iter()
             .map(|item| ProxyNode {
                 node_id: Some(item.node_id),
@@ -1498,6 +1532,7 @@ impl BrokerService {
         mut nodes: Vec<ProxyNode>,
         mut warnings: Vec<String>,
     ) -> BrokerResult<ImportedInventoryOutcome> {
+        nodes = filter_malformed_proxy_nodes(nodes, &mut warnings);
         if nodes.is_empty() {
             return Err(BrokerError::SubscriptionInvalid);
         }
@@ -1715,7 +1750,7 @@ impl BrokerService {
         let settings = self
             .get_profile_proxy_settings_effective(profile_id)
             .await?;
-        let mut candidates = self
+        let candidates = self
             .store
             .list_proxy_inventory()
             .await
@@ -1728,6 +1763,11 @@ impl BrokerService {
                 } => allocated_profile_id == profile_id,
             })
             .collect::<Vec<_>>();
+        let mut candidates = self.filter_malformed_inventory_records(
+            profile_id,
+            candidates,
+            "malformed proxy inventory node skipped from effective profile inventory",
+        );
         candidates.sort_by(|left, right| {
             left.proxy_name
                 .cmp(&right.proxy_name)
@@ -1928,6 +1968,10 @@ impl BrokerService {
         &self,
         record: ProxyImportRecord,
     ) -> BrokerResult<ProxyImportItem> {
+        let summary_profile_id = match &record.allocation_scope {
+            ProxyScope::Global => GLOBAL_RUNTIME_PROFILE_ID,
+            ProxyScope::Profile { profile_id } => profile_id.as_str(),
+        };
         let (profiles, settings) = self.list_profile_ids_with_settings().await?;
         let effective_profile_ids = match &record.allocation_scope {
             ProxyScope::Global => profiles
@@ -1941,11 +1985,14 @@ impl BrokerService {
                 .collect::<Vec<_>>(),
             ProxyScope::Profile { profile_id } => vec![profile_id.clone()],
         };
-        let nodes = self
-            .store
-            .list_proxy_inventory_for_import(&record.import_id)
-            .await
-            .map_err(BrokerError::from)?;
+        let nodes = self.filter_malformed_inventory_records(
+            summary_profile_id,
+            self.store
+                .list_proxy_inventory_for_import(&record.import_id)
+                .await
+                .map_err(BrokerError::from)?,
+            "malformed proxy inventory node skipped from proxy import summary",
+        );
         let distinct_ip_count = nodes
             .iter()
             .flat_map(|item| item.resolved_ips.iter().cloned())
@@ -2186,11 +2233,14 @@ impl BrokerService {
         let view = query.view.as_deref().unwrap_or("global");
         match view {
             "global" => {
-                let records = self
-                    .store
-                    .list_proxy_inventory()
-                    .await
-                    .map_err(BrokerError::from)?;
+                let records = self.filter_malformed_inventory_records(
+                    GLOBAL_RUNTIME_PROFILE_ID,
+                    self.store
+                        .list_proxy_inventory()
+                        .await
+                        .map_err(BrokerError::from)?,
+                    "malformed proxy inventory node skipped from global proxy catalog",
+                );
                 self.build_proxy_catalog_response("global", None, records)
                     .await
             }
@@ -2239,11 +2289,14 @@ impl BrokerService {
         }
 
         let records = match view {
-            "global" => self
-                .store
-                .list_proxy_inventory()
-                .await
-                .map_err(BrokerError::from)?,
+            "global" => self.filter_malformed_inventory_records(
+                GLOBAL_RUNTIME_PROFILE_ID,
+                self.store
+                    .list_proxy_inventory()
+                    .await
+                    .map_err(BrokerError::from)?,
+                "malformed proxy inventory node skipped from proxy operation target resolution",
+            ),
             "profile" => {
                 let Some(profile_id) = profile_id else {
                     return Err(BrokerError::InvalidRequest(
@@ -4146,12 +4199,13 @@ impl BrokerService {
         scope: Option<&str>,
         profile_id: Option<&str>,
     ) -> BrokerResult<ListProxyInventoryResponse> {
+        let scope = scope.unwrap_or("all");
         let mut items = self
             .store
             .list_proxy_inventory()
             .await
             .map_err(BrokerError::from)?;
-        match scope.unwrap_or("all") {
+        match scope {
             "all" => {}
             "global" => items.retain(|item| matches!(&item.allocation_scope, ProxyScope::Global)),
             "profile" => {
@@ -4175,6 +4229,16 @@ impl BrokerService {
                 ));
             }
         }
+        let listing_profile_id = if scope == "profile" {
+            profile_id.unwrap_or(GLOBAL_RUNTIME_PROFILE_ID)
+        } else {
+            GLOBAL_RUNTIME_PROFILE_ID
+        };
+        items = self.filter_malformed_inventory_records(
+            listing_profile_id,
+            items,
+            "malformed proxy inventory node skipped from inventory listing",
+        );
 
         let (profiles, settings) = self.list_profile_ids_with_settings().await?;
         let items = items
@@ -5625,6 +5689,7 @@ mod tests {
         fail_shutdown: bool,
         apply_calls: AtomicUsize,
         shutdown_calls: AtomicUsize,
+        payloads: TokioMutex<Vec<String>>,
     }
 
     impl TestRuntime {
@@ -5634,6 +5699,7 @@ mod tests {
                 fail_shutdown,
                 apply_calls: AtomicUsize::new(0),
                 shutdown_calls: AtomicUsize::new(0),
+                payloads: TokioMutex::new(Vec::new()),
             }
         }
     }
@@ -6045,6 +6111,7 @@ mod tests {
 
         async fn apply_config(&self, _profile_id: &str, _payload: &str) -> anyhow::Result<()> {
             self.apply_calls.fetch_add(1, Ordering::SeqCst);
+            self.payloads.lock().await.push(_payload.to_string());
             if self.fail_controller_meta {
                 return Err(anyhow!("apply unavailable"));
             }
@@ -6940,6 +7007,55 @@ proxies:
     }
 
     #[tokio::test]
+    async fn load_subscription_request_filters_malformed_hysteria_nodes_from_source_imports() {
+        let profile_id = "p-filtered-malformed-source";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
+        let source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: bad-hy
+    type: hysteria
+    server: 1.1.1.1
+    up: ""
+    down: ""
+  - name: live-node
+    type: socks5
+    server: 8.8.4.4
+"#,
+        )
+        .await;
+
+        let response = service
+            .load_subscription_request(
+                profile_id,
+                &LoadSubscriptionRequest {
+                    name: None,
+                    source: Some(SubscriptionSource::File(source_path.clone())),
+                    content: None,
+                },
+            )
+            .await
+            .expect("source import should keep the usable node");
+        let _ = tokio::fs::remove_file(&source_path).await;
+
+        assert_eq!(response.loaded_proxies, 1);
+        assert!(
+            response
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("filtered malformed proxy entry `bad-hy`"))
+        );
+        let imports = service
+            .list_proxy_imports(Some("profile"), Some(profile_id))
+            .await
+            .expect("proxy imports should list");
+        assert_eq!(imports.items.len(), 1);
+        assert_eq!(imports.items[0].proxy_count, 1);
+    }
+
+    #[tokio::test]
     async fn manual_node_group_import_autogenerates_group_name() {
         let profile_id = "p-manual-group";
         let store = Arc::new(MemoryStore::new());
@@ -6979,6 +7095,55 @@ proxies:
         assert_eq!(imports.items[0].import_kind, ProxyImportKind::SingleNode);
         assert_eq!(imports.items[0].proxy_count, 2);
         assert_eq!(imports.items[0].name.as_deref(), Some("hk-entry +1"));
+    }
+
+    #[tokio::test]
+    async fn manual_node_group_import_filters_malformed_hysteria_nodes_and_warns() {
+        let profile_id = "p-manual-malformed-group";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
+
+        let response = service
+            .load_subscription_request(
+                profile_id,
+                &LoadSubscriptionRequest {
+                    name: None,
+                    source: None,
+                    content: Some(
+                        r#"
+proxies:
+  - name: bad-hy
+    type: hysteria
+    server: 1.1.1.1
+    up: ""
+    down: ""
+  - name: jp-entry
+    type: socks5
+    server: 8.8.8.8
+    port: 1080
+"#
+                        .to_string(),
+                    ),
+                },
+            )
+            .await
+            .expect("manual import should keep the usable node");
+
+        assert_eq!(response.loaded_proxies, 1);
+        assert!(
+            response
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("filtered malformed proxy entry `bad-hy`"))
+        );
+        let imports = service
+            .list_proxy_imports(Some("profile"), Some(profile_id))
+            .await
+            .expect("proxy imports should list");
+        assert_eq!(imports.items.len(), 1);
+        assert_eq!(imports.items[0].proxy_count, 1);
+        assert_eq!(imports.items[0].name.as_deref(), Some("jp-entry"));
     }
 
     #[tokio::test]
@@ -7455,6 +7620,185 @@ proxies:
             .expect("node-pinned open should succeed");
 
         assert_eq!(response.listen, "127.0.0.1:10080");
+    }
+
+    #[tokio::test]
+    async fn open_session_by_node_skips_malformed_global_inventory_in_shared_runtime_payload() {
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(
+            store.clone(),
+            runtime.clone(),
+            BrokerServiceOptions::default(),
+        );
+        service
+            .create_profile("browser")
+            .await
+            .expect("browser profile should be created");
+
+        let bad_import_id = "imp-bad-global".to_string();
+        store
+            .replace_proxy_inventory_import(
+                &ProxyImportRecord {
+                    import_id: bad_import_id.clone(),
+                    name: Some("bad-global".to_string()),
+                    import_kind: ProxyImportKind::Subscription,
+                    source_scope: ProxyScope::global(),
+                    source_identity: ProxyImportSourceIdentity::manual(&bad_import_id),
+                    allocation_scope: ProxyScope::global(),
+                    subscription_metadata: None,
+                    created_at: 1,
+                    updated_at: 1,
+                },
+                &[ProxyInventoryRecord {
+                    import_id: bad_import_id.clone(),
+                    node_id: "node-bad-hy".to_string(),
+                    source_scope: ProxyScope::global(),
+                    allocation_scope: ProxyScope::global(),
+                    proxy_name: "bad-hy".to_string(),
+                    proxy_type: "hysteria".to_string(),
+                    server: "5.5.5.5".to_string(),
+                    resolved_ips: vec!["5.5.5.5".to_string()],
+                    raw_proxy: serde_json::json!({
+                        "name": "bad-hy",
+                        "type": "hysteria",
+                        "server": "5.5.5.5",
+                        "up": "",
+                        "down": "",
+                    }),
+                    created_at: 1,
+                    updated_at: 1,
+                }],
+            )
+            .await
+            .expect("bad global inventory should seed");
+
+        let source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: browser-node
+    type: socks5
+    server: 8.8.4.4
+"#,
+        )
+        .await;
+        service
+            .load_subscription("browser", &SubscriptionSource::File(source_path.clone()))
+            .await
+            .expect("browser subscription should load");
+        let _ = tokio::fs::remove_file(&source_path).await;
+
+        let catalog = service
+            .list_proxy_catalog(&ProxyCatalogQuery {
+                view: Some("profile".to_string()),
+                profile_id: Some("browser".to_string()),
+            })
+            .await
+            .expect("browser catalog should list");
+        let catalog_nodes = catalog
+            .groups
+            .iter()
+            .flat_map(|group| group.nodes.iter())
+            .map(|node| node.proxy_name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(catalog_nodes, vec!["browser-node"]);
+        let node_id = catalog.groups[0].nodes[0].node_id.clone();
+
+        service
+            .open_session_by_node(
+                "browser",
+                &OpenSessionByNodeRequest {
+                    node_id,
+                    desired_port: Some(10080),
+                },
+            )
+            .await
+            .expect("node-pinned open should ignore malformed global inventory");
+
+        let payloads = runtime.payloads.lock().await.clone();
+        let final_payload = payloads
+            .last()
+            .expect("shared runtime should apply at least one payload");
+        assert!(final_payload.contains("browser-node"));
+        assert!(!final_payload.contains("bad-hy"));
+        assert!(!final_payload.contains("up: ''"));
+    }
+
+    #[tokio::test]
+    async fn inventory_views_hide_malformed_inventory_nodes() {
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
+
+        let import_id = "imp-global-filter".to_string();
+        store
+            .replace_proxy_inventory_import(
+                &ProxyImportRecord {
+                    import_id: import_id.clone(),
+                    name: Some("global-filter".to_string()),
+                    import_kind: ProxyImportKind::Subscription,
+                    source_scope: ProxyScope::global(),
+                    source_identity: ProxyImportSourceIdentity::manual(&import_id),
+                    allocation_scope: ProxyScope::global(),
+                    subscription_metadata: None,
+                    created_at: 1,
+                    updated_at: 1,
+                },
+                &[
+                    ProxyInventoryRecord {
+                        import_id: import_id.clone(),
+                        node_id: "node-good".to_string(),
+                        source_scope: ProxyScope::global(),
+                        allocation_scope: ProxyScope::global(),
+                        proxy_name: "good-node".to_string(),
+                        proxy_type: "socks5".to_string(),
+                        server: "8.8.8.8".to_string(),
+                        resolved_ips: vec!["8.8.8.8".to_string()],
+                        raw_proxy: serde_json::json!({
+                            "name": "good-node",
+                            "type": "socks5",
+                            "server": "8.8.8.8",
+                        }),
+                        created_at: 1,
+                        updated_at: 1,
+                    },
+                    ProxyInventoryRecord {
+                        import_id: import_id.clone(),
+                        node_id: "node-bad".to_string(),
+                        source_scope: ProxyScope::global(),
+                        allocation_scope: ProxyScope::global(),
+                        proxy_name: "bad-node".to_string(),
+                        proxy_type: "hysteria".to_string(),
+                        server: "9.9.9.9".to_string(),
+                        resolved_ips: vec!["9.9.9.9".to_string()],
+                        raw_proxy: serde_json::json!({
+                            "name": "bad-node",
+                            "type": "hysteria",
+                            "server": "9.9.9.9",
+                            "up": "",
+                            "down": "",
+                        }),
+                        created_at: 1,
+                        updated_at: 1,
+                    },
+                ],
+            )
+            .await
+            .expect("inventory should seed");
+
+        let inventory = service
+            .list_proxy_inventory(Some("all"), None)
+            .await
+            .expect("inventory should list");
+        assert_eq!(inventory.items.len(), 1);
+        assert_eq!(inventory.items[0].proxy_name, "good-node");
+
+        let imports = service
+            .list_proxy_imports(Some("all"), None)
+            .await
+            .expect("imports should list");
+        assert_eq!(imports.items.len(), 1);
+        assert_eq!(imports.items[0].proxy_count, 1);
     }
 
     #[tokio::test]

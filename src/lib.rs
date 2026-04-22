@@ -5,6 +5,7 @@ pub mod constants;
 pub mod error;
 mod ids;
 pub mod models;
+mod proxy_node_validation;
 pub mod runtime;
 pub mod service;
 pub mod store;

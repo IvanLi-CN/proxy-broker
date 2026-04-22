@@ -17,6 +17,7 @@ use crate::{
         TaskRunEventRecord, TaskRunKind, TaskRunRecord, TaskRunStage, TaskRunStatus,
         TaskRunTrigger,
     },
+    proxy_node_validation::malformed_proxy_reason,
     store::BrokerStore,
     tasks::matches_task_query,
 };
@@ -45,6 +46,7 @@ impl SqliteStore {
 
         let store = Self { pool };
         store.migrate().await?;
+        store.remove_malformed_proxy_rows().await?;
         Ok(store)
     }
 
@@ -403,6 +405,138 @@ impl SqliteStore {
         )
         .execute(&self.pool)
         .await?;
+        Ok(())
+    }
+
+    async fn remove_malformed_proxy_rows(&self) -> anyhow::Result<()> {
+        struct MalformedSubscriptionRow {
+            profile_id: String,
+            proxy_name: String,
+            proxy_type: String,
+            reason: String,
+        }
+
+        struct MalformedInventoryRow {
+            import_id: String,
+            node_id: String,
+            source_scope_profile_id: Option<String>,
+            allocation_scope_profile_id: Option<String>,
+            proxy_name: String,
+            proxy_type: String,
+            reason: String,
+        }
+
+        let subscription_rows = sqlx::query(
+            r#"
+            SELECT profile_id, proxy_name, proxy_type, raw_proxy_json
+            FROM subscription_nodes
+            ORDER BY profile_id ASC, proxy_name ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut malformed_subscription_rows = Vec::new();
+        for row in subscription_rows {
+            let profile_id: String = row.try_get("profile_id")?;
+            let proxy_name: String = row.try_get("proxy_name")?;
+            let proxy_type: String = row.try_get("proxy_type")?;
+            let raw_proxy_json: String = row.try_get("raw_proxy_json")?;
+            let Ok(raw_proxy) = serde_json::from_str::<serde_json::Value>(&raw_proxy_json) else {
+                continue;
+            };
+            if let Some(reason) = malformed_proxy_reason(&proxy_type, &raw_proxy) {
+                malformed_subscription_rows.push(MalformedSubscriptionRow {
+                    profile_id,
+                    proxy_name,
+                    proxy_type,
+                    reason,
+                });
+            }
+        }
+
+        let inventory_rows = sqlx::query(
+            r#"
+            SELECT import_id, node_id, source_scope_profile_id, allocation_scope_profile_id,
+                   proxy_name, proxy_type, raw_proxy_json
+            FROM proxy_inventory_nodes
+            ORDER BY import_id ASC, proxy_name ASC, node_id ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut malformed_inventory_rows = Vec::new();
+        for row in inventory_rows {
+            let import_id: String = row.try_get("import_id")?;
+            let node_id: String = row.try_get("node_id")?;
+            let source_scope_profile_id: Option<String> = row.try_get("source_scope_profile_id")?;
+            let allocation_scope_profile_id: Option<String> =
+                row.try_get("allocation_scope_profile_id")?;
+            let proxy_name: String = row.try_get("proxy_name")?;
+            let proxy_type: String = row.try_get("proxy_type")?;
+            let raw_proxy_json: String = row.try_get("raw_proxy_json")?;
+            let Ok(raw_proxy) = serde_json::from_str::<serde_json::Value>(&raw_proxy_json) else {
+                continue;
+            };
+            if let Some(reason) = malformed_proxy_reason(&proxy_type, &raw_proxy) {
+                malformed_inventory_rows.push(MalformedInventoryRow {
+                    import_id,
+                    node_id,
+                    source_scope_profile_id,
+                    allocation_scope_profile_id,
+                    proxy_name,
+                    proxy_type,
+                    reason,
+                });
+            }
+        }
+
+        if malformed_subscription_rows.is_empty() && malformed_inventory_rows.is_empty() {
+            return Ok(());
+        }
+
+        let mut tx = self.pool.begin().await?;
+        for row in &malformed_subscription_rows {
+            sqlx::query("DELETE FROM subscription_nodes WHERE profile_id = ?1 AND proxy_name = ?2")
+                .bind(&row.profile_id)
+                .bind(&row.proxy_name)
+                .execute(&mut *tx)
+                .await?;
+        }
+        for row in &malformed_inventory_rows {
+            sqlx::query("DELETE FROM proxy_inventory_nodes WHERE node_id = ?1")
+                .bind(&row.node_id)
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await?;
+
+        for row in malformed_subscription_rows {
+            tracing::warn!(
+                profile_id = %row.profile_id,
+                proxy_name = %row.proxy_name,
+                proxy_type = %row.proxy_type,
+                error = %row.reason,
+                "malformed subscription node removed during sqlite startup self-heal"
+            );
+        }
+        for row in malformed_inventory_rows {
+            tracing::warn!(
+                import_id = %row.import_id,
+                node_id = %row.node_id,
+                profile_id = row
+                    .allocation_scope_profile_id
+                    .as_deref()
+                    .or(row.source_scope_profile_id.as_deref())
+                    .unwrap_or(""),
+                proxy_name = %row.proxy_name,
+                proxy_type = %row.proxy_type,
+                error = %row.reason,
+                "malformed proxy inventory node removed during sqlite startup self-heal"
+            );
+        }
+
         Ok(())
     }
 
@@ -3990,6 +4124,215 @@ mod tests {
             assert_eq!(nodes.len(), 1);
             assert_eq!(nodes[0].proxy_name, "same-name");
         }
+
+        let _ = tokio::fs::remove_file(path).await;
+    }
+
+    #[tokio::test]
+    async fn open_self_heals_malformed_hysteria_rate_rows_from_subscription_and_inventory() {
+        let path = temp_store_path();
+        let bootstrap = SqliteStore::open(&path)
+            .await
+            .expect("current sqlite schema should bootstrap");
+        drop(bootstrap);
+
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(&path)
+                    .create_if_missing(true),
+            )
+            .await
+            .expect("sqlite should open for malformed row seed");
+
+        for profile_id in ["browser", "Tavily"] {
+            sqlx::query("INSERT INTO profiles (profile_id, created_at) VALUES (?1, ?2)")
+                .bind(profile_id)
+                .bind(1_i64)
+                .execute(&pool)
+                .await
+                .expect("profile row should seed");
+        }
+
+        sqlx::query(
+            r#"
+            INSERT INTO subscription_nodes (
+              profile_id, proxy_name, proxy_type, server, resolved_ips_json, raw_proxy_json
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "#,
+        )
+        .bind("browser")
+        .bind("browser-good")
+        .bind("socks5")
+        .bind("1.1.1.1")
+        .bind(serde_json::json!(["1.1.1.1"]).to_string())
+        .bind(
+            serde_json::json!({
+                "name": "browser-good",
+                "type": "socks5",
+                "server": "1.1.1.1"
+            })
+            .to_string(),
+        )
+        .execute(&pool)
+        .await
+        .expect("valid subscription node should seed");
+
+        sqlx::query(
+            r#"
+            INSERT INTO subscription_nodes (
+              profile_id, proxy_name, proxy_type, server, resolved_ips_json, raw_proxy_json
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "#,
+        )
+        .bind("browser")
+        .bind("browser-bad")
+        .bind("hysteria")
+        .bind("bad.example.com")
+        .bind(serde_json::json!(["104.18.38.89"]).to_string())
+        .bind(
+            serde_json::json!({
+                "name": "browser-bad",
+                "type": "hysteria",
+                "server": "bad.example.com",
+                "up": "",
+                "down": ""
+            })
+            .to_string(),
+        )
+        .execute(&pool)
+        .await
+        .expect("malformed subscription node should seed");
+
+        let source_url = "https://example.com/tavily.yaml";
+        let import_id = stable_proxy_import_id(
+            &ProxyScope::profile("Tavily"),
+            &ProxyImportSourceIdentity::from_source(&SubscriptionSource::Url(
+                source_url.to_string(),
+            )),
+        );
+        sqlx::query(
+            r#"
+            INSERT INTO proxy_imports (
+              import_id, name, import_kind, source_scope_type, source_scope_profile_id,
+              source_type, source_value, allocation_scope_type, allocation_scope_profile_id,
+              created_at, updated_at
+            )
+            VALUES (?1, 'Tavily feed', 'subscription', 'profile', 'Tavily', 'url', ?2, 'profile', 'Tavily', 10, 20)
+            "#,
+        )
+        .bind(&import_id)
+        .bind(source_url)
+        .execute(&pool)
+        .await
+        .expect("proxy import should seed");
+
+        let valid_inventory_raw = serde_json::json!({
+            "name": "tavily-good",
+            "type": "socks5",
+            "server": "2.2.2.2"
+        });
+        let valid_inventory_node_id = stable_proxy_inventory_node_id_for_test(
+            &import_id,
+            "tavily-good",
+            "socks5",
+            "2.2.2.2",
+            valid_inventory_raw.clone(),
+        );
+        sqlx::query(
+            r#"
+            INSERT INTO proxy_inventory_nodes (
+              import_id, node_id, source_scope_type, source_scope_profile_id, source_type, source_value,
+              allocation_scope_type, allocation_scope_profile_id,
+              proxy_name, proxy_type, server, resolved_ips_json, raw_proxy_json,
+              created_at, updated_at
+            )
+            VALUES (?1, ?2, 'profile', 'Tavily', 'url', ?3, 'profile', 'Tavily', ?4, 'socks5', '2.2.2.2', '["2.2.2.2"]', ?5, 10, 20)
+            "#,
+        )
+        .bind(&import_id)
+        .bind(&valid_inventory_node_id)
+        .bind(source_url)
+        .bind("tavily-good")
+        .bind(valid_inventory_raw.to_string())
+        .execute(&pool)
+        .await
+        .expect("valid inventory node should seed");
+
+        let malformed_inventory_raw = serde_json::json!({
+            "name": "tavily-bad",
+            "type": "hysteria",
+            "server": "bad.example.com",
+            "up": "",
+            "down": ""
+        });
+        let malformed_inventory_node_id = stable_proxy_inventory_node_id_for_test(
+            &import_id,
+            "tavily-bad",
+            "hysteria",
+            "bad.example.com",
+            malformed_inventory_raw.clone(),
+        );
+        sqlx::query(
+            r#"
+            INSERT INTO proxy_inventory_nodes (
+              import_id, node_id, source_scope_type, source_scope_profile_id, source_type, source_value,
+              allocation_scope_type, allocation_scope_profile_id,
+              proxy_name, proxy_type, server, resolved_ips_json, raw_proxy_json,
+              created_at, updated_at
+            )
+            VALUES (?1, ?2, 'profile', 'Tavily', 'url', ?3, 'profile', 'Tavily', ?4, 'hysteria', 'bad.example.com', '["104.18.38.89"]', ?5, 11, 21)
+            "#,
+        )
+        .bind(&import_id)
+        .bind(&malformed_inventory_node_id)
+        .bind(source_url)
+        .bind("tavily-bad")
+        .bind(malformed_inventory_raw.to_string())
+        .execute(&pool)
+        .await
+        .expect("malformed inventory node should seed");
+
+        pool.close().await;
+
+        let store = SqliteStore::open(&path)
+            .await
+            .expect("sqlite store should self-heal malformed hysteria rows");
+
+        let subscription_nodes = store
+            .list_subscription("browser")
+            .await
+            .expect("subscription nodes should list after self-heal");
+        assert_eq!(subscription_nodes.len(), 1);
+        assert_eq!(subscription_nodes[0].proxy_name, "browser-good");
+
+        let inventory_nodes = store
+            .list_proxy_inventory_for_import(&import_id)
+            .await
+            .expect("inventory nodes should list after self-heal");
+        assert_eq!(inventory_nodes.len(), 1);
+        assert_eq!(inventory_nodes[0].node_id, valid_inventory_node_id);
+        assert_eq!(inventory_nodes[0].proxy_name, "tavily-good");
+
+        assert!(
+            store
+                .get_proxy_import(&import_id)
+                .await
+                .expect("import lookup should succeed")
+                .is_some(),
+            "self-heal should keep the import head record readable"
+        );
+        assert!(
+            store
+                .get_proxy_inventory_node(&malformed_inventory_node_id)
+                .await
+                .expect("malformed inventory lookup should succeed")
+                .is_none(),
+            "self-heal should delete the malformed inventory row"
+        );
 
         let _ = tokio::fs::remove_file(path).await;
     }
