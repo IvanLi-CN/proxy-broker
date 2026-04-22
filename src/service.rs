@@ -3194,11 +3194,13 @@ impl BrokerService {
             }
 
             if let Some(online) = online_state.result {
-                let online_has_geo = online.country_code.is_some()
-                    || online.country.is_some()
-                    || online.region.is_some()
-                    || online.city.is_some();
-                if let Some(value) = normalize_country_code(online.country_code.as_deref()) {
+                let normalized_online_country_code =
+                    normalize_country_code(online.country_code.as_deref());
+                let online_has_geo = normalized_online_country_code.is_some()
+                    || online.country.as_ref().is_some()
+                    || online.region.as_ref().is_some()
+                    || online.city.as_ref().is_some();
+                if let Some(value) = normalized_online_country_code {
                     country_code = Some(value);
                 }
                 if let Some(value) = online.country {
@@ -5573,7 +5575,7 @@ mod tests {
     use async_trait::async_trait;
     use axum::{
         Router,
-        extract::State,
+        extract::{Path, State},
         http::{HeaderMap, HeaderValue, StatusCode},
         routing::get,
     };
@@ -6161,6 +6163,38 @@ mod tests {
                 .expect("test server should serve requests");
         });
         (format!("http://{addr}/subscription"), handle)
+    }
+
+    async fn test_online_geo_handler(
+        Path(_ip): Path<String>,
+        State(payload): State<Arc<str>>,
+    ) -> (StatusCode, String) {
+        (StatusCode::OK, payload.to_string())
+    }
+
+    async fn spawn_online_geo_server(
+        payload: &'static str,
+    ) -> (String, String, tokio::task::JoinHandle<()>) {
+        let app = Router::new()
+            .route("/mmdb", get(|| async { StatusCode::NOT_FOUND }))
+            .route("/{ip}", get(test_online_geo_handler))
+            .with_state(Arc::<str>::from(payload));
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("test listener should bind");
+        let addr = listener
+            .local_addr()
+            .expect("test listener should expose local addr");
+        let handle = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("test server should serve requests");
+        });
+        (
+            format!("http://{addr}"),
+            format!("http://{addr}/mmdb"),
+            handle,
+        )
     }
 
     fn make_session(
@@ -7189,6 +7223,57 @@ proxies:
         assert_eq!(metadata.country_code, None);
         assert_eq!(metadata.country_name.as_deref(), Some("Japan"));
         assert_eq!(metadata.city.as_deref(), Some("Shibuya"));
+    }
+
+    #[tokio::test]
+    async fn refresh_geo_records_clears_malformed_online_country_code_only_responses() {
+        let (online_geo_base, mmdb_url, server) =
+            spawn_online_geo_server(r#"{"success":true,"country_code":"global"}"#).await;
+        let data_dir = std::env::temp_dir().join(format!(
+            "proxy-broker-online-geo-test-{}",
+            crate::ids::random_temp_suffix()
+        ));
+        tokio::fs::create_dir_all(&data_dir)
+            .await
+            .expect("temp data dir should be created");
+        let options = BrokerServiceOptions {
+            online_geo_base,
+            mmdb_url,
+            data_dir: data_dir.clone(),
+            ..BrokerServiceOptions::default()
+        };
+
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store, runtime, options);
+        let now = 1_713_309_999;
+        let mut ip_records = vec![IpRecord {
+            ip: "1.1.1.1".to_string(),
+            country_code: Some("US".to_string()),
+            country_name: Some("United States".to_string()),
+            region_name: Some("California".to_string()),
+            city: Some("San Jose".to_string()),
+            geo_source: Some("legacy".to_string()),
+            probe_updated_at: None,
+            geo_updated_at: Some(now - 60),
+            last_used_at: None,
+        }];
+
+        let changed = service
+            .refresh_geo_records("default", true, now, &mut ip_records, None)
+            .await
+            .expect("refresh should succeed");
+
+        server.abort();
+        let _ = tokio::fs::remove_dir_all(&data_dir).await;
+
+        assert_eq!(changed, 1);
+        assert_eq!(ip_records[0].country_code, None);
+        assert_eq!(ip_records[0].country_name, None);
+        assert_eq!(ip_records[0].region_name, None);
+        assert_eq!(ip_records[0].city, None);
+        assert_eq!(ip_records[0].geo_source.as_deref(), Some("none"));
+        assert_eq!(ip_records[0].geo_updated_at, Some(now));
     }
 
     #[tokio::test]
