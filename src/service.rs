@@ -39,12 +39,12 @@ use crate::{
         ProxyCatalogResponse, ProxyImportItem, ProxyImportKind, ProxyImportRecord,
         ProxyImportSourceIdentity, ProxyImportSyncConfig, ProxyInventoryItem, ProxyInventoryRecord,
         ProxyNode, ProxyNodeMetadataRecord, ProxyOperationAcceptedResponse, ProxyOperationRequest,
-        ProxyScope, RefreshRequest, RefreshResponse, SearchSessionOptionsRequest,
-        SearchSessionOptionsResponse, SessionOptionItem, SessionOptionKind, SessionRecord,
-        SessionSelectionMode, SubscriptionSource, SuggestedPortResponse, TaskEventLevel,
-        TaskListQuery, TaskListResponse, TaskRunDetail, TaskRunEventRecord, TaskRunKind,
-        TaskRunRecord, TaskRunScope, TaskRunStage, TaskRunStatus, TaskRunSummary, TaskRunTrigger,
-        now_epoch_sec,
+        ProxyScope, RefreshRequest, RefreshResponse, ResolvedImportNameSource,
+        SearchSessionOptionsRequest, SearchSessionOptionsResponse, SessionOptionItem,
+        SessionOptionKind, SessionRecord, SessionSelectionMode, SubscriptionMetadata,
+        SubscriptionSource, SuggestedPortResponse, TaskEventLevel, TaskListQuery, TaskListResponse,
+        TaskRunDetail, TaskRunEventRecord, TaskRunKind, TaskRunRecord, TaskRunScope, TaskRunStage,
+        TaskRunStatus, TaskRunSummary, TaskRunTrigger, now_epoch_sec,
     },
     runtime::MihomoRuntime,
     store::BrokerStore,
@@ -119,6 +119,12 @@ struct LoadSubscriptionOutcome {
 struct ImportedInventoryOutcome {
     response: LoadSubscriptionResponse,
     import_id: String,
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedImportName {
+    value: Option<String>,
+    source: Option<ResolvedImportNameSource>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1421,6 +1427,64 @@ impl BrokerService {
         Some(format!("{first} +{}", nodes.len() - 1))
     }
 
+    fn resolve_import_name(
+        &self,
+        requested_name: Option<&str>,
+        existing_import: Option<&ProxyImportRecord>,
+        parsed_name: Option<&str>,
+        generated_name: Option<&str>,
+    ) -> ResolvedImportName {
+        if let Some(name) = requested_name
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+        {
+            return ResolvedImportName {
+                value: Some(name),
+                source: Some(ResolvedImportNameSource::ExplicitInput),
+            };
+        }
+
+        if let Some(name) = existing_import
+            .and_then(|item| item.name.as_deref())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+        {
+            return ResolvedImportName {
+                value: Some(name),
+                source: Some(ResolvedImportNameSource::ExistingImport),
+            };
+        }
+
+        if let Some(name) = parsed_name
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+        {
+            return ResolvedImportName {
+                value: Some(name),
+                source: Some(ResolvedImportNameSource::ParsedSource),
+            };
+        }
+
+        if let Some(name) = generated_name
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+        {
+            return ResolvedImportName {
+                value: Some(name),
+                source: Some(ResolvedImportNameSource::Generated),
+            };
+        }
+
+        ResolvedImportName {
+            value: None,
+            source: None,
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn persist_imported_inventory(
         &self,
@@ -1429,6 +1493,8 @@ impl BrokerService {
         source_identity: ProxyImportSourceIdentity,
         import_kind: ProxyImportKind,
         requested_name: Option<&str>,
+        parsed_name: Option<String>,
+        subscription_metadata: Option<SubscriptionMetadata>,
         mut nodes: Vec<ProxyNode>,
         mut warnings: Vec<String>,
     ) -> BrokerResult<ImportedInventoryOutcome> {
@@ -1494,14 +1560,15 @@ impl BrokerService {
         } else {
             None
         };
+        let resolved_name = self.resolve_import_name(
+            requested_name,
+            existing_import.as_ref(),
+            parsed_name.as_deref(),
+            derived_name.as_deref(),
+        );
         let import_record = ProxyImportRecord {
             import_id: import_id.clone(),
-            name: requested_name
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(ToOwned::to_owned)
-                .or_else(|| existing_import.as_ref().and_then(|item| item.name.clone()))
-                .or(derived_name),
+            name: resolved_name.value.clone(),
             import_kind,
             source_scope: source_scope.clone(),
             source_identity,
@@ -1509,6 +1576,7 @@ impl BrokerService {
                 .as_ref()
                 .map(|item| item.allocation_scope.clone())
                 .unwrap_or_else(|| source_scope.clone()),
+            subscription_metadata,
             created_at: existing_import
                 .as_ref()
                 .map(|item| item.created_at)
@@ -1549,6 +1617,9 @@ impl BrokerService {
             response: LoadSubscriptionResponse {
                 loaded_proxies: inventory_nodes.len(),
                 distinct_ips: distinct_ips.len(),
+                resolved_name: import_record.name.clone(),
+                resolved_name_source: resolved_name.source,
+                subscription_metadata: import_record.subscription_metadata.clone(),
                 warnings,
             },
         })
@@ -1560,7 +1631,7 @@ impl BrokerService {
         source: &SubscriptionSource,
         requested_name: Option<&str>,
     ) -> BrokerResult<ImportedInventoryOutcome> {
-        let (nodes, warnings) = subscription::load_from_source(&self.http, source)
+        let loaded = subscription::load_from_source(&self.http, source)
             .await
             .map_err(|err| match err {
                 subscription::SubscriptionLoadError::SourceRead(message) => {
@@ -1571,7 +1642,7 @@ impl BrokerService {
                 }
             })?;
 
-        if nodes.is_empty() {
+        if loaded.nodes.is_empty() {
             return Err(BrokerError::SubscriptionInvalid);
         }
 
@@ -1583,8 +1654,10 @@ impl BrokerService {
             source_identity,
             ProxyImportKind::Subscription,
             requested_name,
-            nodes,
-            warnings,
+            loaded.parsed_name,
+            loaded.metadata,
+            loaded.nodes,
+            loaded.warnings,
         )
         .await
     }
@@ -1595,7 +1668,7 @@ impl BrokerService {
         content: &str,
         requested_name: Option<&str>,
     ) -> BrokerResult<ImportedInventoryOutcome> {
-        let (nodes, warnings) = subscription::load_from_content(content)
+        let loaded = subscription::load_from_content(content)
             .await
             .map_err(|_| BrokerError::SubscriptionInvalid)?;
         let import_id = ids::random_import_id();
@@ -1605,8 +1678,10 @@ impl BrokerService {
             ProxyImportSourceIdentity::manual(import_id),
             ProxyImportKind::SingleNode,
             requested_name,
-            nodes,
-            warnings,
+            None,
+            None,
+            loaded.nodes,
+            loaded.warnings,
         )
         .await
     }
@@ -1886,6 +1961,7 @@ impl BrokerService {
             proxy_count: nodes.len(),
             distinct_ip_count,
             effective_profile_ids,
+            subscription_metadata: record.subscription_metadata,
             created_at: record.created_at,
             updated_at: record.updated_at,
         })
@@ -5429,8 +5505,8 @@ mod tests {
             ApiKeyRecord, IpRecord, LoadSubscriptionRequest, ProbeRecord, ProfileProxySettings,
             ProfileSyncConfig, ProxyCatalogQuery, ProxyImportKind, ProxyImportRecord,
             ProxyImportSourceIdentity, ProxyImportSyncConfig, ProxyInventoryRecord,
-            ProxyNodeMetadataRecord, ProxyScope, SessionRecord, SortMode, SubscriptionSource,
-            TaskListQuery, TaskRunEventRecord, TaskRunRecord,
+            ProxyNodeMetadataRecord, ProxyScope, ResolvedImportNameSource, SessionRecord, SortMode,
+            SubscriptionSource, TaskListQuery, TaskRunEventRecord, TaskRunRecord,
         },
         runtime::MihomoRuntime,
         store::{BrokerStore, MemoryStore},
@@ -5441,7 +5517,7 @@ mod tests {
     use axum::{
         Router,
         extract::State,
-        http::{HeaderMap, StatusCode},
+        http::{HeaderMap, HeaderValue, StatusCode},
         routing::get,
     };
     use std::collections::HashSet;
@@ -5976,27 +6052,37 @@ mod tests {
         payload: Arc<str>,
         status: StatusCode,
         accepted_user_agent: Option<Arc<str>>,
+        response_headers: HeaderMap,
     }
 
     async fn test_subscription_handler(
         State(state): State<TestSubscriptionServerState>,
         headers: HeaderMap,
-    ) -> (StatusCode, String) {
+    ) -> (StatusCode, HeaderMap, String) {
         let user_agent = headers
             .get(reqwest::header::USER_AGENT)
             .and_then(|value| value.to_str().ok());
         if let Some(accepted_user_agent) = state.accepted_user_agent.as_deref()
             && user_agent != Some(accepted_user_agent)
         {
-            return (StatusCode::OK, "invalid-without-compat-ua".to_string());
+            return (
+                StatusCode::OK,
+                HeaderMap::new(),
+                "invalid-without-compat-ua".to_string(),
+            );
         }
-        (state.status, state.payload.to_string())
+        (
+            state.status,
+            state.response_headers.clone(),
+            state.payload.to_string(),
+        )
     }
 
     async fn spawn_subscription_server(
         payload: &'static str,
         status: StatusCode,
         accepted_user_agent: Option<&'static str>,
+        response_headers: Option<HeaderMap>,
     ) -> (String, tokio::task::JoinHandle<()>) {
         let app = Router::new()
             .route("/subscription", get(test_subscription_handler))
@@ -6004,6 +6090,7 @@ mod tests {
                 payload: Arc::<str>::from(payload),
                 status,
                 accepted_user_agent: accepted_user_agent.map(Arc::<str>::from),
+                response_headers: response_headers.unwrap_or_default(),
             });
         let listener = TcpListener::bind(("127.0.0.1", 0))
             .await
@@ -6246,6 +6333,7 @@ proxies:
                     source_scope: ProxyScope::profile(profile_id),
                     source_identity: ProxyImportSourceIdentity::manual(&import_id),
                     allocation_scope: ProxyScope::profile(profile_id),
+                    subscription_metadata: None,
                     created_at: 1,
                     updated_at: 1,
                 },
@@ -6332,6 +6420,7 @@ proxies:
 "#,
             StatusCode::OK,
             Some(SUBSCRIPTION_FETCH_USER_AGENTS[1]),
+            None,
         )
         .await;
 
@@ -6355,7 +6444,7 @@ proxies:
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
         let (url, server) =
-            spawn_subscription_server("still-not-a-subscription", StatusCode::OK, None).await;
+            spawn_subscription_server("still-not-a-subscription", StatusCode::OK, None, None).await;
 
         let result = service
             .load_subscription(profile_id, &SubscriptionSource::Url(url))
@@ -6372,7 +6461,8 @@ proxies:
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
-        let (url, server) = spawn_subscription_server("blocked", StatusCode::FORBIDDEN, None).await;
+        let (url, server) =
+            spawn_subscription_server("blocked", StatusCode::FORBIDDEN, None, None).await;
 
         let result = service
             .load_subscription(profile_id, &SubscriptionSource::Url(url))
@@ -6420,6 +6510,310 @@ proxies:
             .expect("proxy imports should list");
         assert_eq!(imports.items.len(), 1);
         assert_eq!(imports.items[0].name.as_deref(), Some("ops-feed"));
+    }
+
+    #[tokio::test]
+    async fn load_subscription_request_uses_parsed_title_and_metadata_when_name_is_blank() {
+        let profile_id = "p-title-derived";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
+        let mut response_headers = HeaderMap::new();
+        response_headers.insert("profile-title", HeaderValue::from_static("edge-feed"));
+        response_headers.insert(
+            "x-clash-meta-subscription-userinfo",
+            HeaderValue::from_static("upload=10; download=20; total=100; expire=1710000000"),
+        );
+        let (url, server) = spawn_subscription_server(
+            r#"
+proxies:
+  - name: title-node
+    type: socks5
+    server: 8.8.4.4
+"#,
+            StatusCode::OK,
+            None,
+            Some(response_headers),
+        )
+        .await;
+
+        let response = service
+            .load_subscription_request(
+                profile_id,
+                &LoadSubscriptionRequest {
+                    name: None,
+                    source: Some(SubscriptionSource::Url(url.clone())),
+                    content: None,
+                },
+            )
+            .await
+            .expect("derived title import should succeed");
+
+        server.abort();
+
+        assert_eq!(response.resolved_name.as_deref(), Some("edge-feed"));
+        assert_eq!(
+            response.resolved_name_source,
+            Some(ResolvedImportNameSource::ParsedSource)
+        );
+        let metadata = response
+            .subscription_metadata
+            .clone()
+            .expect("response metadata should exist");
+        assert_eq!(metadata.source_title.as_deref(), Some("edge-feed"));
+        assert_eq!(metadata.used_bytes, Some(30));
+        assert_eq!(metadata.remaining_bytes, Some(70));
+        assert_eq!(metadata.expire_at, Some(1_710_000_000));
+
+        let imports = service
+            .list_proxy_imports(Some("profile"), Some(profile_id))
+            .await
+            .expect("proxy imports should list");
+        assert_eq!(imports.items.len(), 1);
+        assert_eq!(imports.items[0].name.as_deref(), Some("edge-feed"));
+        assert_eq!(
+            imports.items[0]
+                .subscription_metadata
+                .as_ref()
+                .and_then(|item| item.source_title.as_deref()),
+            Some("edge-feed")
+        );
+        assert_eq!(
+            imports.items[0]
+                .subscription_metadata
+                .as_ref()
+                .and_then(|item| item.remaining_bytes),
+            Some(70)
+        );
+    }
+
+    #[tokio::test]
+    async fn load_subscription_request_uses_file_name_without_persisting_source_title() {
+        let profile_id = "p-file-name-derived";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
+        let source_path = std::env::temp_dir().join("proxy-broker-file-derived-name.yaml");
+        tokio::fs::write(
+            &source_path,
+            r#"
+proxies:
+  - name: file-node
+    type: socks5
+    server: 8.8.4.4
+"#,
+        )
+        .await
+        .expect("subscription file should be written");
+
+        let response = service
+            .load_subscription_request(
+                profile_id,
+                &LoadSubscriptionRequest {
+                    name: None,
+                    source: Some(SubscriptionSource::File(
+                        source_path.to_string_lossy().to_string(),
+                    )),
+                    content: None,
+                },
+            )
+            .await
+            .expect("file source import should succeed");
+
+        let _ = tokio::fs::remove_file(&source_path).await;
+
+        assert_eq!(
+            response.resolved_name.as_deref(),
+            Some("proxy-broker-file-derived-name")
+        );
+        assert_eq!(
+            response.resolved_name_source,
+            Some(ResolvedImportNameSource::ParsedSource)
+        );
+        assert!(response.subscription_metadata.is_none());
+
+        let imports = service
+            .list_proxy_imports(Some("profile"), Some(profile_id))
+            .await
+            .expect("proxy imports should list");
+        assert_eq!(imports.items.len(), 1);
+        assert_eq!(
+            imports.items[0].name.as_deref(),
+            Some("proxy-broker-file-derived-name")
+        );
+        assert!(imports.items[0].subscription_metadata.is_none());
+    }
+
+    #[tokio::test]
+    async fn load_subscription_request_uses_url_host_when_headers_do_not_name_import() {
+        let profile_id = "p-url-host-derived";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
+        let app = Router::new()
+            .route("/api/v1/client/abcdef123", get(test_subscription_handler))
+            .with_state(TestSubscriptionServerState {
+                payload: Arc::<str>::from(
+                    r#"
+proxies:
+  - name: host-node
+    type: socks5
+    server: 8.8.4.4
+"#,
+                ),
+                status: StatusCode::OK,
+                accepted_user_agent: None,
+                response_headers: HeaderMap::new(),
+            });
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("test listener should bind");
+        let addr = listener
+            .local_addr()
+            .expect("test listener should expose local addr");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("test server should serve requests");
+        });
+        let url = format!("http://{addr}/api/v1/client/abcdef123?token=secret");
+
+        let response = service
+            .load_subscription_request(
+                profile_id,
+                &LoadSubscriptionRequest {
+                    name: None,
+                    source: Some(SubscriptionSource::Url(url)),
+                    content: None,
+                },
+            )
+            .await
+            .expect("host-derived import should succeed");
+
+        server.abort();
+
+        assert_eq!(response.resolved_name.as_deref(), Some("127.0.0.1"));
+        assert_eq!(
+            response.resolved_name_source,
+            Some(ResolvedImportNameSource::ParsedSource)
+        );
+        assert!(response.subscription_metadata.is_none());
+
+        let imports = service
+            .list_proxy_imports(Some("profile"), Some(profile_id))
+            .await
+            .expect("proxy imports should list");
+        assert_eq!(imports.items.len(), 1);
+        assert_eq!(imports.items[0].name.as_deref(), Some("127.0.0.1"));
+        assert!(imports.items[0].subscription_metadata.is_none());
+    }
+
+    #[tokio::test]
+    async fn load_subscription_request_keeps_existing_name_over_new_parsed_title() {
+        let profile_id = "p-existing-name";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
+        let mut response_headers = HeaderMap::new();
+        response_headers.insert("profile-title", HeaderValue::from_static("edge-feed"));
+        let (url, server) = spawn_subscription_server(
+            r#"
+proxies:
+  - name: title-node
+    type: socks5
+    server: 8.8.4.4
+"#,
+            StatusCode::OK,
+            None,
+            Some(response_headers),
+        )
+        .await;
+
+        service
+            .load_subscription_request(
+                profile_id,
+                &LoadSubscriptionRequest {
+                    name: Some("ops-feed".to_string()),
+                    source: Some(SubscriptionSource::Url(url.clone())),
+                    content: None,
+                },
+            )
+            .await
+            .expect("seed import should succeed");
+
+        let response = service
+            .load_subscription_request(
+                profile_id,
+                &LoadSubscriptionRequest {
+                    name: None,
+                    source: Some(SubscriptionSource::Url(url)),
+                    content: None,
+                },
+            )
+            .await
+            .expect("blank rename import should succeed");
+
+        server.abort();
+
+        assert_eq!(response.resolved_name.as_deref(), Some("ops-feed"));
+        assert_eq!(
+            response.resolved_name_source,
+            Some(ResolvedImportNameSource::ExistingImport)
+        );
+        assert_eq!(
+            response
+                .subscription_metadata
+                .as_ref()
+                .and_then(|item| item.source_title.as_deref()),
+            Some("edge-feed")
+        );
+    }
+
+    #[tokio::test]
+    async fn load_subscription_request_filters_information_nodes_from_source_imports() {
+        let profile_id = "p-filtered-source";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
+        let source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: 剩余流量 12GB
+    type: socks5
+    server: 1.1.1.1
+  - name: live-node
+    type: socks5
+    server: 8.8.4.4
+"#,
+        )
+        .await;
+
+        let response = service
+            .load_subscription_request(
+                profile_id,
+                &LoadSubscriptionRequest {
+                    name: None,
+                    source: Some(SubscriptionSource::File(source_path.clone())),
+                    content: None,
+                },
+            )
+            .await
+            .expect("source import should keep the usable node");
+        let _ = tokio::fs::remove_file(&source_path).await;
+
+        assert_eq!(response.loaded_proxies, 1);
+        assert!(
+            response
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("filtered informational subscription entry"))
+        );
+        let imports = service
+            .list_proxy_imports(Some("profile"), Some(profile_id))
+            .await
+            .expect("proxy imports should list");
+        assert_eq!(imports.items.len(), 1);
+        assert_eq!(imports.items[0].proxy_count, 1);
     }
 
     #[tokio::test]

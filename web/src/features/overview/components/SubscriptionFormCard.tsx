@@ -17,7 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useI18n } from "@/i18n";
-import { formatOperatorWarning } from "@/lib/format";
+import { buildSubscriptionMetadataBullets } from "@/lib/format";
 import type { LoadSubscriptionRequest, LoadSubscriptionResponse } from "@/lib/types";
 
 const schema = z.object({
@@ -40,7 +40,7 @@ export function SubscriptionFormCard({
   error,
   onSubmit,
 }: SubscriptionFormCardProps) {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
@@ -50,6 +50,9 @@ export function SubscriptionFormCard({
   });
   const sourceType = form.watch("sourceType");
   const sourceTypeLabel = sourceType === "url" ? t("URL") : t("File path");
+  const responseBullets = response
+    ? buildSubscriptionMetadataBullets(locale, t, response)
+    : undefined;
 
   return (
     <Card className="overflow-hidden border-border/70 bg-card/96 shadow-[0_24px_70px_-44px_rgba(15,23,42,0.55)]">
@@ -168,12 +171,23 @@ export function SubscriptionFormCard({
         {response ? (
           <ActionResponsePanel
             title={t("Subscription loaded")}
-            description={t("Loaded {proxyCount} proxies across {ipCount} distinct IPs.", {
-              proxyCount: response.loaded_proxies,
-              ipCount: response.distinct_ips,
-            })}
+            description={
+              response.resolved_name
+                ? t(
+                    "Loaded {proxyCount} proxies across {ipCount} distinct IPs. Final name: {name}.",
+                    {
+                      proxyCount: response.loaded_proxies,
+                      ipCount: response.distinct_ips,
+                      name: response.resolved_name,
+                    },
+                  )
+                : t("Loaded {proxyCount} proxies across {ipCount} distinct IPs.", {
+                    proxyCount: response.loaded_proxies,
+                    ipCount: response.distinct_ips,
+                  })
+            }
             tone={response.warnings.length > 0 ? "warning" : "success"}
-            bullets={response.warnings.map((warning) => formatOperatorWarning(t, warning))}
+            bullets={responseBullets}
           />
         ) : null}
         {error ? (

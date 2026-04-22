@@ -79,6 +79,13 @@
   - `source_value TEXT NOT NULL`
   - `allocation_scope_type TEXT NOT NULL` (`global|profile`)
   - `allocation_scope_profile_id TEXT`
+  - `source_title TEXT`
+  - `upload_bytes INTEGER`
+  - `download_bytes INTEGER`
+  - `used_bytes INTEGER`
+  - `total_bytes INTEGER`
+  - `remaining_bytes INTEGER`
+  - `expire_at INTEGER`
   - `created_at INTEGER NOT NULL`
   - `updated_at INTEGER NOT NULL`
   - indexes on `(source_scope_type, source_scope_profile_id)` and `(allocation_scope_type, allocation_scope_profile_id)`
@@ -140,6 +147,7 @@
 
 - `proxy_imports` 是原始导入批次的真相源；`proxy_inventory_nodes` 是导入批次下的节点明细层，并通过 `import_id` 关联。
 - `proxy_imports.name` 保存导入显示名称；允许为空，前端或服务端可在创建时生成名称，列表显示时再回退到 `import_id`。
+- source-based imports additionally persist one subscription metadata snapshot in `proxy_imports` (`source_title`, upload/download/used/total/remaining bytes, `expire_at`); historical imports may keep all of these columns `NULL`.
 - 订阅内节点唯一性从 `scope + proxy_name` 改成 `(import_id, proxy_name)`，允许同一 scope 下多个订阅并存且包含同名节点。
 - `single_node` kind 现在表示手动节点组导入：一次提交的一个或多个节点作为同一个原始导入批次保存。
 - `proxy_import_sync_configs` 以 `import_id` 为键保存 profile-local 订阅的自动同步状态，取代“每个 profile 只有一个 source”的旧模型；旧数据会在迁移时回填成 import 级记录。

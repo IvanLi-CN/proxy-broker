@@ -19,7 +19,21 @@ export const healthFixture: HealthResponse = {
 export const subscriptionFixture: LoadSubscriptionResponse = {
   loaded_proxies: 48,
   distinct_ips: 26,
-  warnings: ["proxy `JP-Relay-02` DNS resolve failed, reused 1 cached ip(s)"],
+  resolved_name: "edge-feed",
+  resolved_name_source: "parsed_source",
+  subscription_metadata: {
+    source_title: "edge-feed",
+    upload_bytes: 10 * 1024 ** 3,
+    download_bytes: 20 * 1024 ** 3,
+    used_bytes: 30 * 1024 ** 3,
+    total_bytes: 100 * 1024 ** 3,
+    remaining_bytes: 70 * 1024 ** 3,
+    expire_at: 1_741_748_800,
+  },
+  warnings: [
+    "proxy `JP-Relay-02` DNS resolve failed, reused 1 cached ip(s)",
+    "filtered informational subscription entry `剩余流量 70GB`",
+  ],
 };
 
 export const refreshFixture: RefreshResponse = {

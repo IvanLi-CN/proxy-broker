@@ -43,7 +43,14 @@ import { ProfileProxyPolicyCard } from "@/features/proxies/components/ProfilePro
 import { ProxyLoadCard } from "@/features/proxies/components/ProxyLoadCard";
 import type { ProxyNodeLiveState } from "@/hooks/use-proxy-operation-events";
 import { useI18n } from "@/i18n";
-import { formatCountryName, formatLatency, formatTimestamp, optionalNumber } from "@/lib/format";
+import {
+  formatCountryName,
+  formatLatency,
+  formatSubscriptionExpire,
+  formatSubscriptionQuota,
+  formatTimestamp,
+  optionalNumber,
+} from "@/lib/format";
 import type {
   CurrentUserState,
   ListProxyImportResponse,
@@ -83,6 +90,15 @@ function formatImportKind(kind: ProxyImportKind, t: ReturnType<typeof useI18n>["
 
 function formatImportLabel(item: ProxyImportItem) {
   return item.name?.trim() || item.import_id;
+}
+
+function formatImportSourceTitle(item: ProxyImportItem) {
+  const sourceTitle = item.subscription_metadata?.source_title?.trim();
+  const displayName = item.name?.trim();
+  if (!sourceTitle || sourceTitle === displayName) {
+    return null;
+  }
+  return sourceTitle;
 }
 
 function PageHeader({
@@ -944,6 +960,17 @@ function GroupedProxyCatalogPanel({
                   ).length;
                   const allSelected =
                     group.nodes.length > 0 && selectedCount === group.nodes.length;
+                  const sourceTitle = formatImportSourceTitle(group.import);
+                  const quotaSummary = formatSubscriptionQuota(
+                    locale,
+                    t,
+                    group.import.subscription_metadata,
+                  );
+                  const expireSummary = formatSubscriptionExpire(
+                    locale,
+                    t,
+                    group.import.subscription_metadata,
+                  );
                   const canDeleteProfileImport =
                     mode === "profile" &&
                     group.import.source_scope.type === "profile" &&
@@ -981,6 +1008,11 @@ function GroupedProxyCatalogPanel({
                               <div className="font-medium text-foreground">
                                 {formatImportLabel(group.import)}
                               </div>
+                              {sourceTitle ? (
+                                <div className="text-xs text-muted-foreground">
+                                  {t("Source title: {title}", { title: sourceTitle })}
+                                </div>
+                              ) : null}
                               <div className="flex flex-wrap gap-1">
                                 <Badge
                                   variant="secondary"
@@ -1009,6 +1041,8 @@ function GroupedProxyCatalogPanel({
                                 count: formatNumber(group.import.distinct_ip_count),
                               })}
                             </div>
+                            {quotaSummary ? <div>{quotaSummary}</div> : null}
+                            {expireSummary ? <div>{expireSummary}</div> : null}
                             <div>{formatTimestamp(locale, t, group.import.updated_at)}</div>
                             {mode === "profile" ? (
                               <InventoryProfiles

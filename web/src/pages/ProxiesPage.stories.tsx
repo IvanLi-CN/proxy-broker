@@ -46,6 +46,15 @@ const proxyImportsFixture = {
       effective_profile_ids: ["default", "edge-jp", "lab-us"],
       proxy_count: 12,
       distinct_ip_count: 9,
+      subscription_metadata: {
+        source_title: "Tokyo Premium Feed",
+        upload_bytes: 10 * 1024 ** 3,
+        download_bytes: 20 * 1024 ** 3,
+        used_bytes: 30 * 1024 ** 3,
+        total_bytes: 100 * 1024 ** 3,
+        remaining_bytes: 70 * 1024 ** 3,
+        expire_at: 1_741_748_800,
+      },
       created_at: 1_713_308_400,
       updated_at: 1_713_309_000,
     },
@@ -62,6 +71,7 @@ const proxyImportsFixture = {
       effective_profile_ids: ["edge-jp"],
       proxy_count: 4,
       distinct_ip_count: 3,
+      subscription_metadata: null,
       created_at: 1_713_308_800,
       updated_at: 1_713_309_200,
     },
@@ -605,6 +615,9 @@ export const GlobalConfig: Story = {
     globalLoadResponse: {
       loaded_proxies: 12,
       distinct_ips: 9,
+      resolved_name: "global-jp",
+      resolved_name_source: "parsed_source",
+      subscription_metadata: proxyImportsFixture.items[0]?.subscription_metadata,
       warnings: [],
     },
     globalLoadError: null,
@@ -630,7 +643,11 @@ export const GlobalConfig: Story = {
   async play({ canvasElement }) {
     const canvas = within(canvasElement);
     await expect(await canvas.findByText(/Grouped proxy catalog/i)).toBeVisible();
-    await expect(await canvas.findByText(/global-jp/i)).toBeVisible();
+    await expect(await canvas.findByText(/^global-jp$/i)).toBeVisible();
+    await expect(
+      (await canvas.findAllByText(/Source title: Tokyo Premium Feed/i)).length,
+    ).toBeGreaterThan(0);
+    await expect((await canvas.findAllByText(/Remaining/i)).length).toBeGreaterThan(0);
     await expect(await canvas.findByText(/JP-Tokyo-Entry/i)).toBeVisible();
     await expect(await canvas.findByText(/Probe selected/i)).toBeVisible();
   },
@@ -644,7 +661,16 @@ export const ProfileConfig: Story = {
     profileLoadResponse: {
       loaded_proxies: 4,
       distinct_ips: 3,
-      warnings: [],
+      resolved_name: "edge-feed",
+      resolved_name_source: "parsed_source",
+      subscription_metadata: {
+        source_title: "Edge JP Feed",
+        total_bytes: 60 * 1024 ** 3,
+        remaining_bytes: 42 * 1024 ** 3,
+        used_bytes: 18 * 1024 ** 3,
+        expire_at: 1_741_760_000,
+      },
+      warnings: ["filtered informational subscription entry `剩余流量 42GB`"],
     },
     profileLoadError: null,
     loadingProfile: false,
@@ -720,7 +746,7 @@ export const ZhCN: Story = {
     const canvas = within(canvasElement);
     await expect(await canvas.findByText(/分组代理目录/i)).toBeVisible();
     await expect(await canvas.findByText(/刷新所选/i)).toBeVisible();
-    await expect(await canvas.findByText(/global-jp/i)).toBeVisible();
+    await expect(await canvas.findByText(/^global-jp$/i)).toBeVisible();
   },
 };
 
