@@ -3196,17 +3196,17 @@ impl BrokerService {
             if let Some(online) = online_state.result {
                 let normalized_online_country_code =
                     normalize_country_code(online.country_code.as_deref());
-                let malformed_online_country_code =
-                    online.country_code.is_some() && normalized_online_country_code.is_none();
                 let online_has_geo = normalized_online_country_code.is_some()
                     || online.country.as_ref().is_some()
                     || online.region.as_ref().is_some()
                     || online.city.as_ref().is_some();
-                if let Some(value) = normalized_online_country_code {
-                    country_code = Some(value);
-                } else if online_has_geo && malformed_online_country_code {
-                    country_code = None;
-                }
+                let has_lookup_country_code = mmdb_hit && country_code.is_some();
+                country_code = resolve_online_geo_country_code(
+                    country_code,
+                    has_lookup_country_code,
+                    online.country_code.as_deref(),
+                    online_has_geo,
+                );
                 if let Some(value) = online.country {
                     country_name = Some(value);
                 }
@@ -4592,6 +4592,24 @@ fn normalize_country_code(value: Option<&str>) -> Option<String> {
         return Some(normalized);
     }
     None
+}
+
+fn resolve_online_geo_country_code(
+    current_country_code: Option<String>,
+    has_lookup_country_code: bool,
+    online_country_code: Option<&str>,
+    online_has_geo: bool,
+) -> Option<String> {
+    let normalized_online_country_code = normalize_country_code(online_country_code);
+    let malformed_online_country_code =
+        online_country_code.is_some() && normalized_online_country_code.is_none();
+    if let Some(value) = normalized_online_country_code {
+        return Some(value);
+    }
+    if online_has_geo && malformed_online_country_code && !has_lookup_country_code {
+        return None;
+    }
+    current_country_code
 }
 
 fn normalize_country_filter_token(value: Option<&str>) -> Option<String> {
@@ -8380,6 +8398,22 @@ proxies:
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].country_code.as_deref(), Some("A1"));
         assert_eq!(items[0].country_name.as_deref(), Some("Anonymous Proxy"));
+    }
+
+    #[test]
+    fn resolve_online_geo_country_code_preserves_mmdb_code_on_malformed_online_value() {
+        let country_code =
+            resolve_online_geo_country_code(Some("JP".to_string()), true, Some("global"), true);
+
+        assert_eq!(country_code.as_deref(), Some("JP"));
+    }
+
+    #[test]
+    fn resolve_online_geo_country_code_clears_stale_code_without_lookup_source() {
+        let country_code =
+            resolve_online_geo_country_code(Some("US".to_string()), false, Some("global"), true);
+
+        assert_eq!(country_code, None);
     }
 
     #[test]
