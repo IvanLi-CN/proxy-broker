@@ -23,11 +23,13 @@ pub struct LoadedSubscription {
     pub nodes: Vec<ProxyNode>,
     pub warnings: Vec<String>,
     pub metadata: Option<SubscriptionMetadata>,
+    pub parsed_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
 struct ParsedResponseMetadata {
     metadata: Option<SubscriptionMetadata>,
+    parsed_name: Option<String>,
     warnings: Vec<String>,
     _profile_update_interval_sec: Option<u64>,
 }
@@ -262,11 +264,13 @@ fn content_disposition_mentions_filename(value: &str) -> bool {
     })
 }
 
-fn parse_subscription_userinfo(value: &str) -> Option<SubscriptionMetadata> {
+fn parse_subscription_userinfo(value: &str) -> (Option<SubscriptionMetadata>, Option<String>) {
     let mut upload_bytes = None;
     let mut download_bytes = None;
     let mut total_bytes = None;
     let mut expire_at = None;
+    let mut saw_known_field = false;
+    let mut saw_invalid_known_field = false;
 
     for part in value.split([';', ',']) {
         let (key, raw_value) = match part.split_once('=') {
@@ -276,10 +280,34 @@ fn parse_subscription_userinfo(value: &str) -> Option<SubscriptionMetadata> {
         let key = key.trim().to_ascii_lowercase();
         let raw_value = raw_value.trim();
         match key.as_str() {
-            "upload" => upload_bytes = raw_value.parse::<u64>().ok(),
-            "download" => download_bytes = raw_value.parse::<u64>().ok(),
-            "total" => total_bytes = raw_value.parse::<u64>().ok(),
-            "expire" => expire_at = raw_value.parse::<i64>().ok(),
+            "upload" => {
+                saw_known_field = true;
+                match raw_value.parse::<u64>() {
+                    Ok(value) => upload_bytes = Some(value),
+                    Err(_) => saw_invalid_known_field = true,
+                }
+            }
+            "download" => {
+                saw_known_field = true;
+                match raw_value.parse::<u64>() {
+                    Ok(value) => download_bytes = Some(value),
+                    Err(_) => saw_invalid_known_field = true,
+                }
+            }
+            "total" => {
+                saw_known_field = true;
+                match raw_value.parse::<u64>() {
+                    Ok(value) => total_bytes = Some(value),
+                    Err(_) => saw_invalid_known_field = true,
+                }
+            }
+            "expire" => {
+                saw_known_field = true;
+                match raw_value.parse::<i64>() {
+                    Ok(value) => expire_at = Some(value),
+                    Err(_) => saw_invalid_known_field = true,
+                }
+            }
             _ => {}
         }
     }
@@ -295,7 +323,7 @@ fn parse_subscription_userinfo(value: &str) -> Option<SubscriptionMetadata> {
     };
     let remaining_bytes = total_bytes.map(|total| total.saturating_sub(used_bytes.unwrap_or(0)));
 
-    SubscriptionMetadata {
+    let metadata = SubscriptionMetadata {
         source_title: None,
         upload_bytes,
         download_bytes,
@@ -304,7 +332,15 @@ fn parse_subscription_userinfo(value: &str) -> Option<SubscriptionMetadata> {
         remaining_bytes,
         expire_at,
     }
-    .normalized()
+    .normalized();
+
+    let warning = if !saw_known_field || saw_invalid_known_field {
+        Some("ignored invalid `subscription-userinfo` header".to_string())
+    } else {
+        None
+    };
+
+    (metadata, warning)
 }
 
 fn parse_profile_update_interval(value: &str) -> Option<u64> {
@@ -402,9 +438,16 @@ fn parse_response_metadata(
     fallback_title: Option<String>,
 ) -> ParsedResponseMetadata {
     let mut warnings = Vec::new();
-    let mut metadata = find_header_value(headers, "subscription-userinfo", true)
-        .and_then(|value| parse_subscription_userinfo(&value))
-        .unwrap_or_default();
+    let mut metadata = SubscriptionMetadata::default();
+    if let Some(value) = find_header_value(headers, "subscription-userinfo", true) {
+        let (parsed_metadata, warning) = parse_subscription_userinfo(&value);
+        if let Some(parsed_metadata) = parsed_metadata {
+            metadata = parsed_metadata;
+        }
+        if let Some(warning) = warning {
+            warnings.push(warning);
+        }
+    }
 
     let mut source_title = None;
     if let Some(raw_title) = find_header_value(headers, "profile-title", false) {
@@ -431,14 +474,12 @@ fn parse_response_metadata(
         }
     }
 
-    if source_title.is_none() {
-        source_title = fallback_title;
-    }
-
+    let parsed_name = source_title.clone().or(fallback_title);
     metadata.source_title = source_title;
 
     ParsedResponseMetadata {
         metadata: metadata.normalized(),
+        parsed_name,
         warnings,
         _profile_update_interval_sec: find_header_value(headers, "profile-update-interval", false)
             .and_then(|value| parse_profile_update_interval(&value)),
@@ -448,7 +489,15 @@ fn parse_response_metadata(
 async fn fetch_url_source(
     client: &reqwest::Client,
     url: &str,
-) -> Result<(Vec<Value>, Vec<String>, Option<SubscriptionMetadata>), SubscriptionLoadError> {
+) -> Result<
+    (
+        Vec<Value>,
+        Vec<String>,
+        Option<SubscriptionMetadata>,
+        Option<String>,
+    ),
+    SubscriptionLoadError,
+> {
     let mut fetch_errors = Vec::new();
     let mut parse_errors = Vec::new();
     let mut received_success_body = false;
@@ -520,7 +569,12 @@ async fn fetch_url_source(
                 }
                 let mut metadata = parse_response_metadata(&headers, derive_title_from_url(url));
                 warnings.append(&mut metadata.warnings);
-                return Ok((filtered_proxies, warnings, metadata.metadata));
+                return Ok((
+                    filtered_proxies,
+                    warnings,
+                    metadata.metadata,
+                    metadata.parsed_name,
+                ));
             }
             Ok(_) => {
                 parse_errors.push(format!(
@@ -602,6 +656,7 @@ async fn load_from_proxies(
         nodes,
         warnings,
         metadata: None,
+        parsed_name: None,
     })
 }
 
@@ -609,7 +664,7 @@ pub async fn load_from_source(
     client: &reqwest::Client,
     source: &crate::models::SubscriptionSource,
 ) -> Result<LoadedSubscription, SubscriptionLoadError> {
-    let (mut proxies, mut warnings, metadata) = match source {
+    let (mut proxies, mut warnings, metadata, parsed_name) = match source {
         crate::models::SubscriptionSource::Url(url) => fetch_url_source(client, url).await?,
         crate::models::SubscriptionSource::File(path) => {
             let raw = tokio::fs::read_to_string(path).await.map_err(|err| {
@@ -620,17 +675,15 @@ pub async fn load_from_source(
             (
                 parse_subscription_payload(&raw)?,
                 Vec::new(),
-                SubscriptionMetadata {
-                    source_title: derive_title_from_file_path(path),
-                    ..SubscriptionMetadata::default()
-                }
-                .normalized(),
+                None,
+                derive_title_from_file_path(path),
             )
         }
     };
     proxies = filter_information_proxies(proxies, &mut warnings);
     let mut loaded = load_from_proxies(proxies, warnings).await?;
     loaded.metadata = metadata;
+    loaded.parsed_name = parsed_name;
     Ok(loaded)
 }
 
@@ -1143,6 +1196,7 @@ proxies:
             .metadata
             .expect("content disposition title should survive");
         assert_eq!(metadata.source_title.as_deref(), Some("fallback-name.yaml"));
+        assert_eq!(parsed.parsed_name.as_deref(), Some("fallback-name.yaml"));
         assert!(
             parsed
                 .warnings
@@ -1165,8 +1219,8 @@ proxies:
 
         let parsed = parse_response_metadata(&headers, Some("url-fallback".to_string()));
 
-        let metadata = parsed.metadata.expect("url fallback title should survive");
-        assert_eq!(metadata.source_title.as_deref(), Some("url-fallback"));
+        assert!(parsed.metadata.is_none());
+        assert_eq!(parsed.parsed_name.as_deref(), Some("url-fallback"));
         assert!(
             parsed
                 .warnings
@@ -1220,13 +1274,33 @@ proxies:
 
         let parsed = parse_response_metadata(&headers, Some("url-fallback".to_string()));
 
-        let metadata = parsed.metadata.expect("fallback title should survive");
-        assert_eq!(metadata.source_title.as_deref(), Some("url-fallback"));
+        assert!(parsed.metadata.is_none());
+        assert_eq!(parsed.parsed_name.as_deref(), Some("url-fallback"));
         assert!(
             parsed
                 .warnings
                 .iter()
                 .all(|warning| !warning.contains("Content-Disposition"))
+        );
+    }
+
+    #[test]
+    fn response_metadata_warns_on_invalid_subscription_userinfo() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "subscription-userinfo",
+            HeaderValue::from_static("upload=nope; total=bad"),
+        );
+
+        let parsed = parse_response_metadata(&headers, Some("url-fallback".to_string()));
+
+        assert!(parsed.metadata.is_none());
+        assert_eq!(parsed.parsed_name.as_deref(), Some("url-fallback"));
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("ignored invalid `subscription-userinfo` header"))
         );
     }
 
@@ -1324,7 +1398,7 @@ proxies:
     }
 
     #[tokio::test]
-    async fn file_source_uses_file_stem_as_metadata_title() {
+    async fn file_source_uses_file_stem_as_name_fallback() {
         let client = reqwest::Client::new();
         let path = std::env::temp_dir().join("proxy-broker-source-title.yaml");
         tokio::fs::write(
@@ -1348,9 +1422,10 @@ proxies:
 
         let _ = tokio::fs::remove_file(&path).await;
 
+        assert!(result.metadata.is_none());
         assert_eq!(
-            result.metadata.and_then(|item| item.source_title),
-            Some("proxy-broker-source-title".to_string())
+            result.parsed_name.as_deref(),
+            Some("proxy-broker-source-title")
         );
     }
 }

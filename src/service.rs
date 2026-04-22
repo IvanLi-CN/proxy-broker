@@ -1493,6 +1493,7 @@ impl BrokerService {
         source_identity: ProxyImportSourceIdentity,
         import_kind: ProxyImportKind,
         requested_name: Option<&str>,
+        parsed_name: Option<String>,
         subscription_metadata: Option<SubscriptionMetadata>,
         mut nodes: Vec<ProxyNode>,
         mut warnings: Vec<String>,
@@ -1562,9 +1563,7 @@ impl BrokerService {
         let resolved_name = self.resolve_import_name(
             requested_name,
             existing_import.as_ref(),
-            subscription_metadata
-                .as_ref()
-                .and_then(|item| item.source_title.as_deref()),
+            parsed_name.as_deref(),
             derived_name.as_deref(),
         );
         let import_record = ProxyImportRecord {
@@ -1655,6 +1654,7 @@ impl BrokerService {
             source_identity,
             ProxyImportKind::Subscription,
             requested_name,
+            loaded.parsed_name,
             loaded.metadata,
             loaded.nodes,
             loaded.warnings,
@@ -1678,6 +1678,7 @@ impl BrokerService {
             ProxyImportSourceIdentity::manual(import_id),
             ProxyImportKind::SingleNode,
             requested_name,
+            None,
             None,
             loaded.nodes,
             loaded.warnings,
@@ -6584,6 +6585,63 @@ proxies:
                 .and_then(|item| item.remaining_bytes),
             Some(70)
         );
+    }
+
+    #[tokio::test]
+    async fn load_subscription_request_uses_file_name_without_persisting_source_title() {
+        let profile_id = "p-file-name-derived";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
+        let source_path = std::env::temp_dir().join("proxy-broker-file-derived-name.yaml");
+        tokio::fs::write(
+            &source_path,
+            r#"
+proxies:
+  - name: file-node
+    type: socks5
+    server: 8.8.4.4
+"#,
+        )
+        .await
+        .expect("subscription file should be written");
+
+        let response = service
+            .load_subscription_request(
+                profile_id,
+                &LoadSubscriptionRequest {
+                    name: None,
+                    source: Some(SubscriptionSource::File(
+                        source_path.to_string_lossy().to_string(),
+                    )),
+                    content: None,
+                },
+            )
+            .await
+            .expect("file source import should succeed");
+
+        let _ = tokio::fs::remove_file(&source_path).await;
+
+        assert_eq!(
+            response.resolved_name.as_deref(),
+            Some("proxy-broker-file-derived-name")
+        );
+        assert_eq!(
+            response.resolved_name_source,
+            Some(ResolvedImportNameSource::ParsedSource)
+        );
+        assert!(response.subscription_metadata.is_none());
+
+        let imports = service
+            .list_proxy_imports(Some("profile"), Some(profile_id))
+            .await
+            .expect("proxy imports should list");
+        assert_eq!(imports.items.len(), 1);
+        assert_eq!(
+            imports.items[0].name.as_deref(),
+            Some("proxy-broker-file-derived-name")
+        );
+        assert!(imports.items[0].subscription_metadata.is_none());
     }
 
     #[tokio::test]
