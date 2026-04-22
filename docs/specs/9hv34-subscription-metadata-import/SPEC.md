@@ -2,7 +2,7 @@
 
 ## 状态
 
-- Status: 已实现（本地已验证）
+- Status: 已完成
 - Created: 2026-04-22
 - Last: 2026-04-22
 
@@ -212,7 +212,7 @@
 
 - [x] M1: 落地订阅头解析、过滤结果与 import 级元信息持久化
 - [x] M2: 扩展 HTTP/TS contract 与 UI 展示，移除前端 hostname-only 自动命名依赖
-- [ ] M3: 补齐 Storybook、视觉证据、测试与 PR merge-ready 收敛
+- [x] M3: 补齐 Storybook、视觉证据、测试与 PR merge-ready 收敛
 
 ## 方案概述（Approach, high-level）
 

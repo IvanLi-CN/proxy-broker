@@ -31,4 +31,4 @@
 | 2e86e | 短 ID / NanoID 方案切换并移除主动 UUID 使用 | 已完成 | `2e86e-short-id-without-uuid/SPEC.md` | 2026-04-19 | PR #37 已完成 review、CI 与 spec drift 收口，merge-ready |
 | 98slt | 修复 legacy inventory import 触发的 SQLite 启动迁移崩溃 | 已实现（shared testbox 已验证） | `98slt-fix-legacy-inventory-sync-migration-crash/SPEC.md` | 2026-04-20 | 修复 sync-config 迁移覆写；已用 101 真实 SQLite 资产在共享测试机完成前后对照验证 |
 | s5fwx | 代理页订阅分组节点、共享 Runtime 与实时运营流 | 已实现（本地已验证） | `s5fwx-proxy-node-groups-live-ops/SPEC.md` | 2026-04-21 | grouped node catalog、shared runtime、node-pinned sessions、实时 proxy ops、Storybook 视觉证据已落盘 |
-| 9hv34 | 订阅元信息解析、信息节点过滤与导入名称自动补全 | 已实现（本地已验证） | `9hv34-subscription-metadata-import/SPEC.md` | 2026-04-22 | 订阅头解析、import 级 metadata、保守信息节点过滤、Storybook 视觉证据已落盘，待 PR merge-ready |
+| 9hv34 | 订阅元信息解析、信息节点过滤与导入名称自动补全 | 已完成 | `9hv34-subscription-metadata-import/SPEC.md` | 2026-04-22 | 订阅头解析、import 级 metadata、保守信息节点过滤、Storybook 视觉证据已落盘 |
