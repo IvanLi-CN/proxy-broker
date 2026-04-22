@@ -3164,6 +3164,7 @@ impl BrokerService {
             let mut source = None;
             let mut mmdb_hit = false;
             let mut online_hit = false;
+            let mut lookup_country_code_hit = false;
             let mut mmdb_lookup_succeeded = false;
             let online_state = online_lookup
                 .get(&record.ip)
@@ -3182,6 +3183,7 @@ impl BrokerService {
                         info.names.and_then(|m| m.get("en").map(|x| x.to_string()));
                     if mmdb_country_code.is_some() {
                         country_code = mmdb_country_code.clone();
+                        lookup_country_code_hit = true;
                     }
                     if mmdb_country_name.is_some() {
                         country_name = mmdb_country_name.clone();
@@ -3200,10 +3202,9 @@ impl BrokerService {
                     || online.country.as_ref().is_some()
                     || online.region.as_ref().is_some()
                     || online.city.as_ref().is_some();
-                let has_lookup_country_code = mmdb_hit && country_code.is_some();
                 country_code = resolve_online_geo_country_code(
                     country_code,
-                    has_lookup_country_code,
+                    lookup_country_code_hit,
                     online.country_code.as_deref(),
                     online_has_geo,
                 );
