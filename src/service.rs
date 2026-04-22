@@ -6645,6 +6645,70 @@ proxies:
     }
 
     #[tokio::test]
+    async fn load_subscription_request_uses_url_host_when_headers_do_not_name_import() {
+        let profile_id = "p-url-host-derived";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
+        let app = Router::new()
+            .route("/api/v1/client/abcdef123", get(test_subscription_handler))
+            .with_state(TestSubscriptionServerState {
+                payload: Arc::<str>::from(
+                    r#"
+proxies:
+  - name: host-node
+    type: socks5
+    server: 8.8.4.4
+"#,
+                ),
+                status: StatusCode::OK,
+                accepted_user_agent: None,
+                response_headers: HeaderMap::new(),
+            });
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("test listener should bind");
+        let addr = listener
+            .local_addr()
+            .expect("test listener should expose local addr");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("test server should serve requests");
+        });
+        let url = format!("http://{addr}/api/v1/client/abcdef123?token=secret");
+
+        let response = service
+            .load_subscription_request(
+                profile_id,
+                &LoadSubscriptionRequest {
+                    name: None,
+                    source: Some(SubscriptionSource::Url(url)),
+                    content: None,
+                },
+            )
+            .await
+            .expect("host-derived import should succeed");
+
+        server.abort();
+
+        assert_eq!(response.resolved_name.as_deref(), Some("127.0.0.1"));
+        assert_eq!(
+            response.resolved_name_source,
+            Some(ResolvedImportNameSource::ParsedSource)
+        );
+        assert!(response.subscription_metadata.is_none());
+
+        let imports = service
+            .list_proxy_imports(Some("profile"), Some(profile_id))
+            .await
+            .expect("proxy imports should list");
+        assert_eq!(imports.items.len(), 1);
+        assert_eq!(imports.items[0].name.as_deref(), Some("127.0.0.1"));
+        assert!(imports.items[0].subscription_metadata.is_none());
+    }
+
+    #[tokio::test]
     async fn load_subscription_request_keeps_existing_name_over_new_parsed_title() {
         let profile_id = "p-existing-name";
         let store = Arc::new(MemoryStore::new());

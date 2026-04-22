@@ -362,18 +362,7 @@ fn derive_title_from_file_path(path: &str) -> Option<String> {
 
 fn derive_title_from_url(url: &str) -> Option<String> {
     let parsed = reqwest::Url::parse(url).ok()?;
-    let path_title = parsed
-        .path_segments()
-        .and_then(|segments| segments.filter(|segment| !segment.is_empty()).next_back())
-        .and_then(percent_decode_lossy)
-        .and_then(|value| {
-            Path::new(&value)
-                .file_stem()
-                .map(|stem| stem.to_string_lossy().trim().to_string())
-                .filter(|stem| !stem.is_empty())
-                .or_else(|| clean_source_title(&value))
-        });
-    path_title.or_else(|| clean_source_title(parsed.host_str().unwrap_or_default()))
+    clean_source_title(parsed.host_str().unwrap_or_default())
 }
 
 fn is_information_proxy_name(name: &str) -> bool {
@@ -711,8 +700,9 @@ impl ArcSemaphore {
 #[cfg(test)]
 mod tests {
     use super::{
-        SUBSCRIPTION_FETCH_USER_AGENTS, SubscriptionLoadError, load_from_source,
-        parse_content_disposition_filename, parse_response_metadata, percent_decode_lossy,
+        SUBSCRIPTION_FETCH_USER_AGENTS, SubscriptionLoadError, derive_title_from_url,
+        load_from_source, parse_content_disposition_filename, parse_response_metadata,
+        percent_decode_lossy,
     };
     use crate::models::SubscriptionSource;
     use axum::{
@@ -1232,6 +1222,15 @@ proxies:
                 .warnings
                 .iter()
                 .any(|warning| warning.contains("ignored invalid `Content-Disposition` filename"))
+        );
+    }
+
+    #[test]
+    fn url_title_fallback_prefers_host_over_path_segments() {
+        assert_eq!(
+            derive_title_from_url("https://edge.example.com/api/v1/client/abcdef123?token=secret")
+                .as_deref(),
+            Some("edge.example.com")
         );
     }
 
