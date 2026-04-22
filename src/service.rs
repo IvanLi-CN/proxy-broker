@@ -3196,12 +3196,16 @@ impl BrokerService {
             if let Some(online) = online_state.result {
                 let normalized_online_country_code =
                     normalize_country_code(online.country_code.as_deref());
+                let malformed_online_country_code =
+                    online.country_code.is_some() && normalized_online_country_code.is_none();
                 let online_has_geo = normalized_online_country_code.is_some()
                     || online.country.as_ref().is_some()
                     || online.region.as_ref().is_some()
                     || online.city.as_ref().is_some();
                 if let Some(value) = normalized_online_country_code {
                     country_code = Some(value);
+                } else if online_has_geo && malformed_online_country_code {
+                    country_code = None;
                 }
                 if let Some(value) = online.country {
                     country_name = Some(value);
@@ -4590,12 +4594,16 @@ fn normalize_country_code(value: Option<&str>) -> Option<String> {
     None
 }
 
-fn normalize_city_country_token(value: Option<&str>) -> Option<String> {
+fn normalize_country_filter_token(value: Option<&str>) -> Option<String> {
     let trimmed = value?.trim();
     if trimmed.is_empty() {
         return None;
     }
     normalize_country_code(Some(trimmed)).or_else(|| Some(trimmed.to_ascii_uppercase()))
+}
+
+fn normalize_city_country_token(value: Option<&str>) -> Option<String> {
+    normalize_country_filter_token(value)
 }
 
 fn sanitize_ip_record(mut record: IpRecord) -> IpRecord {
@@ -4614,7 +4622,7 @@ fn normalize_country_codes(values: &[String]) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut normalized = Vec::new();
     for value in values {
-        let Some(item) = normalize_country_code(Some(value.as_str())) else {
+        let Some(item) = normalize_country_filter_token(Some(value.as_str())) else {
             continue;
         };
         if !seen.insert(item.clone()) {
@@ -4819,10 +4827,12 @@ fn search_session_options(
             for record in ip_records {
                 let normalized_country_code =
                     normalize_country_code(record.country_code.as_deref());
+                let country_filter_token =
+                    normalize_country_filter_token(record.country_code.as_deref());
                 let city_country_token =
                     normalize_city_country_token(record.country_code.as_deref());
                 if !country_filters.is_empty() {
-                    let Some(code) = normalized_country_code.as_ref() else {
+                    let Some(code) = country_filter_token.as_ref() else {
                         continue;
                     };
                     if !country_filters.contains(code) {
@@ -4892,10 +4902,12 @@ fn search_session_options(
                 .filter(|record| {
                     let normalized_country_code =
                         normalize_country_code(record.country_code.as_deref());
+                    let country_filter_token =
+                        normalize_country_filter_token(record.country_code.as_deref());
                     let city_country_token =
                         normalize_city_country_token(record.country_code.as_deref());
                     if !country_filters.is_empty() {
-                        let Some(code) = normalized_country_code.as_ref() else {
+                        let Some(code) = country_filter_token.as_ref() else {
                             return false;
                         };
                         if !country_filters.contains(code) {
@@ -5190,6 +5202,7 @@ fn filter_ip_records(
     for record in ip_records {
         let record_ip_key = normalize_ip_text(&record.ip);
         let normalized_country_code = normalize_country_code(record.country_code.as_deref());
+        let country_filter_token = normalize_country_filter_token(record.country_code.as_deref());
         let city_country_token = normalize_city_country_token(record.country_code.as_deref());
 
         if blacklist.contains(&record_ip_key) {
@@ -5202,7 +5215,7 @@ fn filter_ip_records(
             let country_pass = if country_set.is_empty() {
                 true
             } else {
-                normalized_country_code
+                country_filter_token
                     .as_ref()
                     .map(|code| country_set.contains(code))
                     .unwrap_or(false)
@@ -7277,6 +7290,58 @@ proxies:
     }
 
     #[tokio::test]
+    async fn refresh_geo_records_clears_stale_country_code_when_online_country_code_is_malformed() {
+        let (online_geo_base, mmdb_url, server) = spawn_online_geo_server(
+            r#"{"success":true,"country_code":"global","country":"Japan","city":"Tokyo"}"#,
+        )
+        .await;
+        let data_dir = std::env::temp_dir().join(format!(
+            "proxy-broker-online-geo-test-{}",
+            crate::ids::random_temp_suffix()
+        ));
+        tokio::fs::create_dir_all(&data_dir)
+            .await
+            .expect("temp data dir should be created");
+        let options = BrokerServiceOptions {
+            online_geo_base,
+            mmdb_url,
+            data_dir: data_dir.clone(),
+            ..BrokerServiceOptions::default()
+        };
+
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store, runtime, options);
+        let now = 1_713_309_999;
+        let mut ip_records = vec![IpRecord {
+            ip: "1.1.1.1".to_string(),
+            country_code: Some("US".to_string()),
+            country_name: Some("United States".to_string()),
+            region_name: Some("California".to_string()),
+            city: Some("San Jose".to_string()),
+            geo_source: Some("legacy".to_string()),
+            probe_updated_at: None,
+            geo_updated_at: Some(now - 60),
+            last_used_at: None,
+        }];
+
+        let changed = service
+            .refresh_geo_records("default", true, now, &mut ip_records, None)
+            .await
+            .expect("refresh should succeed");
+
+        server.abort();
+        let _ = tokio::fs::remove_dir_all(&data_dir).await;
+
+        assert_eq!(changed, 1);
+        assert_eq!(ip_records[0].country_code, None);
+        assert_eq!(ip_records[0].country_name.as_deref(), Some("Japan"));
+        assert_eq!(ip_records[0].city.as_deref(), Some("Tokyo"));
+        assert_eq!(ip_records[0].geo_source.as_deref(), Some("online"));
+        assert_eq!(ip_records[0].geo_updated_at, Some(now));
+    }
+
+    #[tokio::test]
     async fn load_subscription_accepts_duplicate_proxy_names_with_distinct_node_ids() {
         let profile_id = "dup-names";
         let store = Arc::new(MemoryStore::new());
@@ -8172,6 +8237,42 @@ proxies:
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].country_code, None);
         assert_eq!(items[0].country_name.as_deref(), Some("Japan"));
+    }
+
+    #[test]
+    fn build_open_selector_request_preserves_invalid_country_filters() {
+        let selector = build_open_selector_request(&OpenSessionRequest {
+            selection_mode: SessionSelectionMode::Geo,
+            country_codes: vec!["global".to_string()],
+            ..Default::default()
+        })
+        .expect("legacy non-ISO filters should remain valid");
+
+        assert_eq!(selector.country_codes, vec!["GLOBAL"]);
+    }
+
+    #[test]
+    fn filter_ip_records_preserves_invalid_country_filters() {
+        let mut invalid_country = sample_ip("1.1.1.1", None);
+        invalid_country.country_code = Some("global".to_string());
+        invalid_country.country_name = Some("Japan".to_string());
+        let mut valid_country = sample_ip("2.2.2.2", None);
+        valid_country.country_code = Some("FR".to_string());
+        valid_country.country_name = Some("France".to_string());
+
+        let items = filter_ip_records(
+            vec![invalid_country, valid_country],
+            &[],
+            &ExtractIpRequest {
+                country_codes: vec!["global".to_string()],
+                ..Default::default()
+            },
+        )
+        .expect("legacy non-ISO filters should still match");
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].ip, "1.1.1.1");
+        assert_eq!(items[0].country_code, None);
     }
 
     #[test]
