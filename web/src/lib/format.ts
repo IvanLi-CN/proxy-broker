@@ -17,6 +17,9 @@ const zhGeoLabels: Record<string, string> = {
   "San Jose": "圣何塞",
 };
 
+const COUNTRY_CODE_PATTERN = /^[A-Za-z]{2}$/;
+const SPECIAL_COUNTRY_CODES = new Set(["A1", "A2", "O1"]);
+
 export function splitListInput(value: string) {
   return value
     .split(/[\n,]/)
@@ -198,19 +201,34 @@ export function formatGeoLabel(locale: Locale, value?: string | null) {
   return zhGeoLabels[value] ?? value;
 }
 
+export function normalizeCountryCode(countryCode?: string | null) {
+  if (!countryCode) {
+    return null;
+  }
+  const normalized = countryCode.trim().toUpperCase();
+  return COUNTRY_CODE_PATTERN.test(normalized) || SPECIAL_COUNTRY_CODES.has(normalized)
+    ? normalized
+    : null;
+}
+
 export function formatCountryName(
   locale: Locale,
   countryCode?: string | null,
   fallbackName?: string | null,
 ) {
-  if (countryCode) {
-    const name = new Intl.DisplayNames([locale], { type: "region" }).of(countryCode);
-    if (name) {
-      return name;
+  const normalizedCountryCode = normalizeCountryCode(countryCode);
+  if (normalizedCountryCode) {
+    try {
+      const name = new Intl.DisplayNames([locale], { type: "region" }).of(normalizedCountryCode);
+      if (name) {
+        return name;
+      }
+    } catch {
+      // Ignore invalid region subtags and fall back to the provided display name.
     }
   }
 
-  return formatGeoLabel(locale, fallbackName) ?? fallbackName ?? null;
+  return formatGeoLabel(locale, fallbackName) ?? fallbackName ?? normalizedCountryCode ?? null;
 }
 
 export function formatOperatorWarning(t: Translator, warning: string) {

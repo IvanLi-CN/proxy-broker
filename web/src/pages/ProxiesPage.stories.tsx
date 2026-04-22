@@ -183,6 +183,22 @@ const profileCatalogFixture: ProxyCatalogResponse = {
   })),
 };
 
+const globalCatalogMalformedGeoFixture: ProxyCatalogResponse = {
+  ...globalCatalogFixture,
+  groups: globalCatalogFixture.groups.map((group, groupIndex) => ({
+    ...group,
+    nodes: group.nodes.map((node, nodeIndex) => ({
+      ...node,
+      ip_metadata:
+        groupIndex === 0 && nodeIndex === 0
+          ? node.ip_metadata.map((metadata, metadataIndex) =>
+              metadataIndex === 0 ? { ...metadata, country_code: "global" } : metadata,
+            )
+          : node.ip_metadata.map((metadata) => ({ ...metadata })),
+    })),
+  })),
+};
+
 const liveNodeStates: Record<string, ProxyNodeLiveState> = {
   "node-jp-osaka-edge": {
     kind: "proxy_latency_probe",
@@ -747,6 +763,24 @@ export const ZhCN: Story = {
     await expect(await canvas.findByText(/分组代理目录/i)).toBeVisible();
     await expect(await canvas.findByText(/刷新所选/i)).toBeVisible();
     await expect(await canvas.findByText(/^global-jp$/i)).toBeVisible();
+  },
+};
+
+export const GlobalMalformedGeoMetadata: Story = {
+  ...GlobalConfig,
+  name: "Global Malformed Geo Metadata",
+  args: {
+    ...GlobalConfig.args,
+    proxyCatalog: globalCatalogMalformedGeoFixture,
+  },
+  globals: {
+    locale: "zh-CN",
+  },
+  async play({ canvasElement }) {
+    const canvas = within(canvasElement);
+    await expect(await canvas.findByText(/分组代理目录/i)).toBeVisible();
+    await expect(await canvas.findByText(/日本 \/ Chiyoda/i)).toBeVisible();
+    await expect(canvas.queryByText(/Unexpected Application Error/i)).not.toBeInTheDocument();
   },
 };
 

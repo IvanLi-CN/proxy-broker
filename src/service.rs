@@ -1992,6 +1992,7 @@ impl BrokerService {
             .fold(
                 HashMap::<String, Vec<ProxyNodeMetadataRecord>>::new(),
                 |mut acc, record| {
+                    let record = sanitize_proxy_node_metadata_record(record);
                     acc.entry(record.node_id.clone()).or_default().push(record);
                     acc
                 },
@@ -2080,6 +2081,7 @@ impl BrokerService {
                 .await
                 .map_err(BrokerError::from)?
                 .into_iter()
+                .map(sanitize_ip_record)
                 .map(|record| (record.ip.clone(), record))
                 .collect::<HashMap<_, _>>();
             let mut probe_records = HashMap::<(String, String), Vec<ProbeRecord>>::new();
@@ -2157,7 +2159,8 @@ impl BrokerService {
             return Some(ProxyNodeMetadataRecord {
                 node_id: record.node_id.clone(),
                 ip: ip.to_string(),
-                country_code: ip_record.and_then(|item| item.country_code.clone()),
+                country_code: ip_record
+                    .and_then(|item| normalize_country_code(item.country_code.as_deref())),
                 country_name: ip_record.and_then(|item| item.country_name.clone()),
                 region_name: ip_record.and_then(|item| item.region_name.clone()),
                 city: ip_record.and_then(|item| item.city.clone()),
@@ -2393,7 +2396,8 @@ impl BrokerService {
                 let existing = existing.get(&(node.node_id.clone(), ip.clone()));
                 Some(IpRecord {
                     ip,
-                    country_code: existing.and_then(|record| record.country_code.clone()),
+                    country_code: existing
+                        .and_then(|record| normalize_country_code(record.country_code.as_deref())),
                     country_name: existing.and_then(|record| record.country_name.clone()),
                     region_name: existing.and_then(|record| record.region_name.clone()),
                     city: existing.and_then(|record| record.city.clone()),
@@ -2422,7 +2426,8 @@ impl BrokerService {
             updated_records.push(ProxyNodeMetadataRecord {
                 node_id: node.node_id.clone(),
                 ip: primary_ip.clone(),
-                country_code: geo.and_then(|record| record.country_code.clone()),
+                country_code: geo
+                    .and_then(|record| normalize_country_code(record.country_code.as_deref())),
                 country_name: geo.and_then(|record| record.country_name.clone()),
                 region_name: geo.and_then(|record| record.region_name.clone()),
                 city: geo.and_then(|record| record.city.clone()),
@@ -2577,7 +2582,8 @@ impl BrokerService {
             updates.push(ProxyNodeMetadataRecord {
                 node_id: node.node_id.clone(),
                 ip: primary_ip,
-                country_code: previous.and_then(|record| record.country_code.clone()),
+                country_code: previous
+                    .and_then(|record| normalize_country_code(record.country_code.as_deref())),
                 country_name: previous.and_then(|record| record.country_name.clone()),
                 region_name: previous.and_then(|record| record.region_name.clone()),
                 city: previous.and_then(|record| record.city.clone()),
@@ -3151,7 +3157,7 @@ impl BrokerService {
                 Err(_) => continue,
             };
 
-            let mut country_code = record.country_code.clone();
+            let mut country_code = normalize_country_code(record.country_code.as_deref());
             let mut country_name = record.country_name.clone();
             let mut region_name = record.region_name.clone();
             let mut city = record.city.clone();
@@ -3171,7 +3177,8 @@ impl BrokerService {
                 if let Some(country) = country
                     && let Some(info) = country.country
                 {
-                    let mmdb_country_code = info.iso_code.map(ToString::to_string);
+                    let mmdb_country_code =
+                        normalize_country_code(info.iso_code.map(|value| value.as_ref()));
                     let mmdb_country_name =
                         info.names.and_then(|m| m.get("en").map(|x| x.to_string()));
                     if mmdb_country_code.is_some() {
@@ -3192,7 +3199,7 @@ impl BrokerService {
                     || online.country.is_some()
                     || online.region.is_some()
                     || online.city.is_some();
-                if let Some(value) = online.country_code {
+                if let Some(value) = normalize_country_code(online.country_code.as_deref()) {
                     country_code = Some(value);
                 }
                 if let Some(value) = online.country {
@@ -3383,7 +3390,10 @@ impl BrokerService {
             .store
             .list_ip_records(profile_id)
             .await
-            .map_err(BrokerError::from)?;
+            .map_err(BrokerError::from)?
+            .into_iter()
+            .map(sanitize_ip_record)
+            .collect::<Vec<_>>();
         let probe_records = self
             .store
             .list_probe_records(profile_id)
@@ -3418,7 +3428,10 @@ impl BrokerService {
             .store
             .list_ip_records(profile_id)
             .await
-            .map_err(BrokerError::from)?;
+            .map_err(BrokerError::from)?
+            .into_iter()
+            .map(sanitize_ip_record)
+            .collect::<Vec<_>>();
         let probe_records = self
             .store
             .list_probe_records(profile_id)
@@ -4565,12 +4578,43 @@ fn normalize_ip_text(raw: &str) -> String {
         .unwrap_or_else(|_| trimmed.to_string())
 }
 
+fn normalize_country_code(value: Option<&str>) -> Option<String> {
+    let trimmed = value?.trim();
+    if trimmed.len() != 2 {
+        return None;
+    }
+    let normalized = trimmed.to_ascii_uppercase();
+    if normalized
+        .as_bytes()
+        .iter()
+        .all(|byte| byte.is_ascii_alphabetic())
+        || matches!(normalized.as_str(), "A1" | "A2" | "O1")
+    {
+        return Some(normalized);
+    }
+    None
+}
+
+fn sanitize_ip_record(mut record: IpRecord) -> IpRecord {
+    record.country_code = normalize_country_code(record.country_code.as_deref());
+    record
+}
+
+fn sanitize_proxy_node_metadata_record(
+    mut record: ProxyNodeMetadataRecord,
+) -> ProxyNodeMetadataRecord {
+    record.country_code = normalize_country_code(record.country_code.as_deref());
+    record
+}
+
 fn normalize_country_codes(values: &[String]) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut normalized = Vec::new();
     for value in values {
-        let item = value.trim().to_ascii_uppercase();
-        if item.is_empty() || !seen.insert(item.clone()) {
+        let Some(item) = normalize_country_code(Some(value.as_str())) else {
+            continue;
+        };
+        if !seen.insert(item.clone()) {
             continue;
         }
         normalized.push(item);
@@ -4610,7 +4654,7 @@ fn normalize_city_filters(values: &[String]) -> HashSet<(Option<String>, String)
                     continue;
                 }
                 (
-                    Some(country.trim().to_ascii_uppercase()),
+                    normalize_country_code(Some(country.trim())),
                     city.to_ascii_lowercase(),
                 )
             }
@@ -4732,13 +4776,10 @@ fn search_session_options(
         SessionOptionKind::Country => {
             let mut countries = HashMap::<String, SessionOptionItem>::new();
             for record in ip_records {
-                let Some(code) = record.country_code.as_ref() else {
+                let Some(country_code) = normalize_country_code(record.country_code.as_deref())
+                else {
                     continue;
                 };
-                let country_code = code.trim().to_ascii_uppercase();
-                if country_code.is_empty() {
-                    continue;
-                }
                 let country_name = record
                     .country_name
                     .as_deref()
@@ -4773,11 +4814,13 @@ fn search_session_options(
         SessionOptionKind::City => {
             let mut cities = HashMap::<String, SessionOptionItem>::new();
             for record in ip_records {
+                let normalized_country_code =
+                    normalize_country_code(record.country_code.as_deref());
                 if !country_filters.is_empty() {
-                    let Some(code) = record.country_code.as_ref() else {
+                    let Some(code) = normalized_country_code.as_ref() else {
                         continue;
                     };
-                    if !country_filters.contains(&code.to_ascii_uppercase()) {
+                    if !country_filters.contains(code) {
                         continue;
                     }
                 }
@@ -4789,7 +4832,7 @@ fn search_session_options(
                 if city_value.is_empty() {
                     continue;
                 }
-                let country_code = record.country_code.clone().unwrap_or_default();
+                let country_code = normalized_country_code.unwrap_or_default();
                 let country_name = record.country_name.clone().unwrap_or_default();
                 let meta = match (country_code.trim(), country_name.trim()) {
                     ("", "") => None,
@@ -4834,11 +4877,13 @@ fn search_session_options(
             let mut items = ip_records
                 .iter()
                 .filter(|record| {
+                    let normalized_country_code =
+                        normalize_country_code(record.country_code.as_deref());
                     if !country_filters.is_empty() {
-                        let Some(code) = record.country_code.as_ref() else {
+                        let Some(code) = normalized_country_code.as_ref() else {
                             return false;
                         };
-                        if !country_filters.contains(&code.to_ascii_uppercase()) {
+                        if !country_filters.contains(code) {
                             return false;
                         }
                     }
@@ -4847,14 +4892,12 @@ fn search_session_options(
                             return false;
                         };
                         let city_name = city.trim().to_ascii_lowercase();
-                        let country_code = record
-                            .country_code
-                            .as_ref()
-                            .map(|code| code.trim().to_ascii_uppercase());
                         let matched = city_filters.iter().any(|(country_filter, city_filter)| {
                             city_name == *city_filter
                                 && match country_filter {
-                                    Some(code) => country_code.as_deref() == Some(code.as_str()),
+                                    Some(code) => {
+                                        normalized_country_code.as_deref() == Some(code.as_str())
+                                    }
                                     None => true,
                                 }
                         });
@@ -4868,9 +4911,7 @@ fn search_session_options(
                     let haystack = format!(
                         "{} {} {} {}",
                         record.ip.to_ascii_lowercase(),
-                        record
-                            .country_code
-                            .as_deref()
+                        normalized_country_code
                             .unwrap_or_default()
                             .to_ascii_lowercase(),
                         record
@@ -4890,11 +4931,14 @@ fn search_session_options(
                     value: record.ip.clone(),
                     label: record.ip.clone(),
                     meta: {
-                        let geo = [record.country_code.clone(), record.city.clone()]
-                            .into_iter()
-                            .flatten()
-                            .filter(|value| !value.trim().is_empty())
-                            .collect::<Vec<_>>();
+                        let geo = [
+                            normalize_country_code(record.country_code.as_deref()),
+                            record.city.clone(),
+                        ]
+                        .into_iter()
+                        .flatten()
+                        .filter(|value| !value.trim().is_empty())
+                        .collect::<Vec<_>>();
                         (!geo.is_empty()).then_some(geo.join(" / "))
                     },
                 })
@@ -5127,6 +5171,7 @@ fn filter_ip_records(
 
     for record in ip_records {
         let record_ip_key = normalize_ip_text(&record.ip);
+        let normalized_country_code = normalize_country_code(record.country_code.as_deref());
 
         if blacklist.contains(&record_ip_key) {
             continue;
@@ -5138,10 +5183,9 @@ fn filter_ip_records(
             let country_pass = if country_set.is_empty() {
                 true
             } else {
-                record
-                    .country_code
+                normalized_country_code
                     .as_ref()
-                    .map(|c| country_set.contains(&c.to_ascii_uppercase()))
+                    .map(|code| country_set.contains(code))
                     .unwrap_or(false)
             };
             let city_pass = if city_filters.is_empty() {
@@ -5151,14 +5195,10 @@ fn filter_ip_records(
                     continue;
                 };
                 let city_name = city.trim().to_ascii_lowercase();
-                let country_code = record
-                    .country_code
-                    .as_ref()
-                    .map(|code| code.trim().to_ascii_uppercase());
                 city_filters.iter().any(|(country_filter, city_filter)| {
                     city_name == *city_filter
                         && match country_filter {
-                            Some(code) => country_code.as_deref() == Some(code.as_str()),
+                            Some(code) => normalized_country_code.as_deref() == Some(code.as_str()),
                             None => true,
                         }
                 })
@@ -5177,7 +5217,7 @@ fn filter_ip_records(
 
         items.push(ExtractIpItem {
             ip: record.ip,
-            country_code: record.country_code,
+            country_code: normalized_country_code,
             country_name: record.country_name,
             region_name: record.region_name,
             city: record.city,
@@ -7078,6 +7118,63 @@ proxies:
     }
 
     #[tokio::test]
+    async fn proxy_catalog_sanitizes_invalid_country_codes_from_legacy_profile_records() {
+        let profile_id = "edge-jp";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
+        service
+            .create_profile(profile_id)
+            .await
+            .expect("profile should be created");
+
+        let source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: edge-node
+    type: socks5
+    server: 1.1.1.1
+"#,
+        )
+        .await;
+        service
+            .load_subscription(profile_id, &SubscriptionSource::File(source_path.clone()))
+            .await
+            .expect("subscription should load");
+        let _ = tokio::fs::remove_file(&source_path).await;
+
+        store
+            .replace_ip_records(
+                profile_id,
+                &[IpRecord {
+                    ip: "1.1.1.1".to_string(),
+                    country_code: Some("global".to_string()),
+                    country_name: Some("Japan".to_string()),
+                    region_name: Some("Tokyo".to_string()),
+                    city: Some("Shibuya".to_string()),
+                    geo_source: Some("legacy".to_string()),
+                    probe_updated_at: Some(11),
+                    geo_updated_at: Some(10),
+                    last_used_at: None,
+                }],
+            )
+            .await
+            .expect("legacy ip record should seed");
+
+        let catalog = service
+            .list_proxy_catalog(&ProxyCatalogQuery {
+                view: Some("profile".to_string()),
+                profile_id: Some(profile_id.to_string()),
+            })
+            .await
+            .expect("profile catalog should list");
+        let metadata = &catalog.groups[0].nodes[0].ip_metadata[0];
+        assert_eq!(metadata.country_code, None);
+        assert_eq!(metadata.country_name.as_deref(), Some("Japan"));
+        assert_eq!(metadata.city.as_deref(), Some("Shibuya"));
+    }
+
+    #[tokio::test]
     async fn load_subscription_accepts_duplicate_proxy_names_with_distinct_node_ids() {
         let profile_id = "dup-names";
         let store = Arc::new(MemoryStore::new());
@@ -7940,6 +8037,116 @@ proxies:
             .expect("ip options should respect encoded city filters");
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].value, "1.1.1.1");
+    }
+
+    #[test]
+    fn search_session_options_drops_invalid_country_codes() {
+        let mut invalid_country = sample_ip("1.1.1.1", None);
+        invalid_country.city = Some("Tokyo".to_string());
+        invalid_country.country_code = Some("global".to_string());
+        invalid_country.country_name = Some("Japan".to_string());
+
+        let request = SearchSessionOptionsRequest {
+            kind: SessionOptionKind::Country,
+            query: None,
+            country_codes: vec![],
+            cities: vec![],
+            limit: None,
+        };
+
+        let items = search_session_options(&[invalid_country], &request)
+            .expect("country options should be returned");
+        assert!(items.is_empty());
+    }
+
+    #[test]
+    fn filter_ip_records_sanitizes_invalid_country_codes() {
+        let mut invalid_country = sample_ip("1.1.1.1", None);
+        invalid_country.country_code = Some("global".to_string());
+        invalid_country.country_name = Some("Japan".to_string());
+
+        let items = filter_ip_records(vec![invalid_country], &[], &ExtractIpRequest::default())
+            .expect("extract ip items should be returned");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].country_code, None);
+        assert_eq!(items[0].country_name.as_deref(), Some("Japan"));
+    }
+
+    #[test]
+    fn search_session_options_city_filters_ignore_invalid_country_prefixes() {
+        let mut invalid_country = sample_ip("1.1.1.1", None);
+        invalid_country.city = Some("Tokyo".to_string());
+        invalid_country.country_code = Some("global".to_string());
+        invalid_country.country_name = Some("Japan".to_string());
+
+        let request = SearchSessionOptionsRequest {
+            kind: SessionOptionKind::Ip,
+            query: None,
+            country_codes: vec![],
+            cities: vec!["global::Tokyo".to_string()],
+            limit: None,
+        };
+
+        let items = search_session_options(&[invalid_country], &request)
+            .expect("legacy malformed city filters should still match");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].value, "1.1.1.1");
+    }
+
+    #[test]
+    fn filter_ip_records_city_filters_ignore_invalid_country_prefixes() {
+        let mut invalid_country = sample_ip("1.1.1.1", None);
+        invalid_country.city = Some("Tokyo".to_string());
+        invalid_country.country_code = Some("global".to_string());
+        invalid_country.country_name = Some("Japan".to_string());
+
+        let items = filter_ip_records(
+            vec![invalid_country],
+            &[],
+            &ExtractIpRequest {
+                cities: vec!["global::Tokyo".to_string()],
+                ..Default::default()
+            },
+        )
+        .expect("legacy malformed city filters should still match");
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].ip, "1.1.1.1");
+        assert_eq!(items[0].country_code, None);
+    }
+
+    #[test]
+    fn search_session_options_keeps_maxmind_special_country_codes() {
+        let mut anonymous_proxy = sample_ip("1.1.1.1", None);
+        anonymous_proxy.country_code = Some("a1".to_string());
+        anonymous_proxy.country_name = Some("Anonymous Proxy".to_string());
+
+        let request = SearchSessionOptionsRequest {
+            kind: SessionOptionKind::Country,
+            query: None,
+            country_codes: vec![],
+            cities: vec![],
+            limit: None,
+        };
+
+        let items = search_session_options(&[anonymous_proxy], &request)
+            .expect("country options should load");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].value, "A1");
+        assert_eq!(items[0].label, "Anonymous Proxy (A1)");
+    }
+
+    #[test]
+    fn filter_ip_records_keeps_maxmind_special_country_codes() {
+        let mut anonymous_proxy = sample_ip("1.1.1.1", None);
+        anonymous_proxy.country_code = Some("A1".to_string());
+        anonymous_proxy.country_name = Some("Anonymous Proxy".to_string());
+
+        let items = filter_ip_records(vec![anonymous_proxy], &[], &ExtractIpRequest::default())
+            .expect("extract ip items should be returned");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].country_code.as_deref(), Some("A1"));
+        assert_eq!(items[0].country_name.as_deref(), Some("Anonymous Proxy"));
     }
 
     #[test]

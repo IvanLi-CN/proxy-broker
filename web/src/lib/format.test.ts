@@ -6,8 +6,10 @@ import {
   buildOpenSessionRequest,
   filterCitySelectionsByCountry,
   findOverlappingValues,
+  formatCountryName,
   formatLatency,
   formatTimestamp,
+  normalizeCountryCode,
   splitListInput,
 } from "@/lib/format";
 
@@ -162,5 +164,37 @@ describe("formatLatency", () => {
     expect(formatLatency("zh-CN", t, 12345)).toBe(
       `${new Intl.NumberFormat("zh-CN").format(12345)} ms`,
     );
+  });
+});
+
+describe("normalizeCountryCode", () => {
+  it("normalizes valid ISO-like region codes", () => {
+    expect(normalizeCountryCode(" jp ")).toBe("JP");
+    expect(normalizeCountryCode("us")).toBe("US");
+  });
+
+  it("drops invalid country codes", () => {
+    expect(normalizeCountryCode("a1")).toBe("A1");
+    expect(normalizeCountryCode("o1")).toBe("O1");
+    expect(normalizeCountryCode("global")).toBeNull();
+    expect(normalizeCountryCode("__global__")).toBeNull();
+    expect(normalizeCountryCode("JP1")).toBeNull();
+    expect(normalizeCountryCode("")).toBeNull();
+  });
+});
+
+describe("formatCountryName", () => {
+  it("formats valid region codes with Intl.DisplayNames", () => {
+    expect(formatCountryName("zh-CN", "jp", "Japan")).toBe("日本");
+  });
+
+  it("falls back to the provided country name when the code is invalid", () => {
+    expect(formatCountryName("en-US", "global", "Japan")).toBe("Japan");
+    expect(() => formatCountryName("en-US", "__global__", "Japan")).not.toThrow();
+  });
+
+  it("keeps MaxMind special country codes displayable when Intl.DisplayNames rejects them", () => {
+    expect(formatCountryName("en-US", "A1", "Anonymous Proxy")).toBe("Anonymous Proxy");
+    expect(formatCountryName("en-US", "A1")).toBe("A1");
   });
 });
