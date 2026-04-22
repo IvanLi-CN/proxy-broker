@@ -9,6 +9,7 @@ use thiserror::Error;
 use crate::{
     constants::DEFAULT_DNS_CONCURRENCY,
     models::{ProxyNode, SubscriptionMetadata},
+    proxy_node_validation::{malformed_proxy_reason, malformed_proxy_warning},
 };
 
 pub const SUBSCRIPTION_FETCH_USER_AGENTS: &[&str] =
@@ -138,8 +139,11 @@ fn parse_subscription_payload(raw: &str) -> Result<Vec<Value>, SubscriptionLoadE
 fn payload_has_usable_proxy_entries(proxies: &[Value]) -> bool {
     proxies.iter().any(|proxy| {
         to_json_value(proxy)
-            .and_then(|json| extract_proxy_fields(&json))
-            .is_ok()
+            .and_then(|json| {
+                extract_proxy_fields(&json).map(|(_, proxy_type, _)| (proxy_type, json))
+            })
+            .map(|(proxy_type, json)| malformed_proxy_reason(&proxy_type, &json).is_none())
+            .unwrap_or(false)
     })
 }
 
@@ -422,6 +426,27 @@ fn filter_information_proxies(proxies: Vec<Value>, warnings: &mut Vec<String>) -
         .collect()
 }
 
+fn filter_malformed_proxies(proxies: Vec<Value>, warnings: &mut Vec<String>) -> Vec<Value> {
+    proxies
+        .into_iter()
+        .filter(|proxy| {
+            let Ok(json_proxy) = to_json_value(proxy) else {
+                return true;
+            };
+            let Ok((name, proxy_type, _server)) = extract_proxy_fields(&json_proxy) else {
+                return true;
+            };
+
+            if let Some(warning) = malformed_proxy_warning(&name, &proxy_type, &json_proxy) {
+                warnings.push(warning);
+                false
+            } else {
+                true
+            }
+        })
+        .collect()
+}
+
 fn parse_response_metadata(
     headers: &HeaderMap,
     fallback_title: Option<String>,
@@ -542,10 +567,13 @@ async fn fetch_url_source(
         match parse_subscription_payload(&raw) {
             Ok(proxies) if payload_has_usable_proxy_entries(&proxies) => {
                 let mut warnings = Vec::new();
-                let filtered_proxies = filter_information_proxies(proxies, &mut warnings);
+                let filtered_proxies = filter_malformed_proxies(
+                    filter_information_proxies(proxies, &mut warnings),
+                    &mut warnings,
+                );
                 if !payload_has_usable_proxy_entries(&filtered_proxies) {
                     parse_errors.push(format!(
-                        "{}: payload only contained informational entries after filtering",
+                        "{}: payload only contained filtered or malformed entries after filtering",
                         attempt_label
                     ));
                     continue;
@@ -669,7 +697,10 @@ pub async fn load_from_source(
             )
         }
     };
-    proxies = filter_information_proxies(proxies, &mut warnings);
+    proxies = filter_malformed_proxies(
+        filter_information_proxies(proxies, &mut warnings),
+        &mut warnings,
+    );
     let mut loaded = load_from_proxies(proxies, warnings).await?;
     loaded.metadata = metadata;
     loaded.parsed_name = parsed_name;
@@ -1348,6 +1379,56 @@ proxies:
                 .warnings
                 .iter()
                 .any(|warning| warning.contains("filtered informational subscription entry"))
+        );
+    }
+
+    #[tokio::test]
+    async fn url_source_filters_malformed_hysteria_nodes_and_warns() {
+        let client = reqwest::Client::new();
+        let app = Router::new()
+            .route("/subscription", get(test_subscription_handler))
+            .with_state(TestSubscriptionServerState {
+                accepted_user_agent: None,
+                success_payload: Arc::<str>::from(
+                    r#"
+proxies:
+  - name: bad-hy
+    type: hysteria
+    server: 1.1.1.1
+    up: ""
+    down: ""
+  - name: jp-01
+    type: socks5
+    server: 8.8.8.8
+"#,
+                ),
+                fallback_status: None,
+                response_headers: HeaderMap::new(),
+            });
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("test listener should bind");
+        let addr = listener.local_addr().expect("listener addr should exist");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("test server should serve requests");
+        });
+        let source = SubscriptionSource::Url(format!("http://{addr}/subscription"));
+
+        let result = load_from_source(&client, &source)
+            .await
+            .expect("filtering should keep the valid node");
+
+        server.abort();
+
+        assert_eq!(result.nodes.len(), 1);
+        assert_eq!(result.nodes[0].proxy_name, "jp-01");
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("filtered malformed proxy entry `bad-hy`"))
         );
     }
 
