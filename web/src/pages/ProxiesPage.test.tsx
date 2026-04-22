@@ -1,0 +1,115 @@
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+
+import { I18nProvider } from "@/i18n";
+import type { CurrentUserState, ProxyCatalogResponse } from "@/lib/types";
+import { ProxiesPage } from "@/pages/ProxiesPage";
+
+const currentUser: CurrentUserState = {
+  status: "resolved",
+  identity: {
+    authenticated: true,
+    principal_type: "human",
+    subject: "admin@example.com",
+    email: "admin@example.com",
+    groups: ["admin"],
+    is_admin: true,
+  },
+};
+
+const globalCatalogWithInvalidCountryCode: ProxyCatalogResponse = {
+  view: "global",
+  profile_id: null,
+  groups: [
+    {
+      import: {
+        import_id: "imp-test",
+        name: "global-jp",
+        import_kind: "subscription",
+        source_scope: { type: "global" },
+        source_identity: {
+          source_type: "url",
+          source_value: "https://example.test/global-jp.yaml",
+        },
+        allocation_scope: { type: "global" },
+        effective_profile_ids: ["default"],
+        proxy_count: 1,
+        distinct_ip_count: 1,
+        created_at: 1_713_308_400,
+        updated_at: 1_713_309_000,
+      },
+      nodes: [
+        {
+          import_id: "imp-test",
+          node_id: "node-invalid-country-code",
+          proxy_name: "JP-Tokyo-Entry",
+          proxy_type: "vmess",
+          server: "tokyo-a.example.com:443",
+          resolved_ips: ["203.0.113.10"],
+          source_scope: { type: "global" },
+          allocation_scope: { type: "global" },
+          effective_profile_ids: ["default"],
+          primary_ip: "203.0.113.10",
+          can_open_session: false,
+          ip_metadata: [
+            {
+              node_id: "node-invalid-country-code",
+              ip: "203.0.113.10",
+              country_code: "global",
+              country_name: "Japan",
+              region_name: "Tokyo",
+              city: "Chiyoda",
+              geo_source: "geoip",
+              probe_updated_at: 1_713_309_300,
+              geo_updated_at: 1_713_309_200,
+              last_probe_ok: true,
+              last_latency_ms: 88,
+              median_latency_ms: 92,
+              last_probe_samples: [90, 88, 92, 95, 91],
+              updated_at: 1_713_309_300,
+            },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+describe("ProxiesPage", () => {
+  it("renders global catalog rows even when geo metadata contains an invalid country code", () => {
+    render(
+      <I18nProvider initialLocale="en-US">
+        <ProxiesPage
+          mode="global"
+          profiles={["default"]}
+          currentUser={currentUser}
+          accessDenied={false}
+          authError={null}
+          globalLoadResponse={null}
+          globalLoadError={null}
+          loadingGlobal={false}
+          proxyImports={null}
+          proxyImportsLoading={false}
+          proxyImportsError={null}
+          reallocatingImportId={null}
+          deletingImportId={null}
+          proxyCatalog={globalCatalogWithInvalidCountryCode}
+          proxyCatalogLoading={false}
+          proxyCatalogError={null}
+          liveConnectionState="connected"
+          liveNodeStates={{}}
+          queueingOperation={false}
+          onLoadGlobal={vi.fn()}
+          onReassignImport={vi.fn()}
+          onDeleteImport={vi.fn()}
+          onRefreshNodes={vi.fn()}
+          onProbeNodes={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+
+    expect(screen.getByText("Grouped proxy catalog")).toBeInTheDocument();
+    expect(screen.getByText("JP-Tokyo-Entry")).toBeInTheDocument();
+    expect(screen.getByText("Japan / Chiyoda")).toBeInTheDocument();
+  });
+});
