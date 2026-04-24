@@ -187,19 +187,17 @@ export function SessionsPage({
         )}
         chips={chips}
         actions={
-          <Badge
-            variant="outline"
-            className="rounded-full px-3 py-1 font-mono text-[11px] uppercase tracking-[0.16em]"
-          >
-            <ShieldCheckIcon className="mr-1 size-3.5" />
-            {t("session control")}
-          </Badge>
-        }
-      >
-        <div className="space-y-4">
-          <div className="flex flex-wrap justify-end gap-3">
-            <div className="w-full max-w-[340px] space-y-2">
-              <div className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+          <div className="flex w-full flex-col items-stretch gap-3 sm:w-auto sm:min-w-[320px] sm:items-end">
+            <Badge
+              variant="outline"
+              className="rounded-full px-3 py-1 font-mono text-[11px] uppercase tracking-[0.16em]"
+            >
+              <ShieldCheckIcon className="mr-1 size-3.5" />
+              {t("session control")}
+            </Badge>
+
+            <div className="w-full max-w-[320px] space-y-1.5">
+              <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground sm:text-right">
                 {t("Copy address format")}
               </div>
               <Select
@@ -208,7 +206,7 @@ export function SessionsPage({
               >
                 <SelectTrigger
                   aria-label={t("Copy address format")}
-                  className="w-full bg-background text-left"
+                  className="h-auto min-h-11 w-full bg-background text-left"
                 >
                   <div className="flex min-w-0 flex-col items-start leading-tight">
                     <span className="truncate font-medium text-foreground">
@@ -234,20 +232,20 @@ export function SessionsPage({
               </Select>
             </div>
           </div>
-
-          <SessionsTable
-            closingSessionId={closingSessionId}
-            isLoading={sessionsLoading}
-            listenCopyFormat={listenCopyFormat}
-            onCloseSession={onCloseSession}
-            onEditSession={(sessionId) => {
-              onResetSwitchState();
-              setEditingSessionId(sessionId);
-            }}
-            sessions={sessions}
-            switchingSessionId={switchingSessionId}
-          />
-        </div>
+        }
+      >
+        <SessionsTable
+          closingSessionId={closingSessionId}
+          isLoading={sessionsLoading}
+          listenCopyFormat={listenCopyFormat}
+          onCloseSession={onCloseSession}
+          onEditSession={(sessionId) => {
+            onResetSwitchState();
+            setEditingSessionId(sessionId);
+          }}
+          sessions={sessions}
+          switchingSessionId={switchingSessionId}
+        />
       </DataTablePanel>
 
       <SessionCreateDialog
