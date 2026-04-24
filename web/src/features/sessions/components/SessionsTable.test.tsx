@@ -39,9 +39,11 @@ describe("SessionsTable", () => {
         sessions={sessionsFixture.sessions}
         listenCopyFormat="socks_url"
         isLoading={false}
+        pendingCloseSessionIds={[]}
         closingSessionId={null}
         switchingSessionId={null}
         onEditSession={vi.fn()}
+        onUndoCloseSession={vi.fn()}
         onCloseSession={vi.fn()}
       />,
     );
@@ -64,9 +66,11 @@ describe("SessionsTable", () => {
         sessions={sessionsFixture.sessions}
         listenCopyFormat="http_url"
         isLoading={false}
+        pendingCloseSessionIds={[]}
         closingSessionId={null}
         switchingSessionId={null}
         onEditSession={vi.fn()}
+        onUndoCloseSession={vi.fn()}
         onCloseSession={vi.fn()}
       />,
     );
@@ -81,5 +85,38 @@ describe("SessionsTable", () => {
       expect(writeText).toHaveBeenCalledWith("http://127.0.0.1:10080");
       expect(mockToast.success).toHaveBeenCalledWith("Copied proxy address");
     });
+  });
+
+  it("dims the row and exposes an undo action while close is pending", () => {
+    const onUndoCloseSession = vi.fn();
+
+    renderWithProviders(
+      <SessionsTable
+        sessions={sessionsFixture.sessions}
+        listenCopyFormat="socks_url"
+        isLoading={false}
+        pendingCloseSessionIds={[sessionsFixture.sessions[0]?.session_id ?? ""]}
+        closingSessionId={null}
+        switchingSessionId={null}
+        onEditSession={vi.fn()}
+        onUndoCloseSession={onUndoCloseSession}
+        onCloseSession={vi.fn()}
+      />,
+    );
+
+    const firstRow = screen.getByText("sess-A7c2Kp9LmQ4RsT1v").closest("tr");
+    expect(firstRow).toHaveAttribute("data-close-state", "pending");
+
+    const undoButton = screen.getByRole("button", { name: /^Undo$/i });
+    expect(undoButton).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: /Edit proxy for sess-A7c2Kp9LmQ4RsT1v/i }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: /Copy proxy address for sess-A7c2Kp9LmQ4RsT1v/i }),
+    ).toBeDisabled();
+
+    undoButton.click();
+    expect(onUndoCloseSession).toHaveBeenCalledWith("sess-A7c2Kp9LmQ4RsT1v");
   });
 });

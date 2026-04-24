@@ -28,6 +28,7 @@ export const enUS: MessageCatalog = {
   "Opened {count} sessions in batch": "Opened {count} sessions in batch",
   "Copied proxy address": "Copied proxy address",
   "Could not copy proxy address": "Could not copy proxy address",
+  Undo: "Undo",
   "Pick one simple targeting mode, keep the port optional, and let the backend open the listener from the first surviving candidate.":
     "Pick one simple targeting mode, keep the port optional, and let the backend open the listener from the first surviving candidate.",
   "optional port": "optional port",

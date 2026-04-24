@@ -20,9 +20,11 @@ const meta = {
     sessions: sessionsFixture.sessions,
     listenCopyFormat: "socks_url",
     isLoading: false,
+    pendingCloseSessionIds: [],
     closingSessionId: null,
     switchingSessionId: null,
     onEditSession: fn(),
+    onUndoCloseSession: fn(),
     onCloseSession: fn(),
   },
 } satisfies Meta<typeof SessionsTable>;
@@ -53,5 +55,11 @@ export const Empty: Story = {
 export const Switching: Story = {
   args: {
     switchingSessionId: sessionsFixture.sessions[0]?.session_id,
+  },
+};
+
+export const PendingClose: Story = {
+  args: {
+    pendingCloseSessionIds: [sessionsFixture.sessions[0]?.session_id ?? ""],
   },
 };

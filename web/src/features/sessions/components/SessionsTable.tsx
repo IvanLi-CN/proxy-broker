@@ -69,9 +69,11 @@ interface SessionsTableProps {
   sessions: SessionListItem[];
   listenCopyFormat: SessionCopyAddressFormat;
   isLoading?: boolean;
+  pendingCloseSessionIds?: string[];
   closingSessionId?: string | null;
   switchingSessionId?: string | null;
   onEditSession: (sessionId: string) => void;
+  onUndoCloseSession: (sessionId: string) => void;
   onCloseSession: (sessionId: string) => void;
 }
 
@@ -79,9 +81,11 @@ export function SessionsTable({
   sessions,
   listenCopyFormat,
   isLoading,
+  pendingCloseSessionIds = [],
   closingSessionId,
   switchingSessionId,
   onEditSession,
+  onUndoCloseSession,
   onCloseSession,
 }: SessionsTableProps) {
   const { locale, t } = useI18n();
@@ -137,13 +141,19 @@ export function SessionsTable({
         </TableHeader>
         <TableBody>
           {sessions.map((session) => {
+            const isPendingClose = pendingCloseSessionIds.includes(session.session_id);
             const isClosing = closingSessionId === session.session_id;
             const isSwitching = switchingSessionId === session.session_id;
+            const isDimmed = isPendingClose || isClosing;
             const geoSummary = buildSessionGeoSummary(locale, session);
             const listenEndpoint =
               formatListenEndpoint(session.listen, session.port) ?? session.listen;
             return (
-              <TableRow key={session.session_id} className="[&_td]:py-3">
+              <TableRow
+                key={session.session_id}
+                data-close-state={isPendingClose ? "pending" : isClosing ? "closing" : "idle"}
+                className={cn("[&_td]:py-3", isDimmed && "bg-muted/30 text-muted-foreground")}
+              >
                 <TableCell className="px-4 font-mono text-xs md:text-sm">
                   {session.session_id}
                 </TableCell>
@@ -159,7 +169,7 @@ export function SessionsTable({
                         sessionId: session.session_id,
                       })}
                       onClick={() => onEditSession(session.session_id)}
-                      disabled={isSwitching || isClosing}
+                      disabled={isSwitching || isClosing || isPendingClose}
                     >
                       {isSwitching ? (
                         <LoaderCircleIcon className="size-3.5 animate-spin" />
@@ -191,6 +201,7 @@ export function SessionsTable({
                       onClick={() => {
                         void handleCopyAddress(session);
                       }}
+                      disabled={isDimmed || isSwitching}
                     >
                       <CopyIcon className="size-3.5" />
                     </Button>
@@ -203,11 +214,18 @@ export function SessionsTable({
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => onCloseSession(session.session_id)}
+                    onClick={() =>
+                      isPendingClose
+                        ? onUndoCloseSession(session.session_id)
+                        : onCloseSession(session.session_id)
+                    }
                     disabled={isClosing || isSwitching}
-                    className={cn((isClosing || isSwitching) && "opacity-70")}
+                    className={cn(
+                      (isClosing || isSwitching) && "opacity-70",
+                      isPendingClose && "text-foreground hover:text-foreground",
+                    )}
                   >
-                    {isClosing ? t("Closing...") : t("Close")}
+                    {isPendingClose ? t("Undo") : isClosing ? t("Closing...") : t("Close")}
                   </Button>
                 </TableCell>
               </TableRow>

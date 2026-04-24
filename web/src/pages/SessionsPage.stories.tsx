@@ -98,8 +98,21 @@ export const EmptyState: Story = {
 };
 
 export const ClosingState: Story = {
-  args: {
-    closingSessionId: sessionsFixture.sessions[0]?.session_id,
+  args: {},
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const closeButtons = await canvas.findAllByRole("button", { name: /^Close$/i });
+    const firstCloseButton = closeButtons[0];
+    if (!firstCloseButton) {
+      throw new Error("Expected at least one close button in the session table.");
+    }
+
+    await userEvent.click(firstCloseButton);
+    const pendingRow = (
+      await canvas.findByText(sessionsFixture.sessions[0]?.session_id ?? "")
+    ).closest("tr");
+    await expect(pendingRow).toHaveAttribute("data-close-state", "pending");
+    await expect(await canvas.findByRole("button", { name: /^Undo$/i })).toBeVisible();
   },
 };
 

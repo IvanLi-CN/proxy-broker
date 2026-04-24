@@ -1,5 +1,5 @@
 import { PlusCircleIcon, ShieldCheckIcon } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { DataTablePanel } from "@/components/DataTablePanel";
 import { Badge } from "@/components/ui/badge";
@@ -85,10 +85,17 @@ export function SessionsPage({
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [listenCopyFormat, setListenCopyFormat] = useSessionCopyAddressFormat();
+  const [pendingCloseSessionIds, setPendingCloseSessionIds] = useState<string[]>([]);
+  const [hiddenCloseSessionIds, setHiddenCloseSessionIds] = useState<string[]>([]);
+  const closeCountdownTimersRef = useRef<Map<string, number>>(new Map());
 
   const editingSession = useMemo(
     () => sessions.find((session) => session.session_id === editingSessionId) ?? null,
     [editingSessionId, sessions],
+  );
+  const visibleSessions = useMemo(
+    () => sessions.filter((session) => !hiddenCloseSessionIds.includes(session.session_id)),
+    [hiddenCloseSessionIds, sessions],
   );
   const copyAddressOptions = useMemo(
     () =>
@@ -148,9 +155,76 @@ export function SessionsPage({
     }
   }, [editingSession, editingSessionId, onResetSwitchState, switchingSessionId]);
 
+  useEffect(() => {
+    const currentSessionIds = new Set(sessions.map((session) => session.session_id));
+
+    setPendingCloseSessionIds((previous) =>
+      previous.filter((sessionId) => {
+        if (currentSessionIds.has(sessionId)) {
+          return true;
+        }
+
+        const timerId = closeCountdownTimersRef.current.get(sessionId);
+        if (timerId !== undefined) {
+          window.clearTimeout(timerId);
+          closeCountdownTimersRef.current.delete(sessionId);
+        }
+        return false;
+      }),
+    );
+
+    setHiddenCloseSessionIds((previous) =>
+      previous.filter((sessionId) => currentSessionIds.has(sessionId)),
+    );
+  }, [sessions]);
+
+  useEffect(
+    () => () => {
+      for (const timerId of closeCountdownTimersRef.current.values()) {
+        window.clearTimeout(timerId);
+      }
+      closeCountdownTimersRef.current.clear();
+    },
+    [],
+  );
+
+  const beginCloseCountdown = (sessionId: string) => {
+    if (closeCountdownTimersRef.current.has(sessionId)) {
+      return;
+    }
+
+    setPendingCloseSessionIds((previous) =>
+      previous.includes(sessionId) ? previous : [...previous, sessionId],
+    );
+
+    const timerId = window.setTimeout(() => {
+      closeCountdownTimersRef.current.delete(sessionId);
+      setPendingCloseSessionIds((previous) => previous.filter((id) => id !== sessionId));
+      setHiddenCloseSessionIds((previous) =>
+        previous.includes(sessionId) ? previous : [...previous, sessionId],
+      );
+
+      void Promise.resolve(onCloseSession(sessionId)).catch(() => {
+        setHiddenCloseSessionIds((previous) => previous.filter((id) => id !== sessionId));
+      });
+    }, 10_000);
+
+    closeCountdownTimersRef.current.set(sessionId, timerId);
+  };
+
+  const undoCloseCountdown = (sessionId: string) => {
+    const timerId = closeCountdownTimersRef.current.get(sessionId);
+    if (timerId !== undefined) {
+      window.clearTimeout(timerId);
+      closeCountdownTimersRef.current.delete(sessionId);
+    }
+
+    setPendingCloseSessionIds((previous) => previous.filter((id) => id !== sessionId));
+  };
+
   const chips = [
-    t(sessions.length === 1 ? "{count} session" : "{count} sessions", {
-      count: formatNumber(sessions.length),
+    t(visibleSessions.length === 1 ? "{count} session" : "{count} sessions", {
+      count: formatNumber(visibleSessions.length),
     }),
     sessionsLoading ? t("polling now") : t("polling every 5s"),
     switchingSessionId ? t("switch action in flight") : t("switch action idle"),
@@ -238,12 +312,14 @@ export function SessionsPage({
           closingSessionId={closingSessionId}
           isLoading={sessionsLoading}
           listenCopyFormat={listenCopyFormat}
-          onCloseSession={onCloseSession}
+          onCloseSession={beginCloseCountdown}
           onEditSession={(sessionId) => {
             onResetSwitchState();
             setEditingSessionId(sessionId);
           }}
-          sessions={sessions}
+          onUndoCloseSession={undoCloseCountdown}
+          pendingCloseSessionIds={pendingCloseSessionIds}
+          sessions={visibleSessions}
           switchingSessionId={switchingSessionId}
         />
       </DataTablePanel>

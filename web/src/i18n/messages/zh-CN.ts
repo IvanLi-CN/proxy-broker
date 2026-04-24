@@ -513,6 +513,7 @@ export const zhCN: MessageCatalog = {
   "No sessions yet": "还没有会话",
   "Create one session or a batch from the dialog to populate this list.":
     "先从弹窗创建单个会话或一个批次，这个列表才会有内容。",
+  Undo: "撤销",
   "Edit proxy for {sessionId}": "编辑 {sessionId} 的代理",
   "Switched {sessionId} to {proxyName}": "已将 {sessionId} 切换到 {proxyName}",
   "Open a new session from one dialog. Keep single and batch creation together, but leave the list as the default surface.":
