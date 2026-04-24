@@ -1,7 +1,6 @@
 import { LoaderCircleIcon, PencilLineIcon, PlugZapIcon } from "lucide-react";
 
 import { EmptyPanel } from "@/components/EmptyPanel";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import {
@@ -13,12 +12,21 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useI18n } from "@/i18n";
-import { formatTimestamp } from "@/lib/format";
-import type { SessionRecord } from "@/lib/types";
+import { formatCountryName, formatGeoLabel, formatTimestamp } from "@/lib/format";
+import type { SessionListItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+function buildSessionGeoSummary(locale: "zh-CN" | "en-US", session: SessionListItem) {
+  const parts = [
+    formatCountryName(locale, session.country_code, session.country_name),
+    formatGeoLabel(locale, session.region_name),
+    formatGeoLabel(locale, session.city),
+  ].filter(Boolean);
+  return Array.from(new Set(parts)).join(" / ");
+}
+
 interface SessionsTableProps {
-  sessions: SessionRecord[];
+  sessions: SessionListItem[];
   isLoading?: boolean;
   closingSessionId?: string | null;
   switchingSessionId?: string | null;
@@ -74,43 +82,41 @@ export function SessionsTable({
           {sessions.map((session) => {
             const isClosing = closingSessionId === session.session_id;
             const isSwitching = switchingSessionId === session.session_id;
+            const geoSummary = buildSessionGeoSummary(locale, session);
             return (
               <TableRow key={session.session_id} className="[&_td]:py-3">
                 <TableCell className="px-4 font-mono text-xs md:text-sm">
                   {session.session_id}
                 </TableCell>
                 <TableCell>
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <div className="font-medium">{session.proxy_name}</div>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="size-7 rounded-full"
-                        aria-label={t("Edit proxy for {sessionId}", {
-                          sessionId: session.session_id,
-                        })}
-                        onClick={() => onEditSession(session.session_id)}
-                        disabled={isSwitching || isClosing}
-                      >
-                        {isSwitching ? (
-                          <LoaderCircleIcon className="size-3.5 animate-spin" />
-                        ) : (
-                          <PencilLineIcon className="size-3.5" />
-                        )}
-                      </Button>
-                    </div>
-                    <Badge
-                      variant="outline"
-                      className="rounded-full px-3 py-1 font-mono text-[11px] uppercase tracking-[0.14em]"
+                  <div className="flex items-center gap-2">
+                    <div className="font-medium">{session.proxy_name}</div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="size-7 rounded-full"
+                      aria-label={t("Edit proxy for {sessionId}", {
+                        sessionId: session.session_id,
+                      })}
+                      onClick={() => onEditSession(session.session_id)}
+                      disabled={isSwitching || isClosing}
                     >
-                      {t("port {port}", { port: session.port })}
-                    </Badge>
+                      {isSwitching ? (
+                        <LoaderCircleIcon className="size-3.5 animate-spin" />
+                      ) : (
+                        <PencilLineIcon className="size-3.5" />
+                      )}
+                    </Button>
                   </div>
                 </TableCell>
-                <TableCell className="font-mono text-xs md:text-sm">
-                  {session.selected_ip}
+                <TableCell>
+                  <div className="space-y-1">
+                    <div className="font-mono text-xs md:text-sm">{session.selected_ip}</div>
+                    {geoSummary ? (
+                      <div className="text-xs text-muted-foreground">{geoSummary}</div>
+                    ) : null}
+                  </div>
                 </TableCell>
                 <TableCell className="font-mono text-xs md:text-sm">{session.listen}</TableCell>
                 <TableCell className="text-xs md:text-sm">

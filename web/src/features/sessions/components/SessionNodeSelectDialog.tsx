@@ -21,18 +21,18 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useI18n } from "@/i18n";
-import { formatGeoLabel, formatLatency, formatTimestamp } from "@/lib/format";
+import { formatCountryName, formatGeoLabel, formatLatency, formatTimestamp } from "@/lib/format";
 import type {
+  SessionListItem,
   SessionNodeOptionItem,
   SessionNodeSortMode,
-  SessionRecord,
   UpdateSessionNodeRequest,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface SessionNodeSelectDialogProps {
   open: boolean;
-  session: SessionRecord | null;
+  session: SessionListItem | null;
   isPending: boolean;
   error?: string | null;
   onOpenChange: (open: boolean) => void;
@@ -45,7 +45,7 @@ interface SessionNodeSelectDialogProps {
 
 function buildGeoSummary(locale: "zh-CN" | "en-US", item: SessionNodeOptionItem) {
   const geo = [
-    formatGeoLabel(locale, item.country_name),
+    formatCountryName(locale, item.country_code, item.country_name),
     formatGeoLabel(locale, item.region_name),
     formatGeoLabel(locale, item.city),
   ].filter(Boolean);

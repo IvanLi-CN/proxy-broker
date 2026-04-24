@@ -172,8 +172,15 @@ export interface SessionRecord {
   created_at: number;
 }
 
+export interface SessionListItem extends SessionRecord {
+  country_code?: string | null;
+  country_name?: string | null;
+  region_name?: string | null;
+  city?: string | null;
+}
+
 export interface ListSessionsResponse {
-  sessions: SessionRecord[];
+  sessions: SessionListItem[];
 }
 
 export interface ListProfilesResponse {

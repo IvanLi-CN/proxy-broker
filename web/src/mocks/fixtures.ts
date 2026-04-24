@@ -101,6 +101,10 @@ export const sessionsFixture: ListSessionsResponse = {
       proxy_name: "JP-Tokyo-Entry",
       node_id: "node-jp-tokyo-entry",
       created_at: 1_741_748_460,
+      country_code: "JP",
+      country_name: "Japan",
+      region_name: "Tokyo",
+      city: "Chiyoda",
     },
     {
       session_id: "sess-Q8n3Va1Zx5Mw2Lp7",
@@ -110,6 +114,10 @@ export const sessionsFixture: ListSessionsResponse = {
       proxy_name: "JP-Osaka-Edge",
       node_id: "node-jp-osaka-edge",
       created_at: 1_741_748_520,
+      country_code: "JP",
+      country_name: "Japan",
+      region_name: "Osaka",
+      city: "Osaka",
     },
   ],
 };

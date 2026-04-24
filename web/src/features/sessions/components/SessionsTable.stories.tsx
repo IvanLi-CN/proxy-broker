@@ -12,7 +12,7 @@ const meta = {
     docs: {
       description: {
         component:
-          "Polling table of currently active sessions with close actions and empty/loading fallbacks.",
+          "Polling table of current sessions with inline proxy switching, selected IP geography, and empty/loading fallbacks.",
       },
     },
   },

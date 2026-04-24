@@ -42,7 +42,7 @@ use crate::{
         ProxyOperationRequest, ProxyScope, RefreshRequest, RefreshResponse,
         ResolvedImportNameSource, SearchSessionNodeOptionsRequest,
         SearchSessionNodeOptionsResponse, SearchSessionOptionsRequest,
-        SearchSessionOptionsResponse, SessionNodeOptionItem, SessionNodeSortMode,
+        SearchSessionOptionsResponse, SessionListItem, SessionNodeOptionItem, SessionNodeSortMode,
         SessionOptionItem, SessionOptionKind, SessionRecord, SessionSelectionMode,
         SubscriptionMetadata, SubscriptionSource, SuggestedPortResponse, TaskEventLevel,
         TaskListQuery, TaskListResponse, TaskRunDetail, TaskRunEventRecord, TaskRunKind,
@@ -3745,6 +3745,81 @@ impl BrokerService {
         Ok(sessions)
     }
 
+    async fn build_session_list_items(
+        &self,
+        profile_id: &str,
+        sessions: Vec<SessionRecord>,
+    ) -> BrokerResult<Vec<SessionListItem>> {
+        if sessions.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let effective_profile_ids = vec![profile_id.to_string()];
+        let effective_nodes = self
+            .compose_effective_proxy_inventory_records(profile_id)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|record| (record.node_id.clone(), record))
+            .collect::<HashMap<_, _>>();
+        let metadata_by_node = self
+            .store
+            .list_proxy_node_metadata()
+            .await
+            .map_err(BrokerError::from)?
+            .into_iter()
+            .fold(
+                HashMap::<String, Vec<ProxyNodeMetadataRecord>>::new(),
+                |mut acc, record| {
+                    let record = sanitize_proxy_node_metadata_record(record);
+                    acc.entry(record.node_id.clone()).or_default().push(record);
+                    acc
+                },
+            );
+        let legacy_metadata = self.load_legacy_profile_metadata(&effective_profile_ids).await?;
+
+        Ok(sessions
+            .into_iter()
+            .map(|session| {
+                let selected_metadata = metadata_by_node
+                    .get(&session.node_id)
+                    .and_then(|items| items.iter().find(|item| item.ip == session.selected_ip))
+                    .cloned()
+                    .or_else(|| {
+                        effective_nodes.get(&session.node_id).and_then(|record| {
+                            self.backfill_proxy_node_metadata(
+                                record,
+                                &session.selected_ip,
+                                &effective_profile_ids,
+                                &legacy_metadata,
+                            )
+                            .map(sanitize_proxy_node_metadata_record)
+                        })
+                    });
+
+                SessionListItem {
+                    session_id: session.session_id,
+                    listen: session.listen,
+                    port: session.port,
+                    selected_ip: session.selected_ip,
+                    proxy_name: session.proxy_name,
+                    node_id: session.node_id,
+                    created_at: session.created_at,
+                    country_code: selected_metadata
+                        .as_ref()
+                        .and_then(|item| item.country_code.clone()),
+                    country_name: selected_metadata
+                        .as_ref()
+                        .and_then(|item| item.country_name.clone()),
+                    region_name: selected_metadata
+                        .as_ref()
+                        .and_then(|item| item.region_name.clone()),
+                    city: selected_metadata.as_ref().and_then(|item| item.city.clone()),
+                }
+            })
+            .collect())
+    }
+
     fn build_open_session_response(&self, session: SessionRecord) -> OpenSessionResponse {
         OpenSessionResponse {
             session_id: session.session_id,
@@ -4785,6 +4860,7 @@ impl BrokerService {
 
     pub async fn list_sessions(&self, profile_id: &str) -> BrokerResult<ListSessionsResponse> {
         let sessions = self.list_sessions_backfilled(profile_id).await?;
+        let sessions = self.build_session_list_items(profile_id, sessions).await?;
         Ok(ListSessionsResponse { sessions })
     }
 
@@ -8103,6 +8179,62 @@ proxies:
             .expect("filtered node options should load");
         assert_eq!(filtered.items.len(), 1);
         assert_eq!(filtered.items[0].proxy_name, "aaa-node");
+    }
+
+    #[tokio::test]
+    async fn list_sessions_includes_selected_ip_geo_metadata() {
+        let profile_id = "geo-browser";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
+        service
+            .create_profile(profile_id)
+            .await
+            .expect("profile should be created");
+
+        let node = make_node("jp-tokyo-entry", "203.0.113.10");
+        let node_id = node
+            .node_id
+            .clone()
+            .expect("test node should include a node id");
+        store
+            .replace_subscription(profile_id, &[node])
+            .await
+            .expect("seed subscription should succeed");
+        store
+            .upsert_proxy_node_metadata(&[ProxyNodeMetadataRecord {
+                node_id: node_id.clone(),
+                ip: "203.0.113.10".to_string(),
+                country_code: Some("JP".to_string()),
+                country_name: Some("Japan".to_string()),
+                region_name: Some("Tokyo".to_string()),
+                city: Some("Chiyoda".to_string()),
+                geo_source: Some("fixture".to_string()),
+                probe_updated_at: Some(10),
+                geo_updated_at: Some(11),
+                last_probe_ok: Some(true),
+                last_latency_ms: Some(88),
+                median_latency_ms: Some(88),
+                last_probe_samples: vec![Some(88)],
+                updated_at: 12,
+            }])
+            .await
+            .expect("metadata should be stored");
+        store
+            .insert_session(profile_id, &make_session("s1", "jp-tokyo-entry", "203.0.113.10", 1))
+            .await
+            .expect("seed session should succeed");
+
+        let sessions = service
+            .list_sessions(profile_id)
+            .await
+            .expect("sessions should list");
+        assert_eq!(sessions.sessions.len(), 1);
+        assert_eq!(sessions.sessions[0].node_id, node_id);
+        assert_eq!(sessions.sessions[0].country_code.as_deref(), Some("JP"));
+        assert_eq!(sessions.sessions[0].country_name.as_deref(), Some("Japan"));
+        assert_eq!(sessions.sessions[0].region_name.as_deref(), Some("Tokyo"));
+        assert_eq!(sessions.sessions[0].city.as_deref(), Some("Chiyoda"));
     }
 
     #[tokio::test]

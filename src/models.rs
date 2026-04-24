@@ -147,7 +147,7 @@ pub struct ExtractIpResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListSessionsResponse {
-    pub sessions: Vec<SessionRecord>,
+    pub sessions: Vec<SessionListItem>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -871,6 +871,25 @@ pub struct SessionRecord {
     pub proxy_name: String,
     pub node_id: String,
     pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionListItem {
+    pub session_id: String,
+    pub listen: String,
+    pub port: u16,
+    pub selected_ip: String,
+    pub proxy_name: String,
+    pub node_id: String,
+    pub created_at: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub country_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub country_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub region_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub city: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

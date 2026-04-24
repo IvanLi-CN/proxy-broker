@@ -15,14 +15,14 @@ import type {
   OpenSessionResponse,
   SearchSessionNodeOptionsRequest,
   SearchSessionOptionsRequest,
+  SessionListItem,
   SessionNodeOptionItem,
   SessionOptionItem,
-  SessionRecord,
   UpdateSessionNodeRequest,
 } from "@/lib/types";
 
 interface SessionsPageProps {
-  sessions: SessionRecord[];
+  sessions: SessionListItem[];
   sessionsLoading: boolean;
   openError?: string | null;
   batchError?: string | null;
