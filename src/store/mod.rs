@@ -4,7 +4,7 @@ mod sqlite;
 use async_trait::async_trait;
 
 use crate::models::{
-    ApiKeyRecord, IpRecord, ProbeRecord, ProfileProxySettings, ProxyImportRecord,
+    ApiKeyRecord, IpRecord, NodeUsageRecord, ProbeRecord, ProfileProxySettings, ProxyImportRecord,
     ProxyImportSyncConfig, ProxyInventoryRecord, ProxyNode, ProxyNodeMetadataRecord, ProxyScope,
     SessionRecord, TaskListQuery, TaskRunEventRecord, TaskRunRecord,
 };
@@ -116,6 +116,15 @@ pub trait BrokerStore: Send + Sync {
     ) -> anyhow::Result<()>;
     async fn delete_session(&self, profile_id: &str, session_id: &str) -> anyhow::Result<()>;
     async fn list_sessions(&self, profile_id: &str) -> anyhow::Result<Vec<SessionRecord>>;
+    async fn list_profile_node_usages(
+        &self,
+        profile_id: &str,
+    ) -> anyhow::Result<Vec<NodeUsageRecord>>;
+    async fn list_session_node_usages(
+        &self,
+        profile_id: &str,
+        session_id: &str,
+    ) -> anyhow::Result<Vec<NodeUsageRecord>>;
 
     async fn insert_api_key(&self, api_key: &ApiKeyRecord) -> anyhow::Result<()>;
     async fn get_api_key(&self, key_id: &str) -> anyhow::Result<Option<ApiKeyRecord>>;

@@ -33,3 +33,4 @@
 | s5fwx | 代理页订阅分组节点、共享 Runtime 与实时运营流 | 已实现（本地已验证） | `s5fwx-proxy-node-groups-live-ops/SPEC.md` | 2026-04-21 | grouped node catalog、shared runtime、node-pinned sessions、实时 proxy ops、Storybook 视觉证据已落盘 |
 | 9hv34 | 订阅元信息解析、信息节点过滤与导入名称自动补全 | 已完成 | `9hv34-subscription-metadata-import/SPEC.md` | 2026-04-22 | 订阅头解析、import 级 metadata、保守信息节点过滤、Storybook 视觉证据已落盘 |
 | 7aqsu | malformed Hysteria 速率节点 shared runtime 毒化修复 | 进行中（本地已验证） | `7aqsu-malformed-hysteria-rate-guard/SPEC.md` | 2026-04-23 | 整节点丢弃 malformed hysteria/hysteria2 速率节点，补 shared runtime 兜底、SQLite 自愈与 101 闭环 |
+| 2bsed | 会话页列表优先与会话内切换代理 | 进行中 | `2bsed-sessions-list-first-node-switching/SPEC.md` | 2026-04-24 | /sessions 列表优先、创建弹窗、会话内切换代理、节点 recency 排序与视觉证据 |

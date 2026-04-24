@@ -10,11 +10,11 @@ use sqlx::{Row, SqlitePool, sqlite::SqliteConnectOptions, sqlite::SqlitePoolOpti
 use crate::{
     ids,
     models::{
-        ApiKeyProfileScope, ApiKeyProfileScopeKind, ApiKeyRecord, IpRecord, ProbeRecord,
-        ProfileProxySettings, ProxyImportRecord, ProxyImportSourceIdentity, ProxyImportSyncConfig,
-        ProxyInventoryRecord, ProxyNode, ProxyNodeMetadataRecord, ProxyScope, SessionRecord,
-        SubscriptionMetadata, SubscriptionSource, TaskEventLevel, TaskListQuery,
-        TaskRunEventRecord, TaskRunKind, TaskRunRecord, TaskRunStage, TaskRunStatus,
+        ApiKeyProfileScope, ApiKeyProfileScopeKind, ApiKeyRecord, IpRecord, NodeUsageRecord,
+        ProbeRecord, ProfileProxySettings, ProxyImportRecord, ProxyImportSourceIdentity,
+        ProxyImportSyncConfig, ProxyInventoryRecord, ProxyNode, ProxyNodeMetadataRecord,
+        ProxyScope, SessionRecord, SubscriptionMetadata, SubscriptionSource, TaskEventLevel,
+        TaskListQuery, TaskRunEventRecord, TaskRunKind, TaskRunRecord, TaskRunStage, TaskRunStatus,
         TaskRunTrigger,
     },
     proxy_node_validation::malformed_proxy_reason,
@@ -135,6 +135,47 @@ impl SqliteStore {
         .execute(&self.pool)
         .await?;
         self.migrate_sessions_node_id_schema().await?;
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS profile_node_usages (
+              profile_id TEXT NOT NULL,
+              node_id TEXT NOT NULL,
+              last_used_at INTEGER NOT NULL,
+              PRIMARY KEY (profile_id, node_id)
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS session_node_usages (
+              profile_id TEXT NOT NULL,
+              session_id TEXT NOT NULL,
+              node_id TEXT NOT NULL,
+              last_used_at INTEGER NOT NULL,
+              PRIMARY KEY (profile_id, session_id, node_id)
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_profile_node_usages_lookup
+            ON profile_node_usages(profile_id, last_used_at DESC, node_id ASC)
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_session_node_usages_lookup
+            ON session_node_usages(profile_id, session_id, last_used_at DESC, node_id ASC)
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
 
         sqlx::query(
             r#"
@@ -1676,6 +1717,13 @@ impl BrokerStore for SqliteStore {
                 .bind(session_id)
                 .execute(&mut *tx)
                 .await?;
+            sqlx::query(
+                "DELETE FROM session_node_usages WHERE profile_id = ?1 AND session_id = ?2",
+            )
+            .bind(profile_id)
+            .bind(session_id)
+            .execute(&mut *tx)
+            .await?;
         }
 
         tx.commit().await?;
@@ -2354,17 +2402,51 @@ impl BrokerStore for SqliteStore {
             .bind(last_used_at)
             .execute(&mut *tx)
             .await?;
+            sqlx::query(
+                r#"
+                INSERT INTO profile_node_usages (profile_id, node_id, last_used_at)
+                VALUES (?1, ?2, ?3)
+                ON CONFLICT(profile_id, node_id) DO UPDATE SET
+                  last_used_at = excluded.last_used_at
+                "#,
+            )
+            .bind(profile_id)
+            .bind(&session.node_id)
+            .bind(last_used_at)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                r#"
+                INSERT INTO session_node_usages (profile_id, session_id, node_id, last_used_at)
+                VALUES (?1, ?2, ?3, ?4)
+                ON CONFLICT(profile_id, session_id, node_id) DO UPDATE SET
+                  last_used_at = excluded.last_used_at
+                "#,
+            )
+            .bind(profile_id)
+            .bind(&session.session_id)
+            .bind(&session.node_id)
+            .bind(last_used_at)
+            .execute(&mut *tx)
+            .await?;
         }
         tx.commit().await?;
         Ok(())
     }
 
     async fn delete_session(&self, profile_id: &str, session_id: &str) -> anyhow::Result<()> {
+        let mut tx = self.pool.begin().await?;
         sqlx::query("DELETE FROM sessions WHERE profile_id = ?1 AND session_id = ?2")
             .bind(profile_id)
             .bind(session_id)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
+        sqlx::query("DELETE FROM session_node_usages WHERE profile_id = ?1 AND session_id = ?2")
+            .bind(profile_id)
+            .bind(session_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
         Ok(())
     }
 
@@ -2392,6 +2474,60 @@ impl BrokerStore for SqliteStore {
                     proxy_name: row.try_get("proxy_name")?,
                     node_id: row.try_get("node_id")?,
                     created_at: row.try_get("created_at")?,
+                })
+            })
+            .collect()
+    }
+
+    async fn list_profile_node_usages(
+        &self,
+        profile_id: &str,
+    ) -> anyhow::Result<Vec<NodeUsageRecord>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT node_id, last_used_at
+            FROM profile_node_usages
+            WHERE profile_id = ?1
+            ORDER BY last_used_at DESC, node_id ASC
+            "#,
+        )
+        .bind(profile_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                Ok(NodeUsageRecord {
+                    node_id: row.try_get("node_id")?,
+                    last_used_at: row.try_get("last_used_at")?,
+                })
+            })
+            .collect()
+    }
+
+    async fn list_session_node_usages(
+        &self,
+        profile_id: &str,
+        session_id: &str,
+    ) -> anyhow::Result<Vec<NodeUsageRecord>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT node_id, last_used_at
+            FROM session_node_usages
+            WHERE profile_id = ?1 AND session_id = ?2
+            ORDER BY last_used_at DESC, node_id ASC
+            "#,
+        )
+        .bind(profile_id)
+        .bind(session_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                Ok(NodeUsageRecord {
+                    node_id: row.try_get("node_id")?,
+                    last_used_at: row.try_get("last_used_at")?,
                 })
             })
             .collect()

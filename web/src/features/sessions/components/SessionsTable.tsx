@@ -1,4 +1,4 @@
-import { LoaderCircleIcon, PlugZapIcon } from "lucide-react";
+import { LoaderCircleIcon, PencilLineIcon, PlugZapIcon } from "lucide-react";
 
 import { EmptyPanel } from "@/components/EmptyPanel";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +21,8 @@ interface SessionsTableProps {
   sessions: SessionRecord[];
   isLoading?: boolean;
   closingSessionId?: string | null;
+  switchingSessionId?: string | null;
+  onEditSession: (sessionId: string) => void;
   onCloseSession: (sessionId: string) => void;
 }
 
@@ -28,6 +30,8 @@ export function SessionsTable({
   sessions,
   isLoading,
   closingSessionId,
+  switchingSessionId,
+  onEditSession,
   onCloseSession,
 }: SessionsTableProps) {
   const { locale, t } = useI18n();
@@ -36,11 +40,9 @@ export function SessionsTable({
     return (
       <EmptyPanel
         title={t("Loading sessions")}
-        description={t("Polling the backend for active listeners on this profile.")}
+        description={t("Polling the backend for sessions on this profile.")}
         icon={LoaderCircleIcon}
-        hint={t(
-          "The live listener inventory will appear here as soon as the first response lands.",
-        )}
+        hint={t("The current session list appears here as soon as the first response lands.")}
       />
     );
   }
@@ -48,8 +50,8 @@ export function SessionsTable({
   if (sessions.length === 0) {
     return (
       <EmptyPanel
-        title={t("No active sessions")}
-        description={t("Open a single session or a batch to populate this listener deck.")}
+        title={t("No sessions yet")}
+        description={t("Create one session or a batch from the dialog to populate this list.")}
         icon={PlugZapIcon}
       />
     );
@@ -57,7 +59,7 @@ export function SessionsTable({
 
   return (
     <ScrollArea className="rounded-[28px] border border-border/70 bg-card/90 shadow-sm">
-      <Table className="min-w-[860px]">
+      <Table className="min-w-[920px]">
         <TableHeader>
           <TableRow className="border-b border-border/70 bg-muted/20">
             <TableHead className="px-4">{t("Session ID")}</TableHead>
@@ -71,6 +73,7 @@ export function SessionsTable({
         <TableBody>
           {sessions.map((session) => {
             const isClosing = closingSessionId === session.session_id;
+            const isSwitching = switchingSessionId === session.session_id;
             return (
               <TableRow key={session.session_id} className="[&_td]:py-3">
                 <TableCell className="px-4 font-mono text-xs md:text-sm">
@@ -78,7 +81,26 @@ export function SessionsTable({
                 </TableCell>
                 <TableCell>
                   <div className="space-y-1">
-                    <div className="font-medium">{session.proxy_name}</div>
+                    <div className="flex items-center gap-2">
+                      <div className="font-medium">{session.proxy_name}</div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-7 rounded-full"
+                        aria-label={t("Edit proxy for {sessionId}", {
+                          sessionId: session.session_id,
+                        })}
+                        onClick={() => onEditSession(session.session_id)}
+                        disabled={isSwitching || isClosing}
+                      >
+                        {isSwitching ? (
+                          <LoaderCircleIcon className="size-3.5 animate-spin" />
+                        ) : (
+                          <PencilLineIcon className="size-3.5" />
+                        )}
+                      </Button>
+                    </div>
                     <Badge
                       variant="outline"
                       className="rounded-full px-3 py-1 font-mono text-[11px] uppercase tracking-[0.14em]"
@@ -99,8 +121,8 @@ export function SessionsTable({
                     variant="ghost"
                     size="sm"
                     onClick={() => onCloseSession(session.session_id)}
-                    disabled={isClosing}
-                    className={cn(isClosing && "opacity-70")}
+                    disabled={isClosing || isSwitching}
+                    className={cn((isClosing || isSwitching) && "opacity-70")}
                   >
                     {isClosing ? t("Closing...") : t("Close")}
                   </Button>

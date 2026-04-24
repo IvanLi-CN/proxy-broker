@@ -1,8 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { fn } from "storybook/test";
+import { expect, fn, userEvent, within } from "storybook/test";
 
 import { AppShell } from "@/components/AppShell";
-import { batchFixture, sessionFixture, sessionsFixture } from "@/mocks/fixtures";
+import { sessionNodeOptionsFixture, sessionsFixture } from "@/mocks/fixtures";
 import { SessionsPage } from "@/pages/SessionsPage";
 
 const meta = {
@@ -15,7 +15,7 @@ const meta = {
     docs: {
       description: {
         component:
-          "Session route inside the real app shell, opening directly on the single/batch forms and live listener deck without a route hero.",
+          "Session route inside the real app shell, keeping the session list as the primary surface and moving create/switch flows into dialogs.",
       },
     },
   },
@@ -50,25 +50,35 @@ const meta = {
     sessionsLoading: false,
     openError: null,
     batchError: null,
-    openResponse: sessionFixture,
-    batchResponse: batchFixture,
+    switchError: null,
+    openResponse: null,
+    batchResponse: null,
+    switchedSessionId: null,
     opening: false,
     batchOpening: false,
     suggestedPort: 10080,
     closingSessionId: null,
+    switchingSessionId: null,
     onOpenSession: fn(),
     onOpenBatch: fn(),
+    onUpdateSessionNode: fn(),
     searchSessionOptions: fn(async () => []),
+    searchSessionNodeOptions: fn(async () => sessionNodeOptionsFixture.items),
     onCloseSession: fn(),
+    onResetCreateState: fn(),
+    onResetSwitchState: fn(),
   },
 } satisfies Meta<typeof SessionsPage>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const Default: Story = {};
+export const Default: Story = {
+  args: {},
+};
 
 export const ZhCN: Story = {
+  args: {},
   globals: {
     locale: "zh-CN",
   },
@@ -77,13 +87,47 @@ export const ZhCN: Story = {
 export const EmptyState: Story = {
   args: {
     sessions: [],
-    openResponse: null,
-    batchResponse: null,
   },
 };
 
 export const ClosingState: Story = {
   args: {
     closingSessionId: sessionsFixture.sessions[0]?.session_id,
+  },
+};
+
+export const SwitchingState: Story = {
+  args: {
+    switchingSessionId: sessionsFixture.sessions[0]?.session_id,
+  },
+};
+
+export const CreateDialogFlow: Story = {
+  args: {},
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole("button", { name: /^Create session$/i }));
+    const dialog = within(canvasElement.ownerDocument.body);
+    await expect(await dialog.findByRole("dialog", { name: /Create session/i })).toBeVisible();
+    await expect(await dialog.findByRole("tab", { name: /Single session/i })).toHaveAttribute(
+      "data-state",
+      "active",
+    );
+  },
+};
+
+export const SwitchDialogFlow: Story = {
+  args: {},
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      await canvas.findByRole("button", {
+        name: new RegExp(`Edit proxy for ${sessionsFixture.sessions[0]?.session_id ?? ""}`, "i"),
+      }),
+    );
+    const dialog = within(canvasElement.ownerDocument.body);
+    await dialog.findByRole("dialog", { name: /Switch session proxy/i });
+    await dialog.findByRole("combobox", { name: /Sort by/i });
+    await dialog.findByRole("button", { name: /Use selected node/i });
   },
 };

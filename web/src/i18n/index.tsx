@@ -17,6 +17,33 @@ const CHINESE_LOCALE: Locale = "zh-CN";
 const DEFAULT_DOCUMENT_LANGUAGE = "en";
 const CHINESE_DOCUMENT_LANGUAGE = "zh-Hans";
 
+function getLocalStorage() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const storage = window.localStorage;
+  if (!storage || typeof storage.getItem !== "function" || typeof storage.setItem !== "function") {
+    return null;
+  }
+  return storage;
+}
+
+function safeGetStoredLocale() {
+  try {
+    return getLocalStorage()?.getItem(LOCALE_STORAGE_KEY) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function safePersistLocale(locale: Locale) {
+  try {
+    getLocalStorage()?.setItem(LOCALE_STORAGE_KEY, locale);
+  } catch {
+    // Ignore storage write failures and keep the in-memory locale active.
+  }
+}
+
 function normalizeLocale(value?: string | null): Locale | null {
   if (!value) {
     return null;
@@ -53,7 +80,7 @@ function resolveInitialLocale() {
   const navigatorLocales = Array.isArray(window.navigator.languages)
     ? window.navigator.languages
     : [window.navigator.language];
-  return resolveLocale([window.localStorage.getItem(LOCALE_STORAGE_KEY), ...navigatorLocales]);
+  return resolveLocale([safeGetStoredLocale(), ...navigatorLocales]);
 }
 
 function interpolate(message: string, values?: TranslationValues) {
@@ -122,7 +149,7 @@ export function I18nProvider({
     if (typeof window === "undefined") {
       return;
     }
-    window.localStorage.setItem(LOCALE_STORAGE_KEY, locale);
+    safePersistLocale(locale);
     document.documentElement.lang = localeToDocumentLanguage(locale);
   }, [locale]);
 

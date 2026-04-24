@@ -20,6 +20,8 @@ const meta = {
     sessions: sessionsFixture.sessions,
     isLoading: false,
     closingSessionId: null,
+    switchingSessionId: null,
+    onEditSession: fn(),
     onCloseSession: fn(),
   },
 } satisfies Meta<typeof SessionsTable>;
@@ -27,12 +29,15 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const Default: Story = {};
+export const Default: Story = {
+  args: {},
+};
 
 export const Loading: Story = {
   args: {
     sessions: [],
     isLoading: true,
+    onEditSession: fn(),
   },
 };
 
@@ -40,5 +45,12 @@ export const Empty: Story = {
   args: {
     sessions: [],
     isLoading: false,
+    onEditSession: fn(),
+  },
+};
+
+export const Switching: Story = {
+  args: {
+    switchingSessionId: sessionsFixture.sessions[0]?.session_id,
   },
 };
