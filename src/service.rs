@@ -3776,7 +3776,9 @@ impl BrokerService {
                     acc
                 },
             );
-        let legacy_metadata = self.load_legacy_profile_metadata(&effective_profile_ids).await?;
+        let legacy_metadata = self
+            .load_legacy_profile_metadata(&effective_profile_ids)
+            .await?;
 
         Ok(sessions
             .into_iter()
@@ -3814,7 +3816,9 @@ impl BrokerService {
                     region_name: selected_metadata
                         .as_ref()
                         .and_then(|item| item.region_name.clone()),
-                    city: selected_metadata.as_ref().and_then(|item| item.city.clone()),
+                    city: selected_metadata
+                        .as_ref()
+                        .and_then(|item| item.city.clone()),
                 }
             })
             .collect())
@@ -8221,7 +8225,10 @@ proxies:
             .await
             .expect("metadata should be stored");
         store
-            .insert_session(profile_id, &make_session("s1", "jp-tokyo-entry", "203.0.113.10", 1))
+            .insert_session(
+                profile_id,
+                &make_session("s1", "jp-tokyo-entry", "203.0.113.10", 1),
+            )
             .await
             .expect("seed session should succeed");
 
