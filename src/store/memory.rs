@@ -8,8 +8,8 @@ use async_trait::async_trait;
 
 use crate::{
     models::{
-        ApiKeyRecord, IpRecord, ProbeRecord, ProfileProxySettings, ProfileSnapshot,
-        ProxyImportRecord, ProxyImportSyncConfig, ProxyInventoryRecord, ProxyNode,
+        ApiKeyRecord, IpRecord, NodeUsageRecord, ProbeRecord, ProfileProxySettings,
+        ProfileSnapshot, ProxyImportRecord, ProxyImportSyncConfig, ProxyInventoryRecord, ProxyNode,
         ProxyNodeMetadataRecord, ProxyScope, SessionRecord, TaskListQuery, TaskRunEventRecord,
         TaskRunRecord,
     },
@@ -144,6 +144,7 @@ impl BrokerStore for MemoryStore {
             profile.probe_records = probe_records.to_vec();
             for session_id in removed_session_ids {
                 profile.sessions.remove(session_id);
+                profile.session_node_usages.remove(session_id);
             }
         })
         .context("apply subscription snapshot failed")?;
@@ -502,6 +503,14 @@ impl BrokerStore for MemoryStore {
                         last_used_at: None,
                     });
                 entry.last_used_at = Some(last_used_at);
+                profile
+                    .profile_node_usages
+                    .insert(session.node_id.clone(), last_used_at);
+                profile
+                    .session_node_usages
+                    .entry(session.session_id.clone())
+                    .or_default()
+                    .insert(session.node_id.clone(), last_used_at);
             }
         })?;
         Ok(())
@@ -510,6 +519,7 @@ impl BrokerStore for MemoryStore {
     async fn delete_session(&self, profile_id: &str, session_id: &str) -> anyhow::Result<()> {
         self.with_profile_mut(profile_id, |profile| {
             profile.sessions.remove(session_id);
+            profile.session_node_usages.remove(session_id);
         })?;
         Ok(())
     }
@@ -523,6 +533,55 @@ impl BrokerStore for MemoryStore {
                     .then_with(|| a.session_id.cmp(&b.session_id))
             });
             sessions
+        })
+    }
+
+    async fn list_profile_node_usages(
+        &self,
+        profile_id: &str,
+    ) -> anyhow::Result<Vec<NodeUsageRecord>> {
+        self.with_profile(profile_id, |profile| {
+            let mut usages = profile
+                .profile_node_usages
+                .iter()
+                .map(|(node_id, last_used_at)| NodeUsageRecord {
+                    node_id: node_id.clone(),
+                    last_used_at: *last_used_at,
+                })
+                .collect::<Vec<_>>();
+            usages.sort_by(|left, right| {
+                right
+                    .last_used_at
+                    .cmp(&left.last_used_at)
+                    .then_with(|| left.node_id.cmp(&right.node_id))
+            });
+            usages
+        })
+    }
+
+    async fn list_session_node_usages(
+        &self,
+        profile_id: &str,
+        session_id: &str,
+    ) -> anyhow::Result<Vec<NodeUsageRecord>> {
+        self.with_profile(profile_id, |profile| {
+            let mut usages = profile
+                .session_node_usages
+                .get(session_id)
+                .into_iter()
+                .flat_map(|items| items.iter())
+                .map(|(node_id, last_used_at)| NodeUsageRecord {
+                    node_id: node_id.clone(),
+                    last_used_at: *last_used_at,
+                })
+                .collect::<Vec<_>>();
+            usages.sort_by(|left, right| {
+                right
+                    .last_used_at
+                    .cmp(&left.last_used_at)
+                    .then_with(|| left.node_id.cmp(&right.node_id))
+            });
+            usages
         })
     }
 

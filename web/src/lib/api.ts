@@ -31,6 +31,8 @@ import type {
   ProxyOperationRequest,
   RefreshRequest,
   RefreshResponse,
+  SearchSessionNodeOptionsRequest,
+  SearchSessionNodeOptionsResponse,
   SearchSessionOptionsRequest,
   SearchSessionOptionsResponse,
   SuggestedPortResponse,
@@ -40,6 +42,7 @@ import type {
   UpdateProfileProxySettingsRequest,
   UpdateProxyAllocationRequest,
   UpdateProxyImportAllocationRequest,
+  UpdateSessionNodeRequest,
 } from "@/lib/types";
 
 class ApiError extends Error {
@@ -244,6 +247,14 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  updateSessionNode: (profileId: string, sessionId: string, payload: UpdateSessionNodeRequest) =>
+    request<OpenSessionResponse>(
+      profilePath(profileId, `/sessions/${encodeURIComponent(sessionId)}/node`),
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      },
+    ),
   getSuggestedPort: (profileId: string) =>
     request<SuggestedPortResponse>(profilePath(profileId, "/sessions/suggested-port")),
   searchSessionOptions: (profileId: string, payload: SearchSessionOptionsRequest) =>
@@ -251,6 +262,18 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  searchSessionNodeOptions: (
+    profileId: string,
+    sessionId: string,
+    payload: SearchSessionNodeOptionsRequest,
+  ) =>
+    request<SearchSessionNodeOptionsResponse>(
+      profilePath(profileId, `/sessions/${encodeURIComponent(sessionId)}/node-options/search`),
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    ),
   listApiKeys: () => request<ListApiKeysResponse>("/api/v1/api-keys"),
   createApiKey: (payload: CreateApiKeyRequest) =>
     request<CreateApiKeyResponse>("/api/v1/api-keys", {

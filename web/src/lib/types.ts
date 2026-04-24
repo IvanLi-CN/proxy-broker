@@ -83,6 +83,10 @@ export interface OpenSessionByNodeRequest {
   desired_port?: number | null;
 }
 
+export interface UpdateSessionNodeRequest {
+  node_id: string;
+}
+
 export interface OpenBatchByNodeItemRequest {
   node_id: string;
   desired_port?: number | null;
@@ -115,6 +119,34 @@ export interface SearchSessionOptionsResponse {
   items: SessionOptionItem[];
 }
 
+export type SessionNodeSortMode = "session_recent" | "profile_recent";
+
+export interface SearchSessionNodeOptionsRequest {
+  query?: string;
+  sort_mode?: SessionNodeSortMode;
+  limit?: number;
+}
+
+export interface SessionNodeOptionItem {
+  node_id: string;
+  proxy_name: string;
+  import_name?: string | null;
+  source_label?: string | null;
+  primary_ip?: string | null;
+  country_code?: string | null;
+  country_name?: string | null;
+  region_name?: string | null;
+  city?: string | null;
+  last_probe_ok?: boolean | null;
+  median_latency_ms?: number | null;
+  session_last_used_at?: number | null;
+  profile_last_used_at?: number | null;
+}
+
+export interface SearchSessionNodeOptionsResponse {
+  items: SessionNodeOptionItem[];
+}
+
 export interface ExtractIpItem {
   ip: string;
   country_code?: string | null;
@@ -140,8 +172,15 @@ export interface SessionRecord {
   created_at: number;
 }
 
+export interface SessionListItem extends SessionRecord {
+  country_code?: string | null;
+  country_name?: string | null;
+  region_name?: string | null;
+  city?: string | null;
+}
+
 export interface ListSessionsResponse {
-  sessions: SessionRecord[];
+  sessions: SessionListItem[];
 }
 
 export interface ListProfilesResponse {

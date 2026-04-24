@@ -53,6 +53,20 @@ export function SessionsRoute() {
     onError: (error) => toast.error(formatApiErrorMessage(error, t)),
   });
 
+  const switchMutation = useMutation({
+    mutationFn: ({ sessionId, payload }: { sessionId: string; payload: { node_id: string } }) =>
+      api.updateSessionNode(activeProfileId ?? "", sessionId, payload),
+    onSuccess: async (data, variables) => {
+      toast.success(
+        t("Switched {sessionId} to {proxyName}", {
+          sessionId: variables.sessionId,
+          proxyName: data.proxy_name,
+        }),
+      );
+      await queryClient.invalidateQueries({ queryKey: ["sessions", activeProfileId] });
+    },
+  });
+
   const closeMutation = useMutation({
     mutationFn: (sessionId: string) => api.closeSession(activeProfileId ?? "", sessionId),
     onSuccess: async (_, sessionId) => {
@@ -65,6 +79,7 @@ export function SessionsRoute() {
 
   const { reset: resetOpenMutation } = openMutation;
   const { reset: resetBatchMutation } = batchMutation;
+  const { reset: resetSwitchMutation } = switchMutation;
   const { reset: resetCloseMutation } = closeMutation;
 
   useEffect(() => {
@@ -77,8 +92,15 @@ export function SessionsRoute() {
     previousProfileId.current = activeProfileId;
     resetOpenMutation();
     resetBatchMutation();
+    resetSwitchMutation();
     resetCloseMutation();
-  }, [activeProfileId, resetOpenMutation, resetBatchMutation, resetCloseMutation]);
+  }, [
+    activeProfileId,
+    resetBatchMutation,
+    resetCloseMutation,
+    resetOpenMutation,
+    resetSwitchMutation,
+  ]);
 
   if (!activeProfileId) {
     return <Navigate replace to="/proxies" />;
@@ -99,15 +121,33 @@ export function SessionsRoute() {
       onOpenSession={async (payload) => {
         await openMutation.mutateAsync(payload);
       }}
+      onResetCreateState={() => {
+        resetOpenMutation();
+        resetBatchMutation();
+      }}
+      onResetSwitchState={() => {
+        resetSwitchMutation();
+      }}
+      onUpdateSessionNode={async (sessionId, payload) => {
+        await switchMutation.mutateAsync({ sessionId, payload });
+      }}
       openError={openMutation.isError ? formatApiErrorMessage(openMutation.error, t) : null}
       openResponse={openMutation.data ?? null}
       opening={openMutation.isPending}
+      searchSessionNodeOptions={async (sessionId, payload) =>
+        (await api.searchSessionNodeOptions(activeProfileId, sessionId, payload)).items
+      }
       searchSessionOptions={async (payload) =>
         (await api.searchSessionOptions(activeProfileId, payload)).items
       }
       sessions={sessionsQuery.data?.sessions ?? []}
       sessionsLoading={sessionsQuery.isLoading}
       suggestedPort={suggestedPortQuery.data?.port ?? null}
+      switchError={switchMutation.isError ? formatApiErrorMessage(switchMutation.error, t) : null}
+      switchedSessionId={switchMutation.data?.session_id ?? null}
+      switchingSessionId={
+        switchMutation.isPending ? (switchMutation.variables?.sessionId ?? null) : null
+      }
     />
   );
 }

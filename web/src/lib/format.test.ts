@@ -8,6 +8,7 @@ import {
   findOverlappingValues,
   formatCountryName,
   formatLatency,
+  formatListenEndpoint,
   formatTimestamp,
   normalizeCountryCode,
   splitListInput,
@@ -164,6 +165,18 @@ describe("formatLatency", () => {
     expect(formatLatency("zh-CN", t, 12345)).toBe(
       `${new Intl.NumberFormat("zh-CN").format(12345)} ms`,
     );
+  });
+});
+
+describe("formatListenEndpoint", () => {
+  it("appends the port when the session payload only includes the listen host", () => {
+    expect(formatListenEndpoint("127.0.0.1", 10080)).toBe("127.0.0.1:10080");
+    expect(formatListenEndpoint("::1", 10080)).toBe("[::1]:10080");
+  });
+
+  it("preserves already formatted host:port endpoints", () => {
+    expect(formatListenEndpoint("127.0.0.1:10080", 10080)).toBe("127.0.0.1:10080");
+    expect(formatListenEndpoint("[::1]:10080", 10080)).toBe("[::1]:10080");
   });
 });
 

@@ -147,7 +147,7 @@ pub struct ExtractIpResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListSessionsResponse {
-    pub sessions: Vec<SessionRecord>,
+    pub sessions: Vec<SessionListItem>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -321,6 +321,11 @@ pub struct OpenSessionByNodeRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateSessionNodeRequest {
+    pub node_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenBatchByNodeRequest {
     #[serde(default)]
     pub node_ids: Vec<String>,
@@ -357,6 +362,56 @@ pub struct SessionOptionItem {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchSessionOptionsResponse {
     pub items: Vec<SessionOptionItem>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionNodeSortMode {
+    #[default]
+    SessionRecent,
+    ProfileRecent,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SearchSessionNodeOptionsRequest {
+    #[serde(default, deserialize_with = "deserialize_optional_trimmed_string")]
+    pub query: Option<String>,
+    #[serde(default)]
+    pub sort_mode: SessionNodeSortMode,
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionNodeOptionItem {
+    pub node_id: String,
+    pub proxy_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub import_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub primary_ip: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub country_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub country_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub region_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub city: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_probe_ok: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub median_latency_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_last_used_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile_last_used_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchSessionNodeOptionsResponse {
+    pub items: Vec<SessionNodeOptionItem>,
 }
 
 #[cfg(test)]
@@ -819,6 +874,31 @@ pub struct SessionRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionListItem {
+    pub session_id: String,
+    pub listen: String,
+    pub port: u16,
+    pub selected_ip: String,
+    pub proxy_name: String,
+    pub node_id: String,
+    pub created_at: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub country_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub country_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub region_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub city: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeUsageRecord {
+    pub node_id: String,
+    pub last_used_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyNodeMetadataRecord {
     pub node_id: String,
     pub ip: String,
@@ -1066,6 +1146,8 @@ pub struct ProfileSnapshot {
     pub ip_records: HashMap<String, IpRecord>,
     pub probe_records: Vec<ProbeRecord>,
     pub sessions: HashMap<String, SessionRecord>,
+    pub profile_node_usages: HashMap<String, i64>,
+    pub session_node_usages: HashMap<String, HashMap<String, i64>>,
     pub api_keys: HashMap<String, ApiKeyRecord>,
     pub proxy_imports: HashMap<String, ProxyImportRecord>,
     pub sync_configs: HashMap<String, ProxyImportSyncConfig>,

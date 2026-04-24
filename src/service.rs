@@ -40,11 +40,13 @@ use crate::{
         ProxyImportSourceIdentity, ProxyImportSyncConfig, ProxyInventoryItem, ProxyInventoryRecord,
         ProxyNode, ProxyNodeMetadataRecord, ProxyOperationAcceptedResponse, ProxyOperationRequest,
         ProxyScope, RefreshRequest, RefreshResponse, ResolvedImportNameSource,
-        SearchSessionOptionsRequest, SearchSessionOptionsResponse, SessionOptionItem,
-        SessionOptionKind, SessionRecord, SessionSelectionMode, SubscriptionMetadata,
-        SubscriptionSource, SuggestedPortResponse, TaskEventLevel, TaskListQuery, TaskListResponse,
-        TaskRunDetail, TaskRunEventRecord, TaskRunKind, TaskRunRecord, TaskRunScope, TaskRunStage,
-        TaskRunStatus, TaskRunSummary, TaskRunTrigger, now_epoch_sec,
+        SearchSessionNodeOptionsRequest, SearchSessionNodeOptionsResponse,
+        SearchSessionOptionsRequest, SearchSessionOptionsResponse, SessionListItem,
+        SessionNodeOptionItem, SessionNodeSortMode, SessionOptionItem, SessionOptionKind,
+        SessionRecord, SessionSelectionMode, SubscriptionMetadata, SubscriptionSource,
+        SuggestedPortResponse, TaskEventLevel, TaskListQuery, TaskListResponse, TaskRunDetail,
+        TaskRunEventRecord, TaskRunKind, TaskRunRecord, TaskRunScope, TaskRunStage, TaskRunStatus,
+        TaskRunSummary, TaskRunTrigger, UpdateSessionNodeRequest, now_epoch_sec,
     },
     proxy_node_validation::{filter_malformed_proxy_nodes, malformed_proxy_reason},
     runtime::MihomoRuntime,
@@ -58,6 +60,7 @@ const DEFAULT_AUTO_FULL_REFRESH_EVERY_SEC: u64 = 86_400;
 const TASK_SCHEDULE_SCAN_SEC: u64 = 30;
 const TASK_DISPATCH_POLL_SEC: u64 = 1;
 const DEFAULT_SESSION_OPTIONS_LIMIT: usize = 25;
+const DEFAULT_SESSION_NODE_OPTIONS_LIMIT: usize = 50;
 const GLOBAL_RUNTIME_PROFILE_ID: &str = "__global__";
 const PROXY_PROBE_ROUNDS: usize = 5;
 
@@ -3741,6 +3744,85 @@ impl BrokerService {
         Ok(sessions)
     }
 
+    async fn build_session_list_items(
+        &self,
+        profile_id: &str,
+        sessions: Vec<SessionRecord>,
+    ) -> BrokerResult<Vec<SessionListItem>> {
+        if sessions.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let effective_profile_ids = vec![profile_id.to_string()];
+        let effective_nodes = self
+            .compose_effective_proxy_inventory_records(profile_id)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|record| (record.node_id.clone(), record))
+            .collect::<HashMap<_, _>>();
+        let metadata_by_node = self
+            .store
+            .list_proxy_node_metadata()
+            .await
+            .map_err(BrokerError::from)?
+            .into_iter()
+            .fold(
+                HashMap::<String, Vec<ProxyNodeMetadataRecord>>::new(),
+                |mut acc, record| {
+                    let record = sanitize_proxy_node_metadata_record(record);
+                    acc.entry(record.node_id.clone()).or_default().push(record);
+                    acc
+                },
+            );
+        let legacy_metadata = self
+            .load_legacy_profile_metadata(&effective_profile_ids)
+            .await?;
+
+        Ok(sessions
+            .into_iter()
+            .map(|session| {
+                let selected_metadata = metadata_by_node
+                    .get(&session.node_id)
+                    .and_then(|items| items.iter().find(|item| item.ip == session.selected_ip))
+                    .cloned()
+                    .or_else(|| {
+                        effective_nodes.get(&session.node_id).and_then(|record| {
+                            self.backfill_proxy_node_metadata(
+                                record,
+                                &session.selected_ip,
+                                &effective_profile_ids,
+                                &legacy_metadata,
+                            )
+                            .map(sanitize_proxy_node_metadata_record)
+                        })
+                    });
+
+                SessionListItem {
+                    session_id: session.session_id,
+                    listen: session.listen,
+                    port: session.port,
+                    selected_ip: session.selected_ip,
+                    proxy_name: session.proxy_name,
+                    node_id: session.node_id,
+                    created_at: session.created_at,
+                    country_code: selected_metadata
+                        .as_ref()
+                        .and_then(|item| item.country_code.clone()),
+                    country_name: selected_metadata
+                        .as_ref()
+                        .and_then(|item| item.country_name.clone()),
+                    region_name: selected_metadata
+                        .as_ref()
+                        .and_then(|item| item.region_name.clone()),
+                    city: selected_metadata
+                        .as_ref()
+                        .and_then(|item| item.city.clone()),
+                }
+            })
+            .collect())
+    }
+
     fn build_open_session_response(&self, session: SessionRecord) -> OpenSessionResponse {
         OpenSessionResponse {
             session_id: session.session_id,
@@ -4045,6 +4127,226 @@ impl BrokerService {
 
         let items = search_session_options(&ip_records, request)?;
         Ok(SearchSessionOptionsResponse { items })
+    }
+
+    pub async fn search_session_node_options(
+        &self,
+        profile_id: &str,
+        session_id: &str,
+        request: &SearchSessionNodeOptionsRequest,
+    ) -> BrokerResult<SearchSessionNodeOptionsResponse> {
+        if !self.profile_exists(profile_id).await? {
+            return Err(BrokerError::ProfileNotFound);
+        }
+
+        let sessions = self.list_sessions_backfilled(profile_id).await?;
+        if !sessions
+            .iter()
+            .any(|session| session.session_id == session_id)
+        {
+            return Err(BrokerError::SessionNotFound);
+        }
+
+        let query = request
+            .query
+            .as_deref()
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase();
+        let session_usage = self
+            .store
+            .list_session_node_usages(profile_id, session_id)
+            .await
+            .map_err(BrokerError::from)?
+            .into_iter()
+            .map(|record| (record.node_id, record.last_used_at))
+            .collect::<HashMap<_, _>>();
+        let profile_usage = self
+            .store
+            .list_profile_node_usages(profile_id)
+            .await
+            .map_err(BrokerError::from)?
+            .into_iter()
+            .map(|record| (record.node_id, record.last_used_at))
+            .collect::<HashMap<_, _>>();
+        let import_records = self
+            .store
+            .list_proxy_imports()
+            .await
+            .map_err(BrokerError::from)?
+            .into_iter()
+            .map(|record| (record.import_id.clone(), record))
+            .collect::<HashMap<_, _>>();
+        let metadata_by_node = self
+            .store
+            .list_proxy_node_metadata()
+            .await
+            .map_err(BrokerError::from)?
+            .into_iter()
+            .fold(
+                HashMap::<String, Vec<ProxyNodeMetadataRecord>>::new(),
+                |mut acc, record| {
+                    let record = sanitize_proxy_node_metadata_record(record);
+                    acc.entry(record.node_id.clone()).or_default().push(record);
+                    acc
+                },
+            );
+
+        let mut items = self
+            .compose_effective_proxy_inventory_records(profile_id)
+            .await?
+            .into_iter()
+            .filter_map(|record| {
+                let import_record = import_records.get(&record.import_id);
+                let import_name =
+                    import_record
+                        .and_then(|item| item.name.clone())
+                        .and_then(|value| {
+                            let trimmed = value.trim();
+                            (!trimmed.is_empty()).then(|| trimmed.to_string())
+                        });
+                let source_label = import_record.map(format_proxy_import_source_label);
+                let primary_ip = record.resolved_ips.first().cloned();
+                let primary_metadata = metadata_by_node.get(&record.node_id).and_then(|items| {
+                    primary_ip
+                        .as_ref()
+                        .and_then(|ip| items.iter().find(|item| item.ip == *ip))
+                        .or_else(|| items.first())
+                });
+                let item = SessionNodeOptionItem {
+                    node_id: record.node_id.clone(),
+                    proxy_name: record.proxy_name,
+                    import_name,
+                    source_label,
+                    primary_ip,
+                    country_code: primary_metadata.and_then(|item| item.country_code.clone()),
+                    country_name: primary_metadata.and_then(|item| item.country_name.clone()),
+                    region_name: primary_metadata.and_then(|item| item.region_name.clone()),
+                    city: primary_metadata.and_then(|item| item.city.clone()),
+                    last_probe_ok: primary_metadata.and_then(|item| item.last_probe_ok),
+                    median_latency_ms: primary_metadata.and_then(|item| item.median_latency_ms),
+                    session_last_used_at: session_usage.get(&record.node_id).copied(),
+                    profile_last_used_at: profile_usage.get(&record.node_id).copied(),
+                };
+                matches_session_node_query(&item, &query).then_some(item)
+            })
+            .collect::<Vec<_>>();
+
+        items.sort_by(|left, right| compare_session_node_options(left, right, request.sort_mode));
+        items.truncate(request.limit.unwrap_or(DEFAULT_SESSION_NODE_OPTIONS_LIMIT));
+        Ok(SearchSessionNodeOptionsResponse { items })
+    }
+
+    pub async fn update_session_node(
+        &self,
+        profile_id: &str,
+        session_id: &str,
+        request: &UpdateSessionNodeRequest,
+    ) -> BrokerResult<OpenSessionResponse> {
+        if !self.profile_exists(profile_id).await? {
+            return Err(BrokerError::ProfileNotFound);
+        }
+
+        let _profile_guard = self.lock_profile(profile_id).await;
+        let _shared_runtime_guard = self.shared_runtime_lock.lock().await;
+        let nodes = self
+            .compose_effective_proxy_inventory_records(profile_id)
+            .await?;
+        let Some(node) = nodes
+            .into_iter()
+            .find(|candidate| candidate.node_id == request.node_id)
+        else {
+            return Err(BrokerError::ProxyInventoryNodeNotFound);
+        };
+        let selected_ip = node
+            .resolved_ips
+            .first()
+            .cloned()
+            .ok_or(BrokerError::SubscriptionInvalid)?;
+
+        let mut sessions = self.list_sessions_backfilled(profile_id).await?;
+        let Some(session_index) = sessions
+            .iter()
+            .position(|session| session.session_id == session_id)
+        else {
+            return Err(BrokerError::SessionNotFound);
+        };
+        let previous_sessions = sessions.clone();
+        let mut updated = sessions[session_index].clone();
+        let touch_time = now_epoch_sec();
+
+        if updated.node_id == node.node_id
+            && updated.proxy_name == node.proxy_name
+            && updated.selected_ip == selected_ip
+        {
+            self.store
+                .insert_sessions_with_touch(profile_id, std::slice::from_ref(&updated), touch_time)
+                .await
+                .map_err(BrokerError::from)?;
+            return Ok(self.build_open_session_response(updated));
+        }
+
+        updated.selected_ip = selected_ip;
+        updated.proxy_name = node.proxy_name;
+        updated.node_id = node.node_id;
+        sessions[session_index] = updated.clone();
+
+        if let Err(err) = self
+            .apply_sessions_config_locked(profile_id, &sessions)
+            .await
+        {
+            tracing::warn!(
+                profile_id,
+                session_id,
+                node_id = %updated.node_id,
+                error = %err,
+                "session node switch apply config failed"
+            );
+            if let Err(rollback_err) = self
+                .rollback_runtime_sessions_locked(profile_id, &previous_sessions)
+                .await
+            {
+                tracing::error!(
+                    profile_id,
+                    session_id,
+                    error = %rollback_err,
+                    "runtime rollback failed after session node switch apply failure"
+                );
+                self.recover_runtime_desync_locked(profile_id, &previous_sessions)
+                    .await;
+            }
+            return Err(err);
+        }
+
+        if let Err(err) = self
+            .store
+            .insert_sessions_with_touch(profile_id, std::slice::from_ref(&updated), touch_time)
+            .await
+        {
+            tracing::error!(
+                profile_id,
+                session_id,
+                node_id = %updated.node_id,
+                error = %err,
+                "persist session node switch failed after runtime apply"
+            );
+            if let Err(rollback_err) = self
+                .rollback_runtime_sessions_locked(profile_id, &previous_sessions)
+                .await
+            {
+                tracing::error!(
+                    profile_id,
+                    session_id,
+                    error = %rollback_err,
+                    "runtime rollback failed after session node switch persist failure"
+                );
+                self.recover_runtime_desync_locked(profile_id, &previous_sessions)
+                    .await;
+            }
+            return Err(BrokerError::from(err));
+        }
+
+        Ok(self.build_open_session_response(updated))
     }
 
     pub async fn list_profiles(&self) -> BrokerResult<ListProfilesResponse> {
@@ -4561,6 +4863,7 @@ impl BrokerService {
 
     pub async fn list_sessions(&self, profile_id: &str) -> BrokerResult<ListSessionsResponse> {
         let sessions = self.list_sessions_backfilled(profile_id).await?;
+        let sessions = self.build_session_list_items(profile_id, sessions).await?;
         Ok(ListSessionsResponse { sessions })
     }
 
@@ -5063,6 +5366,68 @@ fn search_session_options(
     };
 
     Ok(items.into_iter().take(limit).collect())
+}
+
+fn format_proxy_import_source_label(record: &ProxyImportRecord) -> String {
+    if let Some(name) = record
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return name.to_string();
+    }
+    let source_value = record.source_identity.source_value.trim();
+    if !source_value.is_empty() {
+        return source_value.to_string();
+    }
+    record.import_id.clone()
+}
+
+fn matches_session_node_query(item: &SessionNodeOptionItem, query: &str) -> bool {
+    if query.is_empty() {
+        return true;
+    }
+    [
+        Some(item.proxy_name.as_str()),
+        item.import_name.as_deref(),
+        item.source_label.as_deref(),
+        item.primary_ip.as_deref(),
+        item.country_code.as_deref(),
+        item.country_name.as_deref(),
+        item.region_name.as_deref(),
+        item.city.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|value| value.to_ascii_lowercase().contains(query))
+}
+
+fn compare_usage_desc(left: Option<i64>, right: Option<i64>) -> CmpOrdering {
+    match (left, right) {
+        (Some(left), Some(right)) => right.cmp(&left),
+        (Some(_), None) => CmpOrdering::Less,
+        (None, Some(_)) => CmpOrdering::Greater,
+        (None, None) => CmpOrdering::Equal,
+    }
+}
+
+fn compare_session_node_options(
+    left: &SessionNodeOptionItem,
+    right: &SessionNodeOptionItem,
+    sort_mode: SessionNodeSortMode,
+) -> CmpOrdering {
+    let ordering = match sort_mode {
+        SessionNodeSortMode::SessionRecent => {
+            compare_usage_desc(left.session_last_used_at, right.session_last_used_at)
+        }
+        SessionNodeSortMode::ProfileRecent => {
+            compare_usage_desc(left.profile_last_used_at, right.profile_last_used_at)
+        }
+    };
+    ordering
+        .then_with(|| left.proxy_name.cmp(&right.proxy_name))
+        .then_with(|| left.node_id.cmp(&right.node_id))
 }
 
 fn inventory_scope_matches_profile(scope: &ProxyScope, profile_id: &str) -> bool {
@@ -5657,11 +6022,12 @@ mod tests {
     use super::*;
     use crate::{
         models::{
-            ApiKeyRecord, IpRecord, LoadSubscriptionRequest, ProbeRecord, ProfileProxySettings,
-            ProfileSyncConfig, ProxyCatalogQuery, ProxyImportKind, ProxyImportRecord,
-            ProxyImportSourceIdentity, ProxyImportSyncConfig, ProxyInventoryRecord,
-            ProxyNodeMetadataRecord, ProxyScope, ResolvedImportNameSource, SessionRecord, SortMode,
-            SubscriptionSource, TaskListQuery, TaskRunEventRecord, TaskRunRecord,
+            ApiKeyRecord, IpRecord, LoadSubscriptionRequest, NodeUsageRecord, ProbeRecord,
+            ProfileProxySettings, ProfileSyncConfig, ProxyCatalogQuery, ProxyImportKind,
+            ProxyImportRecord, ProxyImportSourceIdentity, ProxyImportSyncConfig,
+            ProxyInventoryRecord, ProxyNodeMetadataRecord, ProxyScope, ResolvedImportNameSource,
+            SessionRecord, SortMode, SubscriptionSource, TaskListQuery, TaskRunEventRecord,
+            TaskRunRecord,
         },
         runtime::MihomoRuntime,
         store::{BrokerStore, MemoryStore},
@@ -5699,6 +6065,22 @@ mod tests {
                 fail_shutdown,
                 apply_calls: AtomicUsize::new(0),
                 shutdown_calls: AtomicUsize::new(0),
+                payloads: TokioMutex::new(Vec::new()),
+            }
+        }
+    }
+
+    struct ApplyFailOnCallRuntime {
+        fail_on_call: usize,
+        apply_calls: AtomicUsize,
+        payloads: TokioMutex<Vec<String>>,
+    }
+
+    impl ApplyFailOnCallRuntime {
+        fn new(fail_on_call: usize) -> Self {
+            Self {
+                fail_on_call,
+                apply_calls: AtomicUsize::new(0),
                 payloads: TokioMutex::new(Vec::new()),
             }
         }
@@ -5929,6 +6311,23 @@ mod tests {
             self.inner.list_sessions(profile_id).await
         }
 
+        async fn list_profile_node_usages(
+            &self,
+            profile_id: &str,
+        ) -> anyhow::Result<Vec<NodeUsageRecord>> {
+            self.inner.list_profile_node_usages(profile_id).await
+        }
+
+        async fn list_session_node_usages(
+            &self,
+            profile_id: &str,
+            session_id: &str,
+        ) -> anyhow::Result<Vec<NodeUsageRecord>> {
+            self.inner
+                .list_session_node_usages(profile_id, session_id)
+                .await
+        }
+
         async fn insert_api_key(&self, api_key: &ApiKeyRecord) -> anyhow::Result<()> {
             self.inner.insert_api_key(api_key).await
         }
@@ -6114,6 +6513,48 @@ mod tests {
             self.payloads.lock().await.push(_payload.to_string());
             if self.fail_controller_meta {
                 return Err(anyhow!("apply unavailable"));
+            }
+            Ok(())
+        }
+
+        async fn measure_proxy_delay(
+            &self,
+            _profile_id: &str,
+            _proxy_name: &str,
+            _url: &str,
+            _timeout_ms: u64,
+        ) -> anyhow::Result<Option<u64>> {
+            Ok(Some(1))
+        }
+    }
+
+    #[async_trait]
+    impl MihomoRuntime for ApplyFailOnCallRuntime {
+        async fn ensure_started(&self, _profile_id: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn shutdown_profile(&self, _profile_id: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn controller_meta(
+            &self,
+            _profile_id: &str,
+        ) -> anyhow::Result<(String, Option<String>)> {
+            Ok(("127.0.0.1:9090".to_string(), None))
+        }
+
+        async fn controller_addr(&self, profile_id: &str) -> anyhow::Result<String> {
+            let (addr, _) = self.controller_meta(profile_id).await?;
+            Ok(addr)
+        }
+
+        async fn apply_config(&self, _profile_id: &str, payload: &str) -> anyhow::Result<()> {
+            let call = self.apply_calls.fetch_add(1, Ordering::SeqCst) + 1;
+            self.payloads.lock().await.push(payload.to_string());
+            if call == self.fail_on_call {
+                return Err(anyhow!("apply failed on call {call}"));
             }
             Ok(())
         }
@@ -7613,13 +8054,379 @@ proxies:
                 "edge-jp",
                 &OpenSessionByNodeRequest {
                     node_id,
-                    desired_port: Some(10080),
+                    desired_port: None,
                 },
             )
             .await
             .expect("node-pinned open should succeed");
 
-        assert_eq!(response.listen, "127.0.0.1:10080");
+        assert!(response.port > 0);
+        assert_eq!(response.listen, format!("127.0.0.1:{}", response.port));
+    }
+
+    #[tokio::test]
+    async fn update_session_node_keeps_listener_and_tracks_recent_usage() {
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
+        service
+            .create_profile("browser")
+            .await
+            .expect("browser profile should be created");
+
+        let source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: zzz-node
+    type: socks5
+    server: 1.1.1.1
+  - name: aaa-node
+    type: socks5
+    server: 2.2.2.2
+"#,
+        )
+        .await;
+        service
+            .load_subscription("browser", &SubscriptionSource::File(source_path.clone()))
+            .await
+            .expect("subscription should load");
+        let _ = tokio::fs::remove_file(&source_path).await;
+
+        let opened = service
+            .open_session(
+                "browser",
+                &OpenSessionRequest {
+                    selection_mode: SessionSelectionMode::Ip,
+                    specified_ips: vec!["1.1.1.1".to_string()],
+                    desired_port: Some(10080),
+                    ..OpenSessionRequest::default()
+                },
+            )
+            .await
+            .expect("session should open");
+
+        let catalog = service
+            .list_proxy_catalog(&ProxyCatalogQuery {
+                view: Some("profile".to_string()),
+                profile_id: Some("browser".to_string()),
+            })
+            .await
+            .expect("profile catalog should list");
+        let target_node = catalog
+            .groups
+            .iter()
+            .flat_map(|group| group.nodes.iter())
+            .find(|node| node.proxy_name == "aaa-node")
+            .expect("target node should exist");
+
+        tokio::time::sleep(Duration::from_millis(1_100)).await;
+        let before_switch = service
+            .list_sessions("browser")
+            .await
+            .expect("sessions should list before switch");
+        let original_created_at = before_switch.sessions[0].created_at;
+
+        let updated = service
+            .update_session_node(
+                "browser",
+                &opened.session_id,
+                &UpdateSessionNodeRequest {
+                    node_id: target_node.node_id.clone(),
+                },
+            )
+            .await
+            .expect("session node should switch");
+
+        assert_eq!(updated.session_id, opened.session_id);
+        assert_eq!(updated.listen, opened.listen);
+        assert_eq!(updated.port, opened.port);
+        assert_eq!(updated.proxy_name, "aaa-node");
+        assert_eq!(updated.selected_ip, "2.2.2.2");
+
+        let sessions = service
+            .list_sessions("browser")
+            .await
+            .expect("sessions should list");
+        assert_eq!(sessions.sessions.len(), 1);
+        assert_eq!(sessions.sessions[0].session_id, opened.session_id);
+        assert_eq!(sessions.sessions[0].created_at, original_created_at);
+        assert_eq!(sessions.sessions[0].listen, "127.0.0.1");
+        assert_eq!(sessions.sessions[0].port, 10080);
+        assert_eq!(sessions.sessions[0].node_id, target_node.node_id);
+
+        let sorted = service
+            .search_session_node_options(
+                "browser",
+                &opened.session_id,
+                &SearchSessionNodeOptionsRequest {
+                    sort_mode: SessionNodeSortMode::SessionRecent,
+                    ..SearchSessionNodeOptionsRequest::default()
+                },
+            )
+            .await
+            .expect("node options should load");
+        assert_eq!(sorted.items[0].proxy_name, "aaa-node");
+        assert!(sorted.items[0].session_last_used_at.is_some());
+        assert!(sorted.items[1].session_last_used_at.is_some());
+
+        let filtered = service
+            .search_session_node_options(
+                "browser",
+                &opened.session_id,
+                &SearchSessionNodeOptionsRequest {
+                    query: Some("2.2.2.2".to_string()),
+                    sort_mode: SessionNodeSortMode::ProfileRecent,
+                    ..SearchSessionNodeOptionsRequest::default()
+                },
+            )
+            .await
+            .expect("filtered node options should load");
+        assert_eq!(filtered.items.len(), 1);
+        assert_eq!(filtered.items[0].proxy_name, "aaa-node");
+    }
+
+    #[tokio::test]
+    async fn list_sessions_includes_selected_ip_geo_metadata() {
+        let profile_id = "geo-browser";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
+        service
+            .create_profile(profile_id)
+            .await
+            .expect("profile should be created");
+
+        let node = make_node("jp-tokyo-entry", "203.0.113.10");
+        let node_id = node
+            .node_id
+            .clone()
+            .expect("test node should include a node id");
+        store
+            .replace_subscription(profile_id, &[node])
+            .await
+            .expect("seed subscription should succeed");
+        store
+            .upsert_proxy_node_metadata(&[ProxyNodeMetadataRecord {
+                node_id: node_id.clone(),
+                ip: "203.0.113.10".to_string(),
+                country_code: Some("JP".to_string()),
+                country_name: Some("Japan".to_string()),
+                region_name: Some("Tokyo".to_string()),
+                city: Some("Chiyoda".to_string()),
+                geo_source: Some("fixture".to_string()),
+                probe_updated_at: Some(10),
+                geo_updated_at: Some(11),
+                last_probe_ok: Some(true),
+                last_latency_ms: Some(88),
+                median_latency_ms: Some(88),
+                last_probe_samples: vec![Some(88)],
+                updated_at: 12,
+            }])
+            .await
+            .expect("metadata should be stored");
+        store
+            .insert_session(
+                profile_id,
+                &make_session("s1", "jp-tokyo-entry", "203.0.113.10", 1),
+            )
+            .await
+            .expect("seed session should succeed");
+
+        let sessions = service
+            .list_sessions(profile_id)
+            .await
+            .expect("sessions should list");
+        assert_eq!(sessions.sessions.len(), 1);
+        assert_eq!(sessions.sessions[0].node_id, node_id);
+        assert_eq!(sessions.sessions[0].country_code.as_deref(), Some("JP"));
+        assert_eq!(sessions.sessions[0].country_name.as_deref(), Some("Japan"));
+        assert_eq!(sessions.sessions[0].region_name.as_deref(), Some("Tokyo"));
+        assert_eq!(sessions.sessions[0].city.as_deref(), Some("Chiyoda"));
+    }
+
+    #[tokio::test]
+    async fn update_session_node_rejects_node_outside_effective_profile_pool() {
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
+        service
+            .create_profile("browser")
+            .await
+            .expect("browser profile should be created");
+        service
+            .create_profile("lab")
+            .await
+            .expect("lab profile should be created");
+
+        let browser_source = write_subscription_file(
+            r#"
+proxies:
+  - name: browser-node
+    type: socks5
+    server: 1.1.1.1
+"#,
+        )
+        .await;
+        service
+            .load_subscription("browser", &SubscriptionSource::File(browser_source.clone()))
+            .await
+            .expect("browser subscription should load");
+        let _ = tokio::fs::remove_file(&browser_source).await;
+
+        let lab_source = write_subscription_file(
+            r#"
+proxies:
+  - name: lab-node
+    type: socks5
+    server: 9.9.9.9
+"#,
+        )
+        .await;
+        service
+            .load_subscription("lab", &SubscriptionSource::File(lab_source.clone()))
+            .await
+            .expect("lab subscription should load");
+        let _ = tokio::fs::remove_file(&lab_source).await;
+
+        let opened = service
+            .open_session(
+                "browser",
+                &OpenSessionRequest {
+                    selection_mode: SessionSelectionMode::Ip,
+                    specified_ips: vec!["1.1.1.1".to_string()],
+                    desired_port: Some(10080),
+                    ..OpenSessionRequest::default()
+                },
+            )
+            .await
+            .expect("session should open");
+
+        let lab_catalog = service
+            .list_proxy_catalog(&ProxyCatalogQuery {
+                view: Some("profile".to_string()),
+                profile_id: Some("lab".to_string()),
+            })
+            .await
+            .expect("lab catalog should list");
+        let foreign_node_id = lab_catalog.groups[0].nodes[0].node_id.clone();
+
+        let err = service
+            .update_session_node(
+                "browser",
+                &opened.session_id,
+                &UpdateSessionNodeRequest {
+                    node_id: foreign_node_id,
+                },
+            )
+            .await
+            .expect_err("foreign node should be rejected");
+        assert!(matches!(err, BrokerError::ProxyInventoryNodeNotFound));
+    }
+
+    #[tokio::test]
+    async fn update_session_node_rolls_back_runtime_and_persistence_on_apply_failure() {
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(ApplyFailOnCallRuntime::new(2));
+        let service = BrokerService::new(
+            store.clone(),
+            runtime.clone(),
+            BrokerServiceOptions::default(),
+        );
+        service
+            .create_profile("browser")
+            .await
+            .expect("browser profile should be created");
+
+        let source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: start-node
+    type: socks5
+    server: 1.1.1.1
+  - name: next-node
+    type: socks5
+    server: 2.2.2.2
+"#,
+        )
+        .await;
+        service
+            .load_subscription("browser", &SubscriptionSource::File(source_path.clone()))
+            .await
+            .expect("subscription should load");
+        let _ = tokio::fs::remove_file(&source_path).await;
+
+        let catalog = service
+            .list_proxy_catalog(&ProxyCatalogQuery {
+                view: Some("profile".to_string()),
+                profile_id: Some("browser".to_string()),
+            })
+            .await
+            .expect("profile catalog should list");
+        let start_node = catalog
+            .groups
+            .iter()
+            .flat_map(|group| group.nodes.iter())
+            .find(|node| node.proxy_name == "start-node")
+            .expect("start node should exist");
+        let next_node = catalog
+            .groups
+            .iter()
+            .flat_map(|group| group.nodes.iter())
+            .find(|node| node.proxy_name == "next-node")
+            .expect("next node should exist");
+
+        let opened = service
+            .open_session_by_node(
+                "browser",
+                &OpenSessionByNodeRequest {
+                    node_id: start_node.node_id.clone(),
+                    desired_port: Some(10080),
+                },
+            )
+            .await
+            .expect("session should open");
+
+        let err = service
+            .update_session_node(
+                "browser",
+                &opened.session_id,
+                &UpdateSessionNodeRequest {
+                    node_id: next_node.node_id.clone(),
+                },
+            )
+            .await
+            .expect_err("switch should fail on runtime apply");
+        assert!(matches!(
+            err,
+            BrokerError::Internal(_) | BrokerError::MihomoUnavailable(_)
+        ));
+
+        let sessions = service
+            .list_sessions("browser")
+            .await
+            .expect("sessions should still list");
+        assert_eq!(sessions.sessions.len(), 1);
+        assert_eq!(sessions.sessions[0].node_id, start_node.node_id);
+        assert_eq!(sessions.sessions[0].selected_ip, "1.1.1.1");
+
+        let options = service
+            .search_session_node_options(
+                "browser",
+                &opened.session_id,
+                &SearchSessionNodeOptionsRequest {
+                    sort_mode: SessionNodeSortMode::SessionRecent,
+                    ..SearchSessionNodeOptionsRequest::default()
+                },
+            )
+            .await
+            .expect("node options should load");
+        let next_item = options
+            .items
+            .iter()
+            .find(|item| item.node_id == next_node.node_id)
+            .expect("next node should still be present");
+        assert!(next_item.session_last_used_at.is_none());
+        assert_eq!(runtime.apply_calls.load(Ordering::SeqCst), 3);
     }
 
     #[tokio::test]

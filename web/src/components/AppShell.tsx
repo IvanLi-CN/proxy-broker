@@ -104,7 +104,7 @@ export function AppShell({
       to: "/sessions",
       label: t("Sessions"),
       icon: RouteIcon,
-      meta: t("Open, audit, and close live listeners"),
+      meta: t("Create, switch, and close sessions"),
       requiresProfile: true,
     },
   ];

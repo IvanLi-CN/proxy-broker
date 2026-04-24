@@ -18,9 +18,10 @@ use crate::{
         HealthResponse, LoadSubscriptionRequest, OpenBatchByNodeRequest, OpenBatchRequest,
         OpenSessionByNodeRequest, OpenSessionRequest, ProfileProxySettings, ProxyCatalogQuery,
         ProxyImportListQuery, ProxyInventoryListQuery, ProxyOperationRequest, ProxyScope,
-        RefreshRequest, SearchSessionOptionsRequest, SuggestedPortResponse, TaskListQuery,
-        TaskRunDetail, TaskRunSummary, TaskStreamEnvelope, UpdateProfileProxySettingsRequest,
-        UpdateProxyAllocationRequest, UpdateProxyImportAllocationRequest,
+        RefreshRequest, SearchSessionNodeOptionsRequest, SearchSessionOptionsRequest,
+        SuggestedPortResponse, TaskListQuery, TaskRunDetail, TaskRunSummary, TaskStreamEnvelope,
+        UpdateProfileProxySettingsRequest, UpdateProxyAllocationRequest,
+        UpdateProxyImportAllocationRequest, UpdateSessionNodeRequest,
     },
     service::BrokerService,
     tasks::{TaskBusEvent, build_task_list_response, matches_task_query},
@@ -113,10 +114,18 @@ pub fn build_router(state: AppState) -> Router {
             "/api/v1/profiles/{profile_id}/sessions/suggested-port",
             get(suggested_port),
         )
+        .route(
+            "/api/v1/profiles/{profile_id}/sessions/{session_id}/node-options/search",
+            post(search_session_node_options),
+        )
         .route("/api/v1/profiles/{profile_id}/sessions", get(list_sessions))
         .route(
             "/api/v1/profiles/{profile_id}/sessions/{session_id}",
             delete(close_session),
+        )
+        .route(
+            "/api/v1/profiles/{profile_id}/sessions/{session_id}/node",
+            patch(update_session_node),
         )
         .fallback(spa_fallback)
         .layer(middleware::from_fn_with_state(
@@ -734,6 +743,38 @@ async fn close_session(
         .close_session(&profile_id, &session_id)
         .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn search_session_node_options(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    Path((profile_id, session_id)): Path<(String, String)>,
+    payload: Result<Json<SearchSessionNodeOptionsRequest>, JsonRejection>,
+) -> Result<Json<crate::models::SearchSessionNodeOptionsResponse>, BrokerError> {
+    auth.require_profile_access(&profile_id)?;
+    state.service.require_profile_exists(&profile_id).await?;
+    let request = parse_json_payload(payload, "search_session_node_options")?;
+    let resp = state
+        .service
+        .search_session_node_options(&profile_id, &session_id, &request)
+        .await?;
+    Ok(Json(resp))
+}
+
+async fn update_session_node(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    Path((profile_id, session_id)): Path<(String, String)>,
+    payload: Result<Json<UpdateSessionNodeRequest>, JsonRejection>,
+) -> Result<Json<crate::models::OpenSessionResponse>, BrokerError> {
+    auth.require_profile_access(&profile_id)?;
+    state.service.require_profile_exists(&profile_id).await?;
+    let request = parse_json_payload(payload, "update_session_node")?;
+    let resp = state
+        .service
+        .update_session_node(&profile_id, &session_id, &request)
+        .await?;
+    Ok(Json(resp))
 }
 
 async fn list_api_keys(
