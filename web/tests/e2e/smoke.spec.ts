@@ -1032,6 +1032,12 @@ test("operator can drive the main workflows", async ({ page }) => {
   await expect(page.getByText("Fresh-Lab-01")).toBeVisible();
   await expect(page.getByText("Fresh-Lab-02")).toBeVisible();
 
-  await page.getByRole("button", { name: /close/i }).first().click();
-  await expect(page.getByText(/No active sessions/)).toBeVisible();
+  const primarySessionRow = page.getByRole("row").filter({ hasText: SESSION_ID_PRIMARY });
+  await primarySessionRow.getByRole("button", { name: /^close$/i }).click();
+  await expect(primarySessionRow).toHaveAttribute("data-close-state", "pending");
+  await expect(primarySessionRow.getByRole("button", { name: /^undo$/i })).toBeVisible();
+
+  await primarySessionRow.getByRole("button", { name: /^undo$/i }).click();
+  await expect(primarySessionRow).toHaveAttribute("data-close-state", "idle");
+  await expect(primarySessionRow.getByRole("button", { name: /^close$/i })).toBeVisible();
 });
