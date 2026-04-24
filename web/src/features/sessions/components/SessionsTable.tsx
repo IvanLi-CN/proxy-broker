@@ -1,4 +1,5 @@
-import { LoaderCircleIcon, PencilLineIcon, PlugZapIcon } from "lucide-react";
+import { CopyIcon, LoaderCircleIcon, PencilLineIcon, PlugZapIcon } from "lucide-react";
+import { toast } from "sonner";
 
 import { EmptyPanel } from "@/components/EmptyPanel";
 import { Button } from "@/components/ui/button";
@@ -11,8 +12,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import type { SessionCopyAddressFormat } from "@/features/sessions/hooks/use-session-copy-address-format";
 import { useI18n } from "@/i18n";
-import { formatCountryName, formatGeoLabel, formatTimestamp } from "@/lib/format";
+import {
+  formatCountryName,
+  formatGeoLabel,
+  formatListenEndpoint,
+  formatTimestamp,
+} from "@/lib/format";
 import type { SessionListItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -25,8 +32,42 @@ function buildSessionGeoSummary(locale: "zh-CN" | "en-US", session: SessionListI
   return Array.from(new Set(parts)).join(" / ");
 }
 
+function buildSessionProxyAddress(listenEndpoint: string, format: SessionCopyAddressFormat) {
+  switch (format) {
+    case "http_url":
+      return `http://${listenEndpoint}`;
+    case "socks_url":
+      return `socks://${listenEndpoint}`;
+  }
+}
+
+async function copyTextToClipboard(value: string) {
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  if (typeof document === "undefined") {
+    throw new Error("clipboard unavailable");
+  }
+
+  const textArea = document.createElement("textarea");
+  textArea.value = value;
+  textArea.setAttribute("readonly", "");
+  textArea.style.position = "absolute";
+  textArea.style.left = "-9999px";
+  document.body.appendChild(textArea);
+  textArea.select();
+  const copied = document.execCommand?.("copy");
+  document.body.removeChild(textArea);
+  if (!copied) {
+    throw new Error("clipboard unavailable");
+  }
+}
+
 interface SessionsTableProps {
   sessions: SessionListItem[];
+  listenCopyFormat: SessionCopyAddressFormat;
   isLoading?: boolean;
   closingSessionId?: string | null;
   switchingSessionId?: string | null;
@@ -36,6 +77,7 @@ interface SessionsTableProps {
 
 export function SessionsTable({
   sessions,
+  listenCopyFormat,
   isLoading,
   closingSessionId,
   switchingSessionId,
@@ -43,6 +85,21 @@ export function SessionsTable({
   onCloseSession,
 }: SessionsTableProps) {
   const { locale, t } = useI18n();
+
+  const handleCopyAddress = async (session: SessionListItem) => {
+    const listenEndpoint = formatListenEndpoint(session.listen, session.port);
+    if (!listenEndpoint) {
+      toast.error(t("Could not copy proxy address"));
+      return;
+    }
+
+    try {
+      await copyTextToClipboard(buildSessionProxyAddress(listenEndpoint, listenCopyFormat));
+      toast.success(t("Copied proxy address"));
+    } catch {
+      toast.error(t("Could not copy proxy address"));
+    }
+  };
 
   if (isLoading && sessions.length === 0) {
     return (
@@ -83,6 +140,8 @@ export function SessionsTable({
             const isClosing = closingSessionId === session.session_id;
             const isSwitching = switchingSessionId === session.session_id;
             const geoSummary = buildSessionGeoSummary(locale, session);
+            const listenEndpoint =
+              formatListenEndpoint(session.listen, session.port) ?? session.listen;
             return (
               <TableRow key={session.session_id} className="[&_td]:py-3">
                 <TableCell className="px-4 font-mono text-xs md:text-sm">
@@ -118,7 +177,25 @@ export function SessionsTable({
                     ) : null}
                   </div>
                 </TableCell>
-                <TableCell className="font-mono text-xs md:text-sm">{session.listen}</TableCell>
+                <TableCell>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-mono text-xs md:text-sm">{listenEndpoint}</span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="size-7 rounded-full"
+                      aria-label={t("Copy proxy address for {sessionId}", {
+                        sessionId: session.session_id,
+                      })}
+                      onClick={() => {
+                        void handleCopyAddress(session);
+                      }}
+                    >
+                      <CopyIcon className="size-3.5" />
+                    </Button>
+                  </div>
+                </TableCell>
                 <TableCell className="text-xs md:text-sm">
                   {formatTimestamp(locale, t, session.created_at)}
                 </TableCell>

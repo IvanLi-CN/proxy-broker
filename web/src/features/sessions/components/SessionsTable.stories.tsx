@@ -12,12 +12,13 @@ const meta = {
     docs: {
       description: {
         component:
-          "Polling table of current sessions with inline proxy switching, selected IP geography, and empty/loading fallbacks.",
+          "Polling table of current sessions with inline proxy switching, selected IP geography, listener copy buttons, and empty/loading fallbacks.",
       },
     },
   },
   args: {
     sessions: sessionsFixture.sessions,
+    listenCopyFormat: "socks_url",
     isLoading: false,
     closingSessionId: null,
     switchingSessionId: null,

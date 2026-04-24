@@ -93,6 +93,36 @@ export function formatLatency(locale: Locale, t: Translator, value?: number | nu
   return `${new Intl.NumberFormat(locale).format(value)} ms`;
 }
 
+export function formatListenEndpoint(listen?: string | null, port?: number | null) {
+  const host = listen?.trim();
+  if (!host) {
+    return null;
+  }
+  if (port == null) {
+    return host;
+  }
+  if (host.startsWith("[") && host.includes("]:")) {
+    return host;
+  }
+  if (host.startsWith("[") && host.endsWith("]")) {
+    return `${host}:${port}`;
+  }
+
+  const firstColonIndex = host.indexOf(":");
+  const lastColonIndex = host.lastIndexOf(":");
+  if (firstColonIndex >= 0 && firstColonIndex === lastColonIndex) {
+    const portPart = host.slice(lastColonIndex + 1);
+    if (/^\d+$/.test(portPart)) {
+      return host;
+    }
+  }
+
+  if (host.includes(":")) {
+    return `[${host}]:${port}`;
+  }
+  return `${host}:${port}`;
+}
+
 export function formatDataSize(locale: Locale, t: Translator, value?: number | null) {
   if (value == null) {
     return null;

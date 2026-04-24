@@ -4,9 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 import { DataTablePanel } from "@/components/DataTablePanel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { SessionCreateDialog } from "@/features/sessions/components/SessionCreateDialog";
 import { SessionNodeSelectDialog } from "@/features/sessions/components/SessionNodeSelectDialog";
 import { SessionsTable } from "@/features/sessions/components/SessionsTable";
+import {
+  type SessionCopyAddressFormat,
+  useSessionCopyAddressFormat,
+} from "@/features/sessions/hooks/use-session-copy-address-format";
 import { useI18n } from "@/i18n";
 import type {
   OpenBatchRequest,
@@ -79,11 +84,34 @@ export function SessionsPage({
   const { formatNumber, t } = useI18n();
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [listenCopyFormat, setListenCopyFormat] = useSessionCopyAddressFormat();
 
   const editingSession = useMemo(
     () => sessions.find((session) => session.session_id === editingSessionId) ?? null,
     [editingSessionId, sessions],
   );
+  const copyAddressOptions = useMemo(
+    () =>
+      [
+        {
+          value: "socks_url",
+          label: t("SOCKS address"),
+          example: "socks://1.2.3.4:5678",
+        },
+        {
+          value: "http_url",
+          label: t("HTTP address"),
+          example: "http://1.2.3.4:5678",
+        },
+      ] satisfies Array<{
+        value: SessionCopyAddressFormat;
+        label: string;
+        example: string;
+      }>,
+    [t],
+  );
+  const activeCopyAddressOption =
+    copyAddressOptions.find((item) => item.value === listenCopyFormat) ?? copyAddressOptions[0];
 
   useEffect(() => {
     if (!createDialogOpen) {
@@ -168,17 +196,58 @@ export function SessionsPage({
           </Badge>
         }
       >
-        <SessionsTable
-          closingSessionId={closingSessionId}
-          isLoading={sessionsLoading}
-          onCloseSession={onCloseSession}
-          onEditSession={(sessionId) => {
-            onResetSwitchState();
-            setEditingSessionId(sessionId);
-          }}
-          sessions={sessions}
-          switchingSessionId={switchingSessionId}
-        />
+        <div className="space-y-4">
+          <div className="flex flex-wrap justify-end gap-3">
+            <div className="w-full max-w-[340px] space-y-2">
+              <div className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                {t("Copy address format")}
+              </div>
+              <Select
+                value={listenCopyFormat}
+                onValueChange={(value) => setListenCopyFormat(value as SessionCopyAddressFormat)}
+              >
+                <SelectTrigger
+                  aria-label={t("Copy address format")}
+                  className="w-full bg-background text-left"
+                >
+                  <div className="flex min-w-0 flex-col items-start leading-tight">
+                    <span className="truncate font-medium text-foreground">
+                      {activeCopyAddressOption?.label}
+                    </span>
+                    <span className="truncate text-xs text-muted-foreground">
+                      {activeCopyAddressOption?.example}
+                    </span>
+                  </div>
+                </SelectTrigger>
+                <SelectContent>
+                  {copyAddressOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      <div className="flex min-w-0 flex-col items-start leading-tight">
+                        <span className="truncate">{option.label}</span>
+                        <span className="truncate text-xs text-muted-foreground">
+                          {option.example}
+                        </span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <SessionsTable
+            closingSessionId={closingSessionId}
+            isLoading={sessionsLoading}
+            listenCopyFormat={listenCopyFormat}
+            onCloseSession={onCloseSession}
+            onEditSession={(sessionId) => {
+              onResetSwitchState();
+              setEditingSessionId(sessionId);
+            }}
+            sessions={sessions}
+            switchingSessionId={switchingSessionId}
+          />
+        </div>
       </DataTablePanel>
 
       <SessionCreateDialog

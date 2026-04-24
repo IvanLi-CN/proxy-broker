@@ -26,6 +26,8 @@ export const enUS: MessageCatalog = {
   "Subscription sync finished with {count} new IPs.":
     "Subscription sync finished with {count} new IPs.",
   "Opened {count} sessions in batch": "Opened {count} sessions in batch",
+  "Copied proxy address": "Copied proxy address",
+  "Could not copy proxy address": "Could not copy proxy address",
   "Pick one simple targeting mode, keep the port optional, and let the backend open the listener from the first surviving candidate.":
     "Pick one simple targeting mode, keep the port optional, and let the backend open the listener from the first surviving candidate.",
   "optional port": "optional port",
@@ -90,6 +92,10 @@ export const enUS: MessageCatalog = {
   "Manage local imports, global pool usage, and allocations":
     "Manage local imports, global pool usage, and allocations",
   "Create, switch, and close sessions": "Create, switch, and close sessions",
+  "Copy address format": "Copy address format",
+  "SOCKS address": "SOCKS address",
+  "HTTP address": "HTTP address",
+  "Copy proxy address for {sessionId}": "Copy proxy address for {sessionId}",
   "Profile only": "Profile only",
   "Select a concrete profile to use this workspace.":
     "Select a concrete profile to use this workspace.",

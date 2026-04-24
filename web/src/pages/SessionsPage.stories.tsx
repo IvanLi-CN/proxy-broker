@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, fn, userEvent, within } from "storybook/test";
 
 import { AppShell } from "@/components/AppShell";
+import { sessionCopyAddressFormatStorageKey } from "@/features/sessions/hooks/use-session-copy-address-format";
 import { sessionNodeOptionsFixture, sessionsFixture } from "@/mocks/fixtures";
 import { SessionsPage } from "@/pages/SessionsPage";
 
@@ -19,32 +20,38 @@ const meta = {
       },
     },
   },
-  render: (args) => (
-    <AppShell
-      profileId="default"
-      profiles={["default", "edge-jp", "lab-us"]}
-      profilesLoading={false}
-      profilesCreating={false}
-      profilesError={null}
-      healthStatus="ok"
-      currentUser={{
-        status: "resolved",
-        identity: {
-          authenticated: true,
-          principal_type: "human",
-          subject: "admin@example.com",
-          email: "admin@example.com",
-          groups: ["admins", "ops"],
-          is_admin: true,
-        },
-      }}
-      onProfileIdChange={() => undefined}
-      onCreateProfile={async (value: string) => value}
-      onRetryProfiles={() => undefined}
-    >
-      <SessionsPage {...args} />
-    </AppShell>
-  ),
+  render: (args) => {
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(sessionCopyAddressFormatStorageKey);
+    }
+
+    return (
+      <AppShell
+        profileId="default"
+        profiles={["default", "edge-jp", "lab-us"]}
+        profilesLoading={false}
+        profilesCreating={false}
+        profilesError={null}
+        healthStatus="ok"
+        currentUser={{
+          status: "resolved",
+          identity: {
+            authenticated: true,
+            principal_type: "human",
+            subject: "admin@example.com",
+            email: "admin@example.com",
+            groups: ["admins", "ops"],
+            is_admin: true,
+          },
+        }}
+        onProfileIdChange={() => undefined}
+        onCreateProfile={async (value: string) => value}
+        onRetryProfiles={() => undefined}
+      >
+        <SessionsPage {...args} />
+      </AppShell>
+    );
+  },
   args: {
     sessions: sessionsFixture.sessions,
     sessionsLoading: false,
@@ -102,13 +109,37 @@ export const SwitchingState: Story = {
   },
 };
 
+export const CopyFormatFlow: Story = {
+  args: {},
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole("combobox", { name: /Copy address format/i }));
+    const dialog = within(canvasElement.ownerDocument.body);
+    await userEvent.click(await dialog.findByRole("option", { name: /HTTP address/i }));
+    await expect(
+      await canvas.findByRole("combobox", { name: /Copy address format/i }),
+    ).toHaveTextContent(/HTTP address/i);
+    await expect(
+      await canvas.findByRole("button", {
+        name: new RegExp(
+          `Copy proxy address for ${sessionsFixture.sessions[0]?.session_id ?? ""}`,
+          "i",
+        ),
+      }),
+    ).toBeVisible();
+  },
+};
+
 export const CreateDialogFlow: Story = {
   args: {},
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await userEvent.click(await canvas.findByRole("button", { name: /^Create session$/i }));
     const dialog = within(canvasElement.ownerDocument.body);
-    await expect(await dialog.findByRole("dialog", { name: /Create session/i })).toBeVisible();
+    await expect(await dialog.findByRole("dialog", { name: /Create session/i })).toHaveAttribute(
+      "data-state",
+      "open",
+    );
     await expect(await dialog.findByRole("tab", { name: /Single session/i })).toHaveAttribute(
       "data-state",
       "active",

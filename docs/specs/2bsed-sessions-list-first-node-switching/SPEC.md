@@ -37,6 +37,8 @@
 - `创建会话` 弹窗必须保留“单个创建 / 批量创建”两种模式。
 - 会话列表代理列必须提供 edit icon，并弹出可筛选、可排序的节点选择弹窗。
 - 会话列表必须展示当前 selected IP 的国家/地区/城市摘要，并移除重复的 port badge。
+- 会话列表上方必须提供一个带本地记忆的复制地址格式选择器，用于决定监听地址复制结果的协议前缀。
+- 监听地址列必须在文本右侧提供复制 icon，按当前选择器格式复制完整代理地址。
 - 节点选择弹窗默认按 `当前会话最近使用` 排序，并支持切换到 `当前 profile 最近使用`。
 - `PATCH /api/v1/profiles/{profile_id}/sessions/{session_id}/node` 必须保持 `session_id / listen / port / created_at` 不变，只更新 `node_id / proxy_name / selected_ip`。
 - 创建会话与切换代理都必须更新 profile-scope 与 session-scope 的 node usage。
@@ -61,6 +63,12 @@
 - Given 会话列表中的 selected IP 列
   When 节点 metadata 已存在
   Then 列表显示国家 / 地区 / 城市摘要，且不再重复展示 port badge。
+- Given 会话列表上方的复制格式选择器
+  When 操作员切换到另一种地址格式
+  Then 选择结果被保存在浏览器本地，并影响后续监听地址复制内容。
+- Given 会话列表中的监听地址列
+  When 操作员点击复制 icon
+  Then 系统按当前选择器生成并复制完整代理地址，例如 `socks://127.0.0.1:10080` 或 `http://127.0.0.1:10080`。
 - Given 节点选择弹窗
   When 在两种排序之间切换或输入关键词
   Then 列表按对应最近使用时间稳定排序，并只返回当前 profile 可见节点。
@@ -81,7 +89,7 @@
 - source_type: `storybook_canvas`
   story_id_or_title: `Pages/SessionsPage/Default`
   state: `default`
-  evidence_note: 会话页首屏只保留会话列表与一个创建入口；selected IP 列展示地理摘要，原 port badge 已移除。
+  evidence_note: 会话页首屏只保留会话列表与一个创建入口；selected IP 列展示地理摘要，原 port badge 已移除，列表上方新增复制地址格式选择器，监听地址列提供复制按钮。
   image:
   ![会话页默认列表优先布局](./assets/sessions-page-default.png)
 
