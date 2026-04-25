@@ -25,8 +25,8 @@ import {
   formatCountryName,
   formatGeoLabel,
   formatLatency,
-  formatListenEndpoint,
   formatTimestamp,
+  resolveSessionDisplayAddress,
 } from "@/lib/format";
 import type {
   SessionListItem,
@@ -68,7 +68,7 @@ export function SessionNodeSelectDialog({
   onSubmit,
 }: SessionNodeSelectDialogProps) {
   const { locale, t } = useI18n();
-  const listenEndpoint = session ? formatListenEndpoint(session.listen, session.port) : null;
+  const displayAddress = session ? resolveSessionDisplayAddress(session) : null;
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
   const [sortMode, setSortMode] = useState<SessionNodeSortMode>("session_recent");
@@ -160,7 +160,7 @@ export function SessionNodeSelectDialog({
             <div className="font-medium text-foreground">{session.proxy_name}</div>
             <div className="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
               <span>{t("Session ID: {sessionId}", { sessionId: session.session_id })}</span>
-              <span>{t("Listen {listen}", { listen: listenEndpoint ?? session.listen })}</span>
+              <span>{t("Address {address}", { address: displayAddress ?? session.listen })}</span>
               <span>{t("Selected IP {ip}", { ip: session.selected_ip })}</span>
             </div>
           </div>

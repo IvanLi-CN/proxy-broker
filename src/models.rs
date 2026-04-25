@@ -122,6 +122,9 @@ pub struct OpenBatchRequest {
 pub struct OpenSessionResponse {
     pub session_id: String,
     pub listen: String,
+    pub bind_host: String,
+    pub display_host: String,
+    pub display_address: String,
     pub port: u16,
     pub selected_ip: String,
     pub proxy_name: String,
@@ -877,6 +880,9 @@ pub struct SessionRecord {
 pub struct SessionListItem {
     pub session_id: String,
     pub listen: String,
+    pub bind_host: String,
+    pub display_host: String,
+    pub display_address: String,
     pub port: u16,
     pub selected_ip: String,
     pub proxy_name: String,

@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Route, test } from "@playwright/test";
 
 const RUN_ID_LIVE_SYNC = "run-H6r2Lp8XmQ4Tn7Vc";
 const RUN_ID_POST_LOAD = "run-J5w3Ns9Qa1Ze6Ru2";
@@ -139,6 +139,9 @@ test.beforeEach(async ({ page }) => {
     Array<{
       session_id: string;
       listen: string;
+      bind_host: string;
+      display_host: string;
+      display_address: string;
       port: number;
       selected_ip: string;
       proxy_name: string;
@@ -149,7 +152,10 @@ test.beforeEach(async ({ page }) => {
     default: [
       {
         session_id: SESSION_ID_PRIMARY,
-        listen: "127.0.0.1:10080",
+        listen: "127.0.0.1",
+        bind_host: "127.0.0.1",
+        display_host: "127.0.0.1",
+        display_address: "127.0.0.1:10080",
         port: 10080,
         selected_ip: "203.0.113.10",
         proxy_name: "JP-Tokyo-Entry",
@@ -164,6 +170,56 @@ test.beforeEach(async ({ page }) => {
     const parts = pathname.split("/");
     return decodeURIComponent(parts[4] ?? "default");
   };
+
+  const resolveDisplayHost = (route: Route, bindHost: string) => {
+    const requestedHost = route.request().headers()["x-proxy-broker-display-host"]?.trim();
+    if (bindHost === "0.0.0.0" || bindHost === "::" || bindHost === "[::]") {
+      return requestedHost || new URL(route.request().url()).hostname;
+    }
+    return bindHost;
+  };
+
+  const withDisplayAddress = <T extends { listen: string; port: number }>(
+    route: Route,
+    session: T,
+  ) => {
+    const bindHost = session.listen;
+    const displayHost = resolveDisplayHost(route, bindHost);
+    return {
+      ...session,
+      bind_host: bindHost,
+      display_host: displayHost,
+      display_address: `${displayHost}:${session.port}`,
+    };
+  };
+
+  const bindEndpoint = (session: { bind_host: string; port: number }) =>
+    `${session.bind_host}:${session.port}`;
+
+  const toApiSessionResponse = <
+    T extends {
+      session_id: string;
+      bind_host: string;
+      display_host: string;
+      display_address: string;
+      port: number;
+      selected_ip: string;
+      proxy_name: string;
+      node_id?: string;
+    },
+  >(
+    session: T,
+  ) => ({
+    session_id: session.session_id,
+    listen: bindEndpoint(session),
+    bind_host: session.bind_host,
+    display_host: session.display_host,
+    display_address: session.display_address,
+    port: session.port,
+    selected_ip: session.selected_ip,
+    proxy_name: session.proxy_name,
+    node_id: session.node_id,
+  });
 
   const effectiveProfileIdsFor = (item: (typeof proxyImports)[number]) => {
     if (item.allocation_scope.type === "global") {
@@ -817,37 +873,30 @@ test.beforeEach(async ({ page }) => {
       [FRESH_LAB_NODE_IDS[0]]: {
         proxy_name: "Fresh-Lab-01",
         selected_ip: "203.0.113.101",
-        listen: "127.0.0.1:10080",
+        listen: "0.0.0.0",
         port: 10080,
       },
       [FRESH_LAB_NODE_IDS[1]]: {
         proxy_name: "Fresh-Lab-02",
         selected_ip: "203.0.113.102",
-        listen: "127.0.0.1:10081",
+        listen: "0.0.0.0",
         port: 10081,
       },
     };
     const sessionShape = nodeMap[nodeId] ?? nodeMap[FRESH_LAB_NODE_IDS[0]];
-    const session = {
+    const session = withDisplayAddress(route, {
       session_id: sessionIdFor(0),
       ...sessionShape,
       port: payload.desired_port ?? sessionShape.port,
-      listen: `127.0.0.1:${payload.desired_port ?? sessionShape.port}`,
+      listen: sessionShape.listen,
       node_id: nodeId,
       created_at: 1741748460,
-    };
+    });
     sessionsByProfile[profileId] = [session];
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
-        session_id: session.session_id,
-        listen: session.listen,
-        port: session.port,
-        selected_ip: session.selected_ip,
-        proxy_name: session.proxy_name,
-        node_id: session.node_id,
-      }),
+      body: JSON.stringify(toApiSessionResponse(session)),
     });
   });
 
@@ -860,79 +909,78 @@ test.beforeEach(async ({ page }) => {
     const requests =
       payload.requests ??
       (payload.node_ids ?? [...FRESH_LAB_NODE_IDS]).map((nodeId) => ({ node_id: nodeId }));
-    const sessions = requests.map((request, index) => ({
-      session_id: sessionIdFor(index === 0 ? 0 : 1),
-      listen: `127.0.0.1:${request.desired_port ?? (index === 0 ? 10080 : 10081)}`,
-      port: request.desired_port ?? (index === 0 ? 10080 : 10081),
-      selected_ip: index === 0 ? "203.0.113.101" : "203.0.113.102",
-      proxy_name: index === 0 ? "Fresh-Lab-01" : "Fresh-Lab-02",
-      node_id: request.node_id,
-      created_at: 1741748460 + index,
-    }));
+    const sessions = requests.map((request, index) =>
+      withDisplayAddress(route, {
+        session_id: sessionIdFor(index === 0 ? 0 : 1),
+        listen: "0.0.0.0",
+        port: request.desired_port ?? (index === 0 ? 10080 : 10081),
+        selected_ip: index === 0 ? "203.0.113.101" : "203.0.113.102",
+        proxy_name: index === 0 ? "Fresh-Lab-01" : "Fresh-Lab-02",
+        node_id: request.node_id,
+        created_at: 1741748460 + index,
+      }),
+    );
     sessionsByProfile[profileId] = sessions;
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        sessions: sessions.map(({ created_at: _createdAt, ...session }) => session),
+        sessions: sessions.map(({ created_at: _createdAt, ...session }) =>
+          toApiSessionResponse(session),
+        ),
       }),
     });
   });
 
   await page.route("**/api/v1/profiles/*/sessions/open", async (route) => {
     const profileId = extractProfileId(route.request().url());
-    const session = {
+    const session = withDisplayAddress(route, {
       session_id: sessionIdFor(0),
-      listen: "127.0.0.1:10080",
+      listen: "127.0.0.1",
       port: 10080,
       selected_ip: "203.0.113.10",
       proxy_name: "JP-Tokyo-Entry",
       node_id: "node-global-jp-tokyo",
       created_at: 1741748460,
-    };
+    });
     sessionsByProfile[profileId] = [session];
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
-        session_id: session.session_id,
-        listen: session.listen,
-        port: session.port,
-        selected_ip: session.selected_ip,
-        proxy_name: session.proxy_name,
-        node_id: session.node_id,
-      }),
+      body: JSON.stringify(toApiSessionResponse(session)),
     });
   });
 
   await page.route("**/api/v1/profiles/*/sessions/open-batch", async (route) => {
     const profileId = extractProfileId(route.request().url());
     const sessions = [
-      {
+      withDisplayAddress(route, {
         session_id: sessionIdFor(0),
-        listen: "127.0.0.1:10080",
+        listen: "127.0.0.1",
         port: 10080,
         selected_ip: "203.0.113.10",
         proxy_name: "JP-Tokyo-Entry",
         node_id: "node-global-jp-tokyo",
         created_at: 1741748460,
-      },
-      {
+      }),
+      withDisplayAddress(route, {
         session_id: sessionIdFor(1),
-        listen: "127.0.0.1:10081",
+        listen: "127.0.0.1",
         port: 10081,
         selected_ip: "203.0.113.88",
         proxy_name: "JP-Osaka-Edge",
         node_id: "node-global-jp-osaka",
         created_at: 1741748461,
-      },
+      }),
     ];
     sessionsByProfile[profileId] = sessions;
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        sessions: sessions.map(({ created_at: _createdAt, ...session }) => session),
+        sessions: sessions.map(({ created_at: _createdAt, ...session }) =>
+          toApiSessionResponse(session),
+        ),
       }),
     });
   });
@@ -943,7 +991,12 @@ test.beforeEach(async ({ page }) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ sessions: sessionsByProfile[profileId] ?? [] }),
+        body: JSON.stringify({
+          sessions: (sessionsByProfile[profileId] ?? []).map((session) => ({
+            ...session,
+            listen: bindEndpoint(session),
+          })),
+        }),
       });
       return;
     }
@@ -1031,8 +1084,17 @@ test("operator can drive the main workflows", async ({ page }) => {
   await page.getByRole("link", { name: /Sessions/i }).click();
   await expect(page.getByText("Fresh-Lab-01")).toBeVisible();
   await expect(page.getByText("Fresh-Lab-02")).toBeVisible();
-
   const primarySessionRow = page.getByRole("row").filter({ hasText: SESSION_ID_PRIMARY });
+  const pageHost = new URL(page.url()).hostname;
+  await expect(page.getByRole("tab", { name: /SOCKS URI/i })).toHaveAttribute(
+    "data-state",
+    "active",
+  );
+  await page.getByRole("tab", { name: /HTTP URI/i }).click();
+  await expect(page.getByText(`http://${pageHost}:10080`)).toBeVisible();
+  await expect(primarySessionRow.getByText(`${pageHost}:10080`)).toBeVisible();
+  await expect(page.getByText("0.0.0.0:10080")).toHaveCount(0);
+
   await primarySessionRow.getByRole("button", { name: /^close$/i }).click();
   await expect(primarySessionRow).toHaveAttribute("data-close-state", "pending");
   await expect(primarySessionRow.getByRole("button", { name: /^undo$/i })).toBeVisible();

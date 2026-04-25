@@ -126,12 +126,12 @@ export const CopyFormatFlow: Story = {
   args: {},
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await userEvent.click(await canvas.findByRole("combobox", { name: /Copy address format/i }));
-    const dialog = within(canvasElement.ownerDocument.body);
-    await userEvent.click(await dialog.findByRole("option", { name: /HTTP address/i }));
-    await expect(
-      await canvas.findByRole("combobox", { name: /Copy address format/i }),
-    ).toHaveTextContent(/HTTP address/i);
+    await userEvent.click(await canvas.findByRole("tab", { name: /HTTP URI/i }));
+    await expect(await canvas.findByRole("tab", { name: /HTTP URI/i })).toHaveAttribute(
+      "data-state",
+      "active",
+    );
+    await expect(await canvas.findByText("http://127.0.0.1:10080")).toBeVisible();
     await expect(
       await canvas.findByRole("button", {
         name: new RegExp(

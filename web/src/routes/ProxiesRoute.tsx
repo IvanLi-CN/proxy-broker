@@ -7,6 +7,7 @@ import { useProxyOperationEvents } from "@/hooks/use-proxy-operation-events";
 import { useI18n } from "@/i18n";
 import { api } from "@/lib/api";
 import { formatApiErrorMessage } from "@/lib/error-messages";
+import { resolveSessionDisplayAddress } from "@/lib/format";
 import { isGlobalProfileId } from "@/lib/profile-selection";
 import type {
   LoadSubscriptionResponse,
@@ -217,7 +218,7 @@ export function ProxiesRoute() {
     onSuccess: async (response, { requestedProfileId }) => {
       toast.success(
         t("Listening on {listen} via {proxyName} ({selectedIp}).", {
-          listen: response.listen,
+          listen: resolveSessionDisplayAddress(response),
           proxyName: response.proxy_name,
           selectedIp: response.selected_ip,
         }),

@@ -35,6 +35,9 @@ struct Cli {
     )]
     session_listen_ip: IpAddr,
 
+    #[arg(long, env = "PROXY_BROKER_SESSION_PUBLIC_HOST")]
+    session_public_host: Option<String>,
+
     #[arg(long, env = "PROXY_BROKER_SESSION_PORT_RANGE")]
     session_port_range: Option<String>,
 
@@ -223,6 +226,10 @@ async fn main() -> anyhow::Result<()> {
         online_geo_base: args.online_geo_base,
         mmdb_url: args.mmdb_url,
         session_listen_ip: args.session_listen_ip,
+        session_public_host: args
+            .session_public_host
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty()),
         session_port_range,
         ..BrokerServiceOptions::default()
     };

@@ -2,9 +2,9 @@
 
 ## 状态
 
-- Status: 进行中
+- Status: 已完成
 - Created: 2026-04-24
-- Last: 2026-04-24
+- Last: 2026-04-25
 
 ## 背景 / 问题陈述
 
@@ -37,8 +37,12 @@
 - `创建会话` 弹窗必须保留“单个创建 / 批量创建”两种模式。
 - 会话列表代理列必须提供 edit icon，并弹出可筛选、可排序的节点选择弹窗。
 - 会话列表必须展示当前 selected IP 的国家/地区/城市摘要，并移除重复的 port badge。
-- 会话列表上方必须提供一个带本地记忆的复制地址格式选择器，用于决定监听地址复制结果的协议前缀。
-- 监听地址列必须在文本右侧提供复制 icon，按当前选择器格式复制完整代理地址。
+- 会话列表上方必须提供一个带本地记忆的复制格式分段按钮，固定支持 `SOCKS URI`、`HTTP URI` 与 `主机:端口` 三种输出。
+- 复制格式区域必须展示真实预览，直接反映当前会话将被复制出去的代理地址；不得把需求示例写死成产品文案。
+- 会话列表必须把 owner-facing 地址与 runtime bind 地址分离：原始 bind host 只保留给运行时/诊断，默认表格展示与复制都使用可访问的 `display_address`。
+- 当 bind host 为 `0.0.0.0` / `::` / `[::]` 时，owner-facing UI 不得直接展示通配地址；应优先使用 `session_public_host`，否则回退到当前页面 hostname。
+- 当 bind host 为明确地址（例如域名、`192.168.*` 或 `127.0.0.1`）时，`display_address` 必须直接复用该 host，不得再被 UI 强制替换。
+- 会话地址列必须在文本右侧提供复制 icon，按当前选择器格式复制完整代理地址。
 - 会话关闭入口必须先进入 10 秒撤销窗口：点击后整行置灰、非撤销操作禁用、关闭按钮切换为撤销按钮，倒计时结束后才真正移除会话。
 - 节点选择弹窗默认按 `当前会话最近使用` 排序，并支持切换到 `当前 profile 最近使用`。
 - `PATCH /api/v1/profiles/{profile_id}/sessions/{session_id}/node` 必须保持 `session_id / listen / port / created_at` 不变，只更新 `node_id / proxy_name / selected_ip`。
@@ -66,10 +70,16 @@
   Then 列表显示国家 / 地区 / 城市摘要，且不再重复展示 port badge。
 - Given 会话列表上方的复制格式选择器
   When 操作员切换到另一种地址格式
-  Then 选择结果被保存在浏览器本地，并影响后续监听地址复制内容。
-- Given 会话列表中的监听地址列
+  Then 选择结果被保存在浏览器本地，固定可单击切换，并影响后续代理地址复制内容。
+- Given 会话 bind host 为 wildcard
+  When 页面通过某个可访问 hostname 打开当前管理台
+  Then 列表主文案与复制结果使用 `session_public_host` 或当前页面 hostname，而不是 `0.0.0.0:*`。
+- Given 会话 bind host 为明确地址
+  When 列表或创建响应需要展示 owner-facing 地址
+  Then `display_address` 直接复用该 host，不做 loopback 强制替换。
+- Given 会话列表中的代理地址列
   When 操作员点击复制 icon
-  Then 系统按当前选择器生成并复制完整代理地址，例如 `socks://127.0.0.1:10080` 或 `http://127.0.0.1:10080`。
+  Then 系统按当前选择器生成并复制完整代理地址，例如 `socks://ops.example.com:10080`、`http://192.168.31.15:10080` 或 `192.168.31.15:10080`。
 - Given 会话列表中的关闭按钮
   When 操作员点击关闭
   Then 当前行先进入 10 秒撤销窗口并置灰，按钮切换为撤销；若未撤销，会话在 10 秒后消失。
@@ -80,6 +90,7 @@
 ## 质量门槛（Quality Gates）
 
 - `cargo test --lib`
+- `cargo clippy --all-targets --all-features -- -D warnings`
 - `cd web && bun run check`
 - `cd web && bun run typecheck`
 - `cd web && bun run test`
@@ -87,13 +98,14 @@
 - `cd web && bun run build`
 - `cd web && bun run build-storybook`
 - `cd web && bun run test-storybook`
+- `cd web && bun run test:e2e`
 
 ## Visual Evidence
 
 - source_type: `storybook_canvas`
   story_id_or_title: `Pages/SessionsPage/Default`
   state: `default`
-  evidence_note: 会话页首屏只保留会话列表与一个创建入口；selected IP 列展示地理摘要，原 port badge 已移除，列表上方新增复制地址格式选择器，监听地址列提供复制按钮。
+  evidence_note: 会话页首屏只保留会话列表与一个创建入口；selected IP 列展示地理摘要，原 port badge 已移除，列表上方改为固定可见的复制格式分段按钮与真实预览，代理地址列展示 `display_address` 并提供复制按钮。
   image:
   ![会话页默认列表优先布局](./assets/sessions-page-default.png)
 

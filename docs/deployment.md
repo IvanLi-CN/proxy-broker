@@ -17,6 +17,9 @@ The default mode is `enforce`.
   - default: `127.0.0.1:8080`
 - `PROXY_BROKER_SESSION_LISTEN_IP`
   - default: `127.0.0.1`
+- `PROXY_BROKER_SESSION_PUBLIC_HOST`
+  - optional owner-facing host used to render/copy session proxy addresses when
+    session listeners bind to wildcard addresses
 - `PROXY_BROKER_STORE`
   - default: `sqlite`
 - `PROXY_BROKER_SQLITE_PATH`

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { DataTablePanel } from "@/components/DataTablePanel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SessionCreateDialog } from "@/features/sessions/components/SessionCreateDialog";
 import { SessionNodeSelectDialog } from "@/features/sessions/components/SessionNodeSelectDialog";
 import { SessionsTable } from "@/features/sessions/components/SessionsTable";
@@ -13,6 +13,7 @@ import {
   useSessionCopyAddressFormat,
 } from "@/features/sessions/hooks/use-session-copy-address-format";
 import { useI18n } from "@/i18n";
+import { buildProxyAddressFromDisplayAddress, resolveSessionDisplayAddress } from "@/lib/format";
 import type {
   OpenBatchRequest,
   OpenBatchResponse,
@@ -102,23 +103,28 @@ export function SessionsPage({
       [
         {
           value: "socks_url",
-          label: t("SOCKS address"),
-          example: "socks://1.2.3.4:5678",
+          label: t("SOCKS URI"),
         },
         {
           value: "http_url",
-          label: t("HTTP address"),
-          example: "http://1.2.3.4:5678",
+          label: t("HTTP URI"),
+        },
+        {
+          value: "host_port",
+          label: t("Host:port"),
         },
       ] satisfies Array<{
         value: SessionCopyAddressFormat;
         label: string;
-        example: string;
       }>,
     [t],
   );
-  const activeCopyAddressOption =
-    copyAddressOptions.find((item) => item.value === listenCopyFormat) ?? copyAddressOptions[0];
+  const previewDisplayAddress = visibleSessions[0]
+    ? resolveSessionDisplayAddress(visibleSessions[0])
+    : null;
+  const copyFormatPreview = previewDisplayAddress
+    ? buildProxyAddressFromDisplayAddress(previewDisplayAddress, listenCopyFormat)
+    : t("Preview appears after the first session opens.");
 
   useEffect(() => {
     if (!createDialogOpen) {
@@ -272,38 +278,36 @@ export function SessionsPage({
 
             <div className="w-full max-w-[320px] space-y-1.5">
               <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground sm:text-right">
-                {t("Copy address format")}
+                {t("Copy format")}
               </div>
-              <Select
+              <Tabs
                 value={listenCopyFormat}
                 onValueChange={(value) => setListenCopyFormat(value as SessionCopyAddressFormat)}
+                className="w-full gap-2"
               >
-                <SelectTrigger
-                  aria-label={t("Copy address format")}
-                  className="h-auto min-h-11 w-full bg-background text-left"
+                <TabsList
+                  aria-label={t("Copy format")}
+                  className="grid h-auto w-full grid-cols-3 rounded-2xl border border-border/70 bg-background/80 p-1"
                 >
-                  <div className="flex min-w-0 flex-col items-start leading-tight">
-                    <span className="truncate font-medium text-foreground">
-                      {activeCopyAddressOption?.label}
-                    </span>
-                    <span className="truncate text-xs text-muted-foreground">
-                      {activeCopyAddressOption?.example}
-                    </span>
-                  </div>
-                </SelectTrigger>
-                <SelectContent>
                   {copyAddressOptions.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      <div className="flex min-w-0 flex-col items-start leading-tight">
-                        <span className="truncate">{option.label}</span>
-                        <span className="truncate text-xs text-muted-foreground">
-                          {option.example}
-                        </span>
-                      </div>
-                    </SelectItem>
+                    <TabsTrigger
+                      key={option.value}
+                      value={option.value}
+                      className="rounded-xl px-3 py-2 text-xs font-semibold sm:text-[13px]"
+                    >
+                      {option.label}
+                    </TabsTrigger>
                   ))}
-                </SelectContent>
-              </Select>
+                </TabsList>
+              </Tabs>
+              <div className="rounded-2xl border border-border/70 bg-background px-3 py-2 text-left">
+                <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                  {t("Will copy")}
+                </div>
+                <div className="truncate font-mono text-xs text-foreground sm:text-[13px]">
+                  {copyFormatPreview}
+                </div>
+              </div>
             </div>
           </div>
         }

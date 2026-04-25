@@ -26,6 +26,7 @@ import {
   filterCitySelectionsByCountry,
   findOverlappingValues,
   formatSortMode,
+  resolveSessionDisplayAddress,
 } from "@/lib/format";
 import type {
   OpenBatchRequest,
@@ -113,8 +114,8 @@ const emptyRow = (): BatchRequestRow => ({
   sortMode: "lru",
 });
 
-const inlineFieldClass = "grid gap-2 md:grid-cols-[88px_minmax(0,1fr)] md:items-start md:gap-3";
-const pairFieldClass = "grid gap-3 lg:grid-cols-2";
+const inlineFieldClass = "grid gap-2 md:grid-cols-[96px_minmax(160px,1fr)] md:items-start md:gap-3";
+const pairFieldClass = "grid gap-3 xl:grid-cols-2";
 
 function FieldLabel({ htmlFor, label, hint }: { htmlFor?: string; label: string; hint?: string }) {
   const { t } = useI18n();
@@ -503,7 +504,7 @@ export function OpenBatchForm({
               count: response.sessions.length,
             })}
             bullets={response.sessions.map(
-              (session) => `${session.session_id} -> ${session.listen}`,
+              (session) => `${session.session_id} -> ${resolveSessionDisplayAddress(session)}`,
             )}
           />
         ) : null}

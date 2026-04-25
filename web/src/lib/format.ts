@@ -2,6 +2,9 @@ import type { Locale, Translator } from "@/i18n";
 import type {
   ExtractIpRequest,
   OpenSessionRequest,
+  OpenSessionResponse,
+  SessionListItem,
+  SessionRecord,
   SessionSelectionMode,
   SortMode,
   SubscriptionMetadata,
@@ -121,6 +124,38 @@ export function formatListenEndpoint(listen?: string | null, port?: number | nul
     return `[${host}]:${port}`;
   }
   return `${host}:${port}`;
+}
+
+type SessionDisplayAddressLike = Pick<
+  SessionRecord | SessionListItem | OpenSessionResponse,
+  "display_address" | "display_host" | "bind_host" | "listen" | "port"
+>;
+
+export function resolveSessionDisplayAddress(session: SessionDisplayAddressLike) {
+  if (session.display_address?.trim()) {
+    return session.display_address.trim();
+  }
+  if (session.display_host?.trim()) {
+    return formatListenEndpoint(session.display_host, session.port) ?? session.display_host.trim();
+  }
+  if (session.bind_host?.trim()) {
+    return formatListenEndpoint(session.bind_host, session.port) ?? session.bind_host.trim();
+  }
+  return formatListenEndpoint(session.listen, session.port) ?? session.listen?.trim() ?? "";
+}
+
+export function buildProxyAddressFromDisplayAddress(
+  displayAddress: string,
+  format: "socks_url" | "http_url" | "host_port",
+) {
+  switch (format) {
+    case "http_url":
+      return `http://${displayAddress}`;
+    case "host_port":
+      return displayAddress;
+    case "socks_url":
+      return `socks://${displayAddress}`;
+  }
 }
 
 export function formatDataSize(locale: Locale, t: Translator, value?: number | null) {

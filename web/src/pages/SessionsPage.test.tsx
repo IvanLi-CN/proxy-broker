@@ -81,14 +81,13 @@ describe("SessionsPage", () => {
       />,
     );
 
-    expect(screen.getByRole("combobox", { name: /Copy address format/i })).toHaveTextContent(
-      /HTTP address/i,
-    );
+    expect(screen.getByRole("tab", { name: /HTTP URI/i })).toHaveAttribute("data-state", "active");
+    expect(screen.getAllByText("http://127.0.0.1:10080")[0]).toBeInTheDocument();
 
-    await user.click(screen.getByRole("combobox", { name: /Copy address format/i }));
-    await user.click(screen.getByRole("option", { name: /SOCKS address/i }));
+    await user.click(screen.getByRole("tab", { name: /Host:port/i }));
 
-    expect(window.localStorage.getItem(sessionCopyAddressFormatStorageKey)).toBe("socks_url");
+    expect(window.localStorage.getItem(sessionCopyAddressFormatStorageKey)).toBe("host_port");
+    expect(screen.getAllByText("127.0.0.1:10080")[0]).toBeInTheDocument();
   });
 
   it("greys the row, swaps close to undo, and delays removal for 10 seconds", async () => {
