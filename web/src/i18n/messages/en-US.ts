@@ -332,6 +332,7 @@ export const enUS: MessageCatalog = {
   "No sessions yet": "No sessions yet",
   "Create one session or a batch from the dialog to populate this list.":
     "Create one session or a batch from the dialog to populate this list.",
+  Region: "Region",
   "Session ID": "Session ID",
   "Selected IP": "Selected IP",
   "Proxy address": "Proxy address",
