@@ -26,6 +26,7 @@ import {
   filterCitySelectionsByCountry,
   findOverlappingValues,
   formatSortMode,
+  resolveSessionDisplayAddress,
 } from "@/lib/format";
 import type {
   OpenSessionRequest,
@@ -100,8 +101,8 @@ const defaultValues: FormValues = {
   sortMode: "lru",
 };
 
-const inlineFieldClass = "grid gap-2 md:grid-cols-[88px_minmax(0,1fr)] md:items-start md:gap-3";
-const pairFieldClass = "grid gap-3 lg:grid-cols-2";
+const inlineFieldClass = "grid gap-2 md:grid-cols-[96px_minmax(160px,1fr)] md:items-start md:gap-3";
+const pairFieldClass = "grid gap-3 xl:grid-cols-2";
 
 function FieldLabel({ htmlFor, label, hint }: { htmlFor?: string; label: string; hint?: string }) {
   const { t } = useI18n();
@@ -358,7 +359,7 @@ export function OpenSessionForm({
                     {...form.register("desiredPort")}
                     inputMode="numeric"
                     placeholder={suggestedPort?.toString() ?? "10080"}
-                    className="bg-card font-mono text-xs md:text-sm"
+                    className="min-w-[140px] bg-card font-mono text-xs md:min-w-[168px] md:text-sm"
                   />
                 </div>
               </div>
@@ -446,7 +447,7 @@ export function OpenSessionForm({
           <ActionResponsePanel
             title={t("Session opened")}
             description={t("Listening on {listen} via {proxyName} ({selectedIp}).", {
-              listen: response.listen,
+              listen: resolveSessionDisplayAddress(response),
               proxyName: response.proxy_name,
               selectedIp: response.selected_ip,
             })}

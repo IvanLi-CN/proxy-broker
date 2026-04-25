@@ -4,7 +4,7 @@ use axum::{
     Json, Router,
     body::Bytes,
     extract::{Path, Query, State, rejection::JsonRejection},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     middleware,
     response::sse::{Event, KeepAlive, Sse},
     routing::{delete, get, patch, post},
@@ -29,6 +29,7 @@ use crate::{
 };
 
 const GLOBAL_TASK_PROFILE_ID: &str = "__global__";
+const SESSION_DISPLAY_HOST_HEADER: &str = "x-proxy-broker-display-host";
 
 #[derive(Clone)]
 pub struct AppState {
@@ -639,12 +640,17 @@ async fn open_session(
     auth: AuthContext,
     State(state): State<AppState>,
     Path(profile_id): Path<String>,
+    headers: HeaderMap,
     payload: Result<Json<OpenSessionRequest>, JsonRejection>,
 ) -> Result<Json<crate::models::OpenSessionResponse>, BrokerError> {
     auth.require_profile_access(&profile_id)?;
     state.service.require_profile_exists(&profile_id).await?;
     let request = parse_json_payload(payload, "open_session")?;
-    let resp = state.service.open_session(&profile_id, &request).await?;
+    let display_host = resolve_session_display_host_hint(&headers);
+    let resp = state
+        .service
+        .open_session(&profile_id, &request, display_host.as_deref())
+        .await?;
     Ok(Json(resp))
 }
 
@@ -652,12 +658,17 @@ async fn open_batch(
     auth: AuthContext,
     State(state): State<AppState>,
     Path(profile_id): Path<String>,
+    headers: HeaderMap,
     payload: Result<Json<OpenBatchRequest>, JsonRejection>,
 ) -> Result<Json<crate::models::OpenBatchResponse>, BrokerError> {
     auth.require_profile_access(&profile_id)?;
     state.service.require_profile_exists(&profile_id).await?;
     let request = parse_json_payload(payload, "open_batch")?;
-    let resp = state.service.open_batch(&profile_id, &request).await?;
+    let display_host = resolve_session_display_host_hint(&headers);
+    let resp = state
+        .service
+        .open_batch(&profile_id, &request, display_host.as_deref())
+        .await?;
     Ok(Json(resp))
 }
 
@@ -665,14 +676,16 @@ async fn open_session_by_node(
     auth: AuthContext,
     State(state): State<AppState>,
     Path(profile_id): Path<String>,
+    headers: HeaderMap,
     payload: Result<Json<OpenSessionByNodeRequest>, JsonRejection>,
 ) -> Result<Json<crate::models::OpenSessionResponse>, BrokerError> {
     auth.require_profile_access(&profile_id)?;
     state.service.require_profile_exists(&profile_id).await?;
     let request = parse_json_payload(payload, "open_session_by_node")?;
+    let display_host = resolve_session_display_host_hint(&headers);
     let resp = state
         .service
-        .open_session_by_node(&profile_id, &request)
+        .open_session_by_node(&profile_id, &request, display_host.as_deref())
         .await?;
     Ok(Json(resp))
 }
@@ -681,14 +694,16 @@ async fn open_batch_by_node(
     auth: AuthContext,
     State(state): State<AppState>,
     Path(profile_id): Path<String>,
+    headers: HeaderMap,
     payload: Result<Json<OpenBatchByNodeRequest>, JsonRejection>,
 ) -> Result<Json<crate::models::OpenBatchResponse>, BrokerError> {
     auth.require_profile_access(&profile_id)?;
     state.service.require_profile_exists(&profile_id).await?;
     let request = parse_json_payload(payload, "open_batch_by_node")?;
+    let display_host = resolve_session_display_host_hint(&headers);
     let resp = state
         .service
-        .open_batch_by_node(&profile_id, &request)
+        .open_batch_by_node(&profile_id, &request, display_host.as_deref())
         .await?;
     Ok(Json(resp))
 }
@@ -724,10 +739,15 @@ async fn list_sessions(
     auth: AuthContext,
     State(state): State<AppState>,
     Path(profile_id): Path<String>,
+    headers: HeaderMap,
 ) -> Result<Json<crate::models::ListSessionsResponse>, BrokerError> {
     auth.require_profile_access(&profile_id)?;
     state.service.require_profile_exists(&profile_id).await?;
-    let resp = state.service.list_sessions(&profile_id).await?;
+    let display_host = resolve_session_display_host_hint(&headers);
+    let resp = state
+        .service
+        .list_sessions(&profile_id, display_host.as_deref())
+        .await?;
     Ok(Json(resp))
 }
 
@@ -765,16 +785,31 @@ async fn update_session_node(
     auth: AuthContext,
     State(state): State<AppState>,
     Path((profile_id, session_id)): Path<(String, String)>,
+    headers: HeaderMap,
     payload: Result<Json<UpdateSessionNodeRequest>, JsonRejection>,
 ) -> Result<Json<crate::models::OpenSessionResponse>, BrokerError> {
     auth.require_profile_access(&profile_id)?;
     state.service.require_profile_exists(&profile_id).await?;
     let request = parse_json_payload(payload, "update_session_node")?;
+    let display_host = resolve_session_display_host_hint(&headers);
     let resp = state
         .service
-        .update_session_node(&profile_id, &session_id, &request)
+        .update_session_node(&profile_id, &session_id, &request, display_host.as_deref())
         .await?;
     Ok(Json(resp))
+}
+
+fn resolve_session_display_host_hint(headers: &HeaderMap) -> Option<String> {
+    [SESSION_DISPLAY_HOST_HEADER, "x-forwarded-host", "host"]
+        .into_iter()
+        .find_map(|header_name| {
+            headers
+                .get(header_name)
+                .and_then(|value| value.to_str().ok())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+        })
 }
 
 async fn list_api_keys(
@@ -832,8 +867,9 @@ mod tests {
     use crate::{
         auth::{AuthConfig, AuthConfigOptions},
         models::{
-            ProfileSyncConfig, SubscriptionSource, TaskListQuery, TaskRunKind, TaskRunScope,
-            TaskRunStage, TaskRunStatus, TaskRunSummary, TaskRunTrigger, now_epoch_sec,
+            ProfileSyncConfig, ProxyNode, SessionRecord, SubscriptionSource, TaskListQuery,
+            TaskRunKind, TaskRunScope, TaskRunStage, TaskRunStatus, TaskRunSummary, TaskRunTrigger,
+            now_epoch_sec,
         },
         runtime::MihomoRuntime,
         service::{BrokerService, BrokerServiceOptions},
@@ -1009,6 +1045,82 @@ mod tests {
                 .get(axum::http::header::CONTENT_TYPE)
                 .and_then(|value| value.to_str().ok()),
             Some("text/event-stream")
+        );
+    }
+
+    #[tokio::test]
+    async fn list_sessions_endpoint_uses_request_display_host_for_wildcard_binds() {
+        let store = Arc::new(MemoryStore::new());
+        let service = Arc::new(BrokerService::new(
+            store.clone(),
+            Arc::new(ApiTestRuntime),
+            BrokerServiceOptions::default(),
+        ));
+        service
+            .create_profile("default")
+            .await
+            .expect("profile should be created");
+        store
+            .replace_subscription(
+                "default",
+                &[ProxyNode {
+                    proxy_name: "jp-edge".to_string(),
+                    proxy_type: "socks5".to_string(),
+                    server: "203.0.113.10".to_string(),
+                    resolved_ips: vec!["203.0.113.10".to_string()],
+                    raw_proxy: serde_json::json!({
+                        "name": "jp-edge",
+                        "type": "socks5",
+                        "server": "203.0.113.10",
+                    }),
+                    node_id: Some("node-jp-edge".to_string()),
+                }],
+            )
+            .await
+            .expect("subscription seed should succeed");
+        store
+            .insert_session(
+                "default",
+                &SessionRecord {
+                    session_id: "sess-123".to_string(),
+                    listen: "0.0.0.0".to_string(),
+                    port: 20002,
+                    selected_ip: "203.0.113.10".to_string(),
+                    proxy_name: "jp-edge".to_string(),
+                    node_id: "node-jp-edge".to_string(),
+                    created_at: 1,
+                },
+            )
+            .await
+            .expect("session seed should succeed");
+        let app = build_router(AppState {
+            service,
+            auth: Arc::new(dev_auth()),
+        });
+
+        let response = app
+            .oneshot(trusted_request(
+                Request::builder()
+                    .uri("/api/v1/profiles/default/sessions")
+                    .header(super::SESSION_DISPLAY_HOST_HEADER, "panel.example.test")
+                    .body(Body::empty())
+                    .unwrap(),
+            ))
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should decode");
+        let payload: crate::models::ListSessionsResponse =
+            serde_json::from_slice(&bytes).expect("json should decode");
+        assert_eq!(payload.sessions[0].listen, "0.0.0.0:20002");
+        assert_eq!(payload.sessions[0].bind_host, "0.0.0.0");
+        assert_eq!(payload.sessions[0].display_host, "panel.example.test");
+        assert_eq!(
+            payload.sessions[0].display_address,
+            "panel.example.test:20002"
         );
     }
 

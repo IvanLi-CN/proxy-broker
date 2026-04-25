@@ -431,9 +431,15 @@
   - when `PROXY_BROKER_SESSION_PORT_RANGE` is configured, both auto-allocation
     and explicit `desired_port` must stay inside that inclusive range
 - Success:
-  - `session_id`, `listen`, `port`, `selected_ip`, `proxy_name`
-  - `listen` echoes the configured session listener bind IP (`127.0.0.1` for
-    local runs, `0.0.0.0` for wildcard deployments)
+  - `session_id`, `listen`, `bind_host`, `display_host`, `display_address`,
+    `port`, `selected_ip`, `proxy_name`
+  - `listen` is kept for backward compatibility and still returns the bound
+    listener endpoint (`<bind_host>:<port>`)
+  - `bind_host` is the runtime listener bind host used by mihomo
+  - `display_host` / `display_address` are owner-facing values for UI and copy
+    actions; wildcard binds (`0.0.0.0` / `::`) resolve through
+    `PROXY_BROKER_SESSION_PUBLIC_HOST` when configured, otherwise through the
+    current operator-plane hostname
   - `session_id` is an opaque short string (`sess-<16 alnum chars>`)
 - Error:
   - `authentication_required` (401)
@@ -495,6 +501,10 @@
   - API key whose scope allows `{profile_id}`
 - Success:
   - `sessions[]`
+  - each item carries `listen`, `bind_host`, `display_host`, `display_address`,
+    `port`, `selected_ip`, `proxy_name`, `node_id`, `created_at`
+  - owner-facing UI must use `display_address`; `listen` remains the raw
+    backward-compatible bind surface
 - Error:
   - `authentication_required` (401)
   - `admin_required` (403) for non-admin human callers

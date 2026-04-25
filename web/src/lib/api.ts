@@ -59,13 +59,37 @@ class ApiError extends Error {
   }
 }
 
+const sessionDisplayHostHeader = "X-Proxy-Broker-Display-Host";
+
+function getWindowHostname() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const hostname = window.location.hostname?.trim();
+  return hostname ? hostname : null;
+}
+
+function withSessionDisplayHostHeader(init?: RequestInit): RequestInit | undefined {
+  const hostname = getWindowHostname();
+  if (!hostname) {
+    return init;
+  }
+  return {
+    ...(init ?? {}),
+    headers: {
+      [sessionDisplayHostHeader]: hostname,
+      ...(init?.headers ?? {}),
+    },
+  };
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
+    ...init,
     headers: {
       "Content-Type": "application/json",
       ...(init?.headers ?? {}),
     },
-    ...init,
   });
 
   if (!response.ok) {
@@ -165,7 +189,10 @@ export const api = {
     request<TaskRunDetail>(`/api/v1/tasks/${encodeURIComponent(runId)}`),
   getTaskEventsUrl: (query?: TaskListQuery) => withSearch("/api/v1/tasks/events", query),
   listSessions: (profileId: string) =>
-    request<ListSessionsResponse>(profilePath(profileId, "/sessions")),
+    request<ListSessionsResponse>(
+      profilePath(profileId, "/sessions"),
+      withSessionDisplayHostHeader(),
+    ),
   loadSubscription: (profileId: string, payload: LoadSubscriptionRequest) =>
     request<LoadSubscriptionResponse>(profilePath(profileId, "/subscriptions/load"), {
       method: "POST",
@@ -228,32 +255,44 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   openSession: (profileId: string, payload: OpenSessionRequest) =>
-    request<OpenSessionResponse>(profilePath(profileId, "/sessions/open"), {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
+    request<OpenSessionResponse>(
+      profilePath(profileId, "/sessions/open"),
+      withSessionDisplayHostHeader({
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    ),
   openBatch: (profileId: string, payload: OpenBatchRequest) =>
-    request<OpenBatchResponse>(profilePath(profileId, "/sessions/open-batch"), {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
+    request<OpenBatchResponse>(
+      profilePath(profileId, "/sessions/open-batch"),
+      withSessionDisplayHostHeader({
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    ),
   openSessionByNode: (profileId: string, payload: OpenSessionByNodeRequest) =>
-    request<OpenSessionResponse>(profilePath(profileId, "/sessions/open-by-node"), {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
+    request<OpenSessionResponse>(
+      profilePath(profileId, "/sessions/open-by-node"),
+      withSessionDisplayHostHeader({
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    ),
   openBatchByNode: (profileId: string, payload: OpenBatchByNodeRequest) =>
-    request<OpenBatchResponse>(profilePath(profileId, "/sessions/open-batch-by-node"), {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
+    request<OpenBatchResponse>(
+      profilePath(profileId, "/sessions/open-batch-by-node"),
+      withSessionDisplayHostHeader({
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    ),
   updateSessionNode: (profileId: string, sessionId: string, payload: UpdateSessionNodeRequest) =>
     request<OpenSessionResponse>(
       profilePath(profileId, `/sessions/${encodeURIComponent(sessionId)}/node`),
-      {
+      withSessionDisplayHostHeader({
         method: "PATCH",
         body: JSON.stringify(payload),
-      },
+      }),
     ),
   getSuggestedPort: (profileId: string) =>
     request<SuggestedPortResponse>(profilePath(profileId, "/sessions/suggested-port")),

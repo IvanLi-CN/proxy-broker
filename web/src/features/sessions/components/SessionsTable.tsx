@@ -15,10 +15,11 @@ import {
 import type { SessionCopyAddressFormat } from "@/features/sessions/hooks/use-session-copy-address-format";
 import { useI18n } from "@/i18n";
 import {
+  buildProxyAddressFromDisplayAddress,
   formatCountryName,
   formatGeoLabel,
-  formatListenEndpoint,
   formatTimestamp,
+  resolveSessionDisplayAddress,
 } from "@/lib/format";
 import type { SessionListItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -30,15 +31,6 @@ function buildSessionGeoSummary(locale: "zh-CN" | "en-US", session: SessionListI
     formatGeoLabel(locale, session.city),
   ].filter(Boolean);
   return Array.from(new Set(parts)).join(" / ");
-}
-
-function buildSessionProxyAddress(listenEndpoint: string, format: SessionCopyAddressFormat) {
-  switch (format) {
-    case "http_url":
-      return `http://${listenEndpoint}`;
-    case "socks_url":
-      return `socks://${listenEndpoint}`;
-  }
 }
 
 async function copyTextToClipboard(value: string) {
@@ -91,14 +83,16 @@ export function SessionsTable({
   const { locale, t } = useI18n();
 
   const handleCopyAddress = async (session: SessionListItem) => {
-    const listenEndpoint = formatListenEndpoint(session.listen, session.port);
-    if (!listenEndpoint) {
+    const displayAddress = resolveSessionDisplayAddress(session);
+    if (!displayAddress) {
       toast.error(t("Could not copy proxy address"));
       return;
     }
 
     try {
-      await copyTextToClipboard(buildSessionProxyAddress(listenEndpoint, listenCopyFormat));
+      await copyTextToClipboard(
+        buildProxyAddressFromDisplayAddress(displayAddress, listenCopyFormat),
+      );
       toast.success(t("Copied proxy address"));
     } catch {
       toast.error(t("Could not copy proxy address"));
@@ -134,7 +128,7 @@ export function SessionsTable({
             <TableHead className="px-4">{t("Session ID")}</TableHead>
             <TableHead>{t("Proxy")}</TableHead>
             <TableHead>{t("Selected IP")}</TableHead>
-            <TableHead>{t("Listen")}</TableHead>
+            <TableHead>{t("Proxy address")}</TableHead>
             <TableHead>{t("Created")}</TableHead>
             <TableHead className="pr-4 text-right">{t("Action")}</TableHead>
           </TableRow>
@@ -146,8 +140,7 @@ export function SessionsTable({
             const isSwitching = switchingSessionId === session.session_id;
             const isDimmed = isPendingClose || isClosing;
             const geoSummary = buildSessionGeoSummary(locale, session);
-            const listenEndpoint =
-              formatListenEndpoint(session.listen, session.port) ?? session.listen;
+            const displayAddress = resolveSessionDisplayAddress(session);
             return (
               <TableRow
                 key={session.session_id}
@@ -189,7 +182,7 @@ export function SessionsTable({
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-1.5">
-                    <span className="font-mono text-xs md:text-sm">{listenEndpoint}</span>
+                    <span className="font-mono text-xs md:text-sm">{displayAddress}</span>
                     <Button
                       type="button"
                       variant="ghost"
@@ -201,7 +194,7 @@ export function SessionsTable({
                       onClick={() => {
                         void handleCopyAddress(session);
                       }}
-                      disabled={isDimmed || isSwitching}
+                      disabled={isDimmed || isSwitching || !displayAddress}
                     >
                       <CopyIcon className="size-3.5" />
                     </Button>

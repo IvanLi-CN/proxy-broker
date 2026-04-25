@@ -60,10 +60,25 @@ describe("SessionsTable", () => {
       configurable: true,
       value: { writeText },
     });
+    const baseSession = sessionsFixture.sessions[0];
+    if (!baseSession) {
+      throw new Error("Expected at least one session fixture.");
+    }
+    const sessions = {
+      sessions: [
+        {
+          ...baseSession,
+          listen: "0.0.0.0",
+          bind_host: "0.0.0.0",
+          display_host: "ops.example.test",
+          display_address: "ops.example.test:10080",
+        },
+      ],
+    };
 
     renderWithProviders(
       <SessionsTable
-        sessions={sessionsFixture.sessions}
+        sessions={sessions.sessions}
         listenCopyFormat="http_url"
         isLoading={false}
         pendingCloseSessionIds={[]}
@@ -82,7 +97,7 @@ describe("SessionsTable", () => {
     );
 
     await waitFor(() => {
-      expect(writeText).toHaveBeenCalledWith("http://127.0.0.1:10080");
+      expect(writeText).toHaveBeenCalledWith("http://ops.example.test:10080");
       expect(mockToast.success).toHaveBeenCalledWith("Copied proxy address");
     });
   });

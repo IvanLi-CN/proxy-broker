@@ -76,6 +76,7 @@ pub struct BrokerServiceOptions {
     pub mmdb_url: String,
     pub data_dir: PathBuf,
     pub session_listen_ip: IpAddr,
+    pub session_public_host: Option<String>,
     pub session_port_range: Option<(u16, u16)>,
 }
 
@@ -94,6 +95,7 @@ impl Default for BrokerServiceOptions {
             session_listen_ip: DEFAULT_SESSION_LISTEN_IP
                 .parse()
                 .unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST)),
+            session_public_host: None,
             session_port_range: None,
         }
     }
@@ -171,6 +173,20 @@ impl BrokerService {
     async fn lock_profile(&self, profile_id: &str) -> tokio::sync::OwnedMutexGuard<()> {
         let lock = self.profile_locks[self.profile_lock_index(profile_id)].clone();
         lock.lock_owned().await
+    }
+
+    fn resolve_session_display_host(
+        &self,
+        bind_host: &str,
+        request_display_host: Option<&str>,
+    ) -> String {
+        if is_wildcard_session_host(bind_host) {
+            return normalize_session_host(self.options.session_public_host.as_deref())
+                .or_else(|| normalize_session_host(request_display_host))
+                .unwrap_or_else(|| bind_host.trim().to_string());
+        }
+
+        normalize_session_host(Some(bind_host)).unwrap_or_else(|| bind_host.trim().to_string())
     }
 
     async fn profile_exists(&self, profile_id: &str) -> BrokerResult<bool> {
@@ -3470,6 +3486,7 @@ impl BrokerService {
         &self,
         profile_id: &str,
         request: &OpenSessionRequest,
+        request_display_host: Option<&str>,
     ) -> BrokerResult<OpenSessionResponse> {
         let _profile_guard = self.lock_profile(profile_id).await;
         let _shared_runtime_guard = self.shared_runtime_lock.lock().await;
@@ -3576,7 +3593,7 @@ impl BrokerService {
                 return Err(BrokerError::from(err));
             }
 
-            return Ok(self.build_open_session_response(prepared));
+            return Ok(self.build_open_session_response(prepared, request_display_host));
         }
 
         Err(BrokerError::PortInUse)
@@ -3586,6 +3603,7 @@ impl BrokerService {
         &self,
         profile_id: &str,
         request: &OpenBatchRequest,
+        request_display_host: Option<&str>,
     ) -> BrokerResult<OpenBatchResponse> {
         if request.requests.is_empty() {
             return Ok(OpenBatchResponse { sessions: vec![] });
@@ -3697,7 +3715,7 @@ impl BrokerService {
             return Ok(OpenBatchResponse {
                 sessions: staged
                     .into_iter()
-                    .map(|s| self.build_open_session_response(s))
+                    .map(|s| self.build_open_session_response(s, request_display_host))
                     .collect(),
             });
         }
@@ -3748,6 +3766,7 @@ impl BrokerService {
         &self,
         profile_id: &str,
         sessions: Vec<SessionRecord>,
+        request_display_host: Option<&str>,
     ) -> BrokerResult<Vec<SessionListItem>> {
         if sessions.is_empty() {
             return Ok(Vec::new());
@@ -3782,6 +3801,10 @@ impl BrokerService {
         Ok(sessions
             .into_iter()
             .map(|session| {
+                let bind_host = session.listen.clone();
+                let display_host =
+                    self.resolve_session_display_host(&bind_host, request_display_host);
+                let display_address = format_listen_endpoint(&display_host, session.port);
                 let selected_metadata = metadata_by_node
                     .get(&session.node_id)
                     .and_then(|items| items.iter().find(|item| item.ip == session.selected_ip))
@@ -3800,7 +3823,10 @@ impl BrokerService {
 
                 SessionListItem {
                     session_id: session.session_id,
-                    listen: session.listen,
+                    listen: format_listen_endpoint(&bind_host, session.port),
+                    bind_host,
+                    display_host,
+                    display_address,
                     port: session.port,
                     selected_ip: session.selected_ip,
                     proxy_name: session.proxy_name,
@@ -3823,10 +3849,20 @@ impl BrokerService {
             .collect())
     }
 
-    fn build_open_session_response(&self, session: SessionRecord) -> OpenSessionResponse {
+    fn build_open_session_response(
+        &self,
+        session: SessionRecord,
+        request_display_host: Option<&str>,
+    ) -> OpenSessionResponse {
+        let bind_host = session.listen.clone();
+        let display_host = self.resolve_session_display_host(&bind_host, request_display_host);
+        let display_address = format_listen_endpoint(&display_host, session.port);
         OpenSessionResponse {
             session_id: session.session_id,
-            listen: format_listen_endpoint(&session.listen, session.port),
+            listen: format_listen_endpoint(&bind_host, session.port),
+            bind_host,
+            display_host,
+            display_address,
             port: session.port,
             selected_ip: session.selected_ip,
             proxy_name: session.proxy_name,
@@ -3838,6 +3874,7 @@ impl BrokerService {
         &self,
         profile_id: &str,
         request: &OpenSessionByNodeRequest,
+        request_display_host: Option<&str>,
     ) -> BrokerResult<OpenSessionResponse> {
         let _profile_guard = self.lock_profile(profile_id).await;
         let _shared_runtime_guard = self.shared_runtime_lock.lock().await;
@@ -3942,7 +3979,7 @@ impl BrokerService {
                 return Err(BrokerError::from(err));
             }
 
-            return Ok(self.build_open_session_response(prepared));
+            return Ok(self.build_open_session_response(prepared, request_display_host));
         }
 
         Err(BrokerError::PortInUse)
@@ -3952,6 +3989,7 @@ impl BrokerService {
         &self,
         profile_id: &str,
         request: &OpenBatchByNodeRequest,
+        request_display_host: Option<&str>,
     ) -> BrokerResult<OpenBatchResponse> {
         let requests = if !request.requests.is_empty() {
             request.requests.clone()
@@ -4086,7 +4124,7 @@ impl BrokerService {
             return Ok(OpenBatchResponse {
                 sessions: staged
                     .into_iter()
-                    .map(|session| self.build_open_session_response(session))
+                    .map(|session| self.build_open_session_response(session, request_display_host))
                     .collect(),
             });
         }
@@ -4242,6 +4280,7 @@ impl BrokerService {
         profile_id: &str,
         session_id: &str,
         request: &UpdateSessionNodeRequest,
+        request_display_host: Option<&str>,
     ) -> BrokerResult<OpenSessionResponse> {
         if !self.profile_exists(profile_id).await? {
             return Err(BrokerError::ProfileNotFound);
@@ -4283,7 +4322,7 @@ impl BrokerService {
                 .insert_sessions_with_touch(profile_id, std::slice::from_ref(&updated), touch_time)
                 .await
                 .map_err(BrokerError::from)?;
-            return Ok(self.build_open_session_response(updated));
+            return Ok(self.build_open_session_response(updated, request_display_host));
         }
 
         updated.selected_ip = selected_ip;
@@ -4346,7 +4385,7 @@ impl BrokerService {
             return Err(BrokerError::from(err));
         }
 
-        Ok(self.build_open_session_response(updated))
+        Ok(self.build_open_session_response(updated, request_display_host))
     }
 
     pub async fn list_profiles(&self) -> BrokerResult<ListProfilesResponse> {
@@ -4861,9 +4900,15 @@ impl BrokerService {
         ))
     }
 
-    pub async fn list_sessions(&self, profile_id: &str) -> BrokerResult<ListSessionsResponse> {
+    pub async fn list_sessions(
+        &self,
+        profile_id: &str,
+        request_display_host: Option<&str>,
+    ) -> BrokerResult<ListSessionsResponse> {
         let sessions = self.list_sessions_backfilled(profile_id).await?;
-        let sessions = self.build_session_list_items(profile_id, sessions).await?;
+        let sessions = self
+            .build_session_list_items(profile_id, sessions, request_display_host)
+            .await?;
         Ok(ListSessionsResponse { sessions })
     }
 
@@ -5966,6 +6011,33 @@ fn runtime_node_id(node: &ProxyNode) -> String {
     node.node_id
         .clone()
         .unwrap_or_else(|| node.proxy_name.clone())
+}
+
+fn normalize_session_host(raw: Option<&str>) -> Option<String> {
+    let candidate = raw?
+        .split(',')
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+
+    if candidate.starts_with('[') {
+        let end = candidate.find(']')?;
+        return Some(candidate[1..end].trim().to_string());
+    }
+
+    if let Some((host, port)) = candidate.rsplit_once(':')
+        && !host.is_empty()
+        && port.chars().all(|char| char.is_ascii_digit())
+        && !host.contains(':')
+    {
+        return Some(host.trim().to_string());
+    }
+
+    Some(candidate.to_string())
+}
+
+fn is_wildcard_session_host(host: &str) -> bool {
+    matches!(host.trim(), "0.0.0.0" | "::" | "[::]")
 }
 
 fn format_listen_endpoint(listen: &str, port: u16) -> String {
@@ -8056,12 +8128,19 @@ proxies:
                     node_id,
                     desired_port: None,
                 },
+                None,
             )
             .await
             .expect("node-pinned open should succeed");
 
         assert!(response.port > 0);
         assert_eq!(response.listen, format!("127.0.0.1:{}", response.port));
+        assert_eq!(response.bind_host, "127.0.0.1");
+        assert_eq!(response.display_host, "127.0.0.1");
+        assert_eq!(
+            response.display_address,
+            format!("127.0.0.1:{}", response.port)
+        );
     }
 
     #[tokio::test]
@@ -8101,6 +8180,7 @@ proxies:
                     desired_port: Some(10080),
                     ..OpenSessionRequest::default()
                 },
+                None,
             )
             .await
             .expect("session should open");
@@ -8121,7 +8201,7 @@ proxies:
 
         tokio::time::sleep(Duration::from_millis(1_100)).await;
         let before_switch = service
-            .list_sessions("browser")
+            .list_sessions("browser", None)
             .await
             .expect("sessions should list before switch");
         let original_created_at = before_switch.sessions[0].created_at;
@@ -8133,24 +8213,28 @@ proxies:
                 &UpdateSessionNodeRequest {
                     node_id: target_node.node_id.clone(),
                 },
+                None,
             )
             .await
             .expect("session node should switch");
 
         assert_eq!(updated.session_id, opened.session_id);
         assert_eq!(updated.listen, opened.listen);
+        assert_eq!(updated.bind_host, opened.bind_host);
+        assert_eq!(updated.display_host, opened.display_host);
+        assert_eq!(updated.display_address, opened.display_address);
         assert_eq!(updated.port, opened.port);
         assert_eq!(updated.proxy_name, "aaa-node");
         assert_eq!(updated.selected_ip, "2.2.2.2");
 
         let sessions = service
-            .list_sessions("browser")
+            .list_sessions("browser", None)
             .await
             .expect("sessions should list");
         assert_eq!(sessions.sessions.len(), 1);
         assert_eq!(sessions.sessions[0].session_id, opened.session_id);
         assert_eq!(sessions.sessions[0].created_at, original_created_at);
-        assert_eq!(sessions.sessions[0].listen, "127.0.0.1");
+        assert_eq!(sessions.sessions[0].listen, "127.0.0.1:10080");
         assert_eq!(sessions.sessions[0].port, 10080);
         assert_eq!(sessions.sessions[0].node_id, target_node.node_id);
 
@@ -8233,7 +8317,7 @@ proxies:
             .expect("seed session should succeed");
 
         let sessions = service
-            .list_sessions(profile_id)
+            .list_sessions(profile_id, None)
             .await
             .expect("sessions should list");
         assert_eq!(sessions.sessions.len(), 1);
@@ -8242,6 +8326,138 @@ proxies:
         assert_eq!(sessions.sessions[0].country_name.as_deref(), Some("Japan"));
         assert_eq!(sessions.sessions[0].region_name.as_deref(), Some("Tokyo"));
         assert_eq!(sessions.sessions[0].city.as_deref(), Some("Chiyoda"));
+    }
+
+    #[tokio::test]
+    async fn list_sessions_uses_request_host_for_wildcard_display_address() {
+        let profile_id = "display-wildcard";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
+        service
+            .create_profile(profile_id)
+            .await
+            .expect("profile should be created");
+
+        let mut session = make_session("s-display", "wild-node", "203.0.113.10", 1);
+        session.listen = "0.0.0.0".to_string();
+        session.port = 20002;
+        store
+            .replace_subscription(profile_id, &[make_node("wild-node", "203.0.113.10")])
+            .await
+            .expect("seed subscription should succeed");
+        store
+            .insert_session(profile_id, &session)
+            .await
+            .expect("seed session should succeed");
+
+        let sessions = service
+            .list_sessions(profile_id, Some("panel.example.test"))
+            .await
+            .expect("sessions should list");
+        assert_eq!(sessions.sessions[0].listen, "0.0.0.0:20002");
+        assert_eq!(sessions.sessions[0].bind_host, "0.0.0.0");
+        assert_eq!(sessions.sessions[0].display_host, "panel.example.test");
+        assert_eq!(
+            sessions.sessions[0].display_address,
+            "panel.example.test:20002"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_sessions_prefers_public_host_only_for_wildcard_binds() {
+        let profile_id = "display-explicit";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(
+            store.clone(),
+            runtime,
+            BrokerServiceOptions {
+                session_public_host: Some("ops.example.test".to_string()),
+                ..BrokerServiceOptions::default()
+            },
+        );
+        service
+            .create_profile(profile_id)
+            .await
+            .expect("profile should be created");
+
+        let mut wildcard = make_session("s-wild", "wild-node", "203.0.113.10", 1);
+        wildcard.listen = "0.0.0.0".to_string();
+        wildcard.port = 20001;
+        let mut explicit = make_session("s-explicit", "explicit-node", "203.0.113.20", 2);
+        explicit.listen = "192.168.31.15".to_string();
+        explicit.port = 20003;
+
+        store
+            .replace_subscription(
+                profile_id,
+                &[
+                    make_node("wild-node", "203.0.113.10"),
+                    make_node("explicit-node", "203.0.113.20"),
+                ],
+            )
+            .await
+            .expect("seed subscription should succeed");
+        store
+            .insert_sessions(profile_id, &[wildcard, explicit.clone()])
+            .await
+            .expect("seed sessions should succeed");
+
+        let sessions = service
+            .list_sessions(profile_id, Some("console.example.test"))
+            .await
+            .expect("sessions should list");
+        let wildcard_session = sessions
+            .sessions
+            .iter()
+            .find(|item| item.session_id == "s-wild")
+            .expect("wildcard session should exist");
+        assert_eq!(wildcard_session.listen, "0.0.0.0:20001");
+        assert_eq!(wildcard_session.display_host, "ops.example.test");
+        assert_eq!(wildcard_session.display_address, "ops.example.test:20001");
+
+        let explicit_session = sessions
+            .sessions
+            .iter()
+            .find(|item| item.session_id == explicit.session_id)
+            .expect("explicit session should exist");
+        assert_eq!(explicit_session.listen, "192.168.31.15:20003");
+        assert_eq!(explicit_session.bind_host, "192.168.31.15");
+        assert_eq!(explicit_session.display_host, "192.168.31.15");
+        assert_eq!(explicit_session.display_address, "192.168.31.15:20003");
+    }
+
+    #[tokio::test]
+    async fn list_sessions_reuses_explicit_bind_host_without_public_override() {
+        let profile_id = "display-bind-host";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
+        service
+            .create_profile(profile_id)
+            .await
+            .expect("profile should be created");
+
+        let mut session = make_session("s-bind", "bind-node", "203.0.113.30", 1);
+        session.listen = "192.168.31.15".to_string();
+        session.port = 20005;
+        store
+            .replace_subscription(profile_id, &[make_node("bind-node", "203.0.113.30")])
+            .await
+            .expect("seed subscription should succeed");
+        store
+            .insert_session(profile_id, &session)
+            .await
+            .expect("seed session should succeed");
+
+        let sessions = service
+            .list_sessions(profile_id, Some("console.example.test"))
+            .await
+            .expect("sessions should list");
+        assert_eq!(sessions.sessions[0].listen, "192.168.31.15:20005");
+        assert_eq!(sessions.sessions[0].display_host, "192.168.31.15");
+        assert_eq!(sessions.sessions[0].display_address, "192.168.31.15:20005");
     }
 
     #[tokio::test]
@@ -8297,6 +8513,7 @@ proxies:
                     desired_port: Some(10080),
                     ..OpenSessionRequest::default()
                 },
+                None,
             )
             .await
             .expect("session should open");
@@ -8317,6 +8534,7 @@ proxies:
                 &UpdateSessionNodeRequest {
                     node_id: foreign_node_id,
                 },
+                None,
             )
             .await
             .expect_err("foreign node should be rejected");
@@ -8382,6 +8600,7 @@ proxies:
                     node_id: start_node.node_id.clone(),
                     desired_port: Some(10080),
                 },
+                None,
             )
             .await
             .expect("session should open");
@@ -8393,6 +8612,7 @@ proxies:
                 &UpdateSessionNodeRequest {
                     node_id: next_node.node_id.clone(),
                 },
+                None,
             )
             .await
             .expect_err("switch should fail on runtime apply");
@@ -8402,7 +8622,7 @@ proxies:
         ));
 
         let sessions = service
-            .list_sessions("browser")
+            .list_sessions("browser", None)
             .await
             .expect("sessions should still list");
         assert_eq!(sessions.sessions.len(), 1);
@@ -8518,6 +8738,7 @@ proxies:
                     node_id,
                     desired_port: Some(10080),
                 },
+                None,
             )
             .await
             .expect("node-pinned open should ignore malformed global inventory");
@@ -8675,6 +8896,7 @@ proxies:
                         node_id: alpha_node_id,
                         desired_port: Some(10080),
                     },
+                    None,
                 )
                 .await
         });
@@ -8690,6 +8912,7 @@ proxies:
                         node_id: beta_node_id,
                         desired_port: Some(10081),
                     },
+                    None,
                 )
                 .await
         });
@@ -8764,6 +8987,7 @@ proxies:
                     node_id,
                     desired_port: Some(10080),
                 },
+                None,
             )
             .await
             .expect("node-pinned session should open");
@@ -8775,7 +8999,7 @@ proxies:
             .expect("startup reconcile should succeed");
 
         let sessions = restarted
-            .list_sessions(profile_id)
+            .list_sessions(profile_id, None)
             .await
             .expect("sessions should list");
         assert_eq!(sessions.sessions.len(), 1);
@@ -8937,7 +9161,7 @@ proxies:
         );
 
         let response = service
-            .open_batch("p-empty", &OpenBatchRequest { requests: vec![] })
+            .open_batch("p-empty", &OpenBatchRequest { requests: vec![] }, None)
             .await
             .expect("empty batch should be a no-op");
 
@@ -8971,6 +9195,7 @@ proxies:
                         ..Default::default()
                     }],
                 },
+                None,
             )
             .await
             .expect_err("invalid batch request should fail with explicit error");

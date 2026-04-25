@@ -71,6 +71,9 @@ export const ipResultsFixture: ExtractIpResponse = {
 export const sessionFixture: OpenSessionResponse = {
   session_id: "sess-A7c2Kp9LmQ4RsT1v",
   listen: "127.0.0.1:10080",
+  bind_host: "127.0.0.1",
+  display_host: "127.0.0.1",
+  display_address: "127.0.0.1:10080",
   port: 10080,
   selected_ip: "203.0.113.10",
   proxy_name: "JP-Tokyo-Entry",
@@ -83,6 +86,9 @@ export const batchFixture: OpenBatchResponse = {
     {
       session_id: "sess-Q8n3Va1Zx5Mw2Lp7",
       listen: "127.0.0.1:10081",
+      bind_host: "127.0.0.1",
+      display_host: "127.0.0.1",
+      display_address: "127.0.0.1:10081",
       port: 10081,
       selected_ip: "203.0.113.88",
       proxy_name: "JP-Osaka-Edge",
@@ -96,6 +102,9 @@ export const sessionsFixture: ListSessionsResponse = {
     {
       session_id: "sess-A7c2Kp9LmQ4RsT1v",
       listen: "127.0.0.1:10080",
+      bind_host: "127.0.0.1",
+      display_host: "127.0.0.1",
+      display_address: "127.0.0.1:10080",
       port: 10080,
       selected_ip: "203.0.113.10",
       proxy_name: "JP-Tokyo-Entry",
@@ -109,6 +118,9 @@ export const sessionsFixture: ListSessionsResponse = {
     {
       session_id: "sess-Q8n3Va1Zx5Mw2Lp7",
       listen: "127.0.0.1:10081",
+      bind_host: "127.0.0.1",
+      display_host: "127.0.0.1",
+      display_address: "127.0.0.1:10081",
       port: 10081,
       selected_ip: "203.0.113.88",
       proxy_name: "JP-Osaka-Edge",

@@ -68,6 +68,9 @@ export interface OpenBatchRequest {
 export interface OpenSessionResponse {
   session_id: string;
   listen: string;
+  bind_host: string;
+  display_host: string;
+  display_address: string;
   port: number;
   selected_ip: string;
   proxy_name: string;
@@ -165,6 +168,9 @@ export interface ExtractIpResponse {
 export interface SessionRecord {
   session_id: string;
   listen: string;
+  bind_host: string;
+  display_host: string;
+  display_address: string;
   port: number;
   selected_ip: string;
   proxy_name: string;

@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { useI18n } from "@/i18n";
 import { api } from "@/lib/api";
 import { formatApiErrorMessage } from "@/lib/error-messages";
+import { resolveSessionDisplayAddress } from "@/lib/format";
 import { isGlobalProfileId } from "@/lib/profile-selection";
 import { SessionsPage } from "@/pages/SessionsPage";
 import type { RootOutletContext } from "@/routes/RootRoute";
@@ -35,7 +36,7 @@ export function SessionsRoute() {
     mutationFn: (payload: Parameters<typeof api.openSession>[1]) =>
       api.openSession(activeProfileId ?? "", payload),
     onSuccess: async (data) => {
-      toast.success(t("Opened {listen}", { listen: data.listen }));
+      toast.success(t("Opened {listen}", { listen: resolveSessionDisplayAddress(data) }));
       await queryClient.invalidateQueries({ queryKey: ["sessions", activeProfileId] });
       await queryClient.invalidateQueries({ queryKey: ["suggested-port", activeProfileId] });
     },

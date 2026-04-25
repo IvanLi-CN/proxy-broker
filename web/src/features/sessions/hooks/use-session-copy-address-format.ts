@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 
-export type SessionCopyAddressFormat = "socks_url" | "http_url";
+export type SessionCopyAddressFormat = "socks_url" | "http_url" | "host_port";
 
 export const defaultSessionCopyAddressFormat: SessionCopyAddressFormat = "socks_url";
 export const sessionCopyAddressFormatStorageKey = "proxy-broker.session-copy-address-format";
 
 function isSessionCopyAddressFormat(value: string | null): value is SessionCopyAddressFormat {
-  return value === "socks_url" || value === "http_url";
+  return value === "socks_url" || value === "http_url" || value === "host_port";
 }
 
 export function useSessionCopyAddressFormat() {
