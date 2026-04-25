@@ -100,9 +100,6 @@ export const enUS: MessageCatalog = {
   "SOCKS URI": "SOCKS URI",
   "HTTP URI": "HTTP URI",
   "Host:port": "Host:port",
-  "Will copy": "Will copy",
-  "Preview appears after the first session opens.":
-    "Preview appears after the first session opens.",
   "Copy proxy address for {sessionId}": "Copy proxy address for {sessionId}",
   "Profile only": "Profile only",
   "Select a concrete profile to use this workspace.":

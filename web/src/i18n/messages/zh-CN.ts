@@ -56,8 +56,6 @@ export const zhCN: MessageCatalog = {
   "SOCKS URI": "SOCKS URI",
   "HTTP URI": "HTTP URI",
   "Host:port": "主机:端口",
-  "Will copy": "将复制",
-  "Preview appears after the first session opens.": "第一个会话打开后，这里会显示真实复制结果。",
   "Copy proxy address for {sessionId}": "复制 {sessionId} 的代理地址",
   "Profile {profileId}": "配置 {profileId}",
   "Health checking": "健康检查中",

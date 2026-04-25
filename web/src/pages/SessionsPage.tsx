@@ -1,10 +1,9 @@
-import { PlusCircleIcon, ShieldCheckIcon } from "lucide-react";
+import { PlusCircleIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { DataTablePanel } from "@/components/DataTablePanel";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { SessionCreateDialog } from "@/features/sessions/components/SessionCreateDialog";
 import { SessionNodeSelectDialog } from "@/features/sessions/components/SessionNodeSelectDialog";
 import { SessionsTable } from "@/features/sessions/components/SessionsTable";
@@ -13,7 +12,6 @@ import {
   useSessionCopyAddressFormat,
 } from "@/features/sessions/hooks/use-session-copy-address-format";
 import { useI18n } from "@/i18n";
-import { buildProxyAddressFromDisplayAddress, resolveSessionDisplayAddress } from "@/lib/format";
 import type {
   OpenBatchRequest,
   OpenBatchResponse,
@@ -119,12 +117,6 @@ export function SessionsPage({
       }>,
     [t],
   );
-  const previewDisplayAddress = visibleSessions[0]
-    ? resolveSessionDisplayAddress(visibleSessions[0])
-    : null;
-  const copyFormatPreview = previewDisplayAddress
-    ? buildProxyAddressFromDisplayAddress(previewDisplayAddress, listenCopyFormat)
-    : t("Preview appears after the first session opens.");
 
   useEffect(() => {
     if (!createDialogOpen) {
@@ -266,49 +258,33 @@ export function SessionsPage({
           "This list refreshes every five seconds while you stay on the route, so it reflects the backend's current session inventory.",
         )}
         chips={chips}
-        actions={
-          <div className="flex w-full flex-col items-stretch gap-3 sm:w-auto sm:min-w-[320px] sm:items-end">
-            <Badge
-              variant="outline"
-              className="rounded-full px-3 py-1 font-mono text-[11px] uppercase tracking-[0.16em]"
-            >
-              <ShieldCheckIcon className="mr-1 size-3.5" />
-              {t("session control")}
-            </Badge>
-
-            <div className="w-full max-w-[320px] space-y-1.5">
-              <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground sm:text-right">
-                {t("Copy format")}
-              </div>
-              <Tabs
-                value={listenCopyFormat}
-                onValueChange={(value) => setListenCopyFormat(value as SessionCopyAddressFormat)}
-                className="w-full gap-2"
-              >
-                <TabsList
-                  aria-label={t("Copy format")}
-                  className="grid h-auto w-full grid-cols-3 rounded-2xl border border-border/70 bg-background/80 p-1"
-                >
-                  {copyAddressOptions.map((option) => (
-                    <TabsTrigger
-                      key={option.value}
-                      value={option.value}
-                      className="rounded-xl px-3 py-2 text-xs font-semibold sm:text-[13px]"
-                    >
-                      {option.label}
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-              </Tabs>
-              <div className="rounded-2xl border border-border/70 bg-background px-3 py-2 text-left">
-                <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                  {t("Will copy")}
-                </div>
-                <div className="truncate font-mono text-xs text-foreground sm:text-[13px]">
-                  {copyFormatPreview}
-                </div>
-              </div>
+        toolbar={
+          <div className="flex w-full max-w-[420px] items-center justify-end gap-3 lg:min-w-[360px]">
+            <div className="shrink-0 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
+              {t("Copy format")}
             </div>
+            <ToggleGroup
+              type="single"
+              value={listenCopyFormat}
+              onValueChange={(value) => {
+                if (value === "socks_url" || value === "http_url" || value === "host_port") {
+                  setListenCopyFormat(value);
+                }
+              }}
+              aria-label={t("Copy format")}
+              className="min-w-0 flex-1 rounded-full border border-border/70 bg-background/80 p-1"
+            >
+              {copyAddressOptions.map((option) => (
+                <ToggleGroupItem
+                  key={option.value}
+                  value={option.value}
+                  aria-label={option.label}
+                  className="flex-1 rounded-full border border-transparent px-3 py-2 text-xs font-semibold text-muted-foreground shadow-none transition-[color,background-color,border-color,box-shadow] hover:bg-muted/60 hover:text-foreground data-[state=on]:border-primary/25 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground data-[state=on]:shadow-[0_10px_24px_-16px_hsl(var(--primary)/0.9),inset_0_0_0_1px_hsl(var(--background)/0.14)] hover:data-[state=on]:bg-primary/92 sm:text-[13px]"
+                >
+                  {option.label}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
           </div>
         }
       >
