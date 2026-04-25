@@ -289,6 +289,7 @@ export const zhCN: MessageCatalog = {
   "Choose at least one IP.": "至少选择 1 个 IP。",
   Country: "国家",
   "Region / city": "地区 / 城市",
+  Region: "地区",
   "Search and select countries": "搜索并选择国家",
   "Search countries or codes": "搜索国家或代码",
   "No matching countries": "没有匹配的国家",

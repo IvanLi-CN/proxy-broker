@@ -115,7 +115,8 @@ const emptyRow = (): BatchRequestRow => ({
 });
 
 const inlineFieldClass = "grid gap-2 md:grid-cols-[96px_minmax(160px,1fr)] md:items-start md:gap-3";
-const pairFieldClass = "grid gap-3 xl:grid-cols-2";
+const pairFieldClass =
+  "grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr))]";
 
 function FieldLabel({ htmlFor, label, hint }: { htmlFor?: string; label: string; hint?: string }) {
   const { t } = useI18n();
@@ -276,26 +277,23 @@ export function OpenBatchForm({
                   </div>
 
                   <div className="space-y-3">
-                    <div className={inlineFieldClass}>
-                      <div className="md:pt-1.5">
-                        <FieldLabel label={t("Targeting mode")} />
-                      </div>
-                      <div className="space-y-2">
-                        <Controller
-                          control={form.control}
-                          name={`requests.${index}.selectionMode`}
-                          render={({ field }) => (
-                            <SessionSelectionModeSwitch
-                              value={field.value}
-                              onChange={field.onChange}
-                              size="sm"
-                            />
-                          )}
-                        />
-                        {rowSelectionError ? (
-                          <p className="text-xs text-destructive">{rowSelectionError}</p>
-                        ) : null}
-                      </div>
+                    <div className="space-y-2">
+                      <FieldLabel label={t("Targeting mode")} />
+                      <Controller
+                        control={form.control}
+                        name={`requests.${index}.selectionMode`}
+                        render={({ field }) => (
+                          <SessionSelectionModeSwitch
+                            value={field.value}
+                            onChange={field.onChange}
+                            size="sm"
+                            className="max-w-full"
+                          />
+                        )}
+                      />
+                      {rowSelectionError ? (
+                        <p className="text-xs text-destructive">{rowSelectionError}</p>
+                      ) : null}
                     </div>
 
                     {row.selectionMode !== "any" ? (
@@ -399,7 +397,7 @@ export function OpenBatchForm({
                             {...form.register(`requests.${index}.desiredPort`)}
                             size="sm"
                             placeholder={suggestedPort?.toString() ?? "10080"}
-                            className="bg-card font-mono text-xs"
+                            className="w-full min-w-[168px] bg-card font-mono text-xs md:min-w-[184px]"
                           />
                         </div>
                       </div>

@@ -38,6 +38,15 @@ export const Default: Story = {
   args: {},
 };
 
+export const CompactViewport: Story = {
+  args: {},
+  parameters: {
+    viewport: {
+      defaultViewport: "mobile2",
+    },
+  },
+};
+
 export const BatchError: Story = {
   args: {
     batchError: "The backend rejected one row, so the batch rolled back.",

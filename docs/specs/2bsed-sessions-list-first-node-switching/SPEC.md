@@ -129,3 +129,10 @@
   evidence_note: 关闭动作先进入 10 秒撤销窗口；当前行整体置灰，关闭按钮切换为撤销，复制/编辑入口同步禁用。
   image:
   ![会话关闭撤销状态](./assets/sessions-page-close-pending.png)
+
+- source_type: `storybook_canvas`
+  story_id_or_title: `features/sessions/SessionCreateDialog/CompactViewport`
+  state: `compact dialog viewport`
+  evidence_note: 创建会话弹窗在窄容器里会优先换行并收缩文案，不再出现定位方式切换条和端口 / 提取顺序控件互相挤压、重叠的问题。
+  image:
+  ![创建会话弹窗紧凑视口布局](./assets/sessions-create-dialog-compact.png)

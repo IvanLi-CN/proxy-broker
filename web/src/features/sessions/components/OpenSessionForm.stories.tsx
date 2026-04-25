@@ -92,6 +92,22 @@ export const IpMode: Story = {
   },
 };
 
+export const CompactDialogViewport: Story = {
+  args: {
+    response: null,
+    initialValues: {
+      selectionMode: "any",
+      desiredPort: "10080",
+      sortMode: "lru",
+    },
+  },
+  parameters: {
+    viewport: {
+      defaultViewport: "mobile2",
+    },
+  },
+};
+
 export const AdvancedOpen: Story = {
   args: {
     response: null,

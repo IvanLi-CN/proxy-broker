@@ -102,7 +102,8 @@ const defaultValues: FormValues = {
 };
 
 const inlineFieldClass = "grid gap-2 md:grid-cols-[96px_minmax(160px,1fr)] md:items-start md:gap-3";
-const pairFieldClass = "grid gap-3 xl:grid-cols-2";
+const pairFieldClass =
+  "grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr))]";
 
 function FieldLabel({ htmlFor, label, hint }: { htmlFor?: string; label: string; hint?: string }) {
   const { t } = useI18n();
@@ -232,26 +233,21 @@ export function OpenSessionForm({
           })}
         >
           <div className="space-y-4 rounded-[24px] border border-border/70 bg-background/80 p-4">
-            <div className={inlineFieldClass}>
-              <div className="md:pt-2">
-                <FieldLabel label={t("Targeting mode")} />
-              </div>
-              <div className="space-y-2">
-                <Controller
-                  control={form.control}
-                  name="selectionMode"
-                  render={({ field }) => (
-                    <SessionSelectionModeSwitch
-                      value={field.value}
-                      onChange={field.onChange}
-                      size="sm"
-                    />
-                  )}
-                />
-                {selectionError ? (
-                  <p className="text-xs text-destructive">{selectionError}</p>
-                ) : null}
-              </div>
+            <div className="space-y-2">
+              <FieldLabel label={t("Targeting mode")} />
+              <Controller
+                control={form.control}
+                name="selectionMode"
+                render={({ field }) => (
+                  <SessionSelectionModeSwitch
+                    value={field.value}
+                    onChange={field.onChange}
+                    size="sm"
+                    className="max-w-full"
+                  />
+                )}
+              />
+              {selectionError ? <p className="text-xs text-destructive">{selectionError}</p> : null}
             </div>
 
             {selectionMode !== "any" ? (
@@ -344,7 +340,7 @@ export function OpenSessionForm({
               )}
             >
               <div className={inlineFieldClass}>
-                <div className="md:pt-2">
+                <div className="pt-1 md:pt-2">
                   <FieldLabel
                     htmlFor="desired-port"
                     label={t("Port")}
@@ -359,12 +355,12 @@ export function OpenSessionForm({
                     {...form.register("desiredPort")}
                     inputMode="numeric"
                     placeholder={suggestedPort?.toString() ?? "10080"}
-                    className="min-w-[140px] bg-card font-mono text-xs md:min-w-[168px] md:text-sm"
+                    className="w-full min-w-[168px] bg-card font-mono text-xs md:min-w-[184px] md:text-sm"
                   />
                 </div>
               </div>
               <div className={inlineFieldClass}>
-                <div className="md:pt-2">
+                <div className="pt-1 md:pt-2">
                   <FieldLabel
                     htmlFor="session-sort-mode"
                     label={t("Selection order")}
