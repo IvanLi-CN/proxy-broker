@@ -232,6 +232,33 @@ describe("SessionsTable", () => {
     expect(firstCheckbox).toBeChecked();
   });
 
+  it("deselects a selected session when clicking the checkbox icon", () => {
+    renderWithProviders(<SessionsTableSelectionHarness />);
+
+    const firstCheckbox = screen.getByRole("checkbox", {
+      name: /Select session sess-A7c2Kp9LmQ4RsT1v/i,
+    });
+    const firstCell = firstCheckbox.closest("td");
+    if (!firstCell) {
+      throw new Error("Expected session selection cell.");
+    }
+
+    fireEvent.pointerDown(firstCell, { pointerType: "mouse", button: 0 });
+    fireEvent.pointerUp(window);
+    expect(firstCheckbox).toBeChecked();
+
+    const checkboxIcon = firstCheckbox.querySelector("svg");
+    if (!checkboxIcon) {
+      throw new Error("Expected checked checkbox icon.");
+    }
+
+    fireEvent.pointerDown(checkboxIcon, { pointerType: "mouse", button: 0 });
+    fireEvent.click(firstCheckbox);
+    fireEvent.pointerUp(window);
+
+    expect(firstCheckbox).not.toBeChecked();
+  });
+
   it("extends session selection with shift range selection", () => {
     renderWithProviders(<SessionsTableSelectionHarness />);
 

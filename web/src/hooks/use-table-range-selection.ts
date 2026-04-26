@@ -150,7 +150,7 @@ export function useTableRangeSelection({
         event.preventDefault();
         event.stopPropagation();
         suppressNextCheckedChangeRef.current =
-          event.target instanceof HTMLElement && event.target.closest('[role="checkbox"]') !== null;
+          event.target instanceof Element && event.target.closest('[role="checkbox"]') !== null;
         const targetChecked = !selectedRef.current.includes(itemId);
         dragStateRef.current = { active: true, targetChecked };
         if (event.shiftKey) {
