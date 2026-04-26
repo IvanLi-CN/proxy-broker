@@ -3,8 +3,41 @@ import { expect, fn, userEvent, within } from "storybook/test";
 
 import { AppShell } from "@/components/AppShell";
 import { sessionCopyAddressFormatStorageKey } from "@/features/sessions/hooks/use-session-copy-address-format";
+import type { SessionListItem } from "@/lib/types";
 import { sessionNodeOptionsFixture, sessionsFixture } from "@/mocks/fixtures";
 import { SessionsPage } from "@/pages/SessionsPage";
+
+const longSessionList: SessionListItem[] = Array.from({ length: 28 }, (_, index) => {
+  const source = sessionsFixture.sessions[index % sessionsFixture.sessions.length];
+  if (!source) {
+    throw new Error("Expected session fixtures.");
+  }
+
+  const port = 10080 + index;
+  const regionNames = ["Tokyo", "Osaka", "Singapore", "Seoul", "California", "Sydney"];
+  const cityNames = ["Chiyoda", "Osaka", "Singapore", "Seoul", "San Jose", "Sydney"];
+  const proxyNames = [
+    "JP-Tokyo-Entry",
+    "JP-Osaka-Edge",
+    "SG-Media-Relay",
+    "KR-Seoul-BGP",
+    "US-LosAngeles-Fast",
+    "AU-Sydney-HY2",
+  ];
+
+  return {
+    ...source,
+    session_id: `sess-long-${String(index + 1).padStart(2, "0")}-${source.session_id.slice(-6)}`,
+    listen: `127.0.0.1:${port}`,
+    display_address: `127.0.0.1:${port}`,
+    port,
+    proxy_name: proxyNames[index % proxyNames.length] ?? source.proxy_name,
+    selected_ip: `203.0.113.${10 + index}`,
+    created_at: source.created_at + index * 60,
+    region_name: regionNames[index % regionNames.length],
+    city: cityNames[index % cityNames.length],
+  };
+});
 
 const meta = {
   title: "Pages/SessionsPage",
@@ -85,7 +118,18 @@ export const Default: Story = {
 };
 
 export const ZhCN: Story = {
-  args: {},
+  args: {
+    sessions: longSessionList,
+  },
+  globals: {
+    locale: "zh-CN",
+  },
+};
+
+export const LongList: Story = {
+  args: {
+    sessions: longSessionList,
+  },
   globals: {
     locale: "zh-CN",
   },
@@ -113,6 +157,27 @@ export const ClosingState: Story = {
     ).closest("tr");
     await expect(pendingRow).toHaveAttribute("data-close-state", "pending");
     await expect(await canvas.findByRole("button", { name: /^Undo$/i })).toBeVisible();
+  },
+};
+
+export const BatchSelectionFlow: Story = {
+  args: {},
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const firstCheckbox = await canvas.findByRole("checkbox", {
+      name: /Select session sess-A7c2Kp9LmQ4RsT1v/i,
+    });
+    const secondCheckbox = await canvas.findByRole("checkbox", {
+      name: /Select session sess-Q8n3Va1Zx5Mw2Lp7/i,
+    });
+    firstCheckbox.focus();
+    await userEvent.keyboard("[Space]");
+    secondCheckbox.focus();
+    await userEvent.keyboard("[Space]");
+
+    await expect(await canvas.findByText(/Selected 2 sessions/i)).toBeVisible();
+    await userEvent.click(await canvas.findByRole("button", { name: /^Close selected$/i }));
+    await expect((await canvas.findAllByRole("button", { name: /^Undo$/i })).length).toBe(2);
   },
 };
 

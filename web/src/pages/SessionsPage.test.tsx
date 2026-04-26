@@ -201,4 +201,63 @@ describe("SessionsPage", () => {
     expect(onCloseSession).not.toHaveBeenCalled();
     expect(screen.getByText("sess-A7c2Kp9LmQ4RsT1v")).toBeInTheDocument();
   });
+
+  it("queues selected sessions for delayed batch close", async () => {
+    vi.useFakeTimers();
+    const onCloseSession = vi.fn().mockResolvedValue(undefined);
+
+    renderWithProviders(
+      <SessionsPage
+        sessions={sessionsFixture.sessions}
+        sessionsLoading={false}
+        openError={null}
+        batchError={null}
+        switchError={null}
+        openResponse={null}
+        batchResponse={null}
+        switchedSessionId={null}
+        opening={false}
+        batchOpening={false}
+        suggestedPort={10080}
+        closingSessionId={null}
+        switchingSessionId={null}
+        onOpenSession={vi.fn()}
+        onOpenBatch={vi.fn()}
+        onUpdateSessionNode={vi.fn()}
+        searchSessionOptions={vi.fn(async () => [])}
+        searchSessionNodeOptions={vi.fn(async () => sessionNodeOptionsFixture.items)}
+        onCloseSession={onCloseSession}
+        onResetCreateState={vi.fn()}
+        onResetSwitchState={vi.fn()}
+      />,
+    );
+
+    for (const sessionId of ["sess-A7c2Kp9LmQ4RsT1v", "sess-Q8n3Va1Zx5Mw2Lp7"]) {
+      const checkbox = screen.getByRole("checkbox", {
+        name: new RegExp(`Select session ${sessionId}`, "i"),
+      });
+      const cell = checkbox.closest("td");
+      if (!cell) {
+        throw new Error("Expected session selection cell.");
+      }
+      fireEvent.pointerDown(cell, { pointerType: "mouse", button: 0 });
+      fireEvent.pointerUp(window);
+    }
+
+    expect(screen.getByText("Selected 2 sessions")).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /^Close selected$/i }));
+    });
+
+    expect(screen.getAllByRole("button", { name: /^Undo$/i })).toHaveLength(2);
+    expect(onCloseSession).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+
+    expect(onCloseSession).toHaveBeenCalledWith("sess-A7c2Kp9LmQ4RsT1v");
+    expect(onCloseSession).toHaveBeenCalledWith("sess-Q8n3Va1Zx5Mw2Lp7");
+  });
 });

@@ -818,6 +818,36 @@ export const ProfileBatchActions: Story = {
   },
 };
 
+export const ProfileSelectionFlow: Story = {
+  ...ProfileConfig,
+  render: (args) => (
+    <InteractiveProfileStory {...(args as Extract<ProxiesPageProps, { mode: "profile" }>)} />
+  ),
+  async play({ canvasElement }) {
+    const canvas = within(canvasElement);
+    const groupCheckbox = await canvas.findByLabelText(/Select import group global-jp/i);
+    const firstCheckbox = await canvas.findByLabelText(/Select node JP-Tokyo-Entry/i);
+    const secondCheckbox = await canvas.findByLabelText(/Select node JP-Osaka-Edge/i);
+    const thirdCheckbox = await canvas.findByLabelText(/Select node Edge-Manual-1/i);
+    firstCheckbox.focus();
+    await userEvent.keyboard("[Space]");
+    await expect(groupCheckbox).toHaveAttribute("data-state", "indeterminate");
+
+    firstCheckbox.focus();
+    await userEvent.keyboard("[Space]");
+    firstCheckbox.focus();
+    await userEvent.keyboard("[Space]");
+    secondCheckbox.focus();
+    await userEvent.keyboard("[Space]");
+    await expect((await canvas.findAllByText(/Selected 2 nodes/i)).length).toBeGreaterThan(0);
+
+    thirdCheckbox.focus();
+    await userEvent.keyboard("[Space]");
+    await expect((await canvas.findAllByText(/Selected 3 nodes/i)).length).toBeGreaterThan(0);
+    await expect(await canvas.findByRole("button", { name: /Create sessions/i })).toBeEnabled();
+  },
+};
+
 export const ProfileCreateSessionDialog: Story = {
   args: { ...ProfileConfig.args },
   name: "Profile Create Session Dialog",

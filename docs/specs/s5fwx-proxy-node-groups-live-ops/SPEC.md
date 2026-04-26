@@ -53,6 +53,7 @@
 
 - Global `/proxies` 按 import 分组展示全部节点，并支持批量 refresh / probe。
 - Profile `/proxies` 只展示当前 profile effective pool 中可用的节点，并支持节点级与批量创建会话。
+- `/proxies` grouped node table 必须支持节点多选、表头全选可见节点、导入分组 indeterminate 状态、鼠标/触摸从选择列按下后拖拽批量勾选/取消，以及 Shift 连续选择。
 - 节点测速每个节点执行 5 次，采用 breadth-first 顺序，最终返回成功样本的中位数。
 - 运行中的测速/刷新结果必须通过实时推送增量显示。
 - `SessionRecord` / open 响应必须包含 `node_id`，并对旧数据做 best-effort backfill。
@@ -106,6 +107,9 @@
 - Given Global `/proxies`
   When 打开 grouped node 目录
   Then 页面按 import 分组展示全部节点，支持展开/折叠、节点选择、批量 refresh/probe，且不显示 create-session 动作。
+- Given `/proxies` grouped node table
+  When 操作员点击表头 checkbox、拖拽经过节点选择列，或按 Shift 连续选择
+  Then 仅改变节点选择状态，分组 checkbox 正确展示全选/部分选中/未选中，且不会触发展开、删除、分配或创建会话动作。
 - Given Profile `/proxies`
   When 选择多个节点并执行批量创建会话
   Then 每个所选节点各创建 1 条会话，响应与后续 session 列表都包含 `node_id`。
@@ -161,6 +165,20 @@
 - Visual evidence source: maintain `## Visual Evidence` in this spec when owner-facing or PR-facing screenshots are needed.
 
 ## Visual Evidence
+
+- `source_type=storybook_canvas`
+- `target_program=mock-only`
+- `capture_scope=browser-viewport`
+- `requested_viewport=1440x1040`
+- `viewport_strategy=browser-resize-fallback`
+- `sensitive_exclusion=N/A`
+- `submission_gate=approved`
+- `story_id_or_title=Pages/ProxiesPage/ProfileCatalog`
+- `state=profile grouped node batch selection`
+- `evidence_note=Shows the profile grouped node table after selecting nodes across two import groups: the global import group is indeterminate, the selected-node toolbar exposes refresh/probe/create-session actions, and the Chinese table layout does not overlap.`
+
+PR: include
+![Profile grouped node batch selection](./assets/proxies-batch-selection.png)
 
 - `source_type=storybook_canvas`
 - `target_program=mock-only`
