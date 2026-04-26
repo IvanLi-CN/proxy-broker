@@ -514,31 +514,21 @@ impl BrokerService {
                 .map_err(BrokerError::from)?;
             nodes
                 .iter()
-                .flat_map(|node| {
-                    node.resolved_ips
-                        .iter()
-                        .map(move |ip| (runtime_node_id(node), ip.clone()))
-                })
+                .flat_map(valid_proxy_ip_pairs_for_node)
                 .collect()
         } else {
             inventory_nodes
                 .iter()
-                .flat_map(|node| {
-                    node.resolved_ips
-                        .iter()
-                        .map(move |ip| (node.node_id.clone(), ip.clone()))
-                })
+                .flat_map(valid_proxy_ip_pairs_for_inventory_node)
                 .collect()
         };
 
         if valid_proxy_ip_pairs.is_empty() {
-            for session in &existing_sessions {
-                self.store
-                    .delete_session(profile_id, &session.session_id)
-                    .await
-                    .map_err(BrokerError::from)?;
-            }
-            self.cleanup_shared_runtime_if_idle_locked().await;
+            tracing::warn!(
+                profile_id,
+                session_count = existing_sessions.len(),
+                "startup session reconciliation skipped pruning because no authoritative proxy/IP pairs were available"
+            );
             return Ok(());
         }
 
@@ -1817,6 +1807,33 @@ impl BrokerService {
         Ok(items)
     }
 
+    async fn compose_effective_session_nodes(
+        &self,
+        profile_id: &str,
+    ) -> BrokerResult<Vec<ProxyNode>> {
+        let effective_nodes = self
+            .compose_effective_proxy_inventory_records(profile_id)
+            .await?
+            .into_iter()
+            .map(|record| ProxyNode {
+                node_id: Some(record.node_id),
+                proxy_name: record.proxy_name,
+                proxy_type: record.proxy_type,
+                server: record.server,
+                resolved_ips: record.resolved_ips,
+                raw_proxy: record.raw_proxy,
+            })
+            .collect::<Vec<_>>();
+        if !effective_nodes.is_empty() {
+            return Ok(effective_nodes);
+        }
+
+        self.store
+            .list_subscription(profile_id)
+            .await
+            .map_err(BrokerError::from)
+    }
+
     async fn rebuild_effective_profile_locked(
         &self,
         profile_id: &str,
@@ -1873,11 +1890,7 @@ impl BrokerService {
         let valid_ips: HashSet<String> = ip_map.keys().cloned().collect();
         let valid_proxy_ip_pairs: HashSet<(String, String)> = nodes
             .iter()
-            .flat_map(|node| {
-                node.resolved_ips
-                    .iter()
-                    .map(move |ip| (runtime_node_id(node), ip.clone()))
-            })
+            .flat_map(valid_proxy_ip_pairs_for_node)
             .collect();
         let active_sessions: Vec<SessionRecord> = existing_sessions
             .iter()
@@ -2879,11 +2892,7 @@ impl BrokerService {
     ) -> BrokerResult<RefreshResponse> {
         let _profile_guard = self.lock_profile(profile_id).await;
 
-        let nodes = self
-            .store
-            .list_subscription(profile_id)
-            .await
-            .map_err(BrokerError::from)?;
+        let nodes = self.compose_effective_session_nodes(profile_id).await?;
         if nodes.is_empty() {
             return Err(BrokerError::SubscriptionInvalid);
         }
@@ -3491,11 +3500,7 @@ impl BrokerService {
         let _profile_guard = self.lock_profile(profile_id).await;
         let _shared_runtime_guard = self.shared_runtime_lock.lock().await;
 
-        let nodes = self
-            .store
-            .list_subscription(profile_id)
-            .await
-            .map_err(BrokerError::from)?;
+        let nodes = self.compose_effective_session_nodes(profile_id).await?;
         if nodes.is_empty() {
             return Err(BrokerError::SubscriptionInvalid);
         }
@@ -5946,15 +5951,7 @@ fn prepare_session(
         port,
         selected_ip: ip,
         proxy_name: node.proxy_name.clone(),
-        node_id: node.node_id.clone().unwrap_or_else(|| {
-            ids::stable_proxy_inventory_node_id_for_proxy(
-                "legacy",
-                &node.proxy_name,
-                &node.proxy_type,
-                &node.server,
-                &node.raw_proxy,
-            )
-        }),
+        node_id: runtime_node_id(&node),
         created_at: now,
     })
 }
@@ -6008,9 +6005,39 @@ fn median_success_latency(samples: &[u64]) -> Option<u64> {
 }
 
 fn runtime_node_id(node: &ProxyNode) -> String {
-    node.node_id
-        .clone()
-        .unwrap_or_else(|| node.proxy_name.clone())
+    node.node_id.clone().unwrap_or_else(|| {
+        ids::stable_proxy_inventory_node_id_for_proxy(
+            "legacy",
+            &node.proxy_name,
+            &node.proxy_type,
+            &node.server,
+            &node.raw_proxy,
+        )
+    })
+}
+
+fn runtime_node_keys(node: &ProxyNode) -> Vec<String> {
+    let primary = runtime_node_id(node);
+    if node.node_id.is_none() && node.proxy_name != primary {
+        vec![primary, node.proxy_name.clone()]
+    } else {
+        vec![primary]
+    }
+}
+
+fn valid_proxy_ip_pairs_for_node(node: &ProxyNode) -> Vec<(String, String)> {
+    let keys = runtime_node_keys(node);
+    node.resolved_ips
+        .iter()
+        .flat_map(|ip| keys.iter().cloned().map(move |key| (key, ip.clone())))
+        .collect()
+}
+
+fn valid_proxy_ip_pairs_for_inventory_node(node: &ProxyInventoryRecord) -> Vec<(String, String)> {
+    node.resolved_ips
+        .iter()
+        .map(|ip| (node.node_id.clone(), ip.clone()))
+        .collect()
 }
 
 fn normalize_session_host(raw: Option<&str>) -> Option<String> {
@@ -6102,7 +6129,7 @@ mod tests {
             TaskRunRecord,
         },
         runtime::MihomoRuntime,
-        store::{BrokerStore, MemoryStore},
+        store::{BrokerStore, MemoryStore, SqliteStore},
         subscription::SUBSCRIPTION_FETCH_USER_AGENTS,
     };
     use anyhow::anyhow;
@@ -6694,6 +6721,13 @@ mod tests {
             .await
             .expect("subscription file should be written");
         path.to_string_lossy().to_string()
+    }
+
+    fn temp_sqlite_store_path() -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "proxy-broker-service-{}.db",
+            ids::random_temp_suffix()
+        ))
     }
 
     fn make_node(proxy_name: &str, ip: &str) -> ProxyNode {
@@ -9149,6 +9183,197 @@ proxies:
             "session should not be dropped on port probe"
         );
         assert_eq!(sessions[0].session_id, "s1");
+    }
+
+    #[tokio::test]
+    async fn reconcile_startup_preserves_legacy_sessions_when_subscription_rows_lack_node_ids() {
+        let profile_id = "p-legacy-node-alias";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
+        service
+            .create_profile(profile_id)
+            .await
+            .expect("profile should be created");
+
+        let legacy_proxy_name = "legacy-node";
+        let legacy_ip = "203.0.113.10";
+        let raw_proxy = serde_json::json!({
+            "name": legacy_proxy_name,
+            "type": "socks5",
+            "server": legacy_ip,
+        });
+        store
+            .replace_subscription(
+                profile_id,
+                &[ProxyNode {
+                    node_id: None,
+                    proxy_name: legacy_proxy_name.to_string(),
+                    proxy_type: "socks5".to_string(),
+                    server: legacy_ip.to_string(),
+                    resolved_ips: vec![legacy_ip.to_string()],
+                    raw_proxy,
+                }],
+            )
+            .await
+            .expect("seed subscription should succeed");
+        store
+            .insert_session(
+                profile_id,
+                &SessionRecord {
+                    session_id: "legacy-proxy-name".to_string(),
+                    listen: "127.0.0.1".to_string(),
+                    port: 10080,
+                    selected_ip: legacy_ip.to_string(),
+                    proxy_name: legacy_proxy_name.to_string(),
+                    node_id: legacy_proxy_name.to_string(),
+                    created_at: 1,
+                },
+            )
+            .await
+            .expect("proxy-name session should persist");
+        store
+            .insert_session(
+                profile_id,
+                &SessionRecord {
+                    session_id: "legacy-blank-node".to_string(),
+                    listen: "127.0.0.1".to_string(),
+                    port: 10081,
+                    selected_ip: legacy_ip.to_string(),
+                    proxy_name: legacy_proxy_name.to_string(),
+                    node_id: String::new(),
+                    created_at: 2,
+                },
+            )
+            .await
+            .expect("blank-node session should persist");
+
+        service
+            .reconcile_startup_sessions()
+            .await
+            .expect("startup reconcile should complete");
+
+        let sessions = store
+            .list_sessions(profile_id)
+            .await
+            .expect("list sessions should succeed");
+        assert_eq!(sessions.len(), 2, "legacy sessions should be preserved");
+        let ids = sessions
+            .iter()
+            .map(|session| session.session_id.as_str())
+            .collect::<HashSet<_>>();
+        assert!(ids.contains("legacy-proxy-name"));
+        assert!(ids.contains("legacy-blank-node"));
+    }
+
+    #[tokio::test]
+    async fn reconcile_startup_keeps_persisted_sessions_when_proxy_validity_is_unknown() {
+        let profile_id = "p-unknown-validity";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(
+            store.clone(),
+            runtime.clone(),
+            BrokerServiceOptions::default(),
+        );
+        service
+            .create_profile(profile_id)
+            .await
+            .expect("profile should be created");
+        store
+            .insert_session(
+                profile_id,
+                &make_session("s-keep", "orphaned-node", "203.0.113.90", 1),
+            )
+            .await
+            .expect("seed session should succeed");
+
+        service
+            .reconcile_startup_sessions()
+            .await
+            .expect("startup reconcile should complete");
+
+        let sessions = store
+            .list_sessions(profile_id)
+            .await
+            .expect("list sessions should succeed");
+        assert_eq!(sessions.len(), 1, "session should remain persisted");
+        assert_eq!(sessions[0].session_id, "s-keep");
+        assert_eq!(runtime.apply_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn sqlite_backed_sessions_survive_service_restart_and_startup_reconcile() {
+        let profile_id = "sqlite-restart";
+        let path = temp_sqlite_store_path();
+        let store = Arc::new(
+            SqliteStore::open(&path)
+                .await
+                .expect("sqlite store should open"),
+        );
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
+        service
+            .create_profile(profile_id)
+            .await
+            .expect("profile should be created");
+
+        let source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: sqlite-node
+    type: socks5
+    server: 5.5.5.5
+"#,
+        )
+        .await;
+        service
+            .load_subscription(profile_id, &SubscriptionSource::File(source_path.clone()))
+            .await
+            .expect("subscription should load");
+        let _ = tokio::fs::remove_file(&source_path).await;
+
+        let opened = service
+            .open_session(
+                profile_id,
+                &OpenSessionRequest {
+                    selection_mode: SessionSelectionMode::Ip,
+                    specified_ips: vec!["5.5.5.5".to_string()],
+                    desired_port: Some(10080),
+                    ..OpenSessionRequest::default()
+                },
+                None,
+            )
+            .await
+            .expect("session should open");
+
+        drop(service);
+        drop(store);
+
+        let restarted_store = Arc::new(
+            SqliteStore::open(&path)
+                .await
+                .expect("restarted sqlite store should open"),
+        );
+        let restarted = BrokerService::new(
+            restarted_store.clone(),
+            Arc::new(TestRuntime::default()),
+            BrokerServiceOptions::default(),
+        );
+        restarted
+            .reconcile_startup_sessions()
+            .await
+            .expect("startup reconcile should complete");
+
+        let sessions = restarted
+            .list_sessions(profile_id, None)
+            .await
+            .expect("sessions should list");
+        assert_eq!(sessions.sessions.len(), 1);
+        assert_eq!(sessions.sessions[0].session_id, opened.session_id);
+        assert_eq!(sessions.sessions[0].display_address, "127.0.0.1:10080");
+
+        let _ = tokio::fs::remove_file(path).await;
     }
 
     #[tokio::test]

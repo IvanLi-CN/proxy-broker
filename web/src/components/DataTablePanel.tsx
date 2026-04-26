@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 interface DataTablePanelProps {
   eyebrow: string;
@@ -9,6 +10,7 @@ interface DataTablePanelProps {
   description: string;
   chips?: string[];
   actions?: ReactNode;
+  toolbar?: ReactNode;
   children: ReactNode;
 }
 
@@ -18,6 +20,7 @@ export function DataTablePanel({
   description,
   chips = [],
   actions,
+  toolbar,
   children,
 }: DataTablePanelProps) {
   return (
@@ -37,17 +40,31 @@ export function DataTablePanel({
           </div>
           {actions ? <div className="flex shrink-0 flex-wrap gap-2">{actions}</div> : null}
         </div>
-        {chips.length > 0 ? (
-          <div className="flex flex-wrap gap-2">
-            {chips.map((chip) => (
-              <Badge
-                key={chip}
-                variant="outline"
-                className="rounded-full bg-background/80 px-3 py-1 text-[11px] text-muted-foreground"
-              >
-                {chip}
-              </Badge>
-            ))}
+        {chips.length > 0 || toolbar ? (
+          <div
+            className={cn(
+              "flex flex-col gap-3",
+              toolbar
+                ? "lg:grid lg:min-h-[72px] lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end lg:gap-x-6"
+                : "lg:flex-row lg:items-center lg:justify-between",
+            )}
+          >
+            {chips.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {chips.map((chip) => (
+                  <Badge
+                    key={chip}
+                    variant="outline"
+                    className="rounded-full bg-background/80 px-3 py-1 text-[11px] text-muted-foreground"
+                  >
+                    {chip}
+                  </Badge>
+                ))}
+              </div>
+            ) : (
+              <div />
+            )}
+            {toolbar ? <div className="flex justify-end lg:self-end">{toolbar}</div> : null}
           </div>
         ) : null}
       </CardHeader>

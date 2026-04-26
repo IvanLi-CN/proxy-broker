@@ -50,6 +50,15 @@ The binary now accepts both CLI flags and `PROXY_BROKER_*` environment
 variables for runtime configuration. For containers, prefer environment
 variables over `command:` argument lists.
 
+Session records are persisted in the configured SQLite store (`.proxy-broker/state.sqlite`
+by default). On service restart or binary update, startup reconciliation treats
+those persisted `sessions` rows as the source of truth for the `/sessions`
+operator view: the UI should keep showing any session that was not explicitly
+closed, even if runtime restore is temporarily blocked by port occupancy or a
+short-lived inventory/runtime mismatch. A persisted session is only pruned
+automatically when its stored `node_id + selected_ip` can be proven invalid
+against the current effective pool.
+
 ## Authentication
 
 Human callers are identified from configurable Forward Auth response headers:

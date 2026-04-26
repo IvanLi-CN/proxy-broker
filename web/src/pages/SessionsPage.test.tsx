@@ -81,13 +81,16 @@ describe("SessionsPage", () => {
       />,
     );
 
-    expect(screen.getByRole("tab", { name: /HTTP URI/i })).toHaveAttribute("data-state", "active");
-    expect(screen.getAllByText("http://127.0.0.1:10080")[0]).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /HTTP URI/i })).toHaveAttribute("data-state", "on");
+    expect(screen.queryByText("Will copy")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Preview appears after the first session opens."),
+    ).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: /Host:port/i }));
+    await user.click(screen.getByRole("radio", { name: /Host:port/i }));
 
     expect(window.localStorage.getItem(sessionCopyAddressFormatStorageKey)).toBe("host_port");
-    expect(screen.getAllByText("127.0.0.1:10080")[0]).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /Host:port/i })).toHaveAttribute("data-state", "on");
   });
 
   it("greys the row, swaps close to undo, and delays removal for 10 seconds", async () => {

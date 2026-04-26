@@ -51,6 +51,18 @@ The default mode is `enforce`.
 - `PROXY_BROKER_AUTH_DEV_GROUPS`
   - default: `proxy-broker-dev-admin`
 
+## Session Persistence
+
+- The configured SQLite database (`.proxy-broker/state.sqlite` by default)
+  persists session rows across restarts and binary updates.
+- Startup reconciliation keeps those persisted rows visible in `/sessions` by
+  default; it does not clear the operator list just because runtime restore
+  fails, a port is temporarily occupied, or effective inventory cannot yet be
+  proven.
+- Automatic pruning is reserved for sessions whose stored `node_id +
+  selected_ip` combination can be explicitly shown to be invalid for the
+  current effective pool.
+
 ## Local Development
 
 Use explicit development mode if you want to open the embedded UI without running a real Forward Auth chain:

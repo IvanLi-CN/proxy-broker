@@ -126,12 +126,15 @@ export const CopyFormatFlow: Story = {
   args: {},
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await userEvent.click(await canvas.findByRole("tab", { name: /HTTP URI/i }));
-    await expect(await canvas.findByRole("tab", { name: /HTTP URI/i })).toHaveAttribute(
+    await userEvent.click(await canvas.findByRole("radio", { name: /HTTP URI/i }));
+    await expect(await canvas.findByRole("radio", { name: /HTTP URI/i })).toHaveAttribute(
       "data-state",
-      "active",
+      "on",
     );
-    await expect(await canvas.findByText("http://127.0.0.1:10080")).toBeVisible();
+    await expect(canvas.queryByText("Will copy")).not.toBeInTheDocument();
+    await expect(
+      canvas.queryByText("Preview appears after the first session opens."),
+    ).not.toBeInTheDocument();
     await expect(
       await canvas.findByRole("button", {
         name: new RegExp(

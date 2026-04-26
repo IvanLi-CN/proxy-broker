@@ -23,6 +23,18 @@ const importIdForProfile = (profileId: string) =>
 const sessionIdFor = (index: 0 | 1) => (index === 0 ? SESSION_ID_PRIMARY : SESSION_ID_SECONDARY);
 
 test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    let copied = "";
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (value: string) => {
+          copied = value;
+        },
+        readText: async () => copied,
+      },
+    });
+  });
   const recentTaskBaseSec = Math.floor(Date.now() / 1000) - 120;
   let profiles = ["default", "edge-jp"];
   const profileSettingsByProfile: Record<
@@ -1086,14 +1098,18 @@ test("operator can drive the main workflows", async ({ page }) => {
   await expect(page.getByText("Fresh-Lab-02")).toBeVisible();
   const primarySessionRow = page.getByRole("row").filter({ hasText: SESSION_ID_PRIMARY });
   const pageHost = new URL(page.url()).hostname;
-  await expect(page.getByRole("tab", { name: /SOCKS URI/i })).toHaveAttribute(
-    "data-state",
-    "active",
-  );
-  await page.getByRole("tab", { name: /HTTP URI/i }).click();
-  await expect(page.getByText(`http://${pageHost}:10080`)).toBeVisible();
+  await expect(page.getByRole("radio", { name: /SOCKS URI/i })).toHaveAttribute("data-state", "on");
+  await page.getByRole("radio", { name: /HTTP URI/i }).click();
   await expect(primarySessionRow.getByText(`${pageHost}:10080`)).toBeVisible();
   await expect(page.getByText("0.0.0.0:10080")).toHaveCount(0);
+  await primarySessionRow
+    .getByRole("button", {
+      name: new RegExp(`^Copy proxy address for ${SESSION_ID_PRIMARY}$`, "i"),
+    })
+    .click();
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe(`http://${pageHost}:10080`);
 
   await primarySessionRow.getByRole("button", { name: /^close$/i }).click();
   await expect(primarySessionRow).toHaveAttribute("data-close-state", "pending");

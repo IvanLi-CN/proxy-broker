@@ -37,8 +37,9 @@
 - `创建会话` 弹窗必须保留“单个创建 / 批量创建”两种模式。
 - 会话列表代理列必须提供 edit icon，并弹出可筛选、可排序的节点选择弹窗。
 - 会话列表必须展示当前 selected IP 的国家/地区/城市摘要，并移除重复的 port badge。
-- 会话列表上方必须提供一个带本地记忆的复制格式分段按钮，固定支持 `SOCKS URI`、`HTTP URI` 与 `主机:端口` 三种输出。
-- 复制格式区域必须展示真实预览，直接反映当前会话将被复制出去的代理地址；不得把需求示例写死成产品文案。
+- 会话列表上方必须提供一个按 shadcn/ui `ToggleGroup` 实现、带本地记忆的复制格式选择器，固定支持 `SOCKS URI`、`HTTP URI` 与 `主机:端口` 三种输出。
+- 复制格式 `label` 只允许出现在选项左侧；不得再在选择器上方、下方或独立卡片内重复展示。
+- 复制格式区域不得再渲染独立的预览 / 占位提示卡片；切换格式只影响后续复制结果，不额外占用列表上方高度。
 - 会话列表必须把 owner-facing 地址与 runtime bind 地址分离：原始 bind host 只保留给运行时/诊断，默认表格展示与复制都使用可访问的 `display_address`。
 - 当 bind host 为 `0.0.0.0` / `::` / `[::]` 时，owner-facing UI 不得直接展示通配地址；应优先使用 `session_public_host`，否则回退到当前页面 hostname。
 - 当 bind host 为明确地址（例如域名、`192.168.*` 或 `127.0.0.1`）时，`display_address` 必须直接复用该 host，不得再被 UI 强制替换。
@@ -47,6 +48,8 @@
 - 节点选择弹窗默认按 `当前会话最近使用` 排序，并支持切换到 `当前 profile 最近使用`。
 - `PATCH /api/v1/profiles/{profile_id}/sessions/{session_id}/node` 必须保持 `session_id / listen / port / created_at` 不变，只更新 `node_id / proxy_name / selected_ip`。
 - 创建会话与切换代理都必须更新 profile-scope 与 session-scope 的 node usage。
+- SQLite `sessions` 必须作为启动恢复的真相源；程序重启或更新后，未显式关闭的会话仍需继续出现在 `/sessions` 列表。
+- 启动 reconcile 只有在某条会话的 `node_id + selected_ip` 已被明确判定失效时才允许清理；不得因为运行时恢复失败、端口占用或有效节点暂不可判定而清空列表。
 
 ### SHOULD
 
@@ -70,7 +73,7 @@
   Then 列表显示国家 / 地区 / 城市摘要，且不再重复展示 port badge。
 - Given 会话列表上方的复制格式选择器
   When 操作员切换到另一种地址格式
-  Then 选择结果被保存在浏览器本地，固定可单击切换，并影响后续代理地址复制内容。
+  Then 选择结果被保存在浏览器本地，`label` 固定留在选项左侧，且页面上不再出现额外的预览 / 占位提示卡片。
 - Given 会话 bind host 为 wildcard
   When 页面通过某个可访问 hostname 打开当前管理台
   Then 列表主文案与复制结果使用 `session_public_host` 或当前页面 hostname，而不是 `0.0.0.0:*`。
@@ -86,6 +89,9 @@
 - Given 节点选择弹窗
   When 在两种排序之间切换或输入关键词
   Then 列表按对应最近使用时间稳定排序，并只返回当前 profile 可见节点。
+- Given 已持久化的会话
+  When 程序重启、升级或启动恢复阶段遇到临时运行时故障
+  Then `/sessions` 列表仍显示这些会话，除非其 `node_id + selected_ip` 已被明确判定为失效组合。
 
 ## 质量门槛（Quality Gates）
 
@@ -102,12 +108,21 @@
 
 ## Visual Evidence
 
+- PR: include
 - source_type: `storybook_canvas`
   story_id_or_title: `Pages/SessionsPage/Default`
   state: `default`
-  evidence_note: 会话页首屏只保留会话列表与一个创建入口；selected IP 列展示地理摘要，原 port badge 已移除，列表上方改为固定可见的复制格式分段按钮与真实预览，代理地址列展示 `display_address` 并提供复制按钮。
+  evidence_note: 会话页首屏只保留会话列表与一个创建入口；selected IP 列展示地理摘要，原 port badge 已移除，复制格式控件收敛到列表头部右上角并保持左侧 `复制格式` label + shadcn/ui ToggleGroup，独立预览卡片已删除，代理地址列继续展示 `display_address` 并提供复制按钮。
   image:
-  ![会话页默认列表优先布局](./assets/sessions-page-default.png)
+  ![会话页默认列表优先布局](./assets/sessions-copy-format-toggle-default.png)
+
+- PR: include
+- source_type: `storybook_canvas`
+  story_id_or_title: `Pages/SessionsPage/CopyFormatFlow`
+  state: `http uri selected`
+  evidence_note: 复制格式切换改为位于列表右上角的 shadcn/ui ToggleGroup 单选组，`复制格式` label 固定在选项左侧；切换到 `HTTP URI` 时无选中态错位，也不会再渲染额外的预览提示卡片。
+  image:
+  ![会话页复制格式切换 HTTP URI 选中态](./assets/sessions-copy-format-toggle-http-selected.png)
 
 - source_type: `storybook_canvas`
   story_id_or_title: `Pages/SessionsPage/CreateDialogFlow`
