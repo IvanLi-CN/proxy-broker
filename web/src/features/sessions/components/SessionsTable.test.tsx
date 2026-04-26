@@ -185,6 +185,40 @@ describe("SessionsTable", () => {
     expect(secondCheckbox).toBeChecked();
   });
 
+  it("selects multiple sessions by touch dragging through the checkbox column", () => {
+    renderWithProviders(<SessionsTableSelectionHarness />);
+
+    const firstCheckbox = screen.getByRole("checkbox", {
+      name: /Select session sess-A7c2Kp9LmQ4RsT1v/i,
+    });
+    const secondCheckbox = screen.getByRole("checkbox", {
+      name: /Select session sess-Q8n3Va1Zx5Mw2Lp7/i,
+    });
+    const firstCell = firstCheckbox.closest("td");
+    const secondCell = secondCheckbox.closest("td");
+    if (!firstCell || !secondCell) {
+      throw new Error("Expected session selection cells.");
+    }
+
+    const originalElementFromPoint = document.elementFromPoint;
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: vi.fn(() => secondCell),
+    });
+
+    fireEvent.pointerDown(firstCell, { pointerType: "touch", clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(firstCell, { pointerType: "touch", clientX: 10, clientY: 48 });
+    fireEvent.pointerUp(window);
+
+    expect(firstCheckbox).toBeChecked();
+    expect(secondCheckbox).toBeChecked();
+
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: originalElementFromPoint,
+    });
+  });
+
   it("toggles one session when clicking its checkbox", async () => {
     const user = userEvent.setup();
     renderWithProviders(<SessionsTableSelectionHarness />);

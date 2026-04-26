@@ -15,6 +15,8 @@ interface DragState {
   targetChecked: boolean;
 }
 
+const selectionItemAttribute = "data-table-selection-item-id";
+
 function mergeSelection(current: string[], targetIds: string[], checked: boolean) {
   const next = new Set(current);
   for (const targetId of targetIds) {
@@ -116,8 +118,30 @@ export function useTableRangeSelection({
     [commitSelection, enabledItemIds],
   );
 
+  const commitSelectionAtPoint = useCallback(
+    (clientX: number, clientY: number) => {
+      if (!dragStateRef.current.active) {
+        return;
+      }
+      if (typeof document.elementFromPoint !== "function") {
+        return;
+      }
+
+      const target = document.elementFromPoint(clientX, clientY);
+      const cell = target?.closest(`[${selectionItemAttribute}]`);
+      const itemId = cell?.getAttribute(selectionItemAttribute);
+      if (!itemId || disabledSet.has(itemId)) {
+        return;
+      }
+
+      commitSelection([itemId], dragStateRef.current.targetChecked);
+    },
+    [commitSelection, disabledSet],
+  );
+
   const getSelectionCellProps = useCallback(
     (itemId: string) => ({
+      [selectionItemAttribute]: itemId,
       onPointerDown: (event: PointerEvent<HTMLElement>) => {
         if (disabledSet.has(itemId) || (event.pointerType === "mouse" && event.button !== 0)) {
           return;
@@ -144,8 +168,17 @@ export function useTableRangeSelection({
         event.stopPropagation();
         commitSelection([itemId], dragStateRef.current.targetChecked);
       },
+      onPointerMove: (event: PointerEvent<HTMLElement>) => {
+        if (!dragStateRef.current.active) {
+          return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        commitSelectionAtPoint(event.clientX, event.clientY);
+      },
     }),
-    [commitRange, commitSelection, commitSingle, disabledSet],
+    [commitRange, commitSelection, commitSelectionAtPoint, commitSingle, disabledSet],
   );
 
   const getCheckboxProps = useCallback(
