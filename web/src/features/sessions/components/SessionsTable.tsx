@@ -3,6 +3,7 @@ import { toast } from "sonner";
 
 import { EmptyPanel } from "@/components/EmptyPanel";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import {
   Table,
@@ -13,6 +14,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { SessionCopyAddressFormat } from "@/features/sessions/hooks/use-session-copy-address-format";
+import { useTableRangeSelection } from "@/hooks/use-table-range-selection";
 import { useI18n } from "@/i18n";
 import {
   buildProxyAddressFromDisplayAddress,
@@ -64,6 +66,8 @@ interface SessionsTableProps {
   pendingCloseSessionIds?: string[];
   closingSessionId?: string | null;
   switchingSessionId?: string | null;
+  selectedSessionIds: string[];
+  onSelectedSessionIdsChange: (sessionIds: string[]) => void;
   onEditSession: (sessionId: string) => void;
   onUndoCloseSession: (sessionId: string) => void;
   onCloseSession: (sessionId: string) => void;
@@ -76,11 +80,18 @@ export function SessionsTable({
   pendingCloseSessionIds = [],
   closingSessionId,
   switchingSessionId,
+  selectedSessionIds,
+  onSelectedSessionIdsChange,
   onEditSession,
   onUndoCloseSession,
   onCloseSession,
 }: SessionsTableProps) {
   const { locale, t } = useI18n();
+  const selection = useTableRangeSelection({
+    itemIds: sessions.map((session) => session.session_id),
+    selectedIds: selectedSessionIds,
+    onSelectedIdsChange: onSelectedSessionIdsChange,
+  });
 
   const handleCopyAddress = async (session: SessionListItem) => {
     const displayAddress = resolveSessionDisplayAddress(session);
@@ -125,6 +136,12 @@ export function SessionsTable({
       <Table className="min-w-[920px]">
         <TableHeader>
           <TableRow className="border-b border-border/70 bg-muted/20">
+            <TableHead className="w-10 px-4">
+              <Checkbox
+                {...selection.selectAllCheckboxProps}
+                aria-label={t("Select all visible sessions")}
+              />
+            </TableHead>
             <TableHead className="px-4">{t("Session ID")}</TableHead>
             <TableHead>{t("Proxy")}</TableHead>
             <TableHead>{t("Selected IP")}</TableHead>
@@ -145,8 +162,20 @@ export function SessionsTable({
               <TableRow
                 key={session.session_id}
                 data-close-state={isPendingClose ? "pending" : isClosing ? "closing" : "idle"}
+                data-state={selectedSessionIds.includes(session.session_id) ? "selected" : "idle"}
                 className={cn("[&_td]:py-3", isDimmed && "bg-muted/30 text-muted-foreground")}
               >
+                <TableCell
+                  className="touch-none px-4 align-middle"
+                  {...selection.getSelectionCellProps(session.session_id)}
+                >
+                  <Checkbox
+                    {...selection.getCheckboxProps(session.session_id)}
+                    aria-label={t("Select session {sessionId}", {
+                      sessionId: session.session_id,
+                    })}
+                  />
+                </TableCell>
                 <TableCell className="px-4 font-mono text-xs md:text-sm">
                   {session.session_id}
                 </TableCell>

@@ -1,4 +1,4 @@
-import { PlusCircleIcon } from "lucide-react";
+import { PlusCircleIcon, RotateCcwIcon, XCircleIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { DataTablePanel } from "@/components/DataTablePanel";
@@ -86,6 +86,7 @@ export function SessionsPage({
   const [listenCopyFormat, setListenCopyFormat] = useSessionCopyAddressFormat();
   const [pendingCloseSessionIds, setPendingCloseSessionIds] = useState<string[]>([]);
   const [hiddenCloseSessionIds, setHiddenCloseSessionIds] = useState<string[]>([]);
+  const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
   const closeCountdownTimersRef = useRef<Map<string, number>>(new Map());
 
   const editingSession = useMemo(
@@ -96,6 +97,11 @@ export function SessionsPage({
     () => sessions.filter((session) => !hiddenCloseSessionIds.includes(session.session_id)),
     [hiddenCloseSessionIds, sessions],
   );
+  const visibleSessionIds = useMemo(
+    () => visibleSessions.map((session) => session.session_id),
+    [visibleSessions],
+  );
+  const visibleSessionIdSet = useMemo(() => new Set(visibleSessionIds), [visibleSessionIds]);
   const copyAddressOptions = useMemo(
     () =>
       [
@@ -176,6 +182,12 @@ export function SessionsPage({
     );
   }, [sessions]);
 
+  useEffect(() => {
+    setSelectedSessionIds((previous) =>
+      previous.filter((sessionId) => visibleSessionIdSet.has(sessionId)),
+    );
+  }, [visibleSessionIdSet]);
+
   useEffect(
     () => () => {
       for (const timerId of closeCountdownTimersRef.current.values()) {
@@ -219,6 +231,19 @@ export function SessionsPage({
 
     setPendingCloseSessionIds((previous) => previous.filter((id) => id !== sessionId));
   };
+
+  const selectedVisibleSessionIds = selectedSessionIds.filter((sessionId) =>
+    visibleSessionIdSet.has(sessionId),
+  );
+  const selectedPendingSessionIds = selectedVisibleSessionIds.filter((sessionId) =>
+    pendingCloseSessionIds.includes(sessionId),
+  );
+  const selectedClosableSessionIds = selectedVisibleSessionIds.filter(
+    (sessionId) =>
+      !pendingCloseSessionIds.includes(sessionId) &&
+      closingSessionId !== sessionId &&
+      switchingSessionId !== sessionId,
+  );
 
   const chips = [
     t(visibleSessions.length === 1 ? "{count} session" : "{count} sessions", {
@@ -288,6 +313,45 @@ export function SessionsPage({
           </div>
         }
       >
+        {visibleSessions.length > 0 ? (
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-[16px] border border-dashed border-border/70 bg-muted/10 px-3 py-2 text-xs text-muted-foreground">
+            <span>
+              {selectedVisibleSessionIds.length > 0
+                ? t("Selected {count} sessions", {
+                    count: formatNumber(selectedVisibleSessionIds.length),
+                  })
+                : t("Select one or more sessions to run batch operations.")}
+            </span>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={selectedPendingSessionIds.length === 0}
+                onClick={() => {
+                  for (const sessionId of selectedPendingSessionIds) {
+                    undoCloseCountdown(sessionId);
+                  }
+                }}
+              >
+                <RotateCcwIcon className="size-3.5" />
+                {t("Undo selected")}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={selectedClosableSessionIds.length === 0}
+                onClick={() => {
+                  for (const sessionId of selectedClosableSessionIds) {
+                    beginCloseCountdown(sessionId);
+                  }
+                }}
+              >
+                <XCircleIcon className="size-3.5" />
+                {t("Close selected")}
+              </Button>
+            </div>
+          </div>
+        ) : null}
         <SessionsTable
           closingSessionId={closingSessionId}
           isLoading={sessionsLoading}
@@ -299,6 +363,8 @@ export function SessionsPage({
           }}
           onUndoCloseSession={undoCloseCountdown}
           pendingCloseSessionIds={pendingCloseSessionIds}
+          selectedSessionIds={selectedSessionIds}
+          onSelectedSessionIdsChange={setSelectedSessionIds}
           sessions={visibleSessions}
           switchingSessionId={switchingSessionId}
         />

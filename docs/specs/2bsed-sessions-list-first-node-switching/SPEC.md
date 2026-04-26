@@ -44,6 +44,8 @@
 - 当 bind host 为 `0.0.0.0` / `::` / `[::]` 时，owner-facing UI 不得直接展示通配地址；应优先使用 `session_public_host`，否则回退到当前页面 hostname。
 - 当 bind host 为明确地址（例如域名、`192.168.*` 或 `127.0.0.1`）时，`display_address` 必须直接复用该 host，不得再被 UI 强制替换。
 - 会话地址列必须在文本右侧提供复制 icon，按当前选择器格式复制完整代理地址。
+- 会话列表必须支持行多选、表头全选可见会话、鼠标/触摸从选择列按下后拖拽批量勾选/取消，以及 Shift 连续选择。
+- 会话列表必须提供所选数量、批量关闭与批量撤销入口；批量关闭逐条复用现有 10 秒撤销窗口，不新增后端批量关闭 API。
 - 会话关闭入口必须先进入 10 秒撤销窗口：点击后整行置灰、非撤销操作禁用、关闭按钮切换为撤销按钮，倒计时结束后才真正移除会话。
 - 节点选择弹窗默认按 `当前会话最近使用` 排序，并支持切换到 `当前 profile 最近使用`。
 - `PATCH /api/v1/profiles/{profile_id}/sessions/{session_id}/node` 必须保持 `session_id / listen / port / created_at` 不变，只更新 `node_id / proxy_name / selected_ip`。
@@ -83,6 +85,9 @@
 - Given 会话列表中的代理地址列
   When 操作员点击复制 icon
   Then 系统按当前选择器生成并复制完整代理地址，例如 `socks://ops.example.com:10080`、`http://192.168.31.15:10080` 或 `192.168.31.15:10080`。
+- Given 会话列表选择列
+  When 操作员点击表头 checkbox、Shift 选择范围，或用鼠标/触摸按住选择列拖过多行
+  Then 仅选择状态变化，不触发复制、编辑或关闭动作，并能对所选会话执行批量关闭/撤销。
 - Given 会话列表中的关闭按钮
   When 操作员点击关闭
   Then 当前行先进入 10 秒撤销窗口并置灰，按钮切换为撤销；若未撤销，会话在 10 秒后消失。
@@ -107,6 +112,20 @@
 - `cd web && bun run test:e2e`
 
 ## Visual Evidence
+
+- source_type: `storybook_canvas`
+  target_program: `mock-only`
+  capture_scope: `browser-viewport`
+  requested_viewport: `1440x980`
+  viewport_strategy: `browser-resize-fallback`
+  sensitive_exclusion: `N/A`
+  submission_gate: `approved`
+  story_id_or_title: `Pages/SessionsPage/Default`
+  state: `batch selected close pending`
+  evidence_note: 会话列表支持选择列多选；批量工具条展示已选 2 个会话，批量关闭后两行进入 10 秒撤销窗口，行内复制、编辑与关闭操作不会被选择拖拽误触发。
+  image:
+  PR: include
+  ![会话列表批量选择与关闭撤销](./assets/sessions-batch-selection.png)
 
 - PR: include
 - source_type: `storybook_canvas`

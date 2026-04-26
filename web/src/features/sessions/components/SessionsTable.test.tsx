@@ -1,6 +1,7 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SessionsTable } from "@/features/sessions/components/SessionsTable";
@@ -18,6 +19,26 @@ vi.mock("sonner", () => ({
 
 function renderWithProviders(node: ReactNode) {
   return render(<I18nProvider initialLocale="en-US">{node}</I18nProvider>);
+}
+
+function SessionsTableSelectionHarness() {
+  const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
+
+  return (
+    <SessionsTable
+      sessions={sessionsFixture.sessions}
+      listenCopyFormat="socks_url"
+      isLoading={false}
+      pendingCloseSessionIds={[]}
+      closingSessionId={null}
+      switchingSessionId={null}
+      selectedSessionIds={selectedSessionIds}
+      onSelectedSessionIdsChange={setSelectedSessionIds}
+      onEditSession={vi.fn()}
+      onUndoCloseSession={vi.fn()}
+      onCloseSession={vi.fn()}
+    />
+  );
 }
 
 describe("SessionsTable", () => {
@@ -42,6 +63,8 @@ describe("SessionsTable", () => {
         pendingCloseSessionIds={[]}
         closingSessionId={null}
         switchingSessionId={null}
+        selectedSessionIds={[]}
+        onSelectedSessionIdsChange={vi.fn()}
         onEditSession={vi.fn()}
         onUndoCloseSession={vi.fn()}
         onCloseSession={vi.fn()}
@@ -84,6 +107,8 @@ describe("SessionsTable", () => {
         pendingCloseSessionIds={[]}
         closingSessionId={null}
         switchingSessionId={null}
+        selectedSessionIds={[]}
+        onSelectedSessionIdsChange={vi.fn()}
         onEditSession={vi.fn()}
         onUndoCloseSession={vi.fn()}
         onCloseSession={vi.fn()}
@@ -113,6 +138,8 @@ describe("SessionsTable", () => {
         pendingCloseSessionIds={[sessionsFixture.sessions[0]?.session_id ?? ""]}
         closingSessionId={null}
         switchingSessionId={null}
+        selectedSessionIds={[]}
+        onSelectedSessionIdsChange={vi.fn()}
         onEditSession={vi.fn()}
         onUndoCloseSession={onUndoCloseSession}
         onCloseSession={vi.fn()}
@@ -133,5 +160,126 @@ describe("SessionsTable", () => {
 
     undoButton.click();
     expect(onUndoCloseSession).toHaveBeenCalledWith("sess-A7c2Kp9LmQ4RsT1v");
+  });
+
+  it("selects multiple sessions by dragging through the checkbox column", () => {
+    renderWithProviders(<SessionsTableSelectionHarness />);
+
+    const firstCheckbox = screen.getByRole("checkbox", {
+      name: /Select session sess-A7c2Kp9LmQ4RsT1v/i,
+    });
+    const secondCheckbox = screen.getByRole("checkbox", {
+      name: /Select session sess-Q8n3Va1Zx5Mw2Lp7/i,
+    });
+    const firstCell = firstCheckbox.closest("td");
+    const secondCell = secondCheckbox.closest("td");
+    if (!firstCell || !secondCell) {
+      throw new Error("Expected session selection cells.");
+    }
+
+    fireEvent.pointerDown(firstCell, { pointerType: "mouse", button: 0 });
+    fireEvent.pointerEnter(secondCell, { pointerType: "mouse", button: 0 });
+    fireEvent.pointerUp(window);
+
+    expect(firstCheckbox).toBeChecked();
+    expect(secondCheckbox).toBeChecked();
+  });
+
+  it("selects multiple sessions by touch dragging through the checkbox column", () => {
+    renderWithProviders(<SessionsTableSelectionHarness />);
+
+    const firstCheckbox = screen.getByRole("checkbox", {
+      name: /Select session sess-A7c2Kp9LmQ4RsT1v/i,
+    });
+    const secondCheckbox = screen.getByRole("checkbox", {
+      name: /Select session sess-Q8n3Va1Zx5Mw2Lp7/i,
+    });
+    const firstCell = firstCheckbox.closest("td");
+    const secondCell = secondCheckbox.closest("td");
+    if (!firstCell || !secondCell) {
+      throw new Error("Expected session selection cells.");
+    }
+
+    const originalElementFromPoint = document.elementFromPoint;
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: vi.fn(() => secondCell),
+    });
+
+    fireEvent.pointerDown(firstCell, { pointerType: "touch", clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(firstCell, { pointerType: "touch", clientX: 10, clientY: 48 });
+    fireEvent.pointerUp(window);
+
+    expect(firstCheckbox).toBeChecked();
+    expect(secondCheckbox).toBeChecked();
+
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: originalElementFromPoint,
+    });
+  });
+
+  it("toggles one session when clicking its checkbox", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<SessionsTableSelectionHarness />);
+
+    const firstCheckbox = screen.getByRole("checkbox", {
+      name: /Select session sess-A7c2Kp9LmQ4RsT1v/i,
+    });
+
+    await user.click(firstCheckbox);
+
+    expect(firstCheckbox).toBeChecked();
+  });
+
+  it("deselects a selected session when clicking the checkbox icon", () => {
+    renderWithProviders(<SessionsTableSelectionHarness />);
+
+    const firstCheckbox = screen.getByRole("checkbox", {
+      name: /Select session sess-A7c2Kp9LmQ4RsT1v/i,
+    });
+    const firstCell = firstCheckbox.closest("td");
+    if (!firstCell) {
+      throw new Error("Expected session selection cell.");
+    }
+
+    fireEvent.pointerDown(firstCell, { pointerType: "mouse", button: 0 });
+    fireEvent.pointerUp(window);
+    expect(firstCheckbox).toBeChecked();
+
+    const checkboxIcon = firstCheckbox.querySelector("svg");
+    if (!checkboxIcon) {
+      throw new Error("Expected checked checkbox icon.");
+    }
+
+    fireEvent.pointerDown(checkboxIcon, { pointerType: "mouse", button: 0 });
+    fireEvent.click(firstCheckbox);
+    fireEvent.pointerUp(window);
+
+    expect(firstCheckbox).not.toBeChecked();
+  });
+
+  it("extends session selection with shift range selection", () => {
+    renderWithProviders(<SessionsTableSelectionHarness />);
+
+    const firstCheckbox = screen.getByRole("checkbox", {
+      name: /Select session sess-A7c2Kp9LmQ4RsT1v/i,
+    });
+    const secondCheckbox = screen.getByRole("checkbox", {
+      name: /Select session sess-Q8n3Va1Zx5Mw2Lp7/i,
+    });
+    const firstCell = firstCheckbox.closest("td");
+    const secondCell = secondCheckbox.closest("td");
+    if (!firstCell || !secondCell) {
+      throw new Error("Expected session selection cells.");
+    }
+
+    fireEvent.pointerDown(firstCell, { pointerType: "mouse", button: 0 });
+    fireEvent.pointerUp(window);
+    fireEvent.pointerDown(secondCell, { pointerType: "mouse", button: 0, shiftKey: true });
+    fireEvent.pointerUp(window);
+
+    expect(firstCheckbox).toBeChecked();
+    expect(secondCheckbox).toBeChecked();
   });
 });

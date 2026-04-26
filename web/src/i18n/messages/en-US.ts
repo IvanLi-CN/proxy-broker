@@ -302,6 +302,7 @@ export const enUS: MessageCatalog = {
   "Select one or more nodes to run batch operations.":
     "Select one or more nodes to run batch operations.",
   "Selected {count} nodes": "Selected {count} nodes",
+  "Select all visible nodes": "Select all visible nodes",
   "Refresh selected": "Refresh selected",
   "Probe selected": "Probe selected",
   "Create session": "Create session",
@@ -317,6 +318,11 @@ export const enUS: MessageCatalog = {
     "Keep the page focused on the current session inventory. Create new sessions or switch nodes from dialogs when you need them.",
   "{count} sessions": "{count} sessions",
   "{count} session": "{count} session",
+  "Select one or more sessions to run batch operations.":
+    "Select one or more sessions to run batch operations.",
+  "Selected {count} sessions": "Selected {count} sessions",
+  "Undo selected": "Undo selected",
+  "Close selected": "Close selected",
   "switch action in flight": "switch action in flight",
   "switch action idle": "switch action idle",
   "close action in flight": "close action in flight",
@@ -335,6 +341,8 @@ export const enUS: MessageCatalog = {
   "Proxy address": "Proxy address",
   Created: "Created",
   Action: "Action",
+  "Select all visible sessions": "Select all visible sessions",
+  "Select session {sessionId}": "Select session {sessionId}",
   "Edit proxy for {sessionId}": "Edit proxy for {sessionId}",
   "Switched {sessionId} to {proxyName}": "Switched {sessionId} to {proxyName}",
   "Switch session proxy": "Switch session proxy",

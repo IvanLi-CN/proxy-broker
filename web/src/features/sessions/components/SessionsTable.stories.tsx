@@ -23,6 +23,8 @@ const meta = {
     pendingCloseSessionIds: [],
     closingSessionId: null,
     switchingSessionId: null,
+    selectedSessionIds: [],
+    onSelectedSessionIdsChange: fn(),
     onEditSession: fn(),
     onUndoCloseSession: fn(),
     onCloseSession: fn(),
@@ -61,5 +63,14 @@ export const Switching: Story = {
 export const PendingClose: Story = {
   args: {
     pendingCloseSessionIds: [sessionsFixture.sessions[0]?.session_id ?? ""],
+  },
+};
+
+export const BatchSelection: Story = {
+  args: {
+    selectedSessionIds: [
+      sessionsFixture.sessions[0]?.session_id ?? "",
+      sessionsFixture.sessions[1]?.session_id ?? "",
+    ],
   },
 };

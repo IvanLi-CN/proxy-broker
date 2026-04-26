@@ -7,7 +7,7 @@ import {
   RefreshCcwIcon,
   Trash2Icon,
 } from "lucide-react";
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 
 import { ActionResponsePanel } from "@/components/ActionResponsePanel";
 import { DataTablePanel } from "@/components/DataTablePanel";
@@ -42,6 +42,7 @@ import {
 import { ProfileProxyPolicyCard } from "@/features/proxies/components/ProfileProxyPolicyCard";
 import { ProxyLoadCard } from "@/features/proxies/components/ProxyLoadCard";
 import type { ProxyNodeLiveState } from "@/hooks/use-proxy-operation-events";
+import { useTableRangeSelection } from "@/hooks/use-table-range-selection";
 import { useI18n } from "@/i18n";
 import {
   formatCountryName,
@@ -804,18 +805,6 @@ function GroupedProxyCatalogPanel({
     );
   };
 
-  const toggleNode = (nodeId: string, checked: boolean) => {
-    setSelectedNodeIds((current) => {
-      const next = new Set(current);
-      if (checked) {
-        next.add(nodeId);
-      } else {
-        next.delete(nodeId);
-      }
-      return [...next];
-    });
-  };
-
   const toggleGroupSelection = (group: ProxyCatalogGroupItem, checked: boolean) => {
     setSelectedNodeIds((current) => {
       const next = new Set(current);
@@ -830,6 +819,20 @@ function GroupedProxyCatalogPanel({
     });
   };
 
+  const visibleNodeIds = useMemo(
+    () =>
+      groups.flatMap((group) =>
+        expandedImportIds.includes(group.import.import_id)
+          ? group.nodes.map((node) => node.node_id)
+          : [],
+      ),
+    [expandedImportIds, groups],
+  );
+  const nodeSelection = useTableRangeSelection({
+    itemIds: visibleNodeIds,
+    selectedIds: selectedNodeIds,
+    onSelectedIdsChange: setSelectedNodeIds,
+  });
   const allNodeCount = groups.reduce((sum, group) => sum + group.nodes.length, 0);
   const nodeMap = new Map(
     groups.flatMap((group) => group.nodes.map((node) => [node.node_id, node] as const)),
@@ -924,7 +927,12 @@ function GroupedProxyCatalogPanel({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-10 px-3" />
+                <TableHead className="w-10 px-3">
+                  <Checkbox
+                    {...nodeSelection.selectAllCheckboxProps}
+                    aria-label={t("Select all visible nodes")}
+                  />
+                </TableHead>
                 <TableHead className="px-3 text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
                   {t("Name")}
                 </TableHead>
@@ -981,7 +989,9 @@ function GroupedProxyCatalogPanel({
                       <TableRow key={group.import.import_id} className="bg-muted/10">
                         <TableCell className="px-3 align-top">
                           <Checkbox
-                            checked={allSelected}
+                            checked={
+                              allSelected ? true : selectedCount > 0 ? "indeterminate" : false
+                            }
                             onCheckedChange={(checked) =>
                               toggleGroupSelection(group, checked === true)
                             }
@@ -1129,12 +1139,12 @@ function GroupedProxyCatalogPanel({
                       {expanded
                         ? group.nodes.map((node) => (
                             <TableRow key={node.node_id} className="bg-background/60">
-                              <TableCell className="px-3 align-top">
+                              <TableCell
+                                className="touch-none px-3 align-top"
+                                {...nodeSelection.getSelectionCellProps(node.node_id)}
+                              >
                                 <Checkbox
-                                  checked={selectedNodeIds.includes(node.node_id)}
-                                  onCheckedChange={(checked) =>
-                                    toggleNode(node.node_id, checked === true)
-                                  }
+                                  {...nodeSelection.getCheckboxProps(node.node_id)}
                                   aria-label={t("Select node {name}", { name: node.proxy_name })}
                                 />
                               </TableCell>

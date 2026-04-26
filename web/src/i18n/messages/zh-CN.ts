@@ -519,7 +519,13 @@ export const zhCN: MessageCatalog = {
   "No sessions yet": "还没有会话",
   "Create one session or a batch from the dialog to populate this list.":
     "先从弹窗创建单个会话或一个批次，这个列表才会有内容。",
+  "Select one or more sessions to run batch operations.": "选择一个或多个会话后即可执行批量操作。",
+  "Selected {count} sessions": "已选择 {count} 个会话",
+  "Undo selected": "撤销所选",
+  "Close selected": "关闭所选",
   Undo: "撤销",
+  "Select all visible sessions": "选择所有可见会话",
+  "Select session {sessionId}": "选择会话 {sessionId}",
   "Edit proxy for {sessionId}": "编辑 {sessionId} 的代理",
   "Switched {sessionId} to {proxyName}": "已将 {sessionId} 切换到 {proxyName}",
   "Open a new session from one dialog. Keep single and batch creation together, but leave the list as the default surface.":
@@ -777,6 +783,7 @@ export const zhCN: MessageCatalog = {
   "Live stream: {state}": "实时流：{state}",
   "Select one or more nodes to run batch operations.": "选择一个或多个节点后即可执行批量操作。",
   "Selected {count} nodes": "已选择 {count} 个节点",
+  "Select all visible nodes": "选择所有可见节点",
   "Refresh selected": "刷新所选",
   "Probe selected": "测速所选",
   "Create session": "创建会话",
