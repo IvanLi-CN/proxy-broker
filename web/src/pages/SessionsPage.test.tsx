@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { sessionCopyAddressFormatStorageKey } from "@/features/sessions/hooks/use-session-copy-address-format";
 import { I18nProvider } from "@/i18n";
-import { sessionNodeOptionsFixture, sessionsFixture } from "@/mocks/fixtures";
+import { sessionIpNodeOptionsFixture, sessionsFixture } from "@/mocks/fixtures";
 import { SessionsPage } from "@/pages/SessionsPage";
 
 const mockToast = vi.hoisted(() => ({
@@ -73,8 +73,7 @@ describe("SessionsPage", () => {
         onOpenSession={vi.fn()}
         onOpenBatch={vi.fn()}
         onUpdateSessionNode={vi.fn()}
-        searchSessionOptions={vi.fn(async () => [])}
-        searchSessionNodeOptions={vi.fn(async () => sessionNodeOptionsFixture.items)}
+        searchSessionIpNodeOptions={vi.fn(async () => sessionIpNodeOptionsFixture.groups)}
         onCloseSession={vi.fn()}
         onResetCreateState={vi.fn()}
         onResetSwitchState={vi.fn()}
@@ -115,8 +114,7 @@ describe("SessionsPage", () => {
         onOpenSession={vi.fn()}
         onOpenBatch={vi.fn()}
         onUpdateSessionNode={vi.fn()}
-        searchSessionOptions={vi.fn(async () => [])}
-        searchSessionNodeOptions={vi.fn(async () => sessionNodeOptionsFixture.items)}
+        searchSessionIpNodeOptions={vi.fn(async () => sessionIpNodeOptionsFixture.groups)}
         onCloseSession={onCloseSession}
         onResetCreateState={vi.fn()}
         onResetSwitchState={vi.fn()}
@@ -172,8 +170,7 @@ describe("SessionsPage", () => {
         onOpenSession={vi.fn()}
         onOpenBatch={vi.fn()}
         onUpdateSessionNode={vi.fn()}
-        searchSessionOptions={vi.fn(async () => [])}
-        searchSessionNodeOptions={vi.fn(async () => sessionNodeOptionsFixture.items)}
+        searchSessionIpNodeOptions={vi.fn(async () => sessionIpNodeOptionsFixture.groups)}
         onCloseSession={onCloseSession}
         onResetCreateState={vi.fn()}
         onResetSwitchState={vi.fn()}
@@ -224,8 +221,7 @@ describe("SessionsPage", () => {
         onOpenSession={vi.fn()}
         onOpenBatch={vi.fn()}
         onUpdateSessionNode={vi.fn()}
-        searchSessionOptions={vi.fn(async () => [])}
-        searchSessionNodeOptions={vi.fn(async () => sessionNodeOptionsFixture.items)}
+        searchSessionIpNodeOptions={vi.fn(async () => sessionIpNodeOptionsFixture.groups)}
         onCloseSession={onCloseSession}
         onResetCreateState={vi.fn()}
         onResetSwitchState={vi.fn()}

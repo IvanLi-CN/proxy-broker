@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn } from "storybook/test";
 
 import { SessionCreateDialog } from "@/features/sessions/components/SessionCreateDialog";
+import { sessionIpNodeOptionsFixture } from "@/mocks/fixtures";
 
 const meta = {
   title: "Features/Sessions/SessionCreateDialog",
@@ -27,7 +28,7 @@ const meta = {
     suggestedPort: 10080,
     onOpenSession: fn(),
     onOpenBatch: fn(),
-    searchSessionOptions: fn(async () => []),
+    searchIpNodeOptions: fn(async () => sessionIpNodeOptionsFixture.groups),
   },
 } satisfies Meta<typeof SessionCreateDialog>;
 
@@ -50,6 +51,12 @@ export const CompactViewport: Story = {
 export const BatchError: Story = {
   args: {
     batchError: "The backend rejected one row, so the batch rolled back.",
+  },
+};
+
+export const Empty: Story = {
+  args: {
+    searchIpNodeOptions: fn(async () => []),
   },
 };
 

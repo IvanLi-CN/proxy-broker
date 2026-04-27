@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn } from "storybook/test";
 
 import { SessionNodeSelectDialog } from "@/features/sessions/components/SessionNodeSelectDialog";
-import { sessionNodeOptionsFixture, sessionsFixture } from "@/mocks/fixtures";
+import { sessionIpNodeOptionsFixture, sessionsFixture } from "@/mocks/fixtures";
 
 const meta = {
   title: "Features/Sessions/SessionNodeSelectDialog",
@@ -22,7 +22,7 @@ const meta = {
     isPending: false,
     error: null,
     onOpenChange: fn(),
-    onSearch: fn(async () => sessionNodeOptionsFixture.items),
+    onSearch: fn(async () => sessionIpNodeOptionsFixture.groups),
     onSubmit: fn(),
   },
 } satisfies Meta<typeof SessionNodeSelectDialog>;
@@ -44,5 +44,13 @@ export const ZhCN: Story = {
   args: {},
   globals: {
     locale: "zh-CN",
+  },
+};
+
+export const LoadFailure: Story = {
+  args: {
+    onSearch: fn(async () => {
+      throw new Error("network unavailable");
+    }),
   },
 };

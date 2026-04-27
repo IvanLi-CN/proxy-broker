@@ -75,6 +75,7 @@ export interface OpenSessionResponse {
   selected_ip: string;
   proxy_name: string;
   node_id: string;
+  candidate_node_ids: string[];
 }
 
 export interface OpenBatchResponse {
@@ -87,7 +88,19 @@ export interface OpenSessionByNodeRequest {
 }
 
 export interface UpdateSessionNodeRequest {
-  node_id: string;
+  node_id?: string;
+  selected_ip?: string;
+  candidate_node_ids?: string[];
+}
+
+export interface OpenSessionByIpRequest {
+  selected_ip: string;
+  candidate_node_ids: string[];
+  desired_port?: number | null;
+}
+
+export interface OpenBatchByIpRequest {
+  requests: OpenSessionByIpRequest[];
 }
 
 export interface OpenBatchByNodeItemRequest {
@@ -150,6 +163,54 @@ export interface SearchSessionNodeOptionsResponse {
   items: SessionNodeOptionItem[];
 }
 
+export type SessionIpNodeGroupBy = "subscription" | "city";
+
+export interface SearchSessionIpNodeOptionsRequest {
+  query?: string;
+  group_by?: SessionIpNodeGroupBy;
+  session_id?: string;
+  limit?: number;
+}
+
+export interface SessionIpNodeOptionNodeItem {
+  node_id: string;
+  proxy_name: string;
+  import_name?: string | null;
+  source_label?: string | null;
+  country_code?: string | null;
+  country_name?: string | null;
+  region_name?: string | null;
+  city?: string | null;
+  last_probe_ok?: boolean | null;
+  median_latency_ms?: number | null;
+  profile_last_used_at?: number | null;
+  session_last_used_at?: number | null;
+}
+
+export interface SessionIpNodeOptionIpItem {
+  ip: string;
+  group_key: string;
+  group_label: string;
+  subscription_name?: string | null;
+  country_code?: string | null;
+  country_name?: string | null;
+  region_name?: string | null;
+  city?: string | null;
+  last_used_at?: number | null;
+  best_latency_ms?: number | null;
+  nodes: SessionIpNodeOptionNodeItem[];
+}
+
+export interface SessionIpNodeOptionGroupItem {
+  key: string;
+  label: string;
+  items: SessionIpNodeOptionIpItem[];
+}
+
+export interface SearchSessionIpNodeOptionsResponse {
+  groups: SessionIpNodeOptionGroupItem[];
+}
+
 export interface ExtractIpItem {
   ip: string;
   country_code?: string | null;
@@ -175,6 +236,7 @@ export interface SessionRecord {
   selected_ip: string;
   proxy_name: string;
   node_id: string;
+  candidate_node_ids: string[];
   created_at: number;
 }
 

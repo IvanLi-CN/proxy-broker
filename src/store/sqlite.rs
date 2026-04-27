@@ -127,6 +127,7 @@ impl SqliteStore {
               selected_ip TEXT NOT NULL,
               proxy_name TEXT NOT NULL,
               node_id TEXT NOT NULL DEFAULT '',
+              candidate_node_ids TEXT NOT NULL DEFAULT '[]',
               created_at INTEGER NOT NULL,
               PRIMARY KEY (profile_id, session_id)
             )
@@ -135,6 +136,7 @@ impl SqliteStore {
         .execute(&self.pool)
         .await?;
         self.migrate_sessions_node_id_schema().await?;
+        self.migrate_sessions_candidate_node_ids_schema().await?;
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS profile_node_usages (
@@ -1120,6 +1122,33 @@ impl SqliteStore {
         sqlx::query("ALTER TABLE sessions ADD COLUMN node_id TEXT NOT NULL DEFAULT ''")
             .execute(&self.pool)
             .await?;
+        Ok(())
+    }
+
+    async fn migrate_sessions_candidate_node_ids_schema(&self) -> anyhow::Result<()> {
+        if self
+            .table_has_column("sessions", "candidate_node_ids")
+            .await?
+        {
+            return Ok(());
+        }
+
+        sqlx::query(
+            "ALTER TABLE sessions ADD COLUMN candidate_node_ids TEXT NOT NULL DEFAULT '[]'",
+        )
+        .execute(&self.pool)
+        .await?;
+        sqlx::query(
+            r#"
+            UPDATE sessions
+            SET candidate_node_ids = CASE
+              WHEN node_id IS NULL OR trim(node_id) = '' THEN '[]'
+              ELSE json_array(node_id)
+            END
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 
@@ -2326,15 +2355,17 @@ impl BrokerStore for SqliteStore {
             sqlx::query(
                 r#"
                 INSERT INTO sessions (
-                  profile_id, session_id, listen, port, selected_ip, proxy_name, node_id, created_at
+                  profile_id, session_id, listen, port, selected_ip, proxy_name, node_id,
+                  candidate_node_ids, created_at
                 )
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                 ON CONFLICT(profile_id, session_id) DO UPDATE SET
                   listen = excluded.listen,
                   port = excluded.port,
                   selected_ip = excluded.selected_ip,
                   proxy_name = excluded.proxy_name,
                   node_id = excluded.node_id,
+                  candidate_node_ids = excluded.candidate_node_ids,
                   created_at = excluded.created_at
                 "#,
             )
@@ -2345,6 +2376,7 @@ impl BrokerStore for SqliteStore {
             .bind(&session.selected_ip)
             .bind(&session.proxy_name)
             .bind(&session.node_id)
+            .bind(serde_json::to_string(&session.candidate_node_ids)?)
             .bind(session.created_at)
             .execute(&mut *tx)
             .await?;
@@ -2364,15 +2396,17 @@ impl BrokerStore for SqliteStore {
             sqlx::query(
                 r#"
                 INSERT INTO sessions (
-                  profile_id, session_id, listen, port, selected_ip, proxy_name, node_id, created_at
+                  profile_id, session_id, listen, port, selected_ip, proxy_name, node_id,
+                  candidate_node_ids, created_at
                 )
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                 ON CONFLICT(profile_id, session_id) DO UPDATE SET
                   listen = excluded.listen,
                   port = excluded.port,
                   selected_ip = excluded.selected_ip,
                   proxy_name = excluded.proxy_name,
                   node_id = excluded.node_id,
+                  candidate_node_ids = excluded.candidate_node_ids,
                   created_at = excluded.created_at
                 "#,
             )
@@ -2383,6 +2417,7 @@ impl BrokerStore for SqliteStore {
             .bind(&session.selected_ip)
             .bind(&session.proxy_name)
             .bind(&session.node_id)
+            .bind(serde_json::to_string(&session.candidate_node_ids)?)
             .bind(session.created_at)
             .execute(&mut *tx)
             .await?;
@@ -2453,7 +2488,8 @@ impl BrokerStore for SqliteStore {
     async fn list_sessions(&self, profile_id: &str) -> anyhow::Result<Vec<SessionRecord>> {
         let rows = sqlx::query(
             r#"
-            SELECT session_id, listen, port, selected_ip, proxy_name, node_id, created_at
+            SELECT session_id, listen, port, selected_ip, proxy_name, node_id,
+                   candidate_node_ids, created_at
             FROM sessions
             WHERE profile_id = ?1
             ORDER BY created_at ASC, session_id ASC
@@ -2466,6 +2502,10 @@ impl BrokerStore for SqliteStore {
         rows.into_iter()
             .map(|row| {
                 let port: i64 = row.try_get("port")?;
+                let candidate_node_ids_json: String = row.try_get("candidate_node_ids")?;
+                let candidate_node_ids =
+                    serde_json::from_str::<Vec<String>>(&candidate_node_ids_json)
+                        .unwrap_or_default();
                 Ok(SessionRecord {
                     session_id: row.try_get("session_id")?,
                     listen: row.try_get("listen")?,
@@ -2473,6 +2513,7 @@ impl BrokerStore for SqliteStore {
                     selected_ip: row.try_get("selected_ip")?,
                     proxy_name: row.try_get("proxy_name")?,
                     node_id: row.try_get("node_id")?,
+                    candidate_node_ids,
                     created_at: row.try_get("created_at")?,
                 })
             })

@@ -957,6 +957,7 @@ mod tests {
                 selected_ip: "1.1.1.1".to_string(),
                 proxy_name: "proxy-b".to_string(),
                 node_id: "node-b".to_string(),
+                candidate_node_ids: vec!["node-b".to_string()],
                 created_at: 2,
             },
             SessionRecord {
@@ -966,6 +967,7 @@ mod tests {
                 selected_ip: "1.1.1.2".to_string(),
                 proxy_name: "proxy-a".to_string(),
                 node_id: "node-a".to_string(),
+                candidate_node_ids: vec!["node-a".to_string()],
                 created_at: 2,
             },
             SessionRecord {
@@ -975,6 +977,7 @@ mod tests {
                 selected_ip: "1.1.1.3".to_string(),
                 proxy_name: "proxy-c".to_string(),
                 node_id: "node-c".to_string(),
+                candidate_node_ids: vec!["node-c".to_string()],
                 created_at: 1,
             },
         ];

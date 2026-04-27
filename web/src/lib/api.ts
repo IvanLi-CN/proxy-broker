@@ -16,9 +16,11 @@ import type {
   ListSessionsResponse,
   LoadSubscriptionRequest,
   LoadSubscriptionResponse,
+  OpenBatchByIpRequest,
   OpenBatchByNodeRequest,
   OpenBatchRequest,
   OpenBatchResponse,
+  OpenSessionByIpRequest,
   OpenSessionByNodeRequest,
   OpenSessionRequest,
   OpenSessionResponse,
@@ -31,6 +33,8 @@ import type {
   ProxyOperationRequest,
   RefreshRequest,
   RefreshResponse,
+  SearchSessionIpNodeOptionsRequest,
+  SearchSessionIpNodeOptionsResponse,
   SearchSessionNodeOptionsRequest,
   SearchSessionNodeOptionsResponse,
   SearchSessionOptionsRequest,
@@ -286,6 +290,22 @@ export const api = {
         body: JSON.stringify(payload),
       }),
     ),
+  openSessionByIp: (profileId: string, payload: OpenSessionByIpRequest) =>
+    request<OpenSessionResponse>(
+      profilePath(profileId, "/sessions/open-by-ip"),
+      withSessionDisplayHostHeader({
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    ),
+  openBatchByIp: (profileId: string, payload: OpenBatchByIpRequest) =>
+    request<OpenBatchResponse>(
+      profilePath(profileId, "/sessions/open-batch-by-ip"),
+      withSessionDisplayHostHeader({
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    ),
   updateSessionNode: (profileId: string, sessionId: string, payload: UpdateSessionNodeRequest) =>
     request<OpenSessionResponse>(
       profilePath(profileId, `/sessions/${encodeURIComponent(sessionId)}/node`),
@@ -308,6 +328,14 @@ export const api = {
   ) =>
     request<SearchSessionNodeOptionsResponse>(
       profilePath(profileId, `/sessions/${encodeURIComponent(sessionId)}/node-options/search`),
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    ),
+  searchSessionIpNodeOptions: (profileId: string, payload: SearchSessionIpNodeOptionsRequest) =>
+    request<SearchSessionIpNodeOptionsResponse>(
+      profilePath(profileId, "/sessions/ip-node-options/search"),
       {
         method: "POST",
         body: JSON.stringify(payload),

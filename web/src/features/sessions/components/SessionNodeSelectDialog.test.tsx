@@ -5,19 +5,16 @@ import { describe, expect, it, vi } from "vitest";
 
 import { SessionNodeSelectDialog } from "@/features/sessions/components/SessionNodeSelectDialog";
 import { I18nProvider } from "@/i18n";
-import { sessionNodeOptionsFixture, sessionsFixture } from "@/mocks/fixtures";
+import { sessionIpNodeOptionsFixture, sessionsFixture } from "@/mocks/fixtures";
 
 function renderWithProviders(node: ReactNode) {
   return render(<I18nProvider initialLocale="en-US">{node}</I18nProvider>);
 }
 
 describe("SessionNodeSelectDialog", () => {
-  it("loads node options, switches sort mode, and submits the selected node", async () => {
+  it("loads IP options and submits the selected IP candidate set", async () => {
     const user = userEvent.setup();
-    const onSearch = vi
-      .fn()
-      .mockResolvedValueOnce(sessionNodeOptionsFixture.items)
-      .mockResolvedValueOnce([...sessionNodeOptionsFixture.items].reverse());
+    const onSearch = vi.fn().mockResolvedValue(sessionIpNodeOptionsFixture.groups);
     const onSubmit = vi.fn();
 
     renderWithProviders(
@@ -33,29 +30,20 @@ describe("SessionNodeSelectDialog", () => {
     );
 
     await waitFor(() => {
-      expect(onSearch).toHaveBeenCalledWith(sessionsFixture.sessions[0]?.session_id, {
+      expect(onSearch).toHaveBeenCalledWith({
         query: undefined,
-        sort_mode: "session_recent",
-        limit: 50,
+        group_by: "subscription",
+        session_id: sessionsFixture.sessions[0]?.session_id,
+        limit: 80,
       });
     });
 
-    await user.click(screen.getByRole("combobox", { name: /Sort by/i }));
-    await user.click(screen.getByRole("option", { name: /Current profile last used/i }));
-
-    await waitFor(() => {
-      expect(onSearch).toHaveBeenLastCalledWith(sessionsFixture.sessions[0]?.session_id, {
-        query: undefined,
-        sort_mode: "profile_recent",
-        limit: 50,
-      });
-    });
-
-    await user.click(screen.getByRole("button", { name: /US-SanJose-Edge/i }));
-    await user.click(screen.getByRole("button", { name: /Use selected node/i }));
+    await user.click(screen.getByRole("button", { name: /198\.51\.100\.42/i }));
+    await user.click(screen.getByRole("button", { name: /Use selected candidates/i }));
 
     expect(onSubmit).toHaveBeenCalledWith(sessionsFixture.sessions[0]?.session_id, {
-      node_id: "node-us-sanjose-edge",
+      selected_ip: "198.51.100.42",
+      candidate_node_ids: ["node-us-sanjose-edge"],
     });
   });
 });

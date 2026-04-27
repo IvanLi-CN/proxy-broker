@@ -4,7 +4,7 @@ import { expect, fn, userEvent, within } from "storybook/test";
 import { AppShell } from "@/components/AppShell";
 import { sessionCopyAddressFormatStorageKey } from "@/features/sessions/hooks/use-session-copy-address-format";
 import type { SessionListItem } from "@/lib/types";
-import { sessionNodeOptionsFixture, sessionsFixture } from "@/mocks/fixtures";
+import { sessionIpNodeOptionsFixture, sessionsFixture } from "@/mocks/fixtures";
 import { SessionsPage } from "@/pages/SessionsPage";
 
 const longSessionList: SessionListItem[] = Array.from({ length: 28 }, (_, index) => {
@@ -102,8 +102,7 @@ const meta = {
     onOpenSession: fn(),
     onOpenBatch: fn(),
     onUpdateSessionNode: fn(),
-    searchSessionOptions: fn(async () => []),
-    searchSessionNodeOptions: fn(async () => sessionNodeOptionsFixture.items),
+    searchSessionIpNodeOptions: fn(async () => sessionIpNodeOptionsFixture.groups),
     onCloseSession: fn(),
     onResetCreateState: fn(),
     onResetSwitchState: fn(),
@@ -221,10 +220,7 @@ export const CreateDialogFlow: Story = {
       "data-state",
       "open",
     );
-    await expect(await dialog.findByRole("tab", { name: /Single session/i })).toHaveAttribute(
-      "data-state",
-      "active",
-    );
+    await expect(await dialog.findByRole("button", { name: /^Create session$/i })).toBeEnabled();
   },
 };
 
@@ -239,7 +235,8 @@ export const SwitchDialogFlow: Story = {
     );
     const dialog = within(canvasElement.ownerDocument.body);
     await dialog.findByRole("dialog", { name: /Switch session proxy/i });
-    await dialog.findByRole("combobox", { name: /Sort by/i });
-    await dialog.findByRole("button", { name: /Use selected node/i });
+    await expect(
+      await dialog.findByRole("button", { name: /Use selected candidates/i }),
+    ).toBeEnabled();
   },
 };

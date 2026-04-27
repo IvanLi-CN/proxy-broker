@@ -33,8 +33,8 @@ export function SessionsRoute() {
   });
 
   const openMutation = useMutation({
-    mutationFn: (payload: Parameters<typeof api.openSession>[1]) =>
-      api.openSession(activeProfileId ?? "", payload),
+    mutationFn: (payload: Parameters<typeof api.openSessionByIp>[1]) =>
+      api.openSessionByIp(activeProfileId ?? "", payload),
     onSuccess: async (data) => {
       toast.success(t("Opened {listen}", { listen: resolveSessionDisplayAddress(data) }));
       await queryClient.invalidateQueries({ queryKey: ["sessions", activeProfileId] });
@@ -44,8 +44,8 @@ export function SessionsRoute() {
   });
 
   const batchMutation = useMutation({
-    mutationFn: (payload: Parameters<typeof api.openBatch>[1]) =>
-      api.openBatch(activeProfileId ?? "", payload),
+    mutationFn: (payload: Parameters<typeof api.openBatchByIp>[1]) =>
+      api.openBatchByIp(activeProfileId ?? "", payload),
     onSuccess: async (data) => {
       toast.success(t("Opened {count} sessions in batch", { count: data.sessions.length }));
       await queryClient.invalidateQueries({ queryKey: ["sessions", activeProfileId] });
@@ -55,8 +55,13 @@ export function SessionsRoute() {
   });
 
   const switchMutation = useMutation({
-    mutationFn: ({ sessionId, payload }: { sessionId: string; payload: { node_id: string } }) =>
-      api.updateSessionNode(activeProfileId ?? "", sessionId, payload),
+    mutationFn: ({
+      sessionId,
+      payload,
+    }: {
+      sessionId: string;
+      payload: Parameters<typeof api.updateSessionNode>[2];
+    }) => api.updateSessionNode(activeProfileId ?? "", sessionId, payload),
     onSuccess: async (data, variables) => {
       toast.success(
         t("Switched {sessionId} to {proxyName}", {
@@ -135,11 +140,8 @@ export function SessionsRoute() {
       openError={openMutation.isError ? formatApiErrorMessage(openMutation.error, t) : null}
       openResponse={openMutation.data ?? null}
       opening={openMutation.isPending}
-      searchSessionNodeOptions={async (sessionId, payload) =>
-        (await api.searchSessionNodeOptions(activeProfileId, sessionId, payload)).items
-      }
-      searchSessionOptions={async (payload) =>
-        (await api.searchSessionOptions(activeProfileId, payload)).items
+      searchSessionIpNodeOptions={async (payload) =>
+        (await api.searchSessionIpNodeOptions(activeProfileId, payload)).groups
       }
       sessions={sessionsQuery.data?.sessions ?? []}
       sessionsLoading={sessionsQuery.isLoading}

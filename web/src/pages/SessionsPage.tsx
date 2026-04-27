@@ -13,15 +13,13 @@ import {
 } from "@/features/sessions/hooks/use-session-copy-address-format";
 import { useI18n } from "@/i18n";
 import type {
-  OpenBatchRequest,
+  OpenBatchByIpRequest,
   OpenBatchResponse,
-  OpenSessionRequest,
+  OpenSessionByIpRequest,
   OpenSessionResponse,
-  SearchSessionNodeOptionsRequest,
-  SearchSessionOptionsRequest,
+  SearchSessionIpNodeOptionsRequest,
+  SessionIpNodeOptionGroupItem,
   SessionListItem,
-  SessionNodeOptionItem,
-  SessionOptionItem,
   UpdateSessionNodeRequest,
 } from "@/lib/types";
 
@@ -39,19 +37,15 @@ interface SessionsPageProps {
   suggestedPort?: number | null;
   closingSessionId?: string | null;
   switchingSessionId?: string | null;
-  onOpenSession: (payload: OpenSessionRequest) => void | Promise<void>;
-  onOpenBatch: (payload: OpenBatchRequest) => void | Promise<void>;
+  onOpenSession: (payload: OpenSessionByIpRequest) => void | Promise<void>;
+  onOpenBatch: (payload: OpenBatchByIpRequest) => void | Promise<void>;
   onUpdateSessionNode: (
     sessionId: string,
     payload: UpdateSessionNodeRequest,
   ) => void | Promise<void>;
-  searchSessionOptions: (
-    payload: SearchSessionOptionsRequest,
-  ) => Promise<SessionOptionItem[] | undefined>;
-  searchSessionNodeOptions: (
-    sessionId: string,
-    payload: SearchSessionNodeOptionsRequest,
-  ) => Promise<SessionNodeOptionItem[] | undefined>;
+  searchSessionIpNodeOptions: (
+    payload: SearchSessionIpNodeOptionsRequest,
+  ) => Promise<SessionIpNodeOptionGroupItem[] | undefined>;
   onCloseSession: (sessionId: string) => void | Promise<void>;
   onResetCreateState: () => void;
   onResetSwitchState: () => void;
@@ -74,8 +68,7 @@ export function SessionsPage({
   onOpenSession,
   onOpenBatch,
   onUpdateSessionNode,
-  searchSessionOptions,
-  searchSessionNodeOptions,
+  searchSessionIpNodeOptions,
   onCloseSession,
   onResetCreateState,
   onResetSwitchState,
@@ -387,7 +380,7 @@ export function SessionsPage({
         suggestedPort={suggestedPort}
         onOpenSession={onOpenSession}
         onOpenBatch={onOpenBatch}
-        searchSessionOptions={searchSessionOptions}
+        searchIpNodeOptions={searchSessionIpNodeOptions}
       />
 
       <SessionNodeSelectDialog
@@ -401,7 +394,7 @@ export function SessionsPage({
             onResetSwitchState();
           }
         }}
-        onSearch={searchSessionNodeOptions}
+        onSearch={searchSessionIpNodeOptions}
         onSubmit={onUpdateSessionNode}
       />
     </div>

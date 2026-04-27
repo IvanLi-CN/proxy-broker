@@ -15,11 +15,12 @@ use crate::{
     error::BrokerError,
     models::{
         CreateApiKeyRequest, CreateApiKeyResponse, CreateProfileRequest, CreateProfileResponse,
-        HealthResponse, LoadSubscriptionRequest, OpenBatchByNodeRequest, OpenBatchRequest,
-        OpenSessionByNodeRequest, OpenSessionRequest, ProfileProxySettings, ProxyCatalogQuery,
-        ProxyImportListQuery, ProxyInventoryListQuery, ProxyOperationRequest, ProxyScope,
-        RefreshRequest, SearchSessionNodeOptionsRequest, SearchSessionOptionsRequest,
-        SuggestedPortResponse, TaskListQuery, TaskRunDetail, TaskRunSummary, TaskStreamEnvelope,
+        HealthResponse, LoadSubscriptionRequest, OpenBatchByIpRequest, OpenBatchByNodeRequest,
+        OpenBatchRequest, OpenSessionByIpRequest, OpenSessionByNodeRequest, OpenSessionRequest,
+        ProfileProxySettings, ProxyCatalogQuery, ProxyImportListQuery, ProxyInventoryListQuery,
+        ProxyOperationRequest, ProxyScope, RefreshRequest, SearchSessionIpNodeOptionsRequest,
+        SearchSessionNodeOptionsRequest, SearchSessionOptionsRequest, SuggestedPortResponse,
+        TaskListQuery, TaskRunDetail, TaskRunSummary, TaskStreamEnvelope,
         UpdateProfileProxySettingsRequest, UpdateProxyAllocationRequest,
         UpdateProxyImportAllocationRequest, UpdateSessionNodeRequest,
     },
@@ -112,12 +113,24 @@ pub fn build_router(state: AppState) -> Router {
             post(open_batch_by_node),
         )
         .route(
+            "/api/v1/profiles/{profile_id}/sessions/open-by-ip",
+            post(open_session_by_ip),
+        )
+        .route(
+            "/api/v1/profiles/{profile_id}/sessions/open-batch-by-ip",
+            post(open_batch_by_ip),
+        )
+        .route(
             "/api/v1/profiles/{profile_id}/sessions/suggested-port",
             get(suggested_port),
         )
         .route(
             "/api/v1/profiles/{profile_id}/sessions/{session_id}/node-options/search",
             post(search_session_node_options),
+        )
+        .route(
+            "/api/v1/profiles/{profile_id}/sessions/ip-node-options/search",
+            post(search_session_ip_node_options),
         )
         .route("/api/v1/profiles/{profile_id}/sessions", get(list_sessions))
         .route(
@@ -708,6 +721,42 @@ async fn open_batch_by_node(
     Ok(Json(resp))
 }
 
+async fn open_session_by_ip(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    Path(profile_id): Path<String>,
+    headers: HeaderMap,
+    payload: Result<Json<OpenSessionByIpRequest>, JsonRejection>,
+) -> Result<Json<crate::models::OpenSessionResponse>, BrokerError> {
+    auth.require_profile_access(&profile_id)?;
+    state.service.require_profile_exists(&profile_id).await?;
+    let request = parse_json_payload(payload, "open_session_by_ip")?;
+    let display_host = resolve_session_display_host_hint(&headers);
+    let resp = state
+        .service
+        .open_session_by_ip(&profile_id, &request, display_host.as_deref())
+        .await?;
+    Ok(Json(resp))
+}
+
+async fn open_batch_by_ip(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    Path(profile_id): Path<String>,
+    headers: HeaderMap,
+    payload: Result<Json<OpenBatchByIpRequest>, JsonRejection>,
+) -> Result<Json<crate::models::OpenBatchResponse>, BrokerError> {
+    auth.require_profile_access(&profile_id)?;
+    state.service.require_profile_exists(&profile_id).await?;
+    let request = parse_json_payload(payload, "open_batch_by_ip")?;
+    let display_host = resolve_session_display_host_hint(&headers);
+    let resp = state
+        .service
+        .open_batch_by_ip(&profile_id, &request, display_host.as_deref())
+        .await?;
+    Ok(Json(resp))
+}
+
 async fn suggested_port(
     auth: AuthContext,
     State(state): State<AppState>,
@@ -777,6 +826,22 @@ async fn search_session_node_options(
     let resp = state
         .service
         .search_session_node_options(&profile_id, &session_id, &request)
+        .await?;
+    Ok(Json(resp))
+}
+
+async fn search_session_ip_node_options(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    Path(profile_id): Path<String>,
+    payload: Result<Json<SearchSessionIpNodeOptionsRequest>, JsonRejection>,
+) -> Result<Json<crate::models::SearchSessionIpNodeOptionsResponse>, BrokerError> {
+    auth.require_profile_access(&profile_id)?;
+    state.service.require_profile_exists(&profile_id).await?;
+    let request = parse_json_payload(payload, "search_session_ip_node_options")?;
+    let resp = state
+        .service
+        .search_session_ip_node_options(&profile_id, &request)
         .await?;
     Ok(Json(resp))
 }
@@ -1088,6 +1153,7 @@ mod tests {
                     selected_ip: "203.0.113.10".to_string(),
                     proxy_name: "jp-edge".to_string(),
                     node_id: "node-jp-edge".to_string(),
+                    candidate_node_ids: vec!["node-jp-edge".to_string()],
                     created_at: 1,
                 },
             )
