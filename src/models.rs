@@ -406,6 +406,8 @@ pub struct SessionNodeOptionItem {
     pub last_probe_ok: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub median_latency_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recent_probe_samples: Vec<ProxyNodeProbeSampleRecord>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_last_used_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -644,6 +646,17 @@ pub struct ProxyImportSyncConfig {
 }
 
 pub type ProfileSyncConfig = ProxyImportSyncConfig;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemSettings {
+    pub proxy_probe_interval_sec: u64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateSystemSettingsRequest {
+    pub proxy_probe_interval_sec: u64,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -920,7 +933,19 @@ pub struct ProxyNodeMetadataRecord {
     pub median_latency_ms: Option<u64>,
     #[serde(default)]
     pub last_probe_samples: Vec<Option<u64>>,
+    #[serde(default)]
+    pub recent_probe_samples: Vec<ProxyNodeProbeSampleRecord>,
     pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProxyNodeProbeSampleRecord {
+    pub node_id: String,
+    pub ip: String,
+    pub target_url: String,
+    pub ok: bool,
+    pub latency_ms: Option<u64>,
+    pub sampled_at: i64,
 }
 
 #[derive(Debug, Clone)]

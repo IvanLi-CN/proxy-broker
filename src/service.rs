@@ -24,7 +24,8 @@ use crate::{
     constants::{
         DEFAULT_GEO_ONLINE_CONCURRENCY, DEFAULT_GEO_TTL_SEC, DEFAULT_MMDB_URL,
         DEFAULT_ONLINE_GEO_BASE, DEFAULT_PROBE_CONCURRENCY, DEFAULT_PROBE_TARGETS,
-        DEFAULT_PROBE_TIMEOUT_MS, DEFAULT_PROBE_TTL_SEC, DEFAULT_SESSION_LISTEN_IP,
+        DEFAULT_PROBE_TIMEOUT_MS, DEFAULT_PROBE_TTL_SEC, DEFAULT_PROXY_PROBE_INTERVAL_SEC,
+        DEFAULT_SESSION_LISTEN_IP,
     },
     error::{BrokerError, BrokerResult},
     ids,
@@ -38,15 +39,16 @@ use crate::{
         ProfileProxySettings, ProxyCatalogGroupItem, ProxyCatalogNodeItem, ProxyCatalogQuery,
         ProxyCatalogResponse, ProxyImportItem, ProxyImportKind, ProxyImportRecord,
         ProxyImportSourceIdentity, ProxyImportSyncConfig, ProxyInventoryItem, ProxyInventoryRecord,
-        ProxyNode, ProxyNodeMetadataRecord, ProxyOperationAcceptedResponse, ProxyOperationRequest,
-        ProxyScope, RefreshRequest, RefreshResponse, ResolvedImportNameSource,
-        SearchSessionNodeOptionsRequest, SearchSessionNodeOptionsResponse,
-        SearchSessionOptionsRequest, SearchSessionOptionsResponse, SessionListItem,
-        SessionNodeOptionItem, SessionNodeSortMode, SessionOptionItem, SessionOptionKind,
-        SessionRecord, SessionSelectionMode, SubscriptionMetadata, SubscriptionSource,
-        SuggestedPortResponse, TaskEventLevel, TaskListQuery, TaskListResponse, TaskRunDetail,
-        TaskRunEventRecord, TaskRunKind, TaskRunRecord, TaskRunScope, TaskRunStage, TaskRunStatus,
-        TaskRunSummary, TaskRunTrigger, UpdateSessionNodeRequest, now_epoch_sec,
+        ProxyNode, ProxyNodeMetadataRecord, ProxyNodeProbeSampleRecord,
+        ProxyOperationAcceptedResponse, ProxyOperationRequest, ProxyScope, RefreshRequest,
+        RefreshResponse, ResolvedImportNameSource, SearchSessionNodeOptionsRequest,
+        SearchSessionNodeOptionsResponse, SearchSessionOptionsRequest,
+        SearchSessionOptionsResponse, SessionListItem, SessionNodeOptionItem, SessionNodeSortMode,
+        SessionOptionItem, SessionOptionKind, SessionRecord, SessionSelectionMode,
+        SubscriptionMetadata, SubscriptionSource, SuggestedPortResponse, SystemSettings,
+        TaskEventLevel, TaskListQuery, TaskListResponse, TaskRunDetail, TaskRunEventRecord,
+        TaskRunKind, TaskRunRecord, TaskRunScope, TaskRunStage, TaskRunStatus, TaskRunSummary,
+        TaskRunTrigger, UpdateSessionNodeRequest, now_epoch_sec,
     },
     proxy_node_validation::{filter_malformed_proxy_nodes, malformed_proxy_reason},
     runtime::MihomoRuntime,
@@ -109,6 +111,7 @@ pub struct BrokerService {
     options: BrokerServiceOptions,
     profile_locks: Vec<Arc<TokioMutex<()>>>,
     shared_runtime_lock: Arc<TokioMutex<()>>,
+    proxy_probe_queue_lock: Arc<TokioMutex<()>>,
     task_events: broadcast::Sender<TaskBusEvent>,
     task_active_profiles: Arc<TokioMutex<HashSet<String>>>,
     task_supervisor_started: Arc<AtomicBool>,
@@ -158,6 +161,7 @@ impl BrokerService {
             options,
             profile_locks: (0..64).map(|_| Arc::new(TokioMutex::new(()))).collect(),
             shared_runtime_lock: Arc::new(TokioMutex::new(())),
+            proxy_probe_queue_lock: Arc::new(TokioMutex::new(())),
             task_events,
             task_active_profiles: Arc::new(TokioMutex::new(HashSet::new())),
             task_supervisor_started: Arc::new(AtomicBool::new(false)),
@@ -702,7 +706,98 @@ impl BrokerService {
             }
         }
 
+        self.enqueue_due_proxy_probe_task(now).await?;
+
         Ok(())
+    }
+
+    async fn enqueue_due_proxy_probe_task(&self, now: i64) -> BrokerResult<()> {
+        let _probe_queue_guard = self.proxy_probe_queue_lock.lock().await;
+        let settings = self.get_system_settings().await?;
+        if self
+            .has_pending_or_running_tasks(GLOBAL_RUNTIME_PROFILE_ID)
+            .await?
+        {
+            return Ok(());
+        }
+
+        let records = self
+            .store
+            .list_proxy_inventory()
+            .await
+            .map_err(BrokerError::from)?;
+        let subscription_import_ids = self.subscription_import_ids().await?;
+        if records.iter().all(|record| {
+            !subscription_import_ids.contains(&record.import_id) || record.resolved_ips.is_empty()
+        }) {
+            return Ok(());
+        }
+
+        let latest_scheduled_probe = self
+            .store
+            .list_task_runs(&TaskListQuery {
+                profile_id: Some(GLOBAL_RUNTIME_PROFILE_ID.to_string()),
+                kind: Some(TaskRunKind::ProxyLatencyProbe),
+                trigger: Some(TaskRunTrigger::Schedule),
+                ..TaskListQuery::default()
+            })
+            .await
+            .map_err(BrokerError::from)?
+            .into_iter()
+            .map(|run| run.finished_at.or(run.started_at).unwrap_or(run.created_at))
+            .max();
+        if latest_scheduled_probe
+            .map(|ts| {
+                i64::try_from(settings.proxy_probe_interval_sec)
+                    .ok()
+                    .and_then(|interval| ts.checked_add(interval))
+                    .unwrap_or(i64::MAX)
+                    > now
+            })
+            .unwrap_or(false)
+        {
+            return Ok(());
+        }
+
+        let active_node_ids = self.active_proxy_probe_node_ids().await?;
+        let target_node_ids = records
+            .into_iter()
+            .filter(|record| subscription_import_ids.contains(&record.import_id))
+            .filter(|record| !record.resolved_ips.is_empty())
+            .filter(|record| !active_node_ids.contains(&record.node_id))
+            .map(|record| record.node_id)
+            .collect::<Vec<_>>();
+        if target_node_ids.is_empty() {
+            return Ok(());
+        }
+        let scope = if active_node_ids.is_empty() {
+            TaskRunScope::All
+        } else {
+            TaskRunScope::Nodes {
+                node_ids: target_node_ids,
+            }
+        };
+
+        self.enqueue_task_run(
+            GLOBAL_RUNTIME_PROFILE_ID,
+            TaskRunKind::ProxyLatencyProbe,
+            TaskRunTrigger::Schedule,
+            scope,
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn subscription_import_ids(&self) -> BrokerResult<HashSet<String>> {
+        Ok(self
+            .store
+            .list_proxy_imports()
+            .await
+            .map_err(BrokerError::from)?
+            .into_iter()
+            .filter(|record| record.import_kind == ProxyImportKind::Subscription)
+            .map(|record| record.import_id)
+            .collect())
     }
 
     async fn dispatch_queued_tasks(self: &Arc<Self>) -> BrokerResult<()> {
@@ -750,6 +845,36 @@ impl BrokerService {
         Ok(runs
             .into_iter()
             .any(|run| matches!(run.status, TaskRunStatus::Queued | TaskRunStatus::Running)))
+    }
+
+    async fn active_proxy_probe_node_ids(&self) -> BrokerResult<HashSet<String>> {
+        let runs = self
+            .store
+            .list_task_runs(&TaskListQuery {
+                kind: Some(TaskRunKind::ProxyLatencyProbe),
+                ..TaskListQuery::default()
+            })
+            .await
+            .map_err(BrokerError::from)?;
+        let mut active = HashSet::new();
+        for run in runs
+            .into_iter()
+            .filter(|run| matches!(run.status, TaskRunStatus::Queued | TaskRunStatus::Running))
+        {
+            match self.resolve_proxy_operation_nodes_for_run(&run).await {
+                Ok(nodes) => {
+                    active.extend(nodes.into_iter().map(|node| node.node_id));
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        run_id = %run.run_id,
+                        error = %err,
+                        "failed to resolve active proxy latency probe targets"
+                    );
+                }
+            }
+        }
+        Ok(active)
     }
 
     async fn queued_or_running_task_runs(
@@ -1106,6 +1231,44 @@ impl BrokerService {
             TaskRunStage::Queued,
             "Task run queued.",
             None,
+        )
+        .await?;
+        Ok(run)
+    }
+
+    async fn insert_skipped_task_run(
+        &self,
+        profile_id: &str,
+        kind: TaskRunKind,
+        trigger: TaskRunTrigger,
+        scope: TaskRunScope,
+        summary_json: Option<serde_json::Value>,
+    ) -> BrokerResult<TaskRunRecord> {
+        let now = now_epoch_sec();
+        let run = TaskRunRecord {
+            run_id: ids::random_task_run_id(),
+            profile_id: profile_id.to_string(),
+            kind,
+            trigger,
+            status: TaskRunStatus::Skipped,
+            stage: TaskRunStage::Completed,
+            progress_current: Some(0),
+            progress_total: Some(0),
+            created_at: now,
+            started_at: None,
+            finished_at: Some(now),
+            summary_json: summary_json.clone(),
+            error_code: None,
+            error_message: None,
+            scope,
+        };
+        self.insert_task_run_and_emit(&run).await?;
+        self.append_task_event(
+            &run,
+            TaskEventLevel::Warning,
+            TaskRunStage::Completed,
+            "Task run skipped.",
+            summary_json,
         )
         .await?;
         Ok(run)
@@ -2062,6 +2225,21 @@ impl BrokerService {
             .into_iter()
             .map(|record| (record.import_id.clone(), record))
             .collect::<HashMap<_, _>>();
+        let samples_by_node_ip = self
+            .store
+            .list_recent_proxy_node_probe_samples(10)
+            .await
+            .map_err(BrokerError::from)?
+            .into_iter()
+            .fold(
+                HashMap::<(String, String), Vec<ProxyNodeProbeSampleRecord>>::new(),
+                |mut acc, record| {
+                    acc.entry((record.node_id.clone(), record.ip.clone()))
+                        .or_default()
+                        .push(record);
+                    acc
+                },
+            );
         let metadata_by_node = self
             .store
             .list_proxy_node_metadata()
@@ -2071,7 +2249,10 @@ impl BrokerService {
             .fold(
                 HashMap::<String, Vec<ProxyNodeMetadataRecord>>::new(),
                 |mut acc, record| {
-                    let record = sanitize_proxy_node_metadata_record(record);
+                    let record = attach_recent_probe_samples(
+                        sanitize_proxy_node_metadata_record(record),
+                        &samples_by_node_ip,
+                    );
                     acc.entry(record.node_id.clone()).or_default().push(record);
                     acc
                 },
@@ -2252,6 +2433,7 @@ impl BrokerService {
                     .and_then(|probe| probe.latency_ms),
                 median_latency_ms: median_success_latency(&successes),
                 last_probe_samples,
+                recent_probe_samples: Vec::new(),
                 updated_at,
             });
         }
@@ -2397,23 +2579,74 @@ impl BrokerService {
         &self,
         request: &ProxyOperationRequest,
     ) -> BrokerResult<ProxyOperationAcceptedResponse> {
+        let _probe_queue_guard = self.proxy_probe_queue_lock.lock().await;
         let view = request.view.trim();
         let records = self
             .resolve_proxy_operation_nodes(view, request.profile_id.as_deref(), &request.node_ids)
             .await?;
-        if records.iter().any(|record| record.resolved_ips.is_empty()) {
+        let active_node_ids = self.active_proxy_probe_node_ids().await?;
+        let requested_nodes = records.len();
+        let (ignored_records, target_records): (Vec<_>, Vec<_>) = records
+            .into_iter()
+            .partition(|record| active_node_ids.contains(&record.node_id));
+        let ignored_node_ids = ignored_records
+            .iter()
+            .map(|record| record.node_id.clone())
+            .collect::<Vec<_>>();
+        if target_records
+            .iter()
+            .any(|record| record.resolved_ips.is_empty())
+        {
             return Err(BrokerError::SubscriptionInvalid);
+        }
+        let profile_id = Self::proxy_operation_profile_id(view, request.profile_id.as_deref())?;
+        if target_records.is_empty() {
+            let run = self
+                .insert_skipped_task_run(
+                    &profile_id,
+                    TaskRunKind::ProxyLatencyProbe,
+                    TaskRunTrigger::Operator,
+                    TaskRunScope::Nodes {
+                        node_ids: ignored_node_ids.clone(),
+                    },
+                    Some(serde_json::json!({
+                        "reason": "all_nodes_already_probing",
+                        "requested_nodes": requested_nodes,
+                        "ignored_nodes": ignored_node_ids.len(),
+                        "ignored_node_ids": ignored_node_ids,
+                    })),
+                )
+                .await?;
+            return Ok(ProxyOperationAcceptedResponse { run_id: run.run_id });
         }
         let run = self
             .enqueue_task_run(
-                &Self::proxy_operation_profile_id(view, request.profile_id.as_deref())?,
+                &profile_id,
                 TaskRunKind::ProxyLatencyProbe,
                 TaskRunTrigger::Operator,
                 TaskRunScope::Nodes {
-                    node_ids: records.into_iter().map(|record| record.node_id).collect(),
+                    node_ids: target_records
+                        .iter()
+                        .map(|record| record.node_id.clone())
+                        .collect(),
                 },
             )
             .await?;
+        if !ignored_node_ids.is_empty() {
+            self.append_task_event(
+                &run,
+                TaskEventLevel::Warning,
+                TaskRunStage::Queued,
+                "Ignored proxy nodes that are already being probed.",
+                Some(serde_json::json!({
+                    "ignored_nodes": ignored_node_ids.len(),
+                    "ignored_node_ids": ignored_node_ids,
+                    "targeted_nodes": target_records.len(),
+                    "requested_nodes": requested_nodes,
+                })),
+            )
+            .await?;
+        }
         Ok(ProxyOperationAcceptedResponse { run_id: run.run_id })
     }
 
@@ -2421,22 +2654,60 @@ impl BrokerService {
         &self,
         run: &TaskRunRecord,
     ) -> BrokerResult<Vec<ProxyInventoryRecord>> {
-        let TaskRunScope::Nodes { node_ids } = &run.scope else {
-            return Err(BrokerError::InvalidRequest(
-                "proxy operation requires node scope".to_string(),
-            ));
-        };
         let view = if run.profile_id == GLOBAL_RUNTIME_PROFILE_ID {
             "global"
         } else {
             "profile"
         };
-        self.resolve_proxy_operation_nodes(
-            view,
-            (view == "profile").then_some(run.profile_id.as_str()),
-            node_ids,
-        )
-        .await
+        match &run.scope {
+            TaskRunScope::Nodes { node_ids } => {
+                self.resolve_proxy_operation_nodes(
+                    view,
+                    (view == "profile").then_some(run.profile_id.as_str()),
+                    node_ids,
+                )
+                .await
+            }
+            TaskRunScope::All => match view {
+                "global" => {
+                    let subscription_import_ids = if run.kind == TaskRunKind::ProxyLatencyProbe
+                        && run.trigger == TaskRunTrigger::Schedule
+                    {
+                        Some(self.subscription_import_ids().await?)
+                    } else {
+                        None
+                    };
+                    Ok(self
+                        .filter_malformed_inventory_records(
+                            GLOBAL_RUNTIME_PROFILE_ID,
+                            self.store
+                                .list_proxy_inventory()
+                                .await
+                                .map_err(BrokerError::from)?,
+                            "malformed proxy inventory node skipped from proxy operation all-node scope",
+                        )
+                        .into_iter()
+                        .filter(|record| {
+                            subscription_import_ids
+                                .as_ref()
+                                .map(|ids| ids.contains(&record.import_id))
+                                .unwrap_or(true)
+                        })
+                        .filter(|record| !record.resolved_ips.is_empty())
+                        .collect())
+                }
+                "profile" => Ok(self
+                    .compose_effective_proxy_inventory_records(&run.profile_id)
+                    .await?
+                    .into_iter()
+                    .filter(|record| !record.resolved_ips.is_empty())
+                    .collect()),
+                _ => unreachable!("proxy run view should be known"),
+            },
+            TaskRunScope::Ips { .. } => Err(BrokerError::InvalidRequest(
+                "proxy operation does not accept ip scope".to_string(),
+            )),
+        }
     }
 
     async fn execute_proxy_metadata_refresh_task(
@@ -2525,6 +2796,9 @@ impl BrokerService {
                 last_probe_samples: previous
                     .map(|record| record.last_probe_samples.clone())
                     .unwrap_or_default(),
+                recent_probe_samples: previous
+                    .map(|record| record.recent_probe_samples.clone())
+                    .unwrap_or_default(),
                 updated_at: now,
             });
             run.progress_current = Some((index + 1) as u64);
@@ -2598,47 +2872,69 @@ impl BrokerService {
             BrokerError::InvalidRequest("probe target is not configured".to_string())
         })?;
         let timeout_ms = self.options.probe_timeout_ms;
-        let now = now_epoch_sec();
-        let mut samples_by_node = HashMap::<String, Vec<Option<u64>>>::new();
         let mut progress = 0u64;
+        let mut failed_samples = 0usize;
+        let mut samples_by_node = HashMap::<String, Vec<Option<u64>>>::new();
 
         for round in 0..PROXY_PROBE_ROUNDS {
-            for node in &nodes {
-                let sample = if let Some(primary_ip) = node.resolved_ips.first() {
-                    let runtime_alias = dedicated_ip_proxy_name(&node.node_id, primary_ip);
-                    self.runtime
-                        .measure_proxy_delay(
-                            GLOBAL_RUNTIME_PROFILE_ID,
-                            &runtime_alias,
-                            &probe_target,
-                            timeout_ms,
-                        )
-                        .await
-                        .map_err(|e| BrokerError::MihomoUnavailable(e.to_string()))?
-                } else {
-                    None
-                };
+            let mut probe_stream = stream::iter(nodes.clone())
+                .map(|node| {
+                    let probe_target = probe_target.clone();
+                    async move {
+                        let primary_ip = node
+                            .resolved_ips
+                            .first()
+                            .expect(
+                                "probe nodes with missing primary IP should be rejected earlier",
+                            )
+                            .clone();
+                        let runtime_alias = dedicated_ip_proxy_name(&node.node_id, &primary_ip);
+                        let sample = self
+                            .runtime
+                            .measure_proxy_delay(
+                                GLOBAL_RUNTIME_PROFILE_ID,
+                                &runtime_alias,
+                                &probe_target,
+                                timeout_ms,
+                            )
+                            .await
+                            .map_err(|e| BrokerError::MihomoUnavailable(e.to_string()))?;
+                        Ok::<_, BrokerError>((node, primary_ip, sample))
+                    }
+                })
+                .buffer_unordered(self.options.probe_concurrency.max(1));
+
+            while let Some(result) = probe_stream.next().await {
+                let (node, primary_ip, sample) = result?;
+                let sampled_at = now_epoch_sec();
+                if sample.is_none() {
+                    failed_samples += 1;
+                }
                 samples_by_node
                     .entry(node.node_id.clone())
                     .or_default()
                     .push(sample);
                 progress += 1;
+                self.persist_proxy_probe_sample(
+                    &node,
+                    &primary_ip,
+                    &probe_target,
+                    sample,
+                    sampled_at,
+                    existing.get(&(node.node_id.clone(), primary_ip.clone())),
+                )
+                .await?;
                 run.progress_current = Some(progress);
                 self.update_task_run_and_emit(run).await?;
                 self.append_task_event(
                     run,
                     TaskEventLevel::Info,
                     TaskRunStage::Probing,
-                    format!(
-                        "Round {} probe finished for {}.",
-                        round + 1,
-                        node.proxy_name
-                    ),
+                    format!("Probe sample finished for {}.", node.proxy_name),
                     Some(serde_json::json!({
                         "node_id": node.node_id,
                         "proxy_name": node.proxy_name,
                         "round": round + 1,
-                        "samples_total": PROXY_PROBE_ROUNDS,
                         "sample_ms": sample,
                         "progress_current": progress,
                         "progress_total": total_samples,
@@ -2648,49 +2944,23 @@ impl BrokerService {
             }
         }
 
-        let mut updates = Vec::new();
         let mut failed_nodes = 0usize;
         for node in &nodes {
-            let primary_ip = node
-                .resolved_ips
-                .first()
-                .expect("probe nodes with missing primary IP should be rejected earlier")
-                .clone();
-            let samples = samples_by_node
-                .remove(&node.node_id)
-                .unwrap_or_else(|| vec![None; PROXY_PROBE_ROUNDS]);
-            let successes = samples.iter().flatten().copied().collect::<Vec<_>>();
-            if successes.is_empty() {
+            if samples_by_node
+                .get(&node.node_id)
+                .map(|samples| samples.iter().all(Option::is_none))
+                .unwrap_or(true)
+            {
                 failed_nodes += 1;
             }
-            let previous = existing.get(&(node.node_id.clone(), primary_ip.clone()));
-            updates.push(ProxyNodeMetadataRecord {
-                node_id: node.node_id.clone(),
-                ip: primary_ip,
-                country_code: previous
-                    .and_then(|record| normalize_country_code(record.country_code.as_deref())),
-                country_name: previous.and_then(|record| record.country_name.clone()),
-                region_name: previous.and_then(|record| record.region_name.clone()),
-                city: previous.and_then(|record| record.city.clone()),
-                geo_source: previous.and_then(|record| record.geo_source.clone()),
-                probe_updated_at: Some(now),
-                geo_updated_at: previous.and_then(|record| record.geo_updated_at),
-                last_probe_ok: Some(!successes.is_empty()),
-                last_latency_ms: samples.last().copied().flatten(),
-                median_latency_ms: median_success_latency(&successes),
-                last_probe_samples: samples,
-                updated_at: now,
-            });
         }
-        self.store
-            .upsert_proxy_node_metadata(&updates)
-            .await
-            .map_err(BrokerError::from)?;
         self.complete_task_run(
             run,
             TaskRunStatus::Succeeded,
             Some(serde_json::json!({
-                "targeted_nodes": updates.len(),
+                "targeted_nodes": nodes.len(),
+                "samples": total_samples,
+                "failed_samples": failed_samples,
                 "failed_nodes": failed_nodes,
                 "rounds": PROXY_PROBE_ROUNDS,
             })),
@@ -2699,6 +2969,71 @@ impl BrokerService {
         )
         .await?;
         self.cleanup_shared_runtime_if_idle().await;
+        Ok(())
+    }
+
+    async fn persist_proxy_probe_sample(
+        &self,
+        node: &ProxyInventoryRecord,
+        primary_ip: &str,
+        probe_target: &str,
+        sample: Option<u64>,
+        sampled_at: i64,
+        previous: Option<&ProxyNodeMetadataRecord>,
+    ) -> BrokerResult<()> {
+        let sample_record = ProxyNodeProbeSampleRecord {
+            node_id: node.node_id.clone(),
+            ip: primary_ip.to_string(),
+            target_url: probe_target.to_string(),
+            ok: sample.is_some(),
+            latency_ms: sample,
+            sampled_at,
+        };
+        self.store
+            .insert_proxy_node_probe_samples(std::slice::from_ref(&sample_record))
+            .await
+            .map_err(BrokerError::from)?;
+
+        let recent_samples = self
+            .store
+            .list_recent_proxy_node_probe_samples(10)
+            .await
+            .map_err(BrokerError::from)?
+            .into_iter()
+            .filter(|record| record.node_id == node.node_id && record.ip == primary_ip)
+            .collect::<Vec<_>>();
+        let successes = recent_samples
+            .iter()
+            .filter_map(|record| record.ok.then_some(record.latency_ms).flatten())
+            .collect::<Vec<_>>();
+        let last_probe_samples = recent_samples
+            .iter()
+            .rev()
+            .map(|record| record.ok.then_some(record.latency_ms).flatten())
+            .collect::<Vec<_>>();
+        let latest = recent_samples.first().cloned().unwrap_or(sample_record);
+        let metadata = ProxyNodeMetadataRecord {
+            node_id: node.node_id.clone(),
+            ip: primary_ip.to_string(),
+            country_code: previous
+                .and_then(|record| normalize_country_code(record.country_code.as_deref())),
+            country_name: previous.and_then(|record| record.country_name.clone()),
+            region_name: previous.and_then(|record| record.region_name.clone()),
+            city: previous.and_then(|record| record.city.clone()),
+            geo_source: previous.and_then(|record| record.geo_source.clone()),
+            probe_updated_at: Some(latest.sampled_at),
+            geo_updated_at: previous.and_then(|record| record.geo_updated_at),
+            last_probe_ok: Some(latest.ok),
+            last_latency_ms: latest.latency_ms,
+            median_latency_ms: median_success_latency(&successes),
+            last_probe_samples,
+            recent_probe_samples: recent_samples,
+            updated_at: latest.sampled_at,
+        };
+        self.store
+            .upsert_proxy_node_metadata(&[metadata])
+            .await
+            .map_err(BrokerError::from)?;
         Ok(())
     }
 
@@ -4220,6 +4555,21 @@ impl BrokerService {
             .into_iter()
             .map(|record| (record.import_id.clone(), record))
             .collect::<HashMap<_, _>>();
+        let samples_by_node_ip = self
+            .store
+            .list_recent_proxy_node_probe_samples(10)
+            .await
+            .map_err(BrokerError::from)?
+            .into_iter()
+            .fold(
+                HashMap::<(String, String), Vec<ProxyNodeProbeSampleRecord>>::new(),
+                |mut acc, record| {
+                    acc.entry((record.node_id.clone(), record.ip.clone()))
+                        .or_default()
+                        .push(record);
+                    acc
+                },
+            );
         let metadata_by_node = self
             .store
             .list_proxy_node_metadata()
@@ -4256,6 +4606,14 @@ impl BrokerService {
                         .and_then(|ip| items.iter().find(|item| item.ip == *ip))
                         .or_else(|| items.first())
                 });
+                let recent_probe_samples = primary_metadata
+                    .and_then(|item| {
+                        samples_by_node_ip
+                            .get(&(item.node_id.clone(), item.ip.clone()))
+                            .cloned()
+                    })
+                    .or_else(|| primary_metadata.map(legacy_probe_samples_as_recent))
+                    .unwrap_or_default();
                 let item = SessionNodeOptionItem {
                     node_id: record.node_id.clone(),
                     proxy_name: record.proxy_name,
@@ -4268,6 +4626,7 @@ impl BrokerService {
                     city: primary_metadata.and_then(|item| item.city.clone()),
                     last_probe_ok: primary_metadata.and_then(|item| item.last_probe_ok),
                     median_latency_ms: primary_metadata.and_then(|item| item.median_latency_ms),
+                    recent_probe_samples,
                     session_last_used_at: session_usage.get(&record.node_id).copied(),
                     profile_last_used_at: profile_usage.get(&record.node_id).copied(),
                 };
@@ -4776,6 +5135,35 @@ impl BrokerService {
         Ok(settings)
     }
 
+    pub async fn get_system_settings(&self) -> BrokerResult<SystemSettings> {
+        Ok(self
+            .store
+            .get_system_settings()
+            .await
+            .map_err(BrokerError::from)?
+            .unwrap_or_else(default_system_settings))
+    }
+
+    pub async fn update_system_settings(
+        &self,
+        proxy_probe_interval_sec: u64,
+    ) -> BrokerResult<SystemSettings> {
+        if proxy_probe_interval_sec < 60 {
+            return Err(BrokerError::InvalidRequest(
+                "proxy_probe_interval_sec must be at least 60".to_string(),
+            ));
+        }
+        let settings = SystemSettings {
+            proxy_probe_interval_sec,
+            updated_at: now_epoch_sec(),
+        };
+        self.store
+            .upsert_system_settings(&settings)
+            .await
+            .map_err(BrokerError::from)?;
+        Ok(settings)
+    }
+
     pub async fn list_tasks(&self, query: &TaskListQuery) -> BrokerResult<TaskListResponse> {
         let all_summaries = self.list_task_run_summaries(query).await?;
         Ok(build_task_list_response(query, all_summaries))
@@ -5052,6 +5440,48 @@ fn sanitize_proxy_node_metadata_record(
 ) -> ProxyNodeMetadataRecord {
     record.country_code = normalize_country_code(record.country_code.as_deref());
     record
+}
+
+fn attach_recent_probe_samples(
+    mut record: ProxyNodeMetadataRecord,
+    samples_by_node_ip: &HashMap<(String, String), Vec<ProxyNodeProbeSampleRecord>>,
+) -> ProxyNodeMetadataRecord {
+    record.recent_probe_samples = samples_by_node_ip
+        .get(&(record.node_id.clone(), record.ip.clone()))
+        .cloned()
+        .unwrap_or_else(|| legacy_probe_samples_as_recent(&record));
+    record
+}
+
+fn legacy_probe_samples_as_recent(
+    record: &ProxyNodeMetadataRecord,
+) -> Vec<ProxyNodeProbeSampleRecord> {
+    if record.last_probe_samples.is_empty() {
+        return Vec::new();
+    }
+    let base_at = record.probe_updated_at.unwrap_or(record.updated_at);
+    record
+        .last_probe_samples
+        .iter()
+        .rev()
+        .take(10)
+        .enumerate()
+        .map(|(index, latency_ms)| ProxyNodeProbeSampleRecord {
+            node_id: record.node_id.clone(),
+            ip: record.ip.clone(),
+            target_url: "legacy".to_string(),
+            ok: latency_ms.is_some(),
+            latency_ms: *latency_ms,
+            sampled_at: base_at.saturating_sub(index as i64),
+        })
+        .collect()
+}
+
+fn default_system_settings() -> SystemSettings {
+    SystemSettings {
+        proxy_probe_interval_sec: DEFAULT_PROXY_PROBE_INTERVAL_SEC,
+        updated_at: 0,
+    }
 }
 
 fn normalize_country_codes(values: &[String]) -> Vec<String> {
@@ -6194,6 +6624,13 @@ mod tests {
     }
 
     #[derive(Default)]
+    struct ConcurrentProbeRuntime {
+        apply_calls: AtomicUsize,
+        in_flight: AtomicUsize,
+        max_in_flight: AtomicUsize,
+    }
+
+    #[derive(Default)]
     struct FailProfileSyncConfigStore {
         inner: MemoryStore,
     }
@@ -6373,6 +6810,30 @@ mod tests {
 
         async fn list_proxy_node_metadata(&self) -> anyhow::Result<Vec<ProxyNodeMetadataRecord>> {
             self.inner.list_proxy_node_metadata().await
+        }
+
+        async fn insert_proxy_node_probe_samples(
+            &self,
+            records: &[ProxyNodeProbeSampleRecord],
+        ) -> anyhow::Result<()> {
+            self.inner.insert_proxy_node_probe_samples(records).await
+        }
+
+        async fn list_recent_proxy_node_probe_samples(
+            &self,
+            limit_per_node_ip: usize,
+        ) -> anyhow::Result<Vec<ProxyNodeProbeSampleRecord>> {
+            self.inner
+                .list_recent_proxy_node_probe_samples(limit_per_node_ip)
+                .await
+        }
+
+        async fn get_system_settings(&self) -> anyhow::Result<Option<SystemSettings>> {
+            self.inner.get_system_settings().await
+        }
+
+        async fn upsert_system_settings(&self, settings: &SystemSettings) -> anyhow::Result<()> {
+            self.inner.upsert_system_settings(settings).await
         }
 
         async fn insert_session(
@@ -6709,6 +7170,52 @@ mod tests {
             _timeout_ms: u64,
         ) -> anyhow::Result<Option<u64>> {
             Ok(Some(1))
+        }
+    }
+
+    #[async_trait]
+    impl MihomoRuntime for ConcurrentProbeRuntime {
+        async fn ensure_started(&self, _profile_id: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn shutdown_profile(&self, _profile_id: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn controller_meta(
+            &self,
+            _profile_id: &str,
+        ) -> anyhow::Result<(String, Option<String>)> {
+            Ok(("127.0.0.1:9090".to_string(), None))
+        }
+
+        async fn controller_addr(&self, profile_id: &str) -> anyhow::Result<String> {
+            let (addr, _) = self.controller_meta(profile_id).await?;
+            Ok(addr)
+        }
+
+        async fn apply_config(&self, _profile_id: &str, _payload: &str) -> anyhow::Result<()> {
+            self.apply_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        async fn measure_proxy_delay(
+            &self,
+            _profile_id: &str,
+            proxy_name: &str,
+            _url: &str,
+            _timeout_ms: u64,
+        ) -> anyhow::Result<Option<u64>> {
+            let in_flight = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+            self.max_in_flight.fetch_max(in_flight, Ordering::SeqCst);
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            self.in_flight.fetch_sub(1, Ordering::SeqCst);
+            if proxy_name.contains("fail") {
+                Ok(None)
+            } else {
+                Ok(Some(87))
+            }
         }
     }
 
@@ -7139,6 +7646,389 @@ proxies:
                 .expect("metadata should list")
                 .is_empty(),
             "failed probe should not persist empty-ip metadata"
+        );
+    }
+
+    #[tokio::test]
+    async fn proxy_latency_probe_runs_nodes_concurrently_and_persists_recent_samples() {
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(ConcurrentProbeRuntime::default());
+        let service = BrokerService::new(
+            store.clone(),
+            runtime.clone(),
+            BrokerServiceOptions {
+                probe_concurrency: 2,
+                ..BrokerServiceOptions::default()
+            },
+        );
+        let import_id = "imp-global-probe".to_string();
+        store
+            .replace_proxy_inventory_import(
+                &ProxyImportRecord {
+                    import_id: import_id.clone(),
+                    name: Some("global-probe".to_string()),
+                    import_kind: ProxyImportKind::Subscription,
+                    source_scope: ProxyScope::global(),
+                    source_identity: ProxyImportSourceIdentity::manual(&import_id),
+                    allocation_scope: ProxyScope::global(),
+                    subscription_metadata: None,
+                    created_at: 1,
+                    updated_at: 1,
+                },
+                &[
+                    ProxyInventoryRecord {
+                        import_id: import_id.clone(),
+                        node_id: "node-fast".to_string(),
+                        source_scope: ProxyScope::global(),
+                        allocation_scope: ProxyScope::global(),
+                        proxy_name: "fast-node".to_string(),
+                        proxy_type: "socks5".to_string(),
+                        server: "8.8.8.8".to_string(),
+                        resolved_ips: vec!["8.8.8.8".to_string()],
+                        raw_proxy: serde_json::json!({
+                            "name": "fast-node",
+                            "type": "socks5",
+                            "server": "8.8.8.8",
+                        }),
+                        created_at: 1,
+                        updated_at: 1,
+                    },
+                    ProxyInventoryRecord {
+                        import_id: import_id.clone(),
+                        node_id: "node-fail".to_string(),
+                        source_scope: ProxyScope::global(),
+                        allocation_scope: ProxyScope::global(),
+                        proxy_name: "fail-node".to_string(),
+                        proxy_type: "socks5".to_string(),
+                        server: "9.9.9.9".to_string(),
+                        resolved_ips: vec!["9.9.9.9".to_string()],
+                        raw_proxy: serde_json::json!({
+                            "name": "fail-node",
+                            "type": "socks5",
+                            "server": "9.9.9.9",
+                        }),
+                        created_at: 1,
+                        updated_at: 1,
+                    },
+                    ProxyInventoryRecord {
+                        import_id: import_id.clone(),
+                        node_id: "node-unresolved".to_string(),
+                        source_scope: ProxyScope::global(),
+                        allocation_scope: ProxyScope::global(),
+                        proxy_name: "unresolved-node".to_string(),
+                        proxy_type: "socks5".to_string(),
+                        server: "unresolved.example.test".to_string(),
+                        resolved_ips: Vec::new(),
+                        raw_proxy: serde_json::json!({
+                            "name": "unresolved-node",
+                            "type": "socks5",
+                            "server": "unresolved.example.test",
+                        }),
+                        created_at: 1,
+                        updated_at: 1,
+                    },
+                ],
+            )
+            .await
+            .expect("inventory should seed");
+
+        let mut run = TaskRunRecord {
+            run_id: "run-global-probe".to_string(),
+            profile_id: GLOBAL_RUNTIME_PROFILE_ID.to_string(),
+            kind: TaskRunKind::ProxyLatencyProbe,
+            trigger: TaskRunTrigger::Operator,
+            status: TaskRunStatus::Queued,
+            stage: TaskRunStage::Queued,
+            progress_current: Some(0),
+            progress_total: None,
+            created_at: 1,
+            started_at: None,
+            finished_at: None,
+            summary_json: None,
+            error_code: None,
+            error_message: None,
+            scope: TaskRunScope::All,
+        };
+
+        service
+            .execute_proxy_latency_probe_task(&mut run)
+            .await
+            .expect("probe should complete");
+
+        assert!(
+            runtime.max_in_flight.load(Ordering::SeqCst) >= 2,
+            "batch probing should overlap at least two nodes"
+        );
+        assert_eq!(run.progress_current, Some((PROXY_PROBE_ROUNDS * 2) as u64));
+        let samples = store
+            .list_recent_proxy_node_probe_samples(10)
+            .await
+            .expect("samples should list");
+        assert_eq!(samples.len(), PROXY_PROBE_ROUNDS * 2);
+        let metadata = store
+            .list_proxy_node_metadata()
+            .await
+            .expect("metadata should list");
+        let fast = metadata
+            .iter()
+            .find(|record| record.node_id == "node-fast")
+            .expect("fast node metadata should exist");
+        assert_eq!(fast.last_probe_ok, Some(true));
+        assert_eq!(fast.last_latency_ms, Some(87));
+        assert_eq!(fast.recent_probe_samples.len(), 5);
+        let second = metadata
+            .iter()
+            .find(|record| record.node_id == "node-fail")
+            .expect("second node metadata should exist");
+        assert_eq!(second.last_probe_ok, Some(true));
+        assert_eq!(second.last_latency_ms, Some(87));
+        assert_eq!(second.recent_probe_samples.len(), 5);
+        assert!(
+            metadata
+                .iter()
+                .all(|record| record.node_id != "node-unresolved"),
+            "all-node probe should skip unresolved inventory records"
+        );
+    }
+
+    #[tokio::test]
+    async fn queue_proxy_latency_probe_ignores_nodes_already_queued_for_probe() {
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
+        let import_id = "imp-probe-dedupe".to_string();
+        store
+            .replace_proxy_inventory_import(
+                &ProxyImportRecord {
+                    import_id: import_id.clone(),
+                    name: Some("probe-dedupe".to_string()),
+                    import_kind: ProxyImportKind::Subscription,
+                    source_scope: ProxyScope::global(),
+                    source_identity: ProxyImportSourceIdentity::manual(&import_id),
+                    allocation_scope: ProxyScope::global(),
+                    subscription_metadata: None,
+                    created_at: 1,
+                    updated_at: 1,
+                },
+                &[
+                    ProxyInventoryRecord {
+                        import_id: import_id.clone(),
+                        node_id: "node-probing".to_string(),
+                        source_scope: ProxyScope::global(),
+                        allocation_scope: ProxyScope::global(),
+                        proxy_name: "already-probing".to_string(),
+                        proxy_type: "socks5".to_string(),
+                        server: "203.0.113.10".to_string(),
+                        resolved_ips: vec!["203.0.113.10".to_string()],
+                        raw_proxy: serde_json::json!({
+                            "name": "already-probing",
+                            "type": "socks5",
+                            "server": "203.0.113.10",
+                        }),
+                        created_at: 1,
+                        updated_at: 1,
+                    },
+                    ProxyInventoryRecord {
+                        import_id: import_id.clone(),
+                        node_id: "node-ready".to_string(),
+                        source_scope: ProxyScope::global(),
+                        allocation_scope: ProxyScope::global(),
+                        proxy_name: "ready".to_string(),
+                        proxy_type: "socks5".to_string(),
+                        server: "203.0.113.11".to_string(),
+                        resolved_ips: vec!["203.0.113.11".to_string()],
+                        raw_proxy: serde_json::json!({
+                            "name": "ready",
+                            "type": "socks5",
+                            "server": "203.0.113.11",
+                        }),
+                        created_at: 1,
+                        updated_at: 1,
+                    },
+                ],
+            )
+            .await
+            .expect("inventory should seed");
+
+        let first = service
+            .queue_proxy_latency_probe(&ProxyOperationRequest {
+                view: "global".to_string(),
+                profile_id: None,
+                node_ids: vec!["node-probing".to_string()],
+            })
+            .await
+            .expect("first probe should queue");
+        let second = service
+            .queue_proxy_latency_probe(&ProxyOperationRequest {
+                view: "global".to_string(),
+                profile_id: None,
+                node_ids: vec!["node-probing".to_string(), "node-ready".to_string()],
+            })
+            .await
+            .expect("second probe should queue only non-duplicate node");
+        let skipped = service
+            .queue_proxy_latency_probe(&ProxyOperationRequest {
+                view: "global".to_string(),
+                profile_id: None,
+                node_ids: vec!["node-probing".to_string()],
+            })
+            .await
+            .expect("all-duplicate probe should return a skipped task");
+
+        let first_run = store
+            .get_task_run(&first.run_id)
+            .await
+            .expect("first run lookup should succeed")
+            .expect("first run should exist");
+        assert!(matches!(
+            first_run.scope,
+            TaskRunScope::Nodes { ref node_ids } if node_ids == &vec!["node-probing".to_string()]
+        ));
+
+        let second_run = store
+            .get_task_run(&second.run_id)
+            .await
+            .expect("second run lookup should succeed")
+            .expect("second run should exist");
+        assert!(matches!(
+            second_run.scope,
+            TaskRunScope::Nodes { ref node_ids } if node_ids == &vec!["node-ready".to_string()]
+        ));
+        assert_eq!(second_run.status, TaskRunStatus::Queued);
+
+        let skipped_run = store
+            .get_task_run(&skipped.run_id)
+            .await
+            .expect("skipped run lookup should succeed")
+            .expect("skipped run should exist");
+        assert_eq!(skipped_run.status, TaskRunStatus::Skipped);
+        assert!(matches!(
+            skipped_run.scope,
+            TaskRunScope::Nodes { ref node_ids } if node_ids == &vec!["node-probing".to_string()]
+        ));
+        assert_eq!(
+            skipped_run.summary_json,
+            Some(serde_json::json!({
+                "reason": "all_nodes_already_probing",
+                "requested_nodes": 1,
+                "ignored_nodes": 1,
+                "ignored_node_ids": ["node-probing"],
+            }))
+        );
+    }
+
+    #[tokio::test]
+    async fn scheduled_proxy_latency_probe_all_scope_targets_subscription_imports_only() {
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(ConcurrentProbeRuntime::default());
+        let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
+        let subscription_import_id = "imp-scheduled-subscription".to_string();
+        store
+            .replace_proxy_inventory_import(
+                &ProxyImportRecord {
+                    import_id: subscription_import_id.clone(),
+                    name: Some("scheduled-subscription".to_string()),
+                    import_kind: ProxyImportKind::Subscription,
+                    source_scope: ProxyScope::global(),
+                    source_identity: ProxyImportSourceIdentity::manual(&subscription_import_id),
+                    allocation_scope: ProxyScope::global(),
+                    subscription_metadata: None,
+                    created_at: 1,
+                    updated_at: 1,
+                },
+                &[ProxyInventoryRecord {
+                    import_id: subscription_import_id.clone(),
+                    node_id: "node-scheduled-subscription".to_string(),
+                    source_scope: ProxyScope::global(),
+                    allocation_scope: ProxyScope::global(),
+                    proxy_name: "scheduled-subscription".to_string(),
+                    proxy_type: "socks5".to_string(),
+                    server: "8.8.8.8".to_string(),
+                    resolved_ips: vec!["8.8.8.8".to_string()],
+                    raw_proxy: serde_json::json!({
+                        "name": "scheduled-subscription",
+                        "type": "socks5",
+                        "server": "8.8.8.8",
+                    }),
+                    created_at: 1,
+                    updated_at: 1,
+                }],
+            )
+            .await
+            .expect("subscription inventory should seed");
+        let manual_import_id = "imp-scheduled-manual".to_string();
+        store
+            .replace_proxy_inventory_import(
+                &ProxyImportRecord {
+                    import_id: manual_import_id.clone(),
+                    name: Some("scheduled-manual".to_string()),
+                    import_kind: ProxyImportKind::SingleNode,
+                    source_scope: ProxyScope::global(),
+                    source_identity: ProxyImportSourceIdentity::manual(&manual_import_id),
+                    allocation_scope: ProxyScope::global(),
+                    subscription_metadata: None,
+                    created_at: 1,
+                    updated_at: 1,
+                },
+                &[ProxyInventoryRecord {
+                    import_id: manual_import_id.clone(),
+                    node_id: "node-scheduled-manual".to_string(),
+                    source_scope: ProxyScope::global(),
+                    allocation_scope: ProxyScope::global(),
+                    proxy_name: "scheduled-manual".to_string(),
+                    proxy_type: "socks5".to_string(),
+                    server: "9.9.9.9".to_string(),
+                    resolved_ips: vec!["9.9.9.9".to_string()],
+                    raw_proxy: serde_json::json!({
+                        "name": "scheduled-manual",
+                        "type": "socks5",
+                        "server": "9.9.9.9",
+                    }),
+                    created_at: 1,
+                    updated_at: 1,
+                }],
+            )
+            .await
+            .expect("manual inventory should seed");
+
+        let mut run = TaskRunRecord {
+            run_id: "run-scheduled-global-probe".to_string(),
+            profile_id: GLOBAL_RUNTIME_PROFILE_ID.to_string(),
+            kind: TaskRunKind::ProxyLatencyProbe,
+            trigger: TaskRunTrigger::Schedule,
+            status: TaskRunStatus::Queued,
+            stage: TaskRunStage::Queued,
+            progress_current: Some(0),
+            progress_total: None,
+            created_at: 1,
+            started_at: None,
+            finished_at: None,
+            summary_json: None,
+            error_code: None,
+            error_message: None,
+            scope: TaskRunScope::All,
+        };
+
+        service
+            .execute_proxy_latency_probe_task(&mut run)
+            .await
+            .expect("scheduled probe should complete");
+
+        assert_eq!(run.progress_current, Some(PROXY_PROBE_ROUNDS as u64));
+        let metadata = store
+            .list_proxy_node_metadata()
+            .await
+            .expect("metadata should list");
+        assert!(
+            metadata
+                .iter()
+                .any(|record| record.node_id == "node-scheduled-subscription")
+        );
+        assert!(
+            metadata
+                .iter()
+                .all(|record| record.node_id != "node-scheduled-manual"),
+            "scheduled all-node probe must not target single-node imports"
         );
     }
 
@@ -8338,6 +9228,7 @@ proxies:
                 last_latency_ms: Some(88),
                 median_latency_ms: Some(88),
                 last_probe_samples: vec![Some(88)],
+                recent_probe_samples: Vec::new(),
                 updated_at: 12,
             }])
             .await
@@ -10877,6 +11768,104 @@ proxies:
             .collect::<HashSet<_>>();
         assert!(kinds.contains(&TaskRunKind::SubscriptionSync));
         assert!(kinds.contains(&TaskRunKind::MetadataRefreshFull));
+    }
+
+    #[tokio::test]
+    async fn enqueue_due_tasks_queues_global_proxy_probe_after_configured_interval() {
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
+        let now = now_epoch_sec();
+        service
+            .update_system_settings(60)
+            .await
+            .expect("settings should update");
+        let import_id = "imp-scheduled-probe".to_string();
+        store
+            .replace_proxy_inventory_import(
+                &ProxyImportRecord {
+                    import_id: import_id.clone(),
+                    name: Some("scheduled-probe".to_string()),
+                    import_kind: ProxyImportKind::Subscription,
+                    source_scope: ProxyScope::global(),
+                    source_identity: ProxyImportSourceIdentity::manual(&import_id),
+                    allocation_scope: ProxyScope::global(),
+                    subscription_metadata: None,
+                    created_at: now,
+                    updated_at: now,
+                },
+                &[ProxyInventoryRecord {
+                    import_id: import_id.clone(),
+                    node_id: "node-scheduled-probe".to_string(),
+                    source_scope: ProxyScope::global(),
+                    allocation_scope: ProxyScope::global(),
+                    proxy_name: "scheduled-probe".to_string(),
+                    proxy_type: "socks5".to_string(),
+                    server: "8.8.4.4".to_string(),
+                    resolved_ips: vec!["8.8.4.4".to_string()],
+                    raw_proxy: serde_json::json!({
+                        "name": "scheduled-probe",
+                        "type": "socks5",
+                        "server": "8.8.4.4",
+                    }),
+                    created_at: now,
+                    updated_at: now,
+                }],
+            )
+            .await
+            .expect("inventory should seed");
+
+        service
+            .enqueue_due_tasks()
+            .await
+            .expect("due tasks should enqueue");
+        service
+            .enqueue_due_tasks()
+            .await
+            .expect("fresh scheduled probe should not duplicate");
+
+        let tasks = store
+            .list_task_runs(&TaskListQuery {
+                profile_id: Some(GLOBAL_RUNTIME_PROFILE_ID.to_string()),
+                kind: Some(TaskRunKind::ProxyLatencyProbe),
+                trigger: Some(TaskRunTrigger::Schedule),
+                ..TaskListQuery::default()
+            })
+            .await
+            .expect("task list should succeed");
+        assert_eq!(tasks.len(), 1);
+        assert!(matches!(tasks[0].scope, TaskRunScope::All));
+    }
+
+    #[tokio::test]
+    async fn system_settings_default_and_validation_are_persisted() {
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
+
+        let defaults = service
+            .get_system_settings()
+            .await
+            .expect("default settings should load");
+        assert_eq!(
+            defaults.proxy_probe_interval_sec,
+            DEFAULT_PROXY_PROBE_INTERVAL_SEC
+        );
+        assert!(matches!(
+            service.update_system_settings(59).await,
+            Err(BrokerError::InvalidRequest(_))
+        ));
+
+        let updated = service
+            .update_system_settings(900)
+            .await
+            .expect("settings should update");
+        assert_eq!(updated.proxy_probe_interval_sec, 900);
+        let loaded = service
+            .get_system_settings()
+            .await
+            .expect("updated settings should load");
+        assert_eq!(loaded.proxy_probe_interval_sec, 900);
     }
 
     #[test]

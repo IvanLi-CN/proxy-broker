@@ -10,8 +10,8 @@ use crate::{
     models::{
         ApiKeyRecord, IpRecord, NodeUsageRecord, ProbeRecord, ProfileProxySettings,
         ProfileSnapshot, ProxyImportRecord, ProxyImportSyncConfig, ProxyInventoryRecord, ProxyNode,
-        ProxyNodeMetadataRecord, ProxyScope, SessionRecord, TaskListQuery, TaskRunEventRecord,
-        TaskRunRecord,
+        ProxyNodeMetadataRecord, ProxyNodeProbeSampleRecord, ProxyScope, SessionRecord,
+        SystemSettings, TaskListQuery, TaskRunEventRecord, TaskRunRecord,
     },
     store::BrokerStore,
     tasks::matches_task_query,
@@ -23,9 +23,18 @@ struct MemoryStoreState {
     proxy_imports: HashMap<String, ProxyImportRecord>,
     proxy_inventory: HashMap<String, ProxyInventoryRecord>,
     proxy_node_metadata: HashMap<(String, String), ProxyNodeMetadataRecord>,
+    proxy_node_probe_sample_seq: u64,
+    proxy_node_probe_samples: Vec<MemoryProxyNodeProbeSample>,
     proxy_import_sync_configs: HashMap<String, ProxyImportSyncConfig>,
     profile_proxy_settings: HashMap<String, ProfileProxySettings>,
+    system_settings: Option<SystemSettings>,
     api_keys: HashMap<String, ApiKeyRecord>,
+}
+
+#[derive(Clone)]
+struct MemoryProxyNodeProbeSample {
+    seq: u64,
+    record: ProxyNodeProbeSampleRecord,
 }
 
 #[derive(Default, Clone)]
@@ -449,6 +458,91 @@ impl BrokerStore for MemoryStore {
                 .then_with(|| left.ip.cmp(&right.ip))
         });
         Ok(items)
+    }
+
+    async fn insert_proxy_node_probe_samples(
+        &self,
+        records: &[ProxyNodeProbeSampleRecord],
+    ) -> anyhow::Result<()> {
+        let mut guard = self
+            .inner
+            .write()
+            .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
+        for record in records {
+            guard.proxy_node_probe_sample_seq = guard.proxy_node_probe_sample_seq.saturating_add(1);
+            let seq = guard.proxy_node_probe_sample_seq;
+            guard
+                .proxy_node_probe_samples
+                .push(MemoryProxyNodeProbeSample {
+                    seq,
+                    record: record.clone(),
+                });
+        }
+        guard.proxy_node_probe_samples.sort_by(|left, right| {
+            right
+                .record
+                .sampled_at
+                .cmp(&left.record.sampled_at)
+                .then_with(|| right.seq.cmp(&left.seq))
+                .then_with(|| left.record.node_id.cmp(&right.record.node_id))
+                .then_with(|| left.record.ip.cmp(&right.record.ip))
+        });
+
+        let mut kept = HashMap::<(String, String), usize>::new();
+        guard.proxy_node_probe_samples.retain(|record| {
+            let count = kept
+                .entry((record.record.node_id.clone(), record.record.ip.clone()))
+                .or_insert(0);
+            *count += 1;
+            *count <= 10
+        });
+        Ok(())
+    }
+
+    async fn list_recent_proxy_node_probe_samples(
+        &self,
+        limit_per_node_ip: usize,
+    ) -> anyhow::Result<Vec<ProxyNodeProbeSampleRecord>> {
+        let guard = self
+            .inner
+            .read()
+            .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
+        let mut items = guard.proxy_node_probe_samples.clone();
+        items.sort_by(|left, right| {
+            right
+                .record
+                .sampled_at
+                .cmp(&left.record.sampled_at)
+                .then_with(|| right.seq.cmp(&left.seq))
+                .then_with(|| left.record.node_id.cmp(&right.record.node_id))
+                .then_with(|| left.record.ip.cmp(&right.record.ip))
+        });
+        let mut kept = HashMap::<(String, String), usize>::new();
+        items.retain(|record| {
+            let count = kept
+                .entry((record.record.node_id.clone(), record.record.ip.clone()))
+                .or_insert(0);
+            *count += 1;
+            *count <= limit_per_node_ip
+        });
+        Ok(items.into_iter().map(|item| item.record).collect())
+    }
+
+    async fn get_system_settings(&self) -> anyhow::Result<Option<SystemSettings>> {
+        let guard = self
+            .inner
+            .read()
+            .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
+        Ok(guard.system_settings.clone())
+    }
+
+    async fn upsert_system_settings(&self, settings: &SystemSettings) -> anyhow::Result<()> {
+        let mut guard = self
+            .inner
+            .write()
+            .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
+        guard.system_settings = Some(settings.clone());
+        Ok(())
     }
 
     async fn insert_session(
@@ -876,8 +970,8 @@ mod tests {
         auth::issue_api_key,
         models::{
             ApiKeyProfileScope, ProfileProxySettings, ProxyImportKind, ProxyImportRecord,
-            ProxyImportSourceIdentity, ProxyImportSyncConfig, ProxyInventoryRecord, ProxyScope,
-            SessionRecord, SubscriptionSource,
+            ProxyImportSourceIdentity, ProxyImportSyncConfig, ProxyInventoryRecord,
+            ProxyNodeProbeSampleRecord, ProxyScope, SessionRecord, SubscriptionSource,
         },
         store::BrokerStore,
     };
@@ -1065,6 +1159,34 @@ mod tests {
                 .expect("sync config query should succeed")
                 .is_none()
         );
+    }
+
+    #[tokio::test]
+    async fn proxy_node_probe_samples_keep_newest_same_second_samples() {
+        let store = MemoryStore::new();
+        let samples = (0..12)
+            .map(|index| ProxyNodeProbeSampleRecord {
+                node_id: "node-memory-probe".to_string(),
+                ip: "203.0.113.10".to_string(),
+                target_url: "https://example.test".to_string(),
+                ok: true,
+                latency_ms: Some(80 + index),
+                sampled_at: 42,
+            })
+            .collect::<Vec<_>>();
+
+        store
+            .insert_proxy_node_probe_samples(&samples)
+            .await
+            .expect("samples should insert");
+
+        let recent = store
+            .list_recent_proxy_node_probe_samples(10)
+            .await
+            .expect("recent samples should list");
+        assert_eq!(recent.len(), 10);
+        assert_eq!(recent[0].latency_ms, Some(91));
+        assert_eq!(recent[9].latency_ms, Some(82));
     }
 
     #[tokio::test]

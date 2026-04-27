@@ -14,6 +14,7 @@ import type {
   ProfileProxySettings,
   ProxyOperationRequest,
   ProxyScope,
+  SystemSettings,
   TaskRunSummary,
 } from "@/lib/types";
 import { ProxiesPage } from "@/pages/ProxiesPage";
@@ -76,6 +77,11 @@ export function ProxiesRoute() {
   const globalCatalogQuery = useQuery({
     queryKey: ["proxy-catalog", "global"],
     queryFn: () => api.listProxyCatalog({ view: "global" }),
+    enabled: isGlobalConfig && canManageGlobal,
+  });
+  const systemSettingsQuery = useQuery({
+    queryKey: ["system-settings"],
+    queryFn: api.getSystemSettings,
     enabled: isGlobalConfig && canManageGlobal,
   });
   const profileCatalogQuery = useQuery({
@@ -164,6 +170,19 @@ export function ProxiesRoute() {
           : t("Disabled global pool for {profileId}", { profileId: settings.profile_id }),
       );
       await refreshProxyQueries(settings.profile_id);
+    },
+    onError: (error) => toast.error(formatApiErrorMessage(error, t)),
+  });
+  const systemSettingsMutation = useMutation({
+    mutationFn: (proxyProbeIntervalSec: number) =>
+      api.updateSystemSettings({ proxy_probe_interval_sec: proxyProbeIntervalSec }),
+    onSuccess: (settings) => {
+      queryClient.setQueryData<SystemSettings>(["system-settings"], settings);
+      toast.success(
+        t("Automatic latency probe interval saved: {minutes} minutes", {
+          minutes: Math.round(settings.proxy_probe_interval_sec / 60),
+        }),
+      );
     },
     onError: (error) => toast.error(formatApiErrorMessage(error, t)),
   });
@@ -336,12 +355,21 @@ export function ProxiesRoute() {
       proxyImports={importQuery.data ?? null}
       proxyImportsError={importQuery.isError ? formatApiErrorMessage(importQuery.error, t) : null}
       proxyImportsLoading={importQuery.isLoading}
+      systemSettings={systemSettingsQuery.data ?? null}
+      systemSettingsLoading={systemSettingsQuery.isLoading}
+      systemSettingsError={
+        systemSettingsQuery.isError ? formatApiErrorMessage(systemSettingsQuery.error, t) : null
+      }
+      updatingSystemSettings={systemSettingsMutation.isPending}
       loadingGlobal={globalLoadMutation.isPending}
       onDeleteImport={async (importId) => {
         await deleteMutation.mutateAsync(importId);
       }}
       onLoadGlobal={async (payload) => {
         await globalLoadMutation.mutateAsync(payload);
+      }}
+      onUpdateSystemSettings={async (proxyProbeIntervalSec) => {
+        await systemSettingsMutation.mutateAsync(proxyProbeIntervalSec);
       }}
       onReassignImport={async (importId, scope) => {
         await reassignMutation.mutateAsync({ importId, scope });

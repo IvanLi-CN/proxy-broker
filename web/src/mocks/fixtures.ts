@@ -13,6 +13,17 @@ import type {
 
 const recentTaskBaseSec = Math.floor(Date.now() / 1000) - 120;
 
+function createProbeSamples(nodeId: string, ip: string, samples: Array<number | null>) {
+  return samples.map((latencyMs, index) => ({
+    node_id: nodeId,
+    ip,
+    target_url: "https://www.gstatic.com/generate_204",
+    ok: latencyMs != null,
+    latency_ms: latencyMs,
+    sampled_at: 1_741_748_540 - index * 20,
+  }));
+}
+
 export const healthFixture: HealthResponse = {
   status: "ok",
 };
@@ -148,6 +159,14 @@ export const sessionNodeOptionsFixture: SearchSessionNodeOptionsResponse = {
       city: "Chiyoda",
       last_probe_ok: true,
       median_latency_ms: 88,
+      recent_probe_samples: createProbeSamples("node-jp-tokyo-entry", "203.0.113.10", [
+        88,
+        92,
+        140,
+        151,
+        309,
+        null,
+      ]),
       session_last_used_at: 1_741_748_520,
       profile_last_used_at: 1_741_748_520,
     },
@@ -163,6 +182,11 @@ export const sessionNodeOptionsFixture: SearchSessionNodeOptionsResponse = {
       city: "Osaka",
       last_probe_ok: true,
       median_latency_ms: 103,
+      recent_probe_samples: createProbeSamples(
+        "node-jp-osaka-edge",
+        "203.0.113.88",
+        [103, 118, 155, 229, 301],
+      ),
       session_last_used_at: 1_741_748_200,
       profile_last_used_at: 1_741_748_460,
     },
@@ -178,6 +202,11 @@ export const sessionNodeOptionsFixture: SearchSessionNodeOptionsResponse = {
       city: "San Jose",
       last_probe_ok: false,
       median_latency_ms: null,
+      recent_probe_samples: createProbeSamples("node-us-sanjose-edge", "198.51.100.42", [
+        null,
+        null,
+        340,
+      ]),
       session_last_used_at: null,
       profile_last_used_at: 1_741_747_900,
     },

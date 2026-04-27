@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { fn } from "storybook/test";
+import { expect, fn, userEvent, within } from "storybook/test";
 
 import { SessionNodeSelectDialog } from "@/features/sessions/components/SessionNodeSelectDialog";
 import { sessionNodeOptionsFixture, sessionsFixture } from "@/mocks/fixtures";
@@ -32,6 +32,21 @@ type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {
   args: {},
+  async play({ canvasElement }) {
+    const dialog = within(canvasElement.ownerDocument.body);
+    await expect((await dialog.findAllByText(/JP-Tokyo-Entry/i)).length).toBeGreaterThan(0);
+    const latencyLabels = await dialog.findAllByText(/88 ms/i);
+    await expect(latencyLabels.length).toBeGreaterThan(0);
+    await expect((await dialog.findAllByText(/Current session last used/i)).length).toBeGreaterThan(
+      0,
+    );
+    const firstLatencyLabel = latencyLabels[0];
+    if (!firstLatencyLabel) {
+      throw new Error("Expected an 88 ms latency label");
+    }
+    await userEvent.hover(firstLatencyLabel);
+    await expect((await dialog.findAllByText(/140 ms/i)).length).toBeGreaterThan(0);
+  },
 };
 
 export const Switching: Story = {

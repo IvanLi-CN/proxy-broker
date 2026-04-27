@@ -10,6 +10,7 @@ pub const DEFAULT_GEO_ONLINE_CONCURRENCY: usize = 8;
 
 pub const DEFAULT_PROBE_TTL_SEC: u64 = 600;
 pub const DEFAULT_GEO_TTL_SEC: u64 = 86_400;
+pub const DEFAULT_PROXY_PROBE_INTERVAL_SEC: u64 = 3_600;
 
 pub const DEFAULT_SERVICE_ADDR: &str = "127.0.0.1:8080";
 pub const DEFAULT_SESSION_LISTEN_IP: &str = "127.0.0.1";
