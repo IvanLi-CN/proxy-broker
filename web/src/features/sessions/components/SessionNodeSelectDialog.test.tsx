@@ -3,12 +3,17 @@ import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { SessionNodeSelectDialog } from "@/features/sessions/components/SessionNodeSelectDialog";
 import { I18nProvider } from "@/i18n";
 import { sessionNodeOptionsFixture, sessionsFixture } from "@/mocks/fixtures";
 
 function renderWithProviders(node: ReactNode) {
-  return render(<I18nProvider initialLocale="en-US">{node}</I18nProvider>);
+  return render(
+    <I18nProvider initialLocale="en-US">
+      <TooltipProvider>{node}</TooltipProvider>
+    </I18nProvider>,
+  );
 }
 
 describe("SessionNodeSelectDialog", () => {

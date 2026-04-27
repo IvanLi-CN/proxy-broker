@@ -20,6 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n";
 import {
   formatCountryName,
@@ -28,6 +29,11 @@ import {
   formatTimestamp,
   resolveSessionDisplayAddress,
 } from "@/lib/format";
+import {
+  type ProbeDisplayState,
+  probeLatencyBadgeToneClass,
+  probeLatencyToneClass,
+} from "@/lib/proxy-probe-display";
 import type {
   SessionListItem,
   SessionNodeOptionItem,
@@ -220,6 +226,14 @@ export function SessionNodeSelectDialog({
                     : item.profile_last_used_at;
                 const geoSummary = buildGeoSummary(locale, item);
                 const metaParts = [item.source_label, item.primary_ip, geoSummary].filter(Boolean);
+                const recentSamples = item.recent_probe_samples ?? [];
+                const latestSample = recentSamples[0] ?? null;
+                const probeState: ProbeDisplayState = latestSample
+                  ? latestSample.ok && latestSample.latency_ms != null
+                    ? "success"
+                    : "failed"
+                  : "empty";
+                const latency = latestSample?.ok ? (latestSample.latency_ms ?? null) : null;
                 return (
                   <button
                     key={item.node_id}
@@ -245,25 +259,70 @@ export function SessionNodeSelectDialog({
                           </div>
                         ) : null}
                       </div>
-                      <div className="shrink-0 text-right text-xs text-muted-foreground">
-                        <div>
+                      <div className="flex min-w-0 shrink-0 items-center gap-2 whitespace-nowrap text-right text-xs text-muted-foreground">
+                        <span className="shrink-0">
                           {sortMode === "session_recent"
                             ? t("Current session last used")
                             : t("Current profile last used")}
-                        </div>
-                        <div className="mt-1 font-medium text-foreground">
+                        </span>
+                        <span className="min-w-0 truncate font-medium text-foreground">
                           {formatTimestamp(locale, t, usageTimestamp)}
-                        </div>
+                        </span>
                       </div>
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                      <span>
-                        {item.last_probe_ok === false
-                          ? t("Probe failed")
-                          : item.last_probe_ok === true
-                            ? formatLatency(locale, t, item.median_latency_ms)
-                            : t("No probe data yet")}
-                      </span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span
+                            className={cn(
+                              "cursor-help font-semibold underline decoration-dotted underline-offset-4",
+                              probeLatencyToneClass(probeState, latency),
+                            )}
+                          >
+                            {latestSample
+                              ? latestSample.ok && latestSample.latency_ms != null
+                                ? formatLatency(locale, t, latestSample.latency_ms)
+                                : t("Probe failed")
+                              : t("-- ms")}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent
+                          side="top"
+                          align="start"
+                          className="max-w-sm border border-border bg-popover text-popover-foreground shadow-xl shadow-foreground/10"
+                          arrowClassName="bg-popover fill-popover"
+                        >
+                          {recentSamples.length > 0 ? (
+                            <div className="space-y-1">
+                              {recentSamples.slice(0, 10).map((sample) => (
+                                <div
+                                  key={`${sample.node_id}-${sample.ip}-${sample.sampled_at}-${sample.target_url}-${sample.ok ? sample.latency_ms : "fail"}`}
+                                  className="flex min-w-52 justify-between gap-4"
+                                >
+                                  <span>{formatTimestamp(locale, t, sample.sampled_at)}</span>
+                                  <span
+                                    className={cn(
+                                      "rounded-md border px-1.5 py-0.5 font-mono font-semibold",
+                                      probeLatencyBadgeToneClass(
+                                        sample.ok && sample.latency_ms != null
+                                          ? "success"
+                                          : "failed",
+                                        sample.latency_ms,
+                                      ),
+                                    )}
+                                  >
+                                    {sample.ok && sample.latency_ms != null
+                                      ? formatLatency(locale, t, sample.latency_ms)
+                                      : t("Probe failed")}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            t("No probe data yet")
+                          )}
+                        </TooltipContent>
+                      </Tooltip>
                       {item.profile_last_used_at ? (
                         <span>
                           {t("Profile last used {time}", {

@@ -5,8 +5,9 @@ use async_trait::async_trait;
 
 use crate::models::{
     ApiKeyRecord, IpRecord, NodeUsageRecord, ProbeRecord, ProfileProxySettings, ProxyImportRecord,
-    ProxyImportSyncConfig, ProxyInventoryRecord, ProxyNode, ProxyNodeMetadataRecord, ProxyScope,
-    SessionRecord, TaskListQuery, TaskRunEventRecord, TaskRunRecord,
+    ProxyImportSyncConfig, ProxyInventoryRecord, ProxyNode, ProxyNodeMetadataRecord,
+    ProxyNodeProbeSampleRecord, ProxyScope, SessionRecord, SystemSettings, TaskListQuery,
+    TaskRunEventRecord, TaskRunRecord,
 };
 
 pub use memory::MemoryStore;
@@ -100,6 +101,17 @@ pub trait BrokerStore: Send + Sync {
         records: &[ProxyNodeMetadataRecord],
     ) -> anyhow::Result<()>;
     async fn list_proxy_node_metadata(&self) -> anyhow::Result<Vec<ProxyNodeMetadataRecord>>;
+    async fn insert_proxy_node_probe_samples(
+        &self,
+        records: &[ProxyNodeProbeSampleRecord],
+    ) -> anyhow::Result<()>;
+    async fn list_recent_proxy_node_probe_samples(
+        &self,
+        limit_per_node_ip: usize,
+    ) -> anyhow::Result<Vec<ProxyNodeProbeSampleRecord>>;
+
+    async fn get_system_settings(&self) -> anyhow::Result<Option<SystemSettings>>;
+    async fn upsert_system_settings(&self, settings: &SystemSettings) -> anyhow::Result<()>;
 
     async fn insert_session(&self, profile_id: &str, session: &SessionRecord)
     -> anyhow::Result<()>;

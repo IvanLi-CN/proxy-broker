@@ -21,7 +21,7 @@ use crate::{
         RefreshRequest, SearchSessionNodeOptionsRequest, SearchSessionOptionsRequest,
         SuggestedPortResponse, TaskListQuery, TaskRunDetail, TaskRunSummary, TaskStreamEnvelope,
         UpdateProfileProxySettingsRequest, UpdateProxyAllocationRequest,
-        UpdateProxyImportAllocationRequest, UpdateSessionNodeRequest,
+        UpdateProxyImportAllocationRequest, UpdateSessionNodeRequest, UpdateSystemSettingsRequest,
     },
     service::BrokerService,
     tasks::{TaskBusEvent, build_task_list_response, matches_task_query},
@@ -77,6 +77,10 @@ pub fn build_router(state: AppState) -> Router {
             get(get_profile_proxy_settings).patch(update_profile_proxy_settings),
         )
         .route("/api/v1/tasks", get(list_tasks))
+        .route(
+            "/api/v1/system-settings",
+            get(get_system_settings).patch(update_system_settings),
+        )
         .route("/api/v1/tasks/events", get(stream_tasks))
         .route("/api/v1/tasks/{run_id}", get(get_task_run_detail))
         .route(
@@ -305,6 +309,29 @@ async fn update_profile_proxy_settings(
     let resp = state
         .service
         .update_profile_proxy_settings(&profile_id, request.use_global_proxies)
+        .await?;
+    Ok(Json(resp))
+}
+
+async fn get_system_settings(
+    auth: AuthContext,
+    State(state): State<AppState>,
+) -> Result<Json<crate::models::SystemSettings>, BrokerError> {
+    auth.require_admin()?;
+    let resp = state.service.get_system_settings().await?;
+    Ok(Json(resp))
+}
+
+async fn update_system_settings(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    payload: Result<Json<UpdateSystemSettingsRequest>, JsonRejection>,
+) -> Result<Json<crate::models::SystemSettings>, BrokerError> {
+    auth.require_admin()?;
+    let request = parse_json_payload(payload, "update_system_settings")?;
+    let resp = state
+        .service
+        .update_system_settings(request.proxy_probe_interval_sec)
         .await?;
     Ok(Json(resp))
 }

@@ -13,9 +13,9 @@ use crate::{
         ApiKeyProfileScope, ApiKeyProfileScopeKind, ApiKeyRecord, IpRecord, NodeUsageRecord,
         ProbeRecord, ProfileProxySettings, ProxyImportRecord, ProxyImportSourceIdentity,
         ProxyImportSyncConfig, ProxyInventoryRecord, ProxyNode, ProxyNodeMetadataRecord,
-        ProxyScope, SessionRecord, SubscriptionMetadata, SubscriptionSource, TaskEventLevel,
-        TaskListQuery, TaskRunEventRecord, TaskRunKind, TaskRunRecord, TaskRunStage, TaskRunStatus,
-        TaskRunTrigger,
+        ProxyNodeProbeSampleRecord, ProxyScope, SessionRecord, SubscriptionMetadata,
+        SubscriptionSource, SystemSettings, TaskEventLevel, TaskListQuery, TaskRunEventRecord,
+        TaskRunKind, TaskRunRecord, TaskRunStage, TaskRunStatus, TaskRunTrigger,
     },
     proxy_node_validation::malformed_proxy_reason,
     store::BrokerStore,
@@ -195,6 +195,41 @@ impl SqliteStore {
               last_probe_samples_json TEXT NOT NULL DEFAULT '[]',
               updated_at INTEGER NOT NULL,
               PRIMARY KEY (node_id, ip)
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS proxy_node_probe_samples (
+              sample_id INTEGER PRIMARY KEY AUTOINCREMENT,
+              node_id TEXT NOT NULL,
+              ip TEXT NOT NULL,
+              target_url TEXT NOT NULL,
+              ok INTEGER NOT NULL,
+              latency_ms INTEGER,
+              sampled_at INTEGER NOT NULL
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_proxy_node_probe_samples_lookup
+            ON proxy_node_probe_samples(node_id, ip, sampled_at DESC, sample_id DESC)
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS system_settings (
+              key TEXT PRIMARY KEY,
+              value_json TEXT NOT NULL,
+              updated_at INTEGER NOT NULL
             )
             "#,
         )
@@ -2301,10 +2336,129 @@ impl BrokerStore for SqliteStore {
                     last_latency_ms: last_latency_ms.map(|value| value as u64),
                     median_latency_ms: median_latency_ms.map(|value| value as u64),
                     last_probe_samples: serde_json::from_str(&last_probe_samples_json)?,
+                    recent_probe_samples: Vec::new(),
                     updated_at: row.try_get("updated_at")?,
                 })
             })
             .collect()
+    }
+
+    async fn insert_proxy_node_probe_samples(
+        &self,
+        records: &[ProxyNodeProbeSampleRecord],
+    ) -> anyhow::Result<()> {
+        let mut tx = self.pool.begin().await?;
+        for record in records {
+            sqlx::query(
+                r#"
+                INSERT INTO proxy_node_probe_samples (
+                  node_id, ip, target_url, ok, latency_ms, sampled_at
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                "#,
+            )
+            .bind(&record.node_id)
+            .bind(&record.ip)
+            .bind(&record.target_url)
+            .bind(i64::from(record.ok as i32))
+            .bind(record.latency_ms.map(|value| value as i64))
+            .bind(record.sampled_at)
+            .execute(&mut *tx)
+            .await?;
+
+            sqlx::query(
+                r#"
+                DELETE FROM proxy_node_probe_samples
+                WHERE node_id = ?1 AND ip = ?2 AND sample_id NOT IN (
+                  SELECT sample_id
+                  FROM proxy_node_probe_samples
+                  WHERE node_id = ?1 AND ip = ?2
+                  ORDER BY sampled_at DESC, sample_id DESC
+                  LIMIT 10
+                )
+                "#,
+            )
+            .bind(&record.node_id)
+            .bind(&record.ip)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn list_recent_proxy_node_probe_samples(
+        &self,
+        limit_per_node_ip: usize,
+    ) -> anyhow::Result<Vec<ProxyNodeProbeSampleRecord>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT node_id, ip, target_url, ok, latency_ms, sampled_at
+            FROM proxy_node_probe_samples
+            ORDER BY node_id ASC, ip ASC, sampled_at DESC, sample_id DESC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut counts = HashMap::<(String, String), usize>::new();
+        let mut items = Vec::new();
+        for row in rows {
+            let node_id: String = row.try_get("node_id")?;
+            let ip: String = row.try_get("ip")?;
+            let count = counts.entry((node_id.clone(), ip.clone())).or_insert(0);
+            if *count >= limit_per_node_ip {
+                continue;
+            }
+            *count += 1;
+            let ok: i64 = row.try_get("ok")?;
+            let latency_ms: Option<i64> = row.try_get("latency_ms")?;
+            items.push(ProxyNodeProbeSampleRecord {
+                node_id,
+                ip,
+                target_url: row.try_get("target_url")?,
+                ok: ok != 0,
+                latency_ms: latency_ms.map(|value| value as u64),
+                sampled_at: row.try_get("sampled_at")?,
+            });
+        }
+        Ok(items)
+    }
+
+    async fn get_system_settings(&self) -> anyhow::Result<Option<SystemSettings>> {
+        let row = sqlx::query(
+            r#"
+            SELECT value_json, updated_at
+            FROM system_settings
+            WHERE key = 'system'
+            "#,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let value_json: String = row.try_get("value_json")?;
+        let mut settings = serde_json::from_str::<SystemSettings>(&value_json)?;
+        settings.updated_at = row.try_get("updated_at")?;
+        Ok(Some(settings))
+    }
+
+    async fn upsert_system_settings(&self, settings: &SystemSettings) -> anyhow::Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO system_settings (key, value_json, updated_at)
+            VALUES ('system', ?1, ?2)
+            ON CONFLICT(key) DO UPDATE SET
+              value_json = excluded.value_json,
+              updated_at = excluded.updated_at
+            "#,
+        )
+        .bind(serde_json::to_string(settings)?)
+        .bind(settings.updated_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     async fn insert_session(
@@ -3506,8 +3660,8 @@ mod tests {
         ids,
         models::{
             ApiKeyProfileScope, ProxyImportKind, ProxyImportRecord, ProxyImportSourceIdentity,
-            ProxyInventoryRecord, ProxyNode, ProxyScope, SubscriptionMetadata, SubscriptionSource,
-            TaskListQuery,
+            ProxyInventoryRecord, ProxyNode, ProxyNodeProbeSampleRecord, ProxyScope,
+            SubscriptionMetadata, SubscriptionSource, SystemSettings, TaskListQuery,
         },
         store::BrokerStore,
     };
@@ -3882,6 +4036,66 @@ mod tests {
 
         let profiles = store.list_profiles().await.expect("list should succeed");
         assert_eq!(profiles, vec!["legacy-profile"]);
+
+        let _ = tokio::fs::remove_file(path).await;
+    }
+
+    #[tokio::test]
+    async fn proxy_node_probe_samples_keep_latest_ten_per_node_ip() {
+        let (store, path) = open_temp_store().await;
+        let samples = (0..12)
+            .map(|index| ProxyNodeProbeSampleRecord {
+                node_id: "node-a".to_string(),
+                ip: "1.1.1.1".to_string(),
+                target_url: "https://example.test".to_string(),
+                ok: index % 3 != 0,
+                latency_ms: (index % 3 != 0).then_some(80 + index as u64),
+                sampled_at: 1_000 + index as i64,
+            })
+            .collect::<Vec<_>>();
+
+        store
+            .insert_proxy_node_probe_samples(&samples)
+            .await
+            .expect("samples should insert");
+
+        let recent = store
+            .list_recent_proxy_node_probe_samples(10)
+            .await
+            .expect("recent samples should list");
+        assert_eq!(recent.len(), 10);
+        assert_eq!(recent[0].sampled_at, 1_011);
+        assert_eq!(recent[9].sampled_at, 1_002);
+
+        let _ = tokio::fs::remove_file(path).await;
+    }
+
+    #[tokio::test]
+    async fn system_settings_round_trip() {
+        let (store, path) = open_temp_store().await;
+        assert!(
+            store
+                .get_system_settings()
+                .await
+                .expect("settings query should succeed")
+                .is_none()
+        );
+
+        store
+            .upsert_system_settings(&SystemSettings {
+                proxy_probe_interval_sec: 900,
+                updated_at: 123,
+            })
+            .await
+            .expect("settings should upsert");
+
+        let settings = store
+            .get_system_settings()
+            .await
+            .expect("settings query should succeed")
+            .expect("settings should exist");
+        assert_eq!(settings.proxy_probe_interval_sec, 900);
+        assert_eq!(settings.updated_at, 123);
 
         let _ = tokio::fs::remove_file(path).await;
     }
