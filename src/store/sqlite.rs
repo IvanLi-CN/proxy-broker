@@ -1669,7 +1669,6 @@ impl BrokerStore for SqliteStore {
         nodes: &[ProxyNode],
         ip_records: &[IpRecord],
         probe_records: &[ProbeRecord],
-        removed_session_ids: &[String],
     ) -> anyhow::Result<()> {
         let mut tx = self.pool.begin().await?;
 
@@ -1742,21 +1741,6 @@ impl BrokerStore for SqliteStore {
             .bind(record.ok as i64)
             .bind(record.latency_ms.map(|x| x as i64))
             .bind(record.updated_at)
-            .execute(&mut *tx)
-            .await?;
-        }
-
-        for session_id in removed_session_ids {
-            sqlx::query("DELETE FROM sessions WHERE profile_id = ?1 AND session_id = ?2")
-                .bind(profile_id)
-                .bind(session_id)
-                .execute(&mut *tx)
-                .await?;
-            sqlx::query(
-                "DELETE FROM session_node_usages WHERE profile_id = ?1 AND session_id = ?2",
-            )
-            .bind(profile_id)
-            .bind(session_id)
             .execute(&mut *tx)
             .await?;
         }

@@ -29,7 +29,6 @@ pub trait BrokerStore: Send + Sync {
         nodes: &[ProxyNode],
         ip_records: &[IpRecord],
         probe_records: &[ProbeRecord],
-        removed_session_ids: &[String],
     ) -> anyhow::Result<()>;
     async fn list_subscription(&self, profile_id: &str) -> anyhow::Result<Vec<ProxyNode>>;
 
