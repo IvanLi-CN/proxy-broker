@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { I18nProvider } from "@/i18n";
 import type { CurrentUserState, ProxyCatalogResponse } from "@/lib/types";
 import { ProxiesPage } from "@/pages/ProxiesPage";
@@ -16,6 +17,17 @@ const currentUser: CurrentUserState = {
     is_admin: true,
   },
 };
+
+function createProbeSamples(nodeId: string, ip: string, samples: Array<number | null>) {
+  return samples.map((latencyMs, index) => ({
+    node_id: nodeId,
+    ip,
+    target_url: "https://www.gstatic.com/generate_204",
+    ok: latencyMs != null,
+    latency_ms: latencyMs,
+    sampled_at: 1_713_309_380 - index * 20,
+  }));
+}
 
 const globalCatalogWithInvalidCountryCode: ProxyCatalogResponse = {
   view: "global",
@@ -66,6 +78,11 @@ const globalCatalogWithInvalidCountryCode: ProxyCatalogResponse = {
               last_latency_ms: 88,
               median_latency_ms: 92,
               last_probe_samples: [90, 88, 92, 95, 91],
+              recent_probe_samples: createProbeSamples(
+                "node-invalid-country-code",
+                "203.0.113.10",
+                [88, 91, 95, 92, 90],
+              ),
               updated_at: 1_713_309_300,
             },
           ],
@@ -79,32 +96,34 @@ describe("ProxiesPage", () => {
   it("renders global catalog rows even when geo metadata contains an invalid country code", () => {
     render(
       <I18nProvider initialLocale="en-US">
-        <ProxiesPage
-          mode="global"
-          profiles={["default"]}
-          currentUser={currentUser}
-          accessDenied={false}
-          authError={null}
-          globalLoadResponse={null}
-          globalLoadError={null}
-          loadingGlobal={false}
-          proxyImports={null}
-          proxyImportsLoading={false}
-          proxyImportsError={null}
-          reallocatingImportId={null}
-          deletingImportId={null}
-          proxyCatalog={globalCatalogWithInvalidCountryCode}
-          proxyCatalogLoading={false}
-          proxyCatalogError={null}
-          liveConnectionState="connected"
-          liveNodeStates={{}}
-          queueingOperation={false}
-          onLoadGlobal={vi.fn()}
-          onReassignImport={vi.fn()}
-          onDeleteImport={vi.fn()}
-          onRefreshNodes={vi.fn()}
-          onProbeNodes={vi.fn()}
-        />
+        <TooltipProvider>
+          <ProxiesPage
+            mode="global"
+            profiles={["default"]}
+            currentUser={currentUser}
+            accessDenied={false}
+            authError={null}
+            globalLoadResponse={null}
+            globalLoadError={null}
+            loadingGlobal={false}
+            proxyImports={null}
+            proxyImportsLoading={false}
+            proxyImportsError={null}
+            reallocatingImportId={null}
+            deletingImportId={null}
+            proxyCatalog={globalCatalogWithInvalidCountryCode}
+            proxyCatalogLoading={false}
+            proxyCatalogError={null}
+            liveConnectionState="connected"
+            liveNodeStates={{}}
+            queueingOperation={false}
+            onLoadGlobal={vi.fn()}
+            onReassignImport={vi.fn()}
+            onDeleteImport={vi.fn()}
+            onRefreshNodes={vi.fn()}
+            onProbeNodes={vi.fn()}
+          />
+        </TooltipProvider>
       </I18nProvider>,
     );
 

@@ -6,7 +6,7 @@
   - `list_profiles()`
   - `create_profile(profile_id, created_at)`
   - `replace_subscription(profile_id, nodes)`
-  - `apply_subscription_snapshot(profile_id, nodes, ip_records, probe_records, removed_session_ids)`
+  - `apply_subscription_snapshot(profile_id, nodes, ip_records, probe_records)`
   - `list_subscription(profile_id)`
   - `list_proxy_inventory()`
   - `replace_proxy_inventory_scope(source_scope, nodes)`

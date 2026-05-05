@@ -40,6 +40,7 @@ import type {
   SearchSessionOptionsRequest,
   SearchSessionOptionsResponse,
   SuggestedPortResponse,
+  SystemSettings,
   TaskListQuery,
   TaskListResponse,
   TaskRunDetail,
@@ -47,6 +48,7 @@ import type {
   UpdateProxyAllocationRequest,
   UpdateProxyImportAllocationRequest,
   UpdateSessionNodeRequest,
+  UpdateSystemSettingsRequest,
 } from "@/lib/types";
 
 class ApiError extends Error {
@@ -245,6 +247,12 @@ export const api = {
     request<ProfileProxySettings>(profilePath(profileId, "/proxy-settings")),
   updateProfileProxySettings: (profileId: string, payload: UpdateProfileProxySettingsRequest) =>
     request<ProfileProxySettings>(profilePath(profileId, "/proxy-settings"), {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  getSystemSettings: () => request<SystemSettings>("/api/v1/system-settings"),
+  updateSystemSettings: (payload: UpdateSystemSettingsRequest) =>
+    request<SystemSettings>("/api/v1/system-settings", {
       method: "PATCH",
       body: JSON.stringify(payload),
     }),

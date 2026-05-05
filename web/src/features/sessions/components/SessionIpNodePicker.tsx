@@ -15,6 +15,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n";
 import { formatCountryName, formatGeoLabel, formatLatency, formatTimestamp } from "@/lib/format";
+import { probeLatencyBadgeToneClass } from "@/lib/proxy-probe-display";
 import type {
   SearchSessionIpNodeOptionsRequest,
   SessionIpNodeGroupBy,
@@ -254,9 +255,11 @@ export function SessionIpNodePicker({
       return;
     }
     setActiveIp(first.ip);
-    setSelectedIps(new Set([first.ip]));
     setCandidateByIp((current) => new Map(current).set(first.ip, new Set(defaultNodeIds(first))));
-  }, [activeIp, items]);
+    if (mode === "single") {
+      setSelectedIps(new Set([first.ip]));
+    }
+  }, [activeIp, items, mode]);
 
   useEffect(() => {
     const selections = [...selectedIps]
@@ -318,6 +321,19 @@ export function SessionIpNodePicker({
       return next;
     });
     setSelectedIps((current) => new Set(current).add(activeItem.ip));
+  };
+
+  const clearActiveNodes = () => {
+    if (!activeItem) {
+      return;
+    }
+    const activeIp = activeItem.ip;
+    setCandidateByIp((current) => new Map(current).set(activeIp, new Set()));
+    setSelectedIps((current) => {
+      const next = new Set(current);
+      next.delete(activeIp);
+      return next;
+    });
   };
 
   const selectedNodeIds = activeItem
@@ -506,16 +522,49 @@ export function SessionIpNodePicker({
                                   />
                                 </div>
                               </TooltipTrigger>
-                              <TooltipContent>
-                                {node.last_probe_ok === false
-                                  ? t("Last probe failed")
-                                  : t("Median latency {latency}. Quality: {quality}", {
-                                      latency: formatLatency(locale, t, node.median_latency_ms),
-                                      quality: latencyQualityLabel(
-                                        t,
-                                        latencyQuality(node.median_latency_ms, node.last_probe_ok),
-                                      ),
-                                    })}
+                              <TooltipContent
+                                side="top"
+                                align="start"
+                                className="max-w-sm border border-border bg-popover text-popover-foreground shadow-xl shadow-foreground/10"
+                                arrowClassName="bg-popover fill-popover"
+                              >
+                                {node.recent_probe_samples.length > 0 ? (
+                                  <div className="space-y-1">
+                                    {node.recent_probe_samples.slice(0, 10).map((sample) => (
+                                      <div
+                                        key={`${sample.node_id}-${sample.ip}-${sample.sampled_at}-${sample.target_url}-${sample.ok ? sample.latency_ms : "fail"}`}
+                                        className="flex min-w-52 justify-between gap-4"
+                                      >
+                                        <span>{formatTimestamp(locale, t, sample.sampled_at)}</span>
+                                        <span
+                                          className={cn(
+                                            "rounded-md border px-1.5 py-0.5 font-mono font-semibold",
+                                            probeLatencyBadgeToneClass(
+                                              sample.ok && sample.latency_ms != null
+                                                ? "success"
+                                                : "failed",
+                                              sample.latency_ms,
+                                            ),
+                                          )}
+                                        >
+                                          {sample.ok && sample.latency_ms != null
+                                            ? formatLatency(locale, t, sample.latency_ms)
+                                            : t("Probe failed")}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : node.last_probe_ok === false ? (
+                                  t("Last probe failed")
+                                ) : (
+                                  t("Median latency {latency}. Quality: {quality}", {
+                                    latency: formatLatency(locale, t, node.median_latency_ms),
+                                    quality: latencyQualityLabel(
+                                      t,
+                                      latencyQuality(node.median_latency_ms, node.last_probe_ok),
+                                    ),
+                                  })
+                                )}
                               </TooltipContent>
                             </Tooltip>
                             <Tooltip>
@@ -551,14 +600,7 @@ export function SessionIpNodePicker({
               >
                 {t("Select all nodes")}
               </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() =>
-                  setCandidateByIp((current) => new Map(current).set(activeItem.ip, new Set()))
-                }
-              >
+              <Button type="button" variant="ghost" size="sm" onClick={clearActiveNodes}>
                 {t("Clear nodes")}
               </Button>
             </div>

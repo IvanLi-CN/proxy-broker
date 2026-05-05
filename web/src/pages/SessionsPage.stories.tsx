@@ -220,7 +220,10 @@ export const CreateDialogFlow: Story = {
       "data-state",
       "open",
     );
-    await expect(await dialog.findByRole("button", { name: /^Create session$/i })).toBeEnabled();
+    const submit = await dialog.findByRole("button", { name: /^Create session$/i });
+    await expect(submit).toBeDisabled();
+    await userEvent.click(await dialog.findByRole("button", { name: /203\.0\.113\.10/i }));
+    await expect(submit).toBeEnabled();
   },
 };
 

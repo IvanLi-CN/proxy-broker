@@ -1,5 +1,5 @@
 import { LoaderCircleIcon, PencilLineIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -47,12 +47,18 @@ export function SessionNodeSelectDialog({
   const { t } = useI18n();
   const displayAddress = session ? resolveSessionDisplayAddress(session) : null;
   const [selection, setSelection] = useState<SessionIpNodePickerSelection | null>(null);
+  const initializedSessionId = useRef<string | null>(null);
 
   useEffect(() => {
     if (!open || !session) {
       setSelection(null);
+      initializedSessionId.current = null;
       return;
     }
+    if (initializedSessionId.current === session.session_id) {
+      return;
+    }
+    initializedSessionId.current = session.session_id;
     setSelection({
       selectedIp: session.selected_ip,
       candidateNodeIds:
@@ -100,6 +106,7 @@ export function SessionNodeSelectDialog({
 
         {session ? (
           <SessionIpNodePicker
+            key={session.session_id}
             mode="single"
             sessionId={session.session_id}
             initialSelectedIp={session.selected_ip}

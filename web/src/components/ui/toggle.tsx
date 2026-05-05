@@ -42,5 +42,5 @@ function Toggle({
   );
 }
 
-export { Toggle, toggleVariants };
 export type { ToggleVariants };
+export { Toggle, toggleVariants };

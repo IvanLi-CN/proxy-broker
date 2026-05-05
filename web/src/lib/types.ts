@@ -155,6 +155,7 @@ export interface SessionNodeOptionItem {
   city?: string | null;
   last_probe_ok?: boolean | null;
   median_latency_ms?: number | null;
+  recent_probe_samples: ProxyNodeProbeSampleRecord[];
   session_last_used_at?: number | null;
   profile_last_used_at?: number | null;
 }
@@ -183,6 +184,7 @@ export interface SessionIpNodeOptionNodeItem {
   city?: string | null;
   last_probe_ok?: boolean | null;
   median_latency_ms?: number | null;
+  recent_probe_samples: ProxyNodeProbeSampleRecord[];
   profile_last_used_at?: number | null;
   session_last_used_at?: number | null;
 }
@@ -336,7 +338,17 @@ export interface ProxyNodeMetadataRecord {
   last_latency_ms?: number | null;
   median_latency_ms?: number | null;
   last_probe_samples: Array<number | null>;
+  recent_probe_samples: ProxyNodeProbeSampleRecord[];
   updated_at: number;
+}
+
+export interface ProxyNodeProbeSampleRecord {
+  node_id: string;
+  ip: string;
+  target_url: string;
+  ok: boolean;
+  latency_ms?: number | null;
+  sampled_at: number;
 }
 
 export interface ProxyCatalogNodeItem extends ProxyInventoryItem {
@@ -382,6 +394,15 @@ export interface ProfileProxySettings {
 
 export interface UpdateProfileProxySettingsRequest {
   use_global_proxies: boolean;
+}
+
+export interface SystemSettings {
+  proxy_probe_interval_sec: number;
+  updated_at: number;
+}
+
+export interface UpdateSystemSettingsRequest {
+  proxy_probe_interval_sec: number;
 }
 
 export interface HealthResponse {

@@ -56,7 +56,8 @@
 - 创建会话与切换代理都必须更新 profile-scope 与 session-scope 的 node usage。
 - `SessionRecord`、列表响应和打开响应必须包含 `candidate_node_ids`；旧会话候选集默认回填为当前 `node_id`。
 - SQLite `sessions` 必须作为启动恢复的真相源；程序重启或更新后，未显式关闭的会话仍需继续出现在 `/sessions` 列表。
-- 启动 reconcile 只有在某条会话的 `node_id + selected_ip` 已被明确判定失效时才允许清理；不得因为运行时恢复失败、端口占用或有效节点暂不可判定而清空列表。
+- 启动 reconcile、自动订阅同步、refresh / rebuild 等后台路径不得删除 SQLite `sessions` 行；即使某条会话当前无法映射到 effective pool，也只能跳过 runtime restore 并记录 warning，等待操作员显式关闭或切换节点。
+- 会话只能通过显式创建接口新增，并只能通过显式关闭接口从持久化 store 删除；后台任务不得自动创建、重建、迁移、重新分配或删除会话。
 
 ### SHOULD
 
@@ -104,7 +105,10 @@
   Then 左栏 IP 和右栏节点状态保持同步，提交 payload 包含 `selected_ip + candidate_node_ids`。
 - Given 已持久化的会话
   When 程序重启、升级或启动恢复阶段遇到临时运行时故障
-  Then `/sessions` 列表仍显示这些会话，除非其 `node_id + selected_ip` 已被明确判定为失效组合。
+  Then `/sessions` 列表仍显示这些会话，无法恢复到 runtime 的条目只记录 warning，不从 SQLite 删除。
+- Given 已持久化的会话
+  When 自动订阅同步、手动 refresh 或 profile rebuild 后当前 effective pool 不再包含该会话的 `node_id + selected_ip`
+  Then 该会话仍保留在 `/sessions`，直到操作员显式关闭或切换节点。
 
 ## 质量门槛（Quality Gates）
 

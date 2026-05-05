@@ -382,6 +382,17 @@ export const enUS: MessageCatalog = {
   "Probe failed (0/5)": "Probe failed (0/5)",
   "No probe median yet": "No probe median yet",
   "No probe data yet": "No probe data yet",
+  "Probe running": "Probe running",
+  "-- ms": "-- ms",
+  "Automatic latency probe": "Automatic latency probe",
+  "Loading system settings...": "Loading system settings...",
+  "All subscription nodes are probed every {minutes} minutes.":
+    "All subscription nodes are probed every {minutes} minutes.",
+  "Interval minutes": "Interval minutes",
+  "Saving...": "Saving...",
+  Save: "Save",
+  "Automatic latency probe interval saved: {minutes} minutes":
+    "Automatic latency probe interval saved: {minutes} minutes",
   "Queued metadata refresh": "Queued metadata refresh",
   "Queued latency probe": "Queued latency probe",
   "Run ID: {runId}": "Run ID: {runId}",

@@ -8,7 +8,12 @@ import { AppShell } from "@/components/AppShell";
 import { Toaster } from "@/components/ui/sonner";
 import type { ProxyNodeLiveState } from "@/hooks/use-proxy-operation-events";
 import { GLOBAL_PROFILE_ID } from "@/lib/profile-selection";
-import type { CurrentUserState, ProfileProxySettings, ProxyCatalogResponse } from "@/lib/types";
+import type {
+  CurrentUserState,
+  ProfileProxySettings,
+  ProxyCatalogResponse,
+  ProxyNodeProbeSampleRecord,
+} from "@/lib/types";
 import {
   DeleteImportConfirmDialog,
   NodePinnedBatchDialog,
@@ -30,6 +35,22 @@ const currentUser: CurrentUserState = {
     is_admin: true,
   },
 };
+
+function createProbeSamples(
+  nodeId: string,
+  ip: string,
+  samples: Array<number | null>,
+  sampledAt = 1_713_309_380,
+): ProxyNodeProbeSampleRecord[] {
+  return samples.map((latencyMs, index) => ({
+    node_id: nodeId,
+    ip,
+    target_url: "https://www.gstatic.com/generate_204",
+    ok: latencyMs != null,
+    latency_ms: latencyMs,
+    sampled_at: sampledAt - index * 20,
+  }));
+}
 
 const proxyImportsFixture = {
   items: [
@@ -112,6 +133,18 @@ const globalCatalogFixture: ProxyCatalogResponse = {
               last_latency_ms: 88,
               median_latency_ms: 92,
               last_probe_samples: [90, 88, 92, 95, 91],
+              recent_probe_samples: createProbeSamples("node-jp-tokyo-entry", "203.0.113.10", [
+                88,
+                91,
+                95,
+                92,
+                90,
+                140,
+                151,
+                210,
+                309,
+                null,
+              ]),
               updated_at: 1_713_309_300,
             },
           ],
@@ -143,6 +176,13 @@ const globalCatalogFixture: ProxyCatalogResponse = {
               last_latency_ms: null,
               median_latency_ms: null,
               last_probe_samples: [null, null, null, null, null],
+              recent_probe_samples: createProbeSamples("node-jp-osaka-edge", "203.0.113.88", [
+                null,
+                null,
+                null,
+                318,
+                null,
+              ]),
               updated_at: 1_713_309_320,
             },
           ],
@@ -256,6 +296,7 @@ function createProfileCatalogFixture(): ProxyCatalogResponse {
         ip_metadata: node.ip_metadata.map((metadata) => ({
           ...metadata,
           last_probe_samples: [...metadata.last_probe_samples],
+          recent_probe_samples: metadata.recent_probe_samples.map((sample) => ({ ...sample })),
         })),
       })),
     })),
@@ -309,6 +350,8 @@ function InteractiveProfileStory(args: Extract<ProxiesPageProps, { mode: "profil
             latency == null
               ? [null, null, null, null, null]
               : [latency - 5, latency, latency + 3, latency + 1, latency - 2];
+          const ip = node.primary_ip ?? node.resolved_ips[0] ?? "198.51.100.42";
+          const recentProbeSamples = createProbeSamples(node.node_id, ip, samples, updatedAt);
 
           const metadata = node.ip_metadata[0]
             ? {
@@ -319,10 +362,11 @@ function InteractiveProfileStory(args: Extract<ProxiesPageProps, { mode: "profil
                 last_latency_ms: latency,
                 last_probe_ok: latency != null,
                 last_probe_samples: samples,
+                recent_probe_samples: recentProbeSamples,
               }
             : {
                 node_id: node.node_id,
-                ip: node.primary_ip ?? node.resolved_ips[0] ?? "198.51.100.42",
+                ip,
                 country_code: "JP",
                 country_name: "Japan",
                 region_name: node.node_id === "node-edge-manual-1" ? "Tokyo" : "Osaka",
@@ -334,6 +378,7 @@ function InteractiveProfileStory(args: Extract<ProxiesPageProps, { mode: "profil
                 last_latency_ms: latency,
                 median_latency_ms: latency,
                 last_probe_samples: samples,
+                recent_probe_samples: recentProbeSamples,
                 updated_at: updatedAt,
               };
 
@@ -646,10 +691,18 @@ export const GlobalConfig: Story = {
     proxyCatalog: globalCatalogFixture,
     proxyCatalogLoading: false,
     proxyCatalogError: null,
+    systemSettings: {
+      proxy_probe_interval_sec: 3600,
+      updated_at: 1_713_309_300,
+    },
+    systemSettingsLoading: false,
+    systemSettingsError: null,
+    updatingSystemSettings: false,
     liveConnectionState: "connected",
     liveNodeStates,
     queueingOperation: false,
     onLoadGlobal: fn(),
+    onUpdateSystemSettings: fn(),
     onReassignImport: fn(),
     onDeleteImport: fn(),
     onRefreshNodes: fn(),
@@ -665,6 +718,11 @@ export const GlobalConfig: Story = {
     ).toBeGreaterThan(0);
     await expect((await canvas.findAllByText(/Remaining/i)).length).toBeGreaterThan(0);
     await expect(await canvas.findByText(/JP-Tokyo-Entry/i)).toBeVisible();
+    await expect(await canvas.findByText(/Automatic latency probe/i)).toBeVisible();
+    await expect(await canvas.findByText(/88 ms/i)).toBeVisible();
+    await userEvent.hover(await canvas.findByText(/88 ms/i));
+    const dialog = within(canvasElement.ownerDocument.body);
+    await expect((await dialog.findAllByText(/309 ms/i)).length).toBeGreaterThan(0);
     await expect(await canvas.findByText(/Probe selected/i)).toBeVisible();
   },
 };

@@ -2,9 +2,11 @@ import {
   ActivityIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  ClockIcon,
   Layers3Icon,
   PlusIcon,
   RefreshCcwIcon,
+  SaveIcon,
   Trash2Icon,
 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useState } from "react";
@@ -39,6 +41,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ProfileProxyPolicyCard } from "@/features/proxies/components/ProfileProxyPolicyCard";
 import { ProxyLoadCard } from "@/features/proxies/components/ProxyLoadCard";
 import type { ProxyNodeLiveState } from "@/hooks/use-proxy-operation-events";
@@ -52,6 +55,11 @@ import {
   formatTimestamp,
   optionalNumber,
 } from "@/lib/format";
+import {
+  type ProbeDisplayState,
+  probeLatencyBadgeToneClass,
+  probeLatencyToneClass,
+} from "@/lib/proxy-probe-display";
 import type {
   CurrentUserState,
   ListProxyImportResponse,
@@ -66,7 +74,9 @@ import type {
   ProxyImportItem,
   ProxyImportKind,
   ProxyScope,
+  SystemSettings,
 } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 function encodeScope(scope: ProxyScope) {
   return scope.type === "global" ? "global" : `profile:${scope.profile_id}`;
@@ -162,44 +172,94 @@ function NodeStatusCell({
     node.ip_metadata.find((record) => record.ip === node.primary_ip) ?? node.ip_metadata[0] ?? null;
   const country = formatCountryName(locale, metadata?.country_code, metadata?.country_name);
   const city = metadata?.city ?? metadata?.region_name ?? null;
-  const successCount = metadata?.last_probe_samples.filter(
-    (value) => typeof value === "number",
-  ).length;
+  const recentSamples = metadata?.recent_probe_samples ?? [];
+  const latestSample = recentSamples[0] ?? null;
+  const liveProbeState = liveState?.kind === "proxy_latency_probe" ? liveState : null;
+  const liveLatency =
+    liveProbeState?.latestSampleMs == null
+      ? null
+      : formatLatency(locale, t, liveProbeState.latestSampleMs);
+  const displayState: ProbeDisplayState = liveProbeState
+    ? liveProbeState.latestSampleMs == null
+      ? "failed"
+      : "success"
+    : latestSample
+      ? latestSample.ok && latestSample.latency_ms != null
+        ? "success"
+        : "failed"
+      : "empty";
+  const displayLatencyMs = liveProbeState
+    ? (liveProbeState.latestSampleMs ?? null)
+    : latestSample?.ok
+      ? (latestSample.latency_ms ?? null)
+      : null;
+  const displayLatency = liveProbeState
+    ? (liveLatency ?? t("Probe failed"))
+    : latestSample
+      ? latestSample.ok && latestSample.latency_ms != null
+        ? formatLatency(locale, t, latestSample.latency_ms)
+        : t("Probe failed")
+      : t("-- ms");
 
   return (
     <div className="space-y-1 text-xs leading-5 text-muted-foreground">
       <div>
         {country || city ? [country, city].filter(Boolean).join(" / ") : t("No geo metadata yet")}
       </div>
-      {liveState ? (
-        <div className="font-medium text-primary">
-          {liveState.kind === "proxy_latency_probe"
-            ? t("Round {round}/{total}: {latency}", {
-                round: liveState.latestRound ?? 0,
-                total: liveState.samplesTotal ?? 5,
-                latency:
-                  liveState.latestSampleMs == null
-                    ? t("timeout")
-                    : formatLatency(locale, t, liveState.latestSampleMs),
-              })
-            : (liveState.message ?? t("Refreshing metadata"))}
-        </div>
-      ) : metadata ? (
-        <>
-          <div>
-            {metadata.median_latency_ms != null
-              ? t("Median {latency}", {
-                  latency: formatLatency(locale, t, metadata.median_latency_ms),
-                })
-              : successCount === 0 && metadata.last_probe_samples.length > 0
-                ? t("Probe failed (0/5)")
-                : t("No probe median yet")}
-          </div>
-          <div>{formatTimestamp(locale, t, metadata.updated_at)}</div>
-        </>
-      ) : (
-        <div>{t("No probe data yet")}</div>
-      )}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className={cn(
+              "cursor-help p-0 text-left font-semibold underline decoration-dotted underline-offset-4",
+              probeLatencyToneClass(displayState, displayLatencyMs),
+            )}
+          >
+            {displayLatency}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent
+          side="top"
+          align="start"
+          className="max-w-sm border border-border bg-popover text-popover-foreground shadow-xl shadow-foreground/10"
+          arrowClassName="bg-popover fill-popover"
+        >
+          {recentSamples.length > 0 ? (
+            <div className="space-y-1">
+              {recentSamples.slice(0, 10).map((sample) => (
+                <div
+                  key={`${sample.node_id}-${sample.ip}-${sample.sampled_at}-${sample.target_url}-${sample.ok ? sample.latency_ms : "fail"}`}
+                  className="flex min-w-52 justify-between gap-4"
+                >
+                  <span>{formatTimestamp(locale, t, sample.sampled_at)}</span>
+                  <span
+                    className={cn(
+                      "rounded-md border px-1.5 py-0.5 font-mono font-semibold",
+                      probeLatencyBadgeToneClass(
+                        sample.ok && sample.latency_ms != null ? "success" : "failed",
+                        sample.latency_ms,
+                      ),
+                    )}
+                  >
+                    {sample.ok && sample.latency_ms != null
+                      ? formatLatency(locale, t, sample.latency_ms)
+                      : t("Probe failed")}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            t("No probe data yet")
+          )}
+        </TooltipContent>
+      </Tooltip>
+      <div>
+        {liveState
+          ? (liveState.message ?? t("Probe running"))
+          : metadata?.probe_updated_at
+            ? formatTimestamp(locale, t, metadata.probe_updated_at)
+            : t("No probe data yet")}
+      </div>
     </div>
   );
 }
@@ -454,6 +514,79 @@ export function DeleteImportConfirmDialog({
   );
 }
 
+function SystemProbeSettingsPanel({
+  settings,
+  loading = false,
+  error,
+  updating = false,
+  onUpdate,
+}: {
+  settings?: SystemSettings | null;
+  loading?: boolean;
+  error?: string | null;
+  updating?: boolean;
+  onUpdate: (proxyProbeIntervalSec: number) => void | Promise<void>;
+}) {
+  const { t } = useI18n();
+  const intervalMinutes = Math.max(
+    1,
+    Math.round((settings?.proxy_probe_interval_sec ?? 3600) / 60),
+  );
+  const [value, setValue] = useState(String(intervalMinutes));
+
+  useEffect(() => {
+    setValue(String(intervalMinutes));
+  }, [intervalMinutes]);
+
+  const parsedMinutes = Number.parseInt(value, 10);
+  const nextSeconds = Number.isFinite(parsedMinutes) ? parsedMinutes * 60 : 0;
+  const invalid = !Number.isFinite(parsedMinutes) || parsedMinutes < 1;
+  const ready = !loading && !error && Boolean(settings);
+
+  return (
+    <div className="rounded-lg border border-border bg-card px-4 py-3">
+      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+            <ClockIcon className="size-4" />
+            {t("Automatic latency probe")}
+          </div>
+          <div className="text-xs leading-5 text-muted-foreground">
+            {loading
+              ? t("Loading system settings...")
+              : t("All subscription nodes are probed every {minutes} minutes.", {
+                  minutes: intervalMinutes,
+                })}
+          </div>
+          {error ? <div className="text-xs text-destructive">{error}</div> : null}
+        </div>
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="space-y-1">
+            <Label htmlFor="proxy-probe-interval">{t("Interval minutes")}</Label>
+            <Input
+              id="proxy-probe-interval"
+              type="number"
+              min={1}
+              className="h-9 w-32"
+              value={value}
+              disabled={!ready || updating}
+              onChange={(event) => setValue(event.target.value)}
+            />
+          </div>
+          <Button
+            size="sm"
+            disabled={!ready || updating || invalid}
+            onClick={() => void onUpdate(nextSeconds)}
+          >
+            <SaveIcon className="size-3.5" />
+            {updating ? t("Saving...") : t("Save")}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 interface SharedCatalogProps {
   proxyCatalog?: ProxyCatalogResponse | null;
   proxyCatalogLoading: boolean;
@@ -477,9 +610,14 @@ interface GlobalProxiesPageProps extends SharedCatalogProps {
   proxyImports?: ListProxyImportResponse | null;
   proxyImportsLoading: boolean;
   proxyImportsError?: string | null;
+  systemSettings?: SystemSettings | null;
+  systemSettingsLoading?: boolean;
+  systemSettingsError?: string | null;
+  updatingSystemSettings?: boolean;
   reallocatingImportId?: string | null;
   deletingImportId?: string | null;
   onLoadGlobal: (payload: LoadSubscriptionRequest) => void | Promise<void>;
+  onUpdateSystemSettings?: (proxyProbeIntervalSec: number) => void | Promise<void>;
   onReassignImport: (importId: string, scope: ProxyScope) => void | Promise<void>;
   onDeleteImport: (importId: string) => void | Promise<void>;
 }
@@ -525,9 +663,14 @@ function GlobalProxiesView({
   globalLoadError,
   loadingGlobal,
   proxyImportsError,
+  systemSettings,
+  systemSettingsLoading = false,
+  systemSettingsError,
+  updatingSystemSettings = false,
   reallocatingImportId = null,
   deletingImportId = null,
   onLoadGlobal,
+  onUpdateSystemSettings = async () => undefined,
   onReassignImport,
   onDeleteImport,
   proxyCatalog,
@@ -606,6 +749,14 @@ function GlobalProxiesView({
         )}
         successTitle={t("Global pool updated")}
         title={t("Import global proxy pool")}
+      />
+
+      <SystemProbeSettingsPanel
+        settings={systemSettings}
+        loading={systemSettingsLoading}
+        error={systemSettingsError}
+        updating={updatingSystemSettings}
+        onUpdate={onUpdateSystemSettings}
       />
 
       {proxyImportsError ? (
