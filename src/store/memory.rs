@@ -141,7 +141,6 @@ impl BrokerStore for MemoryStore {
         nodes: &[ProxyNode],
         ip_records: &[IpRecord],
         probe_records: &[ProbeRecord],
-        removed_session_ids: &[String],
     ) -> anyhow::Result<()> {
         self.with_profile_mut(profile_id, |profile| {
             profile.nodes = nodes.to_vec();
@@ -151,10 +150,6 @@ impl BrokerStore for MemoryStore {
                 .map(|record| (record.ip.clone(), record))
                 .collect();
             profile.probe_records = probe_records.to_vec();
-            for session_id in removed_session_ids {
-                profile.sessions.remove(session_id);
-                profile.session_node_usages.remove(session_id);
-            }
         })
         .context("apply subscription snapshot failed")?;
         Ok(())

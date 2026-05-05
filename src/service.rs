@@ -428,12 +428,35 @@ impl BrokerService {
         override_sessions: Option<&[SessionRecord]>,
         start_without_sessions: bool,
     ) -> BrokerResult<()> {
-        let nodes = self.collect_all_runtime_nodes().await?;
         let sessions = self
             .collect_all_sessions(override_profile_id, override_sessions)
             .await?;
+        self.apply_exact_shared_runtime_config_locked(&sessions, start_without_sessions, false)
+            .await
+    }
+
+    async fn apply_exact_shared_runtime_config_locked(
+        &self,
+        sessions: &[SessionRecord],
+        start_without_sessions: bool,
+        shutdown_when_empty: bool,
+    ) -> BrokerResult<()> {
+        let nodes = self.collect_all_runtime_nodes().await?;
         if nodes.is_empty() || (sessions.is_empty() && !start_without_sessions) {
-            self.cleanup_shared_runtime_if_idle_locked().await;
+            if shutdown_when_empty {
+                if let Err(err) = self
+                    .runtime
+                    .shutdown_profile(GLOBAL_RUNTIME_PROFILE_ID)
+                    .await
+                {
+                    tracing::warn!(
+                        error = %err,
+                        "failed to shutdown shared runtime after exact runtime session set became empty"
+                    );
+                }
+            } else {
+                self.cleanup_shared_runtime_if_idle_locked().await;
+            }
             return Ok(());
         }
 
@@ -442,12 +465,87 @@ impl BrokerService {
             .controller_meta(GLOBAL_RUNTIME_PROFILE_ID)
             .await
             .map_err(|e| BrokerError::MihomoUnavailable(e.to_string()))?;
-        let payload = render_payload(&controller, secret.as_deref(), &nodes, &sessions)
+        let payload = render_payload(&controller, secret.as_deref(), &nodes, sessions)
             .map_err(|e| BrokerError::MihomoUnavailable(e.to_string()))?;
         self.runtime
             .apply_config(GLOBAL_RUNTIME_PROFILE_ID, &payload)
             .await
             .map_err(|e| BrokerError::MihomoUnavailable(e.to_string()))
+    }
+
+    async fn apply_profile_restorable_sessions_locked(
+        &self,
+        profile_id: &str,
+        restorable_sessions: &[SessionRecord],
+    ) -> BrokerResult<()> {
+        let mut sessions = Vec::new();
+        let profile_ids = self
+            .store
+            .list_profiles()
+            .await
+            .map_err(BrokerError::from)?;
+        for current_profile_id in profile_ids {
+            if current_profile_id == profile_id {
+                sessions.extend(restorable_sessions.iter().cloned());
+            } else {
+                let existing_sessions = self.list_sessions_backfilled(&current_profile_id).await?;
+                let restorable_sessions = self
+                    .filter_restorable_sessions_for_profile(
+                        &current_profile_id,
+                        &existing_sessions,
+                        "shared runtime rebuild kept persisted session but left it out of runtime restore",
+                    )
+                    .await?;
+                sessions.extend(restorable_sessions);
+            }
+        }
+        sessions.sort_by(|left, right| {
+            left.created_at
+                .cmp(&right.created_at)
+                .then_with(|| left.session_id.cmp(&right.session_id))
+        });
+        self.apply_exact_shared_runtime_config_locked(&sessions, false, true)
+            .await
+    }
+
+    async fn filter_restorable_sessions_for_profile(
+        &self,
+        profile_id: &str,
+        existing_sessions: &[SessionRecord],
+        unrestored_log_message: &'static str,
+    ) -> BrokerResult<Vec<SessionRecord>> {
+        if existing_sessions.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let nodes = self.compose_effective_session_nodes(profile_id).await?;
+        let valid_proxy_ip_pairs = nodes
+            .iter()
+            .flat_map(valid_proxy_ip_pairs_for_node)
+            .collect::<HashSet<_>>();
+
+        if valid_proxy_ip_pairs.is_empty() {
+            log_unrestored_sessions(profile_id, existing_sessions, &[], unrestored_log_message);
+            return Ok(vec![]);
+        }
+
+        let restorable_sessions = existing_sessions
+            .iter()
+            .filter(|session| {
+                valid_proxy_ip_pairs.contains(&(
+                    session_runtime_key(session).to_string(),
+                    session.selected_ip.clone(),
+                ))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        log_unrestored_sessions(
+            profile_id,
+            existing_sessions,
+            &restorable_sessions,
+            unrestored_log_message,
+        );
+        Ok(restorable_sessions)
     }
 
     async fn cleanup_shared_runtime_if_idle(&self) {
@@ -531,7 +629,7 @@ impl BrokerService {
             tracing::warn!(
                 profile_id,
                 session_count = existing_sessions.len(),
-                "startup session reconciliation skipped pruning because no authoritative proxy/IP pairs were available"
+                "startup session reconciliation skipped runtime restore because no authoritative proxy/IP pairs were available"
             );
             return Ok(());
         }
@@ -547,35 +645,21 @@ impl BrokerService {
             .cloned()
             .collect();
 
-        let reconciled_ids: HashSet<&str> = reconciled_sessions
-            .iter()
-            .map(|session| session.session_id.as_str())
-            .collect();
-        let stale_ids: Vec<String> = existing_sessions
-            .iter()
-            .filter(|session| !reconciled_ids.contains(session.session_id.as_str()))
-            .map(|session| session.session_id.clone())
-            .collect();
+        log_unrestored_sessions(
+            profile_id,
+            &existing_sessions,
+            &reconciled_sessions,
+            "startup session reconciliation left persisted session out of runtime restore",
+        );
 
         if reconciled_sessions.is_empty() {
-            for session_id in stale_ids {
-                self.store
-                    .delete_session(profile_id, &session_id)
-                    .await
-                    .map_err(BrokerError::from)?;
-            }
-            self.cleanup_shared_runtime_if_idle_locked().await;
+            self.apply_profile_restorable_sessions_locked(profile_id, &[])
+                .await?;
             return Ok(());
         }
 
-        self.apply_sessions_config_locked(profile_id, &reconciled_sessions)
+        self.apply_profile_restorable_sessions_locked(profile_id, &reconciled_sessions)
             .await?;
-        for session_id in stale_ids {
-            self.store
-                .delete_session(profile_id, &session_id)
-                .await
-                .map_err(BrokerError::from)?;
-        }
 
         Ok(())
     }
@@ -2016,15 +2100,18 @@ impl BrokerService {
         let existing_sessions = self.list_sessions_backfilled(profile_id).await?;
 
         if nodes.is_empty() {
-            let removed_session_ids = existing_sessions
-                .iter()
-                .map(|session| session.session_id.clone())
-                .collect::<Vec<_>>();
+            log_unrestored_sessions(
+                profile_id,
+                &existing_sessions,
+                &[],
+                "effective profile rebuild kept persisted session but could not restore it because no effective nodes were available",
+            );
             self.store
-                .apply_subscription_snapshot(profile_id, &[], &[], &[], &removed_session_ids)
+                .apply_subscription_snapshot(profile_id, &[], &[], &[])
                 .await
                 .map_err(BrokerError::from)?;
-            self.cleanup_shared_runtime_if_idle_locked().await;
+            self.apply_profile_restorable_sessions_locked(profile_id, &[])
+                .await?;
             return Ok(vec![]);
         }
 
@@ -2065,16 +2152,12 @@ impl BrokerService {
             })
             .cloned()
             .collect();
-        let stale_session_ids: Vec<String> = existing_sessions
-            .iter()
-            .filter(|session| {
-                !valid_proxy_ip_pairs.contains(&(
-                    session_runtime_key(session).to_string(),
-                    session.selected_ip.clone(),
-                ))
-            })
-            .map(|session| session.session_id.clone())
-            .collect();
+        log_unrestored_sessions(
+            profile_id,
+            &existing_sessions,
+            &active_sessions,
+            "effective profile rebuild kept persisted session but left it out of runtime restore",
+        );
         let fresh_probe_records = filter_probe_records_by_pair(
             self.store
                 .list_probe_records(profile_id)
@@ -2085,28 +2168,18 @@ impl BrokerService {
         let mut next_ip_records = ip_map.values().cloned().collect::<Vec<_>>();
         clear_stale_probe_timestamps(&mut next_ip_records, &fresh_probe_records);
 
-        let runtime_applied = !active_sessions.is_empty();
-        if runtime_applied {
-            self.apply_sessions_config_locked(profile_id, &active_sessions)
-                .await?;
-        }
+        self.apply_profile_restorable_sessions_locked(profile_id, &active_sessions)
+            .await?;
 
         if let Err(err) = self
             .store
-            .apply_subscription_snapshot(
-                profile_id,
-                &nodes,
-                &next_ip_records,
-                &fresh_probe_records,
-                &stale_session_ids,
-            )
+            .apply_subscription_snapshot(profile_id, &nodes, &next_ip_records, &fresh_probe_records)
             .await
             .map_err(BrokerError::from)
         {
-            if runtime_applied
-                && let Err(rollback_err) = self
-                    .rollback_runtime_sessions_locked(profile_id, &existing_sessions)
-                    .await
+            if let Err(rollback_err) = self
+                .apply_profile_restorable_sessions_locked(profile_id, &existing_sessions)
+                .await
             {
                 tracing::error!(
                     profile_id,
@@ -2118,8 +2191,6 @@ impl BrokerService {
             }
             return Err(err);
         }
-
-        self.cleanup_shared_runtime_if_idle_locked().await;
 
         let mut new_ips = valid_ips
             .difference(&existing_ip_keys)
@@ -6512,6 +6583,37 @@ fn session_runtime_key(session: &SessionRecord) -> &str {
     }
 }
 
+fn log_unrestored_sessions(
+    profile_id: &str,
+    existing_sessions: &[SessionRecord],
+    restorable_sessions: &[SessionRecord],
+    message: &'static str,
+) {
+    if existing_sessions.is_empty() {
+        return;
+    }
+
+    let restorable_ids = restorable_sessions
+        .iter()
+        .map(|session| session.session_id.as_str())
+        .collect::<HashSet<_>>();
+    for session in existing_sessions
+        .iter()
+        .filter(|session| !restorable_ids.contains(session.session_id.as_str()))
+    {
+        tracing::warn!(
+            profile_id,
+            session_id = %session.session_id,
+            node_id = %session.node_id,
+            proxy_name = %session.proxy_name,
+            selected_ip = %session.selected_ip,
+            listen = %session.listen,
+            port = session.port,
+            "{message}"
+        );
+    }
+}
+
 fn sort_queued_runs_for_dispatch(runs: &mut [TaskRunRecord]) {
     runs.sort_by(|left, right| {
         left.created_at
@@ -6659,16 +6761,9 @@ mod tests {
             nodes: &[ProxyNode],
             ip_records: &[IpRecord],
             probe_records: &[ProbeRecord],
-            removed_session_ids: &[String],
         ) -> anyhow::Result<()> {
             self.inner
-                .apply_subscription_snapshot(
-                    profile_id,
-                    nodes,
-                    ip_records,
-                    probe_records,
-                    removed_session_ids,
-                )
+                .apply_subscription_snapshot(profile_id, nodes, ip_records, probe_records)
                 .await
         }
 
@@ -7379,7 +7474,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn load_subscription_skips_runtime_apply_when_no_session_survives() {
+    async fn load_subscription_preserves_unrestorable_sessions_without_runtime_apply() {
         let profile_id = "p-load";
         let store = Arc::new(MemoryStore::new());
         store
@@ -7419,14 +7514,88 @@ proxies:
         );
         assert_eq!(runtime.apply_calls.load(Ordering::SeqCst), 0);
         assert_eq!(runtime.shutdown_calls.load(Ordering::SeqCst), 1);
-        assert!(
-            store
-                .list_sessions(profile_id)
-                .await
-                .expect("list sessions should succeed")
-                .is_empty(),
-            "stale sessions should be cleaned from store"
+        let sessions = store
+            .list_sessions(profile_id)
+            .await
+            .expect("list sessions should succeed");
+        assert_eq!(
+            sessions.len(),
+            1,
+            "unrestorable session should remain persisted"
         );
+        assert_eq!(sessions[0].session_id, "s1");
+    }
+
+    #[tokio::test]
+    async fn load_subscription_keeps_other_profile_sessions_in_shared_runtime() {
+        let stale_profile_id = "p-load-stale";
+        let active_profile_id = "p-load-active";
+        let store = Arc::new(MemoryStore::new());
+        store
+            .replace_subscription(stale_profile_id, &[make_node("old", "1.1.1.1")])
+            .await
+            .expect("seed stale subscription should succeed");
+        store
+            .insert_session(
+                stale_profile_id,
+                &make_session("stale-session", "old", "1.1.1.1", 1),
+            )
+            .await
+            .expect("seed stale session should succeed");
+        store
+            .replace_subscription(active_profile_id, &[make_node("active", "3.3.3.3")])
+            .await
+            .expect("seed active subscription should succeed");
+        store
+            .insert_session(
+                active_profile_id,
+                &make_session("active-session", "active", "3.3.3.3", 2),
+            )
+            .await
+            .expect("seed active session should succeed");
+
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(
+            store.clone(),
+            runtime.clone(),
+            BrokerServiceOptions::default(),
+        );
+        let source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: new
+    type: socks5
+    server: 2.2.2.2
+"#,
+        )
+        .await;
+
+        service
+            .load_subscription(
+                stale_profile_id,
+                &SubscriptionSource::File(source_path.clone()),
+            )
+            .await
+            .expect("subscription load should succeed");
+        let _ = tokio::fs::remove_file(&source_path).await;
+
+        let stale_sessions = store
+            .list_sessions(stale_profile_id)
+            .await
+            .expect("stale sessions should list");
+        assert_eq!(stale_sessions.len(), 1);
+        assert_eq!(stale_sessions[0].session_id, "stale-session");
+        assert_eq!(
+            runtime.shutdown_calls.load(Ordering::SeqCst),
+            0,
+            "refreshing one profile must not shutdown shared runtime for other active sessions"
+        );
+        let payloads = runtime.payloads.lock().await.clone();
+        let latest_payload = payloads
+            .last()
+            .expect("shared runtime should be reconfigured for active sessions");
+        assert!(latest_payload.contains("broker-active-session"));
+        assert!(!latest_payload.contains("broker-stale-session"));
     }
 
     #[tokio::test]
@@ -10191,6 +10360,55 @@ proxies:
         assert_eq!(sessions.len(), 1, "session should remain persisted");
         assert_eq!(sessions[0].session_id, "s-keep");
         assert_eq!(runtime.apply_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn reconcile_startup_preserves_session_when_proxy_pair_is_not_in_current_pool() {
+        let profile_id = "p-pair-missing";
+        let store = Arc::new(MemoryStore::new());
+        store
+            .replace_subscription(profile_id, &[make_node("current-node", "198.51.100.10")])
+            .await
+            .expect("seed subscription should succeed");
+        store
+            .insert_session(
+                profile_id,
+                &make_session("s-keep-missing-pair", "old-node", "203.0.113.90", 1),
+            )
+            .await
+            .expect("seed session should succeed");
+
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(
+            store.clone(),
+            runtime.clone(),
+            BrokerServiceOptions::default(),
+        );
+        service
+            .reconcile_startup_sessions()
+            .await
+            .expect("startup reconcile should complete");
+
+        let sessions = store
+            .list_sessions(profile_id)
+            .await
+            .expect("list sessions should succeed");
+        assert_eq!(
+            sessions.len(),
+            1,
+            "unrestorable session should remain persisted"
+        );
+        assert_eq!(sessions[0].session_id, "s-keep-missing-pair");
+        assert_eq!(
+            runtime.apply_calls.load(Ordering::SeqCst),
+            0,
+            "unrestorable session should not be applied to runtime"
+        );
+        assert_eq!(
+            runtime.shutdown_calls.load(Ordering::SeqCst),
+            1,
+            "runtime should be stopped when no persisted session is restorable"
+        );
     }
 
     #[tokio::test]
