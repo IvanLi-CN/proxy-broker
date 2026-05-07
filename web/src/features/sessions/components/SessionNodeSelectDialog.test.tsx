@@ -168,6 +168,7 @@ describe("SessionNodeSelectDialog", () => {
     const submit = screen.getByRole("button", { name: /Use selected candidates/i });
     expect(submit).toBeEnabled();
 
+    await user.click(screen.getByRole("button", { name: /198\.51\.100\.42/i }));
     await user.click(screen.getByRole("button", { name: /Clear nodes/i }));
 
     expect(submit).toBeDisabled();
