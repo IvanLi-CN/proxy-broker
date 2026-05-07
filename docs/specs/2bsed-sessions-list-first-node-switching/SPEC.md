@@ -222,6 +222,19 @@
   ![切换代理弹窗](./assets/sessions-switch-dialog.png)
 
 - source_type: `storybook_canvas`
+  target_program: `mock-only`
+  capture_scope: `element`
+  requested_viewport: `none`
+  viewport_strategy: `storybook-viewport`
+  sensitive_exclusion: `N/A`
+  submission_gate: `approved`
+  story_id_or_title: `Features/Sessions/SessionNodeSelectDialog/SourceGrouping`
+  state: `source grouping selected`
+  evidence_note: 切换会话代理弹窗改为双栏布局；左栏保留“当前会话上次使用 / 当前 profile 上次使用”两个全量节点入口，并可按订阅来源分组，右栏只展示所选分组节点。
+  image:
+  ![切换代理弹窗双栏来源分组](./assets/session-switch-dialog-source-grouping.png)
+
+- source_type: `storybook_canvas`
   story_id_or_title: `Pages/SessionsPage/ClosingState`
   state: `close pending`
   evidence_note: 关闭动作先进入 10 秒撤销窗口；当前行整体置灰，关闭按钮切换为撤销，复制/编辑入口同步禁用。
