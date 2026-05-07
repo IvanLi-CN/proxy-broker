@@ -14,14 +14,14 @@ use crate::{
     auth::{AuthConfig, AuthContext, resolve_request_auth},
     error::BrokerError,
     models::{
-        CreateApiKeyRequest, CreateApiKeyResponse, CreateProfileRequest, CreateProfileResponse,
+        CreateApiKeyRequest, CreateApiKeyResponse, CreateProjectRequest, CreateProjectResponse,
         HealthResponse, LoadSubscriptionRequest, OpenBatchByIpRequest, OpenBatchByNodeRequest,
         OpenBatchRequest, OpenSessionByIpRequest, OpenSessionByNodeRequest, OpenSessionRequest,
-        ProfileProxySettings, ProxyCatalogQuery, ProxyImportListQuery, ProxyInventoryListQuery,
+        ProjectProxySettings, ProxyCatalogQuery, ProxyImportListQuery, ProxyInventoryListQuery,
         ProxyOperationRequest, ProxyScope, RefreshRequest, SearchSessionIpNodeOptionsRequest,
         SearchSessionNodeOptionsRequest, SearchSessionOptionsRequest, SuggestedPortResponse,
         TaskListQuery, TaskRunDetail, TaskRunSummary, TaskStreamEnvelope,
-        UpdateProfileProxySettingsRequest, UpdateProxyAllocationRequest,
+        UpdateProjectProxySettingsRequest, UpdateProxyAllocationRequest,
         UpdateProxyImportAllocationRequest, UpdateSessionNodeRequest, UpdateSystemSettingsRequest,
     },
     service::BrokerService,
@@ -29,7 +29,7 @@ use crate::{
     web_ui::spa_fallback,
 };
 
-const GLOBAL_TASK_PROFILE_ID: &str = "__global__";
+const GLOBAL_TASK_PROJECT_ID: &str = "__global__";
 const SESSION_DISPLAY_HOST_HEADER: &str = "x-proxy-broker-display-host";
 
 #[derive(Clone)]
@@ -42,7 +42,7 @@ pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/api/v1/auth/me", get(auth_me))
-        .route("/api/v1/profiles", get(list_profiles).post(create_profile))
+        .route("/api/v1/projects", get(list_projects).post(create_project))
         .route("/api/v1/api-keys", get(list_api_keys).post(create_api_key))
         .route("/api/v1/api-keys/{key_id}", delete(revoke_api_key))
         .route(
@@ -74,8 +74,8 @@ pub fn build_router(state: AppState) -> Router {
             delete(delete_proxy_inventory_node),
         )
         .route(
-            "/api/v1/profiles/{profile_id}/proxy-settings",
-            get(get_profile_proxy_settings).patch(update_profile_proxy_settings),
+            "/api/v1/projects/{project_id}/proxy-settings",
+            get(get_project_proxy_settings).patch(update_project_proxy_settings),
         )
         .route("/api/v1/tasks", get(list_tasks))
         .route(
@@ -85,64 +85,64 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/tasks/events", get(stream_tasks))
         .route("/api/v1/tasks/{run_id}", get(get_task_run_detail))
         .route(
-            "/api/v1/profiles/{profile_id}/subscriptions/load",
+            "/api/v1/projects/{project_id}/subscriptions/load",
             post(load_subscription),
         )
         .route(
-            "/api/v1/profiles/{profile_id}/refresh",
-            post(refresh_profile),
+            "/api/v1/projects/{project_id}/refresh",
+            post(refresh_project),
         )
         .route(
-            "/api/v1/profiles/{profile_id}/ips/extract",
+            "/api/v1/projects/{project_id}/ips/extract",
             post(extract_ips),
         )
         .route(
-            "/api/v1/profiles/{profile_id}/ips/options/search",
+            "/api/v1/projects/{project_id}/ips/options/search",
             post(search_session_options),
         )
         .route(
-            "/api/v1/profiles/{profile_id}/sessions/open",
+            "/api/v1/projects/{project_id}/sessions/open",
             post(open_session),
         )
         .route(
-            "/api/v1/profiles/{profile_id}/sessions/open-batch",
+            "/api/v1/projects/{project_id}/sessions/open-batch",
             post(open_batch),
         )
         .route(
-            "/api/v1/profiles/{profile_id}/sessions/open-by-node",
+            "/api/v1/projects/{project_id}/sessions/open-by-node",
             post(open_session_by_node),
         )
         .route(
-            "/api/v1/profiles/{profile_id}/sessions/open-batch-by-node",
+            "/api/v1/projects/{project_id}/sessions/open-batch-by-node",
             post(open_batch_by_node),
         )
         .route(
-            "/api/v1/profiles/{profile_id}/sessions/open-by-ip",
+            "/api/v1/projects/{project_id}/sessions/open-by-ip",
             post(open_session_by_ip),
         )
         .route(
-            "/api/v1/profiles/{profile_id}/sessions/open-batch-by-ip",
+            "/api/v1/projects/{project_id}/sessions/open-batch-by-ip",
             post(open_batch_by_ip),
         )
         .route(
-            "/api/v1/profiles/{profile_id}/sessions/suggested-port",
+            "/api/v1/projects/{project_id}/sessions/suggested-port",
             get(suggested_port),
         )
         .route(
-            "/api/v1/profiles/{profile_id}/sessions/{session_id}/node-options/search",
+            "/api/v1/projects/{project_id}/sessions/{session_id}/node-options/search",
             post(search_session_node_options),
         )
         .route(
-            "/api/v1/profiles/{profile_id}/sessions/ip-node-options/search",
+            "/api/v1/projects/{project_id}/sessions/ip-node-options/search",
             post(search_session_ip_node_options),
         )
-        .route("/api/v1/profiles/{profile_id}/sessions", get(list_sessions))
+        .route("/api/v1/projects/{project_id}/sessions", get(list_sessions))
         .route(
-            "/api/v1/profiles/{profile_id}/sessions/{session_id}",
+            "/api/v1/projects/{project_id}/sessions/{session_id}",
             delete(close_session),
         )
         .route(
-            "/api/v1/profiles/{profile_id}/sessions/{session_id}/node",
+            "/api/v1/projects/{project_id}/sessions/{session_id}/node",
             patch(update_session_node),
         )
         .fallback(spa_fallback)
@@ -164,23 +164,23 @@ async fn auth_me(auth: AuthContext) -> Result<Json<crate::models::AuthMeResponse
     Ok(Json(principal.as_auth_me()))
 }
 
-async fn list_profiles(
+async fn list_projects(
     auth: AuthContext,
     State(state): State<AppState>,
-) -> Result<Json<crate::models::ListProfilesResponse>, BrokerError> {
+) -> Result<Json<crate::models::ListProjectsResponse>, BrokerError> {
     auth.require_admin()?;
-    let resp = state.service.list_profiles().await?;
+    let resp = state.service.list_projects().await?;
     Ok(Json(resp))
 }
 
-async fn create_profile(
+async fn create_project(
     auth: AuthContext,
     State(state): State<AppState>,
-    payload: Result<Json<CreateProfileRequest>, JsonRejection>,
-) -> Result<(StatusCode, Json<CreateProfileResponse>), BrokerError> {
+    payload: Result<Json<CreateProjectRequest>, JsonRejection>,
+) -> Result<(StatusCode, Json<CreateProjectResponse>), BrokerError> {
     auth.require_admin()?;
-    let request = parse_json_payload(payload, "create_profile")?;
-    let resp = state.service.create_profile(&request.profile_id).await?;
+    let request = parse_json_payload(payload, "create_project")?;
+    let resp = state.service.create_project(&request.project_id).await?;
     Ok((StatusCode::CREATED, Json(resp)))
 }
 
@@ -206,7 +206,7 @@ async fn list_proxy_inventory(
     auth.require_admin()?;
     let resp = state
         .service
-        .list_proxy_inventory(query.scope.as_deref(), query.profile_id.as_deref())
+        .list_proxy_inventory(query.scope.as_deref(), query.project_id.as_deref())
         .await?;
     Ok(Json(resp))
 }
@@ -219,7 +219,7 @@ async fn list_proxy_imports(
     auth.require_admin()?;
     let resp = state
         .service
-        .list_proxy_imports(query.scope.as_deref(), query.profile_id.as_deref())
+        .list_proxy_imports(query.scope.as_deref(), query.project_id.as_deref())
         .await?;
     Ok(Json(resp))
 }
@@ -283,14 +283,14 @@ async fn delete_proxy_import(
     match (&record.source_scope, &record.allocation_scope) {
         (ProxyScope::Global, _) => auth.require_admin()?,
         (
-            ProxyScope::Profile {
-                profile_id: source_profile_id,
+            ProxyScope::Project {
+                project_id: source_project_id,
             },
-            ProxyScope::Profile {
-                profile_id: allocation_profile_id,
+            ProxyScope::Project {
+                project_id: allocation_project_id,
             },
-        ) if source_profile_id == allocation_profile_id => {
-            auth.require_profile_access(source_profile_id)?
+        ) if source_project_id == allocation_project_id => {
+            auth.require_project_access(source_project_id)?
         }
         _ => auth.require_admin()?,
     };
@@ -298,30 +298,30 @@ async fn delete_proxy_import(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn get_profile_proxy_settings(
+async fn get_project_proxy_settings(
     auth: AuthContext,
     State(state): State<AppState>,
-    Path(profile_id): Path<String>,
-) -> Result<Json<ProfileProxySettings>, BrokerError> {
+    Path(project_id): Path<String>,
+) -> Result<Json<ProjectProxySettings>, BrokerError> {
     auth.require_admin()?;
     let resp = state
         .service
-        .get_profile_proxy_settings(&profile_id)
+        .get_project_proxy_settings(&project_id)
         .await?;
     Ok(Json(resp))
 }
 
-async fn update_profile_proxy_settings(
+async fn update_project_proxy_settings(
     auth: AuthContext,
     State(state): State<AppState>,
-    Path(profile_id): Path<String>,
-    payload: Result<Json<UpdateProfileProxySettingsRequest>, JsonRejection>,
-) -> Result<Json<ProfileProxySettings>, BrokerError> {
+    Path(project_id): Path<String>,
+    payload: Result<Json<UpdateProjectProxySettingsRequest>, JsonRejection>,
+) -> Result<Json<ProjectProxySettings>, BrokerError> {
     auth.require_admin()?;
-    let request = parse_json_payload(payload, "update_profile_proxy_settings")?;
+    let request = parse_json_payload(payload, "update_project_proxy_settings")?;
     let resp = state
         .service
-        .update_profile_proxy_settings(&profile_id, request.use_global_proxies)
+        .update_project_proxy_settings(&project_id, request.use_global_proxies)
         .await?;
     Ok(Json(resp))
 }
@@ -465,29 +465,29 @@ async fn stream_tasks(
 async fn load_subscription(
     auth: AuthContext,
     State(state): State<AppState>,
-    Path(profile_id): Path<String>,
+    Path(project_id): Path<String>,
     payload: Result<Json<LoadSubscriptionRequest>, JsonRejection>,
 ) -> Result<Json<crate::models::LoadSubscriptionResponse>, BrokerError> {
-    auth.require_profile_access(&profile_id)?;
-    state.service.require_profile_exists(&profile_id).await?;
+    auth.require_project_access(&project_id)?;
+    state.service.require_project_exists(&project_id).await?;
     let request = parse_json_payload(payload, "load_subscription")?;
     let resp = state
         .service
-        .load_subscription_request(&profile_id, &request)
+        .load_subscription_request(&project_id, &request)
         .await?;
     Ok(Json(resp))
 }
 
-async fn refresh_profile(
+async fn refresh_project(
     auth: AuthContext,
     State(state): State<AppState>,
-    Path(profile_id): Path<String>,
+    Path(project_id): Path<String>,
     body: Bytes,
 ) -> Result<Json<crate::models::RefreshResponse>, BrokerError> {
-    auth.require_profile_access(&profile_id)?;
-    state.service.require_profile_exists(&profile_id).await?;
+    auth.require_project_access(&project_id)?;
+    state.service.require_project_exists(&project_id).await?;
     let request = decode_refresh_request(&body)?;
-    let resp = state.service.refresh(&profile_id, &request).await?;
+    let resp = state.service.refresh(&project_id, &request).await?;
     Ok(Json(resp))
 }
 
@@ -553,11 +553,11 @@ fn authorize_proxy_catalog_access(
         "global" => {
             auth.require_admin()?;
         }
-        "profile" => {
-            let profile_id = query.profile_id.as_deref().ok_or_else(|| {
-                BrokerError::InvalidRequest("profile_id is required when view=profile".to_string())
+        "project" => {
+            let project_id = query.project_id.as_deref().ok_or_else(|| {
+                BrokerError::InvalidRequest("project_id is required when view=project".to_string())
             })?;
-            auth.require_profile_access(profile_id)?;
+            auth.require_project_access(project_id)?;
         }
         other => {
             return Err(BrokerError::InvalidRequest(format!(
@@ -572,9 +572,9 @@ fn authorize_task_query_access(
     auth: &AuthContext,
     query: &TaskListQuery,
 ) -> Result<(), BrokerError> {
-    match query.profile_id.as_deref() {
-        Some(profile_id) if profile_id != "all" && profile_id != GLOBAL_TASK_PROFILE_ID => {
-            auth.require_profile_access(profile_id)?;
+    match query.project_id.as_deref() {
+        Some(project_id) if project_id != "all" && project_id != GLOBAL_TASK_PROJECT_ID => {
+            auth.require_project_access(project_id)?;
         }
         _ => {
             auth.require_admin()?;
@@ -587,10 +587,10 @@ fn authorize_task_run_access(
     auth: &AuthContext,
     run: &crate::models::TaskRunSummary,
 ) -> Result<(), BrokerError> {
-    if run.profile_id == GLOBAL_TASK_PROFILE_ID {
+    if run.project_id == GLOBAL_TASK_PROJECT_ID {
         auth.require_admin()?;
     } else {
-        auth.require_profile_access(&run.profile_id)?;
+        auth.require_project_access(&run.project_id)?;
     }
     Ok(())
 }
@@ -603,11 +603,11 @@ fn authorize_proxy_operation_access(
         "global" => {
             auth.require_admin()?;
         }
-        "profile" => {
-            let profile_id = request.profile_id.as_deref().ok_or_else(|| {
-                BrokerError::InvalidRequest("profile_id is required when view=profile".to_string())
+        "project" => {
+            let project_id = request.project_id.as_deref().ok_or_else(|| {
+                BrokerError::InvalidRequest("project_id is required when view=project".to_string())
             })?;
-            auth.require_profile_access(profile_id)?;
+            auth.require_project_access(project_id)?;
         }
         other => {
             return Err(BrokerError::InvalidRequest(format!(
@@ -666,30 +666,30 @@ fn upsert_stream_matching_runs(
 async fn extract_ips(
     auth: AuthContext,
     State(state): State<AppState>,
-    Path(profile_id): Path<String>,
+    Path(project_id): Path<String>,
     payload: Result<Json<crate::models::ExtractIpRequest>, JsonRejection>,
 ) -> Result<Json<crate::models::ExtractIpResponse>, BrokerError> {
-    auth.require_profile_access(&profile_id)?;
-    state.service.require_profile_exists(&profile_id).await?;
+    auth.require_project_access(&project_id)?;
+    state.service.require_project_exists(&project_id).await?;
     let request = parse_json_payload(payload, "extract_ips")?;
-    let resp = state.service.extract_ips(&profile_id, &request).await?;
+    let resp = state.service.extract_ips(&project_id, &request).await?;
     Ok(Json(resp))
 }
 
 async fn open_session(
     auth: AuthContext,
     State(state): State<AppState>,
-    Path(profile_id): Path<String>,
+    Path(project_id): Path<String>,
     headers: HeaderMap,
     payload: Result<Json<OpenSessionRequest>, JsonRejection>,
 ) -> Result<Json<crate::models::OpenSessionResponse>, BrokerError> {
-    auth.require_profile_access(&profile_id)?;
-    state.service.require_profile_exists(&profile_id).await?;
+    auth.require_project_access(&project_id)?;
+    state.service.require_project_exists(&project_id).await?;
     let request = parse_json_payload(payload, "open_session")?;
     let display_host = resolve_session_display_host_hint(&headers);
     let resp = state
         .service
-        .open_session(&profile_id, &request, display_host.as_deref())
+        .open_session(&project_id, &request, display_host.as_deref())
         .await?;
     Ok(Json(resp))
 }
@@ -697,17 +697,17 @@ async fn open_session(
 async fn open_batch(
     auth: AuthContext,
     State(state): State<AppState>,
-    Path(profile_id): Path<String>,
+    Path(project_id): Path<String>,
     headers: HeaderMap,
     payload: Result<Json<OpenBatchRequest>, JsonRejection>,
 ) -> Result<Json<crate::models::OpenBatchResponse>, BrokerError> {
-    auth.require_profile_access(&profile_id)?;
-    state.service.require_profile_exists(&profile_id).await?;
+    auth.require_project_access(&project_id)?;
+    state.service.require_project_exists(&project_id).await?;
     let request = parse_json_payload(payload, "open_batch")?;
     let display_host = resolve_session_display_host_hint(&headers);
     let resp = state
         .service
-        .open_batch(&profile_id, &request, display_host.as_deref())
+        .open_batch(&project_id, &request, display_host.as_deref())
         .await?;
     Ok(Json(resp))
 }
@@ -715,17 +715,17 @@ async fn open_batch(
 async fn open_session_by_node(
     auth: AuthContext,
     State(state): State<AppState>,
-    Path(profile_id): Path<String>,
+    Path(project_id): Path<String>,
     headers: HeaderMap,
     payload: Result<Json<OpenSessionByNodeRequest>, JsonRejection>,
 ) -> Result<Json<crate::models::OpenSessionResponse>, BrokerError> {
-    auth.require_profile_access(&profile_id)?;
-    state.service.require_profile_exists(&profile_id).await?;
+    auth.require_project_access(&project_id)?;
+    state.service.require_project_exists(&project_id).await?;
     let request = parse_json_payload(payload, "open_session_by_node")?;
     let display_host = resolve_session_display_host_hint(&headers);
     let resp = state
         .service
-        .open_session_by_node(&profile_id, &request, display_host.as_deref())
+        .open_session_by_node(&project_id, &request, display_host.as_deref())
         .await?;
     Ok(Json(resp))
 }
@@ -733,17 +733,17 @@ async fn open_session_by_node(
 async fn open_batch_by_node(
     auth: AuthContext,
     State(state): State<AppState>,
-    Path(profile_id): Path<String>,
+    Path(project_id): Path<String>,
     headers: HeaderMap,
     payload: Result<Json<OpenBatchByNodeRequest>, JsonRejection>,
 ) -> Result<Json<crate::models::OpenBatchResponse>, BrokerError> {
-    auth.require_profile_access(&profile_id)?;
-    state.service.require_profile_exists(&profile_id).await?;
+    auth.require_project_access(&project_id)?;
+    state.service.require_project_exists(&project_id).await?;
     let request = parse_json_payload(payload, "open_batch_by_node")?;
     let display_host = resolve_session_display_host_hint(&headers);
     let resp = state
         .service
-        .open_batch_by_node(&profile_id, &request, display_host.as_deref())
+        .open_batch_by_node(&project_id, &request, display_host.as_deref())
         .await?;
     Ok(Json(resp))
 }
@@ -751,17 +751,17 @@ async fn open_batch_by_node(
 async fn open_session_by_ip(
     auth: AuthContext,
     State(state): State<AppState>,
-    Path(profile_id): Path<String>,
+    Path(project_id): Path<String>,
     headers: HeaderMap,
     payload: Result<Json<OpenSessionByIpRequest>, JsonRejection>,
 ) -> Result<Json<crate::models::OpenSessionResponse>, BrokerError> {
-    auth.require_profile_access(&profile_id)?;
-    state.service.require_profile_exists(&profile_id).await?;
+    auth.require_project_access(&project_id)?;
+    state.service.require_project_exists(&project_id).await?;
     let request = parse_json_payload(payload, "open_session_by_ip")?;
     let display_host = resolve_session_display_host_hint(&headers);
     let resp = state
         .service
-        .open_session_by_ip(&profile_id, &request, display_host.as_deref())
+        .open_session_by_ip(&project_id, &request, display_host.as_deref())
         .await?;
     Ok(Json(resp))
 }
@@ -769,17 +769,17 @@ async fn open_session_by_ip(
 async fn open_batch_by_ip(
     auth: AuthContext,
     State(state): State<AppState>,
-    Path(profile_id): Path<String>,
+    Path(project_id): Path<String>,
     headers: HeaderMap,
     payload: Result<Json<OpenBatchByIpRequest>, JsonRejection>,
 ) -> Result<Json<crate::models::OpenBatchResponse>, BrokerError> {
-    auth.require_profile_access(&profile_id)?;
-    state.service.require_profile_exists(&profile_id).await?;
+    auth.require_project_access(&project_id)?;
+    state.service.require_project_exists(&project_id).await?;
     let request = parse_json_payload(payload, "open_batch_by_ip")?;
     let display_host = resolve_session_display_host_hint(&headers);
     let resp = state
         .service
-        .open_batch_by_ip(&profile_id, &request, display_host.as_deref())
+        .open_batch_by_ip(&project_id, &request, display_host.as_deref())
         .await?;
     Ok(Json(resp))
 }
@@ -787,26 +787,26 @@ async fn open_batch_by_ip(
 async fn suggested_port(
     auth: AuthContext,
     State(state): State<AppState>,
-    Path(profile_id): Path<String>,
+    Path(project_id): Path<String>,
 ) -> Result<Json<SuggestedPortResponse>, BrokerError> {
-    auth.require_profile_access(&profile_id)?;
-    state.service.require_profile_exists(&profile_id).await?;
-    let resp = state.service.suggested_port(&profile_id).await?;
+    auth.require_project_access(&project_id)?;
+    state.service.require_project_exists(&project_id).await?;
+    let resp = state.service.suggested_port(&project_id).await?;
     Ok(Json(resp))
 }
 
 async fn search_session_options(
     auth: AuthContext,
     State(state): State<AppState>,
-    Path(profile_id): Path<String>,
+    Path(project_id): Path<String>,
     payload: Result<Json<SearchSessionOptionsRequest>, JsonRejection>,
 ) -> Result<Json<crate::models::SearchSessionOptionsResponse>, BrokerError> {
-    auth.require_profile_access(&profile_id)?;
-    state.service.require_profile_exists(&profile_id).await?;
+    auth.require_project_access(&project_id)?;
+    state.service.require_project_exists(&project_id).await?;
     let request = parse_json_payload(payload, "search_session_options")?;
     let resp = state
         .service
-        .search_session_options(&profile_id, &request)
+        .search_session_options(&project_id, &request)
         .await?;
     Ok(Json(resp))
 }
@@ -814,15 +814,15 @@ async fn search_session_options(
 async fn list_sessions(
     auth: AuthContext,
     State(state): State<AppState>,
-    Path(profile_id): Path<String>,
+    Path(project_id): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<crate::models::ListSessionsResponse>, BrokerError> {
-    auth.require_profile_access(&profile_id)?;
-    state.service.require_profile_exists(&profile_id).await?;
+    auth.require_project_access(&project_id)?;
+    state.service.require_project_exists(&project_id).await?;
     let display_host = resolve_session_display_host_hint(&headers);
     let resp = state
         .service
-        .list_sessions(&profile_id, display_host.as_deref())
+        .list_sessions(&project_id, display_host.as_deref())
         .await?;
     Ok(Json(resp))
 }
@@ -830,13 +830,13 @@ async fn list_sessions(
 async fn close_session(
     auth: AuthContext,
     State(state): State<AppState>,
-    Path((profile_id, session_id)): Path<(String, String)>,
+    Path((project_id, session_id)): Path<(String, String)>,
 ) -> Result<StatusCode, BrokerError> {
-    auth.require_profile_access(&profile_id)?;
-    state.service.require_profile_exists(&profile_id).await?;
+    auth.require_project_access(&project_id)?;
+    state.service.require_project_exists(&project_id).await?;
     state
         .service
-        .close_session(&profile_id, &session_id)
+        .close_session(&project_id, &session_id)
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -844,15 +844,15 @@ async fn close_session(
 async fn search_session_node_options(
     auth: AuthContext,
     State(state): State<AppState>,
-    Path((profile_id, session_id)): Path<(String, String)>,
+    Path((project_id, session_id)): Path<(String, String)>,
     payload: Result<Json<SearchSessionNodeOptionsRequest>, JsonRejection>,
 ) -> Result<Json<crate::models::SearchSessionNodeOptionsResponse>, BrokerError> {
-    auth.require_profile_access(&profile_id)?;
-    state.service.require_profile_exists(&profile_id).await?;
+    auth.require_project_access(&project_id)?;
+    state.service.require_project_exists(&project_id).await?;
     let request = parse_json_payload(payload, "search_session_node_options")?;
     let resp = state
         .service
-        .search_session_node_options(&profile_id, &session_id, &request)
+        .search_session_node_options(&project_id, &session_id, &request)
         .await?;
     Ok(Json(resp))
 }
@@ -860,15 +860,15 @@ async fn search_session_node_options(
 async fn search_session_ip_node_options(
     auth: AuthContext,
     State(state): State<AppState>,
-    Path(profile_id): Path<String>,
+    Path(project_id): Path<String>,
     payload: Result<Json<SearchSessionIpNodeOptionsRequest>, JsonRejection>,
 ) -> Result<Json<crate::models::SearchSessionIpNodeOptionsResponse>, BrokerError> {
-    auth.require_profile_access(&profile_id)?;
-    state.service.require_profile_exists(&profile_id).await?;
+    auth.require_project_access(&project_id)?;
+    state.service.require_project_exists(&project_id).await?;
     let request = parse_json_payload(payload, "search_session_ip_node_options")?;
     let resp = state
         .service
-        .search_session_ip_node_options(&profile_id, &request)
+        .search_session_ip_node_options(&project_id, &request)
         .await?;
     Ok(Json(resp))
 }
@@ -876,17 +876,17 @@ async fn search_session_ip_node_options(
 async fn update_session_node(
     auth: AuthContext,
     State(state): State<AppState>,
-    Path((profile_id, session_id)): Path<(String, String)>,
+    Path((project_id, session_id)): Path<(String, String)>,
     headers: HeaderMap,
     payload: Result<Json<UpdateSessionNodeRequest>, JsonRejection>,
 ) -> Result<Json<crate::models::OpenSessionResponse>, BrokerError> {
-    auth.require_profile_access(&profile_id)?;
-    state.service.require_profile_exists(&profile_id).await?;
+    auth.require_project_access(&project_id)?;
+    state.service.require_project_exists(&project_id).await?;
     let request = parse_json_payload(payload, "update_session_node")?;
     let display_host = resolve_session_display_host_hint(&headers);
     let resp = state
         .service
-        .update_session_node(&profile_id, &session_id, &request, display_host.as_deref())
+        .update_session_node(&project_id, &session_id, &request, display_host.as_deref())
         .await?;
     Ok(Json(resp))
 }
@@ -959,7 +959,7 @@ mod tests {
     use crate::{
         auth::{AuthConfig, AuthConfigOptions},
         models::{
-            ProfileSyncConfig, ProxyNode, SessionRecord, SubscriptionSource, TaskListQuery,
+            ProjectSyncConfig, ProxyNode, SessionRecord, SubscriptionSource, TaskListQuery,
             TaskRunKind, TaskRunScope, TaskRunStage, TaskRunStatus, TaskRunSummary, TaskRunTrigger,
             now_epoch_sec,
         },
@@ -972,32 +972,32 @@ mod tests {
 
     #[async_trait]
     impl MihomoRuntime for ApiTestRuntime {
-        async fn ensure_started(&self, _profile_id: &str) -> anyhow::Result<()> {
+        async fn ensure_started(&self, _project_id: &str) -> anyhow::Result<()> {
             Ok(())
         }
 
-        async fn shutdown_profile(&self, _profile_id: &str) -> anyhow::Result<()> {
+        async fn shutdown_project(&self, _project_id: &str) -> anyhow::Result<()> {
             Ok(())
         }
 
         async fn controller_meta(
             &self,
-            _profile_id: &str,
+            _project_id: &str,
         ) -> anyhow::Result<(String, Option<String>)> {
             Ok(("127.0.0.1:9090".to_string(), None))
         }
 
-        async fn controller_addr(&self, _profile_id: &str) -> anyhow::Result<String> {
+        async fn controller_addr(&self, _project_id: &str) -> anyhow::Result<String> {
             Ok("127.0.0.1:9090".to_string())
         }
 
-        async fn apply_config(&self, _profile_id: &str, _payload: &str) -> anyhow::Result<()> {
+        async fn apply_config(&self, _project_id: &str, _payload: &str) -> anyhow::Result<()> {
             Ok(())
         }
 
         async fn measure_proxy_delay(
             &self,
-            _profile_id: &str,
+            _project_id: &str,
             _proxy_name: &str,
             _url: &str,
             _timeout_ms: u64,
@@ -1047,9 +1047,9 @@ mod tests {
         let store = Arc::new(MemoryStore::new());
         let now = now_epoch_sec();
         store
-            .upsert_profile_sync_config(&ProfileSyncConfig {
+            .upsert_project_sync_config(&ProjectSyncConfig {
                 import_id: "imp-M7n2Qa8Wx4Rp7Ts1".to_string(),
-                profile_id: "default".to_string(),
+                project_id: "default".to_string(),
                 source: SubscriptionSource::Url("https://example.com/sub".to_string()),
                 enabled: true,
                 sync_every_sec: 600,
@@ -1067,7 +1067,7 @@ mod tests {
         store
             .insert_task_run(&crate::models::TaskRunRecord {
                 run_id: "run-H6r2Lp8XmQ4Tn7Vc".to_string(),
-                profile_id: "default".to_string(),
+                project_id: "default".to_string(),
                 kind: TaskRunKind::SubscriptionSync,
                 trigger: TaskRunTrigger::Schedule,
                 status: TaskRunStatus::Queued,
@@ -1098,7 +1098,7 @@ mod tests {
         let response = app
             .oneshot(trusted_request(
                 Request::builder()
-                    .uri("/api/v1/tasks?profile_id=default")
+                    .uri("/api/v1/tasks?project_id=default")
                     .body(Body::empty())
                     .unwrap(),
             ))
@@ -1149,9 +1149,9 @@ mod tests {
             BrokerServiceOptions::default(),
         ));
         service
-            .create_profile("default")
+            .create_project("default")
             .await
-            .expect("profile should be created");
+            .expect("project should be created");
         store
             .replace_subscription(
                 "default",
@@ -1194,7 +1194,7 @@ mod tests {
         let response = app
             .oneshot(trusted_request(
                 Request::builder()
-                    .uri("/api/v1/profiles/default/sessions")
+                    .uri("/api/v1/projects/default/sessions")
                     .header(super::SESSION_DISPLAY_HOST_HEADER, "panel.example.test")
                     .body(Body::empty())
                     .unwrap(),
@@ -1221,7 +1221,7 @@ mod tests {
     fn run_upsert_streaming_updates_currently_visible_rows() {
         let run = TaskRunSummary {
             run_id: "run-J5w3Ns9Qa1Ze6Ru2".to_string(),
-            profile_id: "default".to_string(),
+            project_id: "default".to_string(),
             kind: TaskRunKind::SubscriptionSync,
             trigger: TaskRunTrigger::Schedule,
             status: TaskRunStatus::Succeeded,
@@ -1246,7 +1246,7 @@ mod tests {
     fn run_upsert_streaming_keeps_off_scope_runs_out_of_filtered_feed() {
         let run = TaskRunSummary {
             run_id: "run-P4v8Kb2Yt7Lm1Cx5".to_string(),
-            profile_id: "other".to_string(),
+            project_id: "other".to_string(),
             kind: TaskRunKind::SubscriptionSync,
             trigger: TaskRunTrigger::Schedule,
             status: TaskRunStatus::Succeeded,
@@ -1272,7 +1272,7 @@ mod tests {
         let runs = vec![
             TaskRunSummary {
                 run_id: "run-J5w3Ns9Qa1Ze6Ru2".to_string(),
-                profile_id: "default".to_string(),
+                project_id: "default".to_string(),
                 kind: TaskRunKind::SubscriptionSync,
                 trigger: TaskRunTrigger::Schedule,
                 status: TaskRunStatus::Running,
@@ -1288,7 +1288,7 @@ mod tests {
             },
             TaskRunSummary {
                 run_id: "run-P4v8Kb2Yt7Lm1Cx5".to_string(),
-                profile_id: "default".to_string(),
+                project_id: "default".to_string(),
                 kind: TaskRunKind::MetadataRefreshFull,
                 trigger: TaskRunTrigger::Schedule,
                 status: TaskRunStatus::Queued,
@@ -1314,12 +1314,12 @@ mod tests {
     #[test]
     fn upsert_stream_matching_runs_replaces_visible_run_without_requery() {
         let query = TaskListQuery {
-            profile_id: Some("default".to_string()),
+            project_id: Some("default".to_string()),
             ..TaskListQuery::default()
         };
         let mut matching_runs = vec![TaskRunSummary {
             run_id: "run-J5w3Ns9Qa1Ze6Ru2".to_string(),
-            profile_id: "default".to_string(),
+            project_id: "default".to_string(),
             kind: TaskRunKind::SubscriptionSync,
             trigger: TaskRunTrigger::Schedule,
             status: TaskRunStatus::Running,
@@ -1354,7 +1354,7 @@ mod tests {
         };
         let mut matching_runs = vec![TaskRunSummary {
             run_id: "run-J5w3Ns9Qa1Ze6Ru2".to_string(),
-            profile_id: "default".to_string(),
+            project_id: "default".to_string(),
             kind: TaskRunKind::SubscriptionSync,
             trigger: TaskRunTrigger::Schedule,
             status: TaskRunStatus::Running,

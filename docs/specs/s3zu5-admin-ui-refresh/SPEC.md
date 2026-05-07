@@ -25,7 +25,7 @@ entrypoint to tighten its request model around the simplified create flow.
 
 ## Acceptance Criteria
 
-- The shell presents profile, host, health, and workspace context with stronger
+- The shell presents project, host, health, and workspace context with stronger
   navigation cues and accessible focus/alert states.
 - Overview reads as an operator runway with KPI summary, action cards, and clear
   warning/next-step surfaces.
@@ -56,7 +56,7 @@ entrypoint to tighten its request model around the simplified create flow.
   workspace are implemented on the current PR branch, and the sessions create
   flow now uses a mode-driven request contract instead of the old nested
   selector payload.
-- The sidebar shell now uses a compact brand strip so the active profile input
+- The sidebar shell now uses a compact brand strip so the active project input
   and workspace navigation stay visible without the oversized intro card.
 - The primary route workspaces now begin directly on their operator content
   blocks instead of spending a full viewport on a large route hero and side
@@ -67,8 +67,8 @@ entrypoint to tighten its request model around the simplified create flow.
 - Shared field controls now use an explicit size system so large trigger,
   content, and item surfaces stay visually consistent across the real app and
   Storybook.
-- Route-level UI summaries now keep successful results scoped to the profile
-  that produced them, preventing stale cross-profile state from leaking into
+- Route-level UI summaries now keep successful results scoped to the project
+  that produced them, preventing stale cross-project state from leaking into
   the operator panels.
 - The Sessions workspace now has dedicated helper APIs for suggested ports and
   searchable country/city/IP option lists, while keeping batch-open rollback

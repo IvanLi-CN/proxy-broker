@@ -12,7 +12,7 @@ const meta = {
     docs: {
       description: {
         component:
-          "Primary application chrome with a compact sidebar brand strip, profile switcher, navigation, and top status rail.",
+          "Primary application chrome with a compact sidebar brand strip, project switcher, navigation, and top status rail.",
       },
     },
   },
@@ -24,11 +24,11 @@ const meta = {
     </AppShell>
   ),
   args: {
-    profileId: "default",
-    profiles: ["default", "edge-jp", "lab-us"],
-    profilesLoading: false,
-    profilesCreating: false,
-    profilesError: null,
+    projectId: "default",
+    projects: ["default", "edge-jp", "lab-us"],
+    projectsLoading: false,
+    projectsCreating: false,
+    projectsError: null,
     healthStatus: "ok",
     currentUser: {
       status: "resolved",
@@ -41,9 +41,9 @@ const meta = {
         is_admin: true,
       },
     },
-    onProfileIdChange: () => undefined,
-    onCreateProfile: async (value: string) => value,
-    onRetryProfiles: () => undefined,
+    onProjectIdChange: () => undefined,
+    onCreateProject: async (value: string) => value,
+    onRetryProjects: () => undefined,
   },
 } satisfies Meta<typeof AppShell>;
 

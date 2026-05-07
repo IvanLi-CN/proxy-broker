@@ -6,7 +6,7 @@ import { useTaskEvents } from "@/hooks/use-task-events";
 import { useI18n } from "@/i18n";
 import { api } from "@/lib/api";
 import { formatApiErrorMessage } from "@/lib/error-messages";
-import { isGlobalProfileId } from "@/lib/profile-selection";
+import { isGlobalProjectId } from "@/lib/project-selection";
 import { filterTaskListResponse } from "@/lib/tasks";
 import type { TaskRunKind, TaskRunStatus, TaskRunTrigger } from "@/lib/types";
 import { TasksPage } from "@/pages/TasksPage";
@@ -19,9 +19,9 @@ const TASK_HISTORY_QUERY_REBASE_INTERVAL_MS = 60 * 60 * 1000;
 export function TasksRoute() {
   const { t } = useI18n();
   const outlet = useOutletContext<RootOutletContext>();
-  const { profileId, authMe, currentUser } = outlet;
-  const isGlobalConfig = outlet.isGlobalConfig ?? isGlobalProfileId(profileId);
-  const activeProfileId = outlet.activeProfileId ?? (isGlobalConfig ? null : profileId);
+  const { projectId, authMe, currentUser } = outlet;
+  const isGlobalProject = outlet.isGlobalProject ?? isGlobalProjectId(projectId);
+  const activeProjectId = outlet.activeProjectId ?? (isGlobalProject ? null : projectId);
   const [scope, setScope] = useState<"current" | "all">("current");
   const [kind, setKind] = useState<TaskRunKind | undefined>(undefined);
   const [status, setStatus] = useState<TaskRunStatus | undefined>(undefined);
@@ -61,13 +61,13 @@ export function TasksRoute() {
 
   const liveTaskQuery = useMemo(
     () => ({
-      profile_id: scope === "current" ? (activeProfileId ?? undefined) : undefined,
+      project_id: scope === "current" ? (activeProjectId ?? undefined) : undefined,
       kind,
       status,
       trigger,
       running_only: runningOnly,
     }),
-    [activeProfileId, kind, runningOnly, scope, status, trigger],
+    [activeProjectId, kind, runningOnly, scope, status, trigger],
   );
   const requestTaskQuery = useMemo(
     () => ({
@@ -86,7 +86,7 @@ export function TasksRoute() {
   const selectionResetSignature = useMemo(
     () =>
       JSON.stringify({
-        profile_id: liveTaskQuery.profile_id,
+        project_id: liveTaskQuery.project_id,
         kind: liveTaskQuery.kind,
         status: liveTaskQuery.status,
         trigger: liveTaskQuery.trigger,
@@ -94,7 +94,7 @@ export function TasksRoute() {
       }),
     [
       liveTaskQuery.kind,
-      liveTaskQuery.profile_id,
+      liveTaskQuery.project_id,
       liveTaskQuery.running_only,
       liveTaskQuery.status,
       liveTaskQuery.trigger,
@@ -106,17 +106,17 @@ export function TasksRoute() {
   const tasksQuery = useQuery({
     queryKey: ["tasks", requestTaskQuery],
     queryFn: () => api.listTasks(requestTaskQuery),
-    enabled: canAccess && Boolean(activeProfileId),
+    enabled: canAccess && Boolean(activeProjectId),
     placeholderData: (previousData) => previousData,
   });
   const detailQuery = useQuery({
     queryKey: ["task-run", selectedRunId],
     queryFn: () => api.getTaskRunDetail(selectedRunId ?? ""),
-    enabled: canAccess && Boolean(activeProfileId) && Boolean(selectedRunId),
+    enabled: canAccess && Boolean(activeProjectId) && Boolean(selectedRunId),
   });
   const streamState = useTaskEvents({
     query: requestTaskQuery,
-    enabled: canAccess && Boolean(activeProfileId),
+    enabled: canAccess && Boolean(activeProjectId),
   });
   const visibleTaskList = useMemo(
     () => filterTaskListResponse(tasksQuery.data ?? null, visibleTaskQuery),
@@ -124,7 +124,7 @@ export function TasksRoute() {
   );
 
   useEffect(() => {
-    if (!activeProfileId) {
+    if (!activeProjectId) {
       return;
     }
     const runs = visibleTaskList?.runs ?? [];
@@ -141,9 +141,9 @@ export function TasksRoute() {
         runId: runs[0]?.run_id ?? null,
       });
     }
-  }, [activeProfileId, selectedRunId, selectionResetSignature, visibleTaskList?.runs]);
+  }, [activeProjectId, selectedRunId, selectionResetSignature, visibleTaskList?.runs]);
 
-  if (!activeProfileId) {
+  if (!activeProjectId) {
     return <Navigate replace to="/proxies" />;
   }
 
@@ -163,7 +163,7 @@ export function TasksRoute() {
       }
       onStatusChange={setStatus}
       onTriggerChange={setTrigger}
-      profileId={activeProfileId}
+      projectId={activeProjectId}
       runningOnly={runningOnly}
       scope={scope}
       selectedRunDetail={selectedRunId ? (detailQuery.data ?? null) : null}

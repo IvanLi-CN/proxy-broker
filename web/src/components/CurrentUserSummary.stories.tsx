@@ -96,8 +96,8 @@ export const StateGallery: Story = {
             is_admin: false,
             api_key_id: "key-R2p8Ls4Dw7Hy1Ku6",
             api_key_owner_subject: "admin@example.com",
-            api_key_profile_scope: {
-              kind: "all_profiles",
+            api_key_project_scope: {
+              kind: "all_projects",
             },
           },
         }}
@@ -177,9 +177,9 @@ export const ApiKeyMachine: Story = {
         is_admin: false,
         api_key_id: "key-Q4w8Er2Ty6Ui1Op5",
         api_key_owner_subject: "admin@example.com",
-        api_key_profile_scope: {
-          kind: "selected_profiles",
-          profile_ids: ["default", "edge-jp"],
+        api_key_project_scope: {
+          kind: "selected_projects",
+          project_ids: ["default", "edge-jp"],
         },
       },
     },

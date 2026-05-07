@@ -10,12 +10,12 @@ export interface LoadSubscriptionRequest {
   content?: string;
 }
 
-export interface CreateProfileRequest {
-  profile_id: string;
+export interface CreateProjectRequest {
+  project_id: string;
 }
 
-export interface CreateProfileResponse {
-  profile_id: string;
+export interface CreateProjectResponse {
+  project_id: string;
 }
 
 export interface LoadSubscriptionResponse {
@@ -135,7 +135,7 @@ export interface SearchSessionOptionsResponse {
   items: SessionOptionItem[];
 }
 
-export type SessionNodeSortMode = "session_recent" | "profile_recent";
+export type SessionNodeSortMode = "session_recent" | "project_recent";
 
 export interface SearchSessionNodeOptionsRequest {
   query?: string;
@@ -157,7 +157,7 @@ export interface SessionNodeOptionItem {
   median_latency_ms?: number | null;
   recent_probe_samples: ProxyNodeProbeSampleRecord[];
   session_last_used_at?: number | null;
-  profile_last_used_at?: number | null;
+  project_last_used_at?: number | null;
 }
 
 export interface SearchSessionNodeOptionsResponse {
@@ -185,7 +185,7 @@ export interface SessionIpNodeOptionNodeItem {
   last_probe_ok?: boolean | null;
   median_latency_ms?: number | null;
   recent_probe_samples: ProxyNodeProbeSampleRecord[];
-  profile_last_used_at?: number | null;
+  project_last_used_at?: number | null;
   session_last_used_at?: number | null;
 }
 
@@ -253,11 +253,11 @@ export interface ListSessionsResponse {
   sessions: SessionListItem[];
 }
 
-export interface ListProfilesResponse {
-  profiles: string[];
+export interface ListProjectsResponse {
+  projects: string[];
 }
 
-export type ProxyScope = { type: "global" } | { type: "profile"; profile_id: string };
+export type ProxyScope = { type: "global" } | { type: "project"; project_id: string };
 export type ProxyImportKind = "subscription" | "single_node";
 
 export interface ProxyImportSourceIdentity {
@@ -284,7 +284,7 @@ export interface ProxyImportItem {
   allocation_scope: ProxyScope;
   proxy_count: number;
   distinct_ip_count: number;
-  effective_profile_ids: string[];
+  effective_project_ids: string[];
   subscription_metadata?: SubscriptionMetadata | null;
   created_at: number;
   updated_at: number;
@@ -295,8 +295,8 @@ export interface ListProxyImportResponse {
 }
 
 export interface ProxyImportListQuery {
-  scope?: "all" | "global" | "profile";
-  profile_id?: string;
+  scope?: "all" | "global" | "project";
+  project_id?: string;
 }
 
 export interface UpdateProxyImportAllocationRequest {
@@ -312,7 +312,7 @@ export interface ProxyInventoryItem {
   resolved_ips: string[];
   source_scope: ProxyScope;
   allocation_scope: ProxyScope;
-  effective_profile_ids: string[];
+  effective_project_ids: string[];
 }
 
 export interface ListProxyInventoryResponse {
@@ -320,8 +320,8 @@ export interface ListProxyInventoryResponse {
 }
 
 export interface ProxyInventoryListQuery {
-  scope?: "all" | "global" | "profile";
-  profile_id?: string;
+  scope?: "all" | "global" | "project";
+  project_id?: string;
 }
 
 export interface ProxyNodeMetadataRecord {
@@ -364,18 +364,18 @@ export interface ProxyCatalogGroupItem {
 
 export interface ProxyCatalogResponse {
   view: string;
-  profile_id?: string | null;
+  project_id?: string | null;
   groups: ProxyCatalogGroupItem[];
 }
 
 export interface ProxyCatalogQuery {
-  view?: "global" | "profile";
-  profile_id?: string;
+  view?: "global" | "project";
+  project_id?: string;
 }
 
 export interface ProxyOperationRequest {
-  view: "global" | "profile";
-  profile_id?: string;
+  view: "global" | "project";
+  project_id?: string;
   node_ids: string[];
 }
 
@@ -387,12 +387,12 @@ export interface UpdateProxyAllocationRequest {
   allocation_scope: ProxyScope;
 }
 
-export interface ProfileProxySettings {
-  profile_id: string;
+export interface ProjectProxySettings {
+  project_id: string;
   use_global_proxies: boolean;
 }
 
-export interface UpdateProfileProxySettingsRequest {
+export interface UpdateProjectProxySettingsRequest {
   use_global_proxies: boolean;
 }
 
@@ -411,11 +411,11 @@ export interface HealthResponse {
 
 export type AuthPrincipalType = "human" | "api_key" | "development";
 
-export type ApiKeyProfileScopeKind = "selected_profiles" | "all_profiles";
+export type ApiKeyProjectScopeKind = "selected_projects" | "all_projects";
 
-export interface ApiKeyProfileScope {
-  kind: ApiKeyProfileScopeKind;
-  profile_ids?: string[];
+export interface ApiKeyProjectScope {
+  kind: ApiKeyProjectScopeKind;
+  project_ids?: string[];
 }
 
 export interface AuthMeResponse {
@@ -425,10 +425,10 @@ export interface AuthMeResponse {
   email?: string | null;
   groups: string[];
   is_admin: boolean;
-  profile_id?: string | null;
+  project_id?: string | null;
   api_key_id?: string | null;
   api_key_owner_subject?: string | null;
-  api_key_profile_scope?: ApiKeyProfileScope | null;
+  api_key_project_scope?: ApiKeyProjectScope | null;
 }
 
 export type CurrentUserState =
@@ -449,7 +449,7 @@ export type CurrentUserState =
 
 export interface CreateApiKeyRequest {
   name: string;
-  profile_scope: ApiKeyProfileScope;
+  project_scope: ApiKeyProjectScope;
 }
 
 export interface ApiKeySummary {
@@ -458,8 +458,8 @@ export interface ApiKeySummary {
   prefix: string;
   created_by: string;
   owner_subject: string;
-  profile_scope: ApiKeyProfileScope;
-  profile_id?: string | null;
+  project_scope: ApiKeyProjectScope;
+  project_id?: string | null;
   created_at: number;
   last_used_at?: number | null;
   revoked_at?: number | null;
@@ -504,7 +504,7 @@ export type TaskEventLevel = "info" | "warning" | "error";
 
 export interface TaskRunSummary {
   run_id: string;
-  profile_id: string;
+  project_id: string;
   kind: TaskRunKind;
   trigger: TaskRunTrigger;
   status: TaskRunStatus;
@@ -540,7 +540,7 @@ export interface TaskSummary {
 }
 
 export interface TaskListQuery {
-  profile_id?: string;
+  project_id?: string;
   kind?: TaskRunKind;
   status?: TaskRunStatus;
   trigger?: TaskRunTrigger;

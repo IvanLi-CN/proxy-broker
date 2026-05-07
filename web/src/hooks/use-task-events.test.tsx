@@ -67,7 +67,7 @@ describe("useTaskEvents", () => {
       () =>
         useTaskEvents({
           query: {
-            profile_id: "default",
+            project_id: "default",
             limit: 40,
           },
         }),

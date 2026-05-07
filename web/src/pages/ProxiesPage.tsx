@@ -42,7 +42,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { ProfileProxyPolicyCard } from "@/features/proxies/components/ProfileProxyPolicyCard";
+import { ProjectProxyPolicyCard } from "@/features/proxies/components/ProjectProxyPolicyCard";
 import { ProxyLoadCard } from "@/features/proxies/components/ProxyLoadCard";
 import type { ProxyNodeLiveState } from "@/hooks/use-proxy-operation-events";
 import { useTableRangeSelection } from "@/hooks/use-table-range-selection";
@@ -67,7 +67,7 @@ import type {
   LoadSubscriptionResponse,
   OpenBatchByNodeRequest,
   OpenSessionByNodeRequest,
-  ProfileProxySettings,
+  ProjectProxySettings,
   ProxyCatalogGroupItem,
   ProxyCatalogNodeItem,
   ProxyCatalogResponse,
@@ -79,20 +79,20 @@ import type {
 import { cn } from "@/lib/utils";
 
 function encodeScope(scope: ProxyScope) {
-  return scope.type === "global" ? "global" : `profile:${scope.profile_id}`;
+  return scope.type === "global" ? "global" : `project:${scope.project_id}`;
 }
 
 function decodeScope(value: string): ProxyScope {
   if (value === "global") {
     return { type: "global" };
   }
-  return { type: "profile", profile_id: value.slice("profile:".length) };
+  return { type: "project", project_id: value.slice("project:".length) };
 }
 
 function formatScopeLabel(scope: ProxyScope, t: ReturnType<typeof useI18n>["t"]) {
   return scope.type === "global"
     ? t("Global pool")
-    : t("Profile {profileId}", { profileId: scope.profile_id });
+    : t("Project {projectId}", { projectId: scope.project_id });
 }
 
 function formatImportKind(kind: ProxyImportKind, t: ReturnType<typeof useI18n>["t"]) {
@@ -134,26 +134,26 @@ function PageHeader({
   );
 }
 
-function InventoryProfiles({ effectiveProfileIds }: { effectiveProfileIds: string[] }) {
+function InventoryProjects({ effectiveProjectIds }: { effectiveProjectIds: string[] }) {
   const { formatNumber, t } = useI18n();
-  if (effectiveProfileIds.length === 0) {
-    return <span className="text-xs text-muted-foreground">{t("No active profiles")}</span>;
+  if (effectiveProjectIds.length === 0) {
+    return <span className="text-xs text-muted-foreground">{t("No active projects")}</span>;
   }
 
   return (
     <div className="flex flex-wrap gap-1">
-      {effectiveProfileIds.slice(0, 3).map((profileId) => (
+      {effectiveProjectIds.slice(0, 3).map((projectId) => (
         <Badge
-          key={profileId}
+          key={projectId}
           variant="secondary"
           className="rounded-full bg-muted/70 px-1.5 py-0 text-[10px]"
         >
-          {profileId}
+          {projectId}
         </Badge>
       ))}
-      {effectiveProfileIds.length > 3 ? (
+      {effectiveProjectIds.length > 3 ? (
         <Badge variant="outline" className="rounded-full px-1.5 py-0 text-[10px]">
-          {t("+{count} more", { count: formatNumber(effectiveProfileIds.length - 3) })}
+          {t("+{count} more", { count: formatNumber(effectiveProjectIds.length - 3) })}
         </Badge>
       ) : null}
     </div>
@@ -600,7 +600,7 @@ interface SharedCatalogProps {
 
 interface GlobalProxiesPageProps extends SharedCatalogProps {
   mode: "global";
-  profiles: string[];
+  projects: string[];
   currentUser: CurrentUserState;
   accessDenied?: boolean;
   authError?: string | null;
@@ -622,20 +622,20 @@ interface GlobalProxiesPageProps extends SharedCatalogProps {
   onDeleteImport: (importId: string) => void | Promise<void>;
 }
 
-interface ProfileProxiesPageProps extends SharedCatalogProps {
-  mode: "profile";
-  profileId: string;
+interface ProjectProxiesPageProps extends SharedCatalogProps {
+  mode: "project";
+  projectId: string;
   currentUser: CurrentUserState;
   suggestedPort?: number | null;
-  profileLoadResponse?: LoadSubscriptionResponse | null;
-  profileLoadError?: string | null;
-  loadingProfile: boolean;
-  proxySettings?: ProfileProxySettings | null;
+  projectLoadResponse?: LoadSubscriptionResponse | null;
+  projectLoadError?: string | null;
+  loadingProject: boolean;
+  proxySettings?: ProjectProxySettings | null;
   proxySettingsLoading?: boolean;
   proxySettingsError?: string | null;
   updatingSettings?: boolean;
   showProxyPolicy?: boolean;
-  onLoadProfile: (payload: LoadSubscriptionRequest) => void | Promise<void>;
+  onLoadProject: (payload: LoadSubscriptionRequest) => void | Promise<void>;
   onToggleUseGlobalProxies: (nextValue: boolean) => void | Promise<void>;
   onDeleteImport?: (importId: string) => void | Promise<void>;
   onOpenSessionByNode: (payload: OpenSessionByNodeRequest) => void | Promise<void>;
@@ -645,18 +645,18 @@ interface ProfileProxiesPageProps extends SharedCatalogProps {
   openingBatch?: boolean;
 }
 
-export type ProxiesPageProps = GlobalProxiesPageProps | ProfileProxiesPageProps;
+export type ProxiesPageProps = GlobalProxiesPageProps | ProjectProxiesPageProps;
 
 export function ProxiesPage(props: ProxiesPageProps) {
   if (props.mode === "global") {
     return <GlobalProxiesView {...props} />;
   }
 
-  return <ProfileProxiesView {...props} />;
+  return <ProjectProxiesView {...props} />;
 }
 
 function GlobalProxiesView({
-  profiles,
+  projects,
   accessDenied = false,
   authError = null,
   globalLoadResponse,
@@ -690,7 +690,7 @@ function GlobalProxiesView({
         <PageHeader
           scopeBadge={t("Global")}
           title={t("Proxy")}
-          description={t("Manage the shared global pool and every profile allocation from here.")}
+          description={t("Manage the shared global pool and every project allocation from here.")}
         />
         <ActionResponsePanel
           title={t("Current user unavailable")}
@@ -707,12 +707,12 @@ function GlobalProxiesView({
         <PageHeader
           scopeBadge={t("Global")}
           title={t("Proxy")}
-          description={t("Manage the shared global pool and every profile allocation from here.")}
+          description={t("Manage the shared global pool and every project allocation from here.")}
         />
         <ActionResponsePanel
           title={t("Admin access required")}
           description={t(
-            "The global config can change the shared pool and profile allocations, so only admins can open it.",
+            "The global project can change the shared pool and project allocations, so only admins can open it.",
           )}
           tone="error"
         />
@@ -725,13 +725,13 @@ function GlobalProxiesView({
       <PageHeader
         scopeBadge={t("Global")}
         title={t("Proxy")}
-        description={t("Manage the shared global pool and every profile allocation from here.")}
+        description={t("Manage the shared global pool and every project allocation from here.")}
       />
 
       <ProxyLoadCard
         defaultValue="https://example.com/global-subscription.yaml"
         description={t(
-          "Import one subscription source or one node group into the shared pool. Profiles that keep global usage enabled inherit these nodes immediately.",
+          "Import one subscription source or one node group into the shared pool. Projects that keep global usage enabled inherit these nodes immediately.",
         )}
         error={globalLoadError}
         eyebrow={t("Global pool")}
@@ -769,7 +769,7 @@ function GlobalProxiesView({
 
       <GroupedProxyCatalogPanel
         mode="global"
-        profiles={profiles}
+        projects={projects}
         proxyCatalog={proxyCatalog}
         proxyCatalogLoading={proxyCatalogLoading}
         proxyCatalogError={proxyCatalogError}
@@ -787,18 +787,18 @@ function GlobalProxiesView({
   );
 }
 
-function ProfileProxiesView({
-  profileId,
+function ProjectProxiesView({
+  projectId,
   suggestedPort,
-  profileLoadResponse,
-  profileLoadError,
-  loadingProfile,
+  projectLoadResponse,
+  projectLoadError,
+  loadingProject,
   proxySettings,
   proxySettingsLoading = false,
   proxySettingsError,
   updatingSettings = false,
   showProxyPolicy = true,
-  onLoadProfile,
+  onLoadProject,
   onToggleUseGlobalProxies,
   onDeleteImport,
   proxyCatalog,
@@ -814,49 +814,49 @@ function ProfileProxiesView({
   deletingImportId = null,
   openingSessionNodeId = null,
   openingBatch = false,
-}: ProfileProxiesPageProps) {
+}: ProjectProxiesPageProps) {
   const { t } = useI18n();
 
   return (
     <div className="space-y-5">
       <PageHeader
-        scopeBadge={t("Current config")}
+        scopeBadge={t("Current project")}
         title={t("Proxy")}
         description={t(
-          "Manage local imports and whether {profileId} also composes the global pool.",
+          "Manage local imports and whether {projectId} also composes the global pool.",
           {
-            profileId,
+            projectId,
           },
         )}
       />
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.9fr)]">
         <ProxyLoadCard
-          defaultValue="https://example.com/profile-subscription.yaml"
+          defaultValue="https://example.com/project-subscription.yaml"
           description={t(
-            "Import one subscription source or one node group for this profile only. They stay local unless you later reassign them from the global config.",
+            "Import one subscription source or one node group for this project only. They stay local unless you later reassign them from the global project.",
           )}
-          error={profileLoadError}
-          eyebrow={t("Current config")}
-          onSubmit={onLoadProfile}
-          pending={loadingProfile}
-          response={profileLoadResponse}
-          scopeChip={t("Scoped to {profileId} only.", { profileId })}
+          error={projectLoadError}
+          eyebrow={t("Current project")}
+          onSubmit={onLoadProject}
+          pending={loadingProject}
+          response={projectLoadResponse}
+          scopeChip={t("Scoped to {projectId} only.", { projectId })}
           submitLabel={t("Import local pool")}
           successDescription={t(
-            "Imported {proxyCount} proxies across {ipCount} distinct IPs into profile {profileId}.",
+            "Imported {proxyCount} proxies across {ipCount} distinct IPs into project {projectId}.",
             {
-              proxyCount: profileLoadResponse?.loaded_proxies ?? 0,
-              ipCount: profileLoadResponse?.distinct_ips ?? 0,
-              profileId,
+              proxyCount: projectLoadResponse?.loaded_proxies ?? 0,
+              ipCount: projectLoadResponse?.distinct_ips ?? 0,
+              projectId,
             },
           )}
           successTitle={t("Local pool updated")}
           title={t("Import local proxy pool")}
         />
         {showProxyPolicy ? (
-          <ProfileProxyPolicyCard
-            profileId={profileId}
+          <ProjectProxyPolicyCard
+            projectId={projectId}
             useGlobalProxies={proxySettings?.use_global_proxies ?? true}
             proxySettingsLoading={proxySettingsLoading}
             updatingSettings={updatingSettings}
@@ -867,7 +867,7 @@ function ProfileProxiesView({
       </div>
 
       <GroupedProxyCatalogPanel
-        mode="profile"
+        mode="project"
         proxyCatalog={proxyCatalog}
         proxyCatalogLoading={proxyCatalogLoading}
         proxyCatalogError={proxyCatalogError}
@@ -876,7 +876,7 @@ function ProfileProxiesView({
         queueingOperation={queueingOperation}
         onRefreshNodes={onRefreshNodes}
         onProbeNodes={onProbeNodes}
-        currentProfileId={profileId}
+        currentProjectId={projectId}
         deletingImportId={deletingImportId}
         onDeleteImport={onDeleteImport}
         suggestedPort={suggestedPort}
@@ -891,8 +891,8 @@ function ProfileProxiesView({
 
 function GroupedProxyCatalogPanel({
   mode,
-  profiles = [],
-  currentProfileId,
+  projects = [],
+  currentProjectId,
   proxyCatalog,
   proxyCatalogLoading,
   proxyCatalogError,
@@ -911,9 +911,9 @@ function GroupedProxyCatalogPanel({
   openingSessionNodeId = null,
   openingBatch = false,
 }: {
-  mode: "global" | "profile";
-  profiles?: string[];
-  currentProfileId?: string;
+  mode: "global" | "project";
+  projects?: string[];
+  currentProjectId?: string;
   proxyCatalog?: ProxyCatalogResponse | null;
   proxyCatalogLoading: boolean;
   proxyCatalogError?: string | null;
@@ -1008,14 +1008,14 @@ function GroupedProxyCatalogPanel({
 
       <DataTablePanel
         eyebrow={mode === "global" ? t("Subscription groups") : t("Available grouped nodes")}
-        title={mode === "global" ? t("Grouped proxy catalog") : t("Current profile grouped nodes")}
+        title={mode === "global" ? t("Grouped proxy catalog") : t("Current project grouped nodes")}
         description={
           mode === "global"
             ? t(
                 "Every import expands into its current child nodes here. Batch refresh and probe actions work on the selected nodes, while allocation and delete still operate at the import group level.",
               )
             : t(
-                "The current profile shows its effective winner nodes grouped by import. Refresh, probe, and create-session actions all work directly from this list.",
+                "The current project shows its effective winner nodes grouped by import. Refresh, probe, and create-session actions all work directly from this list.",
               )
         }
         chips={[
@@ -1062,7 +1062,7 @@ function GroupedProxyCatalogPanel({
                 <ActivityIcon className="size-3.5" />
                 {t("Probe selected")}
               </Button>
-              {mode === "profile" ? (
+              {mode === "project" ? (
                 <Button
                   size="sm"
                   disabled={selectedNodeIds.length === 0 || !onOpenBatchByNode || openingBatch}
@@ -1130,10 +1130,10 @@ function GroupedProxyCatalogPanel({
                     t,
                     group.import.subscription_metadata,
                   );
-                  const canDeleteProfileImport =
-                    mode === "profile" &&
-                    group.import.source_scope.type === "profile" &&
-                    group.import.source_scope.profile_id === currentProfileId;
+                  const canDeleteProjectImport =
+                    mode === "project" &&
+                    group.import.source_scope.type === "project" &&
+                    group.import.source_scope.project_id === currentProjectId;
 
                   return (
                     <Fragment key={group.import.import_id}>
@@ -1205,9 +1205,9 @@ function GroupedProxyCatalogPanel({
                             {quotaSummary ? <div>{quotaSummary}</div> : null}
                             {expireSummary ? <div>{expireSummary}</div> : null}
                             <div>{formatTimestamp(locale, t, group.import.updated_at)}</div>
-                            {mode === "profile" ? (
-                              <InventoryProfiles
-                                effectiveProfileIds={group.import.effective_profile_ids}
+                            {mode === "project" ? (
+                              <InventoryProjects
+                                effectiveProjectIds={group.import.effective_project_ids}
                               />
                             ) : null}
                           </div>
@@ -1245,12 +1245,12 @@ function GroupedProxyCatalogPanel({
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="global">{t("Global pool")}</SelectItem>
-                                  {profiles.map((candidateProfileId) => (
+                                  {projects.map((candidateProjectId) => (
                                     <SelectItem
-                                      key={candidateProfileId}
-                                      value={`profile:${candidateProfileId}`}
+                                      key={candidateProjectId}
+                                      value={`project:${candidateProjectId}`}
                                     >
-                                      {t("Profile {profileId}", { profileId: candidateProfileId })}
+                                      {t("Project {projectId}", { projectId: candidateProjectId })}
                                     </SelectItem>
                                   ))}
                                 </SelectContent>
@@ -1267,7 +1267,7 @@ function GroupedProxyCatalogPanel({
                                 {t("Delete")}
                               </Button>
                             </div>
-                          ) : canDeleteProfileImport ? (
+                          ) : canDeleteProjectImport ? (
                             <div className="flex flex-wrap justify-end gap-2">
                               <Button
                                 variant="destructive"
@@ -1327,8 +1327,8 @@ function GroupedProxyCatalogPanel({
                                   <div>{node.primary_ip ?? t("No resolved IPs")}</div>
                                   <div className="font-mono">{node.server}</div>
                                   {mode === "global" ? (
-                                    <InventoryProfiles
-                                      effectiveProfileIds={node.effective_profile_ids}
+                                    <InventoryProjects
+                                      effectiveProjectIds={node.effective_project_ids}
                                     />
                                   ) : null}
                                 </div>
@@ -1340,7 +1340,7 @@ function GroupedProxyCatalogPanel({
                                 />
                               </TableCell>
                               <TableCell className="px-3 py-3 align-top text-right">
-                                {mode === "profile" ? (
+                                {mode === "project" ? (
                                   <Button
                                     size="sm"
                                     disabled={
@@ -1370,7 +1370,7 @@ function GroupedProxyCatalogPanel({
         </div>
       </DataTablePanel>
 
-      {mode === "profile" ? (
+      {mode === "project" ? (
         <>
           <NodePinnedSessionDialog
             open={Boolean(singleDialogNode)}

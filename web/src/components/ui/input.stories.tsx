@@ -9,7 +9,7 @@ const meta = {
   parameters: {
     docs: {
       description: {
-        component: "Single-line input used for profile IDs, ports, and fixed strings.",
+        component: "Single-line input used for project IDs, ports, and fixed strings.",
       },
     },
   },

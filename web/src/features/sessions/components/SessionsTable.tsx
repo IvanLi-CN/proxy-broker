@@ -114,7 +114,7 @@ export function SessionsTable({
     return (
       <EmptyPanel
         title={t("Loading sessions")}
-        description={t("Polling the backend for sessions on this profile.")}
+        description={t("Polling the backend for sessions on this project.")}
         icon={LoaderCircleIcon}
         hint={t("The current session list appears here as soon as the first response lands.")}
       />

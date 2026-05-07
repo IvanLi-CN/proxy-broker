@@ -4,7 +4,7 @@
 
 - Auth: admin human or development principal
 - Query:
-  - `profile_id?`: `string|all`
+  - `project_id?`: `string|all`
   - `kind?`: `subscription_sync|metadata_refresh_incremental|metadata_refresh_full`
   - `status?`: `queued|running|succeeded|failed|skipped`
   - `trigger?`: `schedule|post_load`

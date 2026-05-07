@@ -124,7 +124,7 @@ export function localizeTaskPayload(value: unknown, t: Translator): unknown {
 
 export function formatTaskEventMessage(message: string, t: Translator) {
   switch (message) {
-    case "Refreshing subscription feed for profile.":
+    case "Refreshing subscription feed for project.":
     case "Refreshing probe metadata.":
     case "Task run queued.":
     case "Task run completed successfully.":

@@ -16,7 +16,7 @@
 
 ### Goals
 
-- 为 profile 引入可持久化的自动订阅维护配置。
+- 为 project 引入可持久化的自动订阅维护配置。
 - 在服务启动后自动执行：
   - 每 10 分钟订阅同步，并仅对新增 IP 做元数据刷新。
   - 每 24 小时对全部 IP 强制刷新 probe 与 geo。
@@ -27,15 +27,15 @@
 
 - 不把现有手动 `refresh` / `extract` / `session open` 改造成异步任务 API。
 - 不做任务暂停、恢复、取消或手动重跑。
-- 不为 profile API key 提供任务中心或任务 SSE 消费。
+- 不为 project API key 提供任务中心或任务 SSE 消费。
 
 ## 范围（Scope）
 
 ### In scope
 
-- 新增 `profile_sync_configs`、`task_runs`、`task_run_events` 持久化模型。
+- 新增 `project_sync_configs`、`task_runs`、`task_run_events` 持久化模型。
 - 成功 `load subscription` 后，持久化当前 source 配置，并自动排入一条 `post_load` 的增量元数据任务。
-- 引入后台 supervisor / scheduler，在服务启动时扫描已启用 profile 并自动调度。
+- 引入后台 supervisor / scheduler，在服务启动时扫描已启用 project 并自动调度。
 - 新增任务查询、详情、SSE 流接口。
 - 新增 `/tasks` 页面、侧栏入口、任务筛选条、摘要卡、任务表与事件详情抽屉。
 
@@ -49,10 +49,10 @@
 
 ### MUST
 
-- `load subscription` 成功后必须记录 profile 的订阅源，并自动触发首轮新增 IP 元数据刷新。
+- `load subscription` 成功后必须记录 project 的订阅源，并自动触发首轮新增 IP 元数据刷新。
 - 自动同步不得清空现有可用订阅快照；失败时只记录任务失败。
-- 同一 profile 同时最多运行一个自动任务；重叠到期信号必须折叠，不得并发执行。
-- `Tasks` 页面默认聚焦当前 profile，管理员可切换为 `all profiles` 汇总。
+- 同一 project 同时最多运行一个自动任务；重叠到期信号必须折叠，不得并发执行。
+- `Tasks` 页面默认聚焦当前 project，管理员可切换为 `all projects` 汇总。
 - 任务页面数据必须通过 `SSE` 实时推送更新，而不是退回轮询。
 
 ### SHOULD
@@ -70,9 +70,9 @@
 ### 自动调度
 
 - 成功 `load subscription` 后：
-  - 更新该 profile 的 `profile_sync_configs`。
+  - 更新该 project 的 `project_sync_configs`。
   - 立即创建 `metadata_refresh_incremental` 任务，`trigger=post_load`。
-- 自动调度器每 30 秒扫描一次已启用 profile：
+- 自动调度器每 30 秒扫描一次已启用 project：
   - 若 `sync_every_sec=600` 到期，执行 `subscription_sync`。
   - 若 `full_refresh_every_sec=86400` 到期，执行 `metadata_refresh_full`。
   - 若二者同时到期，先同步订阅，再直接执行全量强刷，不额外排一次 incremental refresh。
@@ -87,18 +87,18 @@
 - `metadata_refresh_incremental`
   - 只针对“新引入的 IP 记录”做 probe 与 geo 更新。
 - `metadata_refresh_full`
-  - 对当前 profile 全量 IP 强制刷新 probe 与 geo，忽略缓存 TTL。
+  - 对当前 project 全量 IP 强制刷新 probe 与 geo，忽略缓存 TTL。
 
 ### 前端任务中心
 
 - 顶层导航新增 `Tasks`。
 - 页面结构：
   - 首屏直接进入实时摘要卡与任务筛选条。
-  - 筛选条：`profile`、`kind`、`status`、`trigger`、`running_only`。
+  - 筛选条：`project`、`kind`、`status`、`trigger`、`running_only`。
   - 左侧高密度任务表。
   - 右侧运行详情抽屉/事件流。
 - 默认表格展示最近 7 天任务；详情打开单条 run 时显示完整事件日志。
-- 管理员在 `all profiles` 模式下可看到跨 profile 汇总与混合列表。
+- 管理员在 `all projects` 模式下可看到跨 project 汇总与混合列表。
 
 ## 接口契约（Interfaces & Contracts）
 
@@ -118,13 +118,13 @@
 
 ## 验收标准（Acceptance Criteria）
 
-- Given 任意 profile 成功完成 `load subscription`
+- Given 任意 project 成功完成 `load subscription`
   When 请求返回 200
   Then 服务端会持久化 source 配置，并立刻生成一条 `post_load` 的增量元数据任务。
-- Given 服务已启动且 profile 启用了自动同步
+- Given 服务已启动且 project 启用了自动同步
   When 到达 10 分钟周期
   Then 会自动生成并执行 `subscription_sync`，无需人工打开页面。
-- Given 服务已启动且 profile 到达 24 小时全量刷新周期
+- Given 服务已启动且 project 到达 24 小时全量刷新周期
   When 调度器扫描到期
   Then 会自动生成 `metadata_refresh_full` 并对所有 IP 强制刷新元数据。
 - Given 管理员打开 `/tasks`
@@ -147,7 +147,7 @@
 - Rust unit/integration tests:
   - store schema 与查询
   - scheduler 到期逻辑
-  - 单 profile 非并发保证
+  - 单 project 非并发保证
   - task query / detail / SSE API
 - Frontend tests:
   - tasks 页面筛选与空态/错误态
@@ -216,7 +216,7 @@
 
 ## 风险 / 开放问题 / 假设（Risks, Open Questions, Assumptions）
 
-- 风险：后台调度与手动 `load/refresh` 会共享 profile lock，若任务阶段过粗，可能放大单 profile 等待时间。
+- 风险：后台调度与手动 `load/refresh` 会共享 project lock，若任务阶段过粗，可能放大单 project 等待时间。
 - 风险：`SSE` 需要处理 snapshot + delta 一致性，前后端 contract 必须稳定。
 - 假设：自动增量元数据刷新的判定单位按“新增 IP”落地，而不是“新增 proxy name”。
 

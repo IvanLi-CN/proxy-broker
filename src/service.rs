@@ -30,13 +30,13 @@ use crate::{
     error::{BrokerError, BrokerResult},
     ids,
     models::{
-        ApiKeyProfileScope, ApiKeyProfileScopeKind, CreateApiKeyRequest, CreateApiKeyResponse,
-        CreateProfileResponse, ExtractIpItem, ExtractIpRequest, ExtractIpResponse, IpRecord,
-        ListApiKeysResponse, ListProfilesResponse, ListProxyImportResponse,
+        ApiKeyProjectScope, ApiKeyProjectScopeKind, CreateApiKeyRequest, CreateApiKeyResponse,
+        CreateProjectResponse, ExtractIpItem, ExtractIpRequest, ExtractIpResponse, IpRecord,
+        ListApiKeysResponse, ListProjectsResponse, ListProxyImportResponse,
         ListProxyInventoryResponse, ListSessionsResponse, LoadSubscriptionRequest,
         LoadSubscriptionResponse, OpenBatchByIpRequest, OpenBatchByNodeRequest, OpenBatchRequest,
         OpenBatchResponse, OpenSessionByIpRequest, OpenSessionByNodeRequest, OpenSessionRequest,
-        OpenSessionResponse, ProbeRecord, ProfileProxySettings, ProxyCatalogGroupItem,
+        OpenSessionResponse, ProbeRecord, ProjectProxySettings, ProxyCatalogGroupItem,
         ProxyCatalogNodeItem, ProxyCatalogQuery, ProxyCatalogResponse, ProxyImportItem,
         ProxyImportKind, ProxyImportRecord, ProxyImportSourceIdentity, ProxyImportSyncConfig,
         ProxyInventoryItem, ProxyInventoryRecord, ProxyNode, ProxyNodeMetadataRecord,
@@ -66,7 +66,7 @@ const TASK_SCHEDULE_SCAN_SEC: u64 = 30;
 const TASK_DISPATCH_POLL_SEC: u64 = 1;
 const DEFAULT_SESSION_OPTIONS_LIMIT: usize = 25;
 const DEFAULT_SESSION_NODE_OPTIONS_LIMIT: usize = 80;
-const GLOBAL_RUNTIME_PROFILE_ID: &str = "__global__";
+const GLOBAL_RUNTIME_PROJECT_ID: &str = "__global__";
 const PROXY_PROBE_ROUNDS: usize = 5;
 
 #[derive(Debug, Clone)]
@@ -112,11 +112,11 @@ pub struct BrokerService {
     runtime: Arc<dyn MihomoRuntime>,
     http: reqwest::Client,
     options: BrokerServiceOptions,
-    profile_locks: Vec<Arc<TokioMutex<()>>>,
+    project_locks: Vec<Arc<TokioMutex<()>>>,
     shared_runtime_lock: Arc<TokioMutex<()>>,
     proxy_probe_queue_lock: Arc<TokioMutex<()>>,
     task_events: broadcast::Sender<TaskBusEvent>,
-    task_active_profiles: Arc<TokioMutex<HashSet<String>>>,
+    task_active_projects: Arc<TokioMutex<HashSet<String>>>,
     task_supervisor_started: Arc<AtomicBool>,
 }
 
@@ -140,7 +140,7 @@ struct ResolvedImportName {
 }
 
 #[derive(Debug, Clone, Default)]
-struct LegacyProfileMetadata {
+struct LegacyProjectMetadata {
     ip_records: HashMap<String, IpRecord>,
     probe_records: HashMap<(String, String), Vec<ProbeRecord>>,
 }
@@ -162,23 +162,23 @@ impl BrokerService {
             runtime,
             http,
             options,
-            profile_locks: (0..64).map(|_| Arc::new(TokioMutex::new(()))).collect(),
+            project_locks: (0..64).map(|_| Arc::new(TokioMutex::new(()))).collect(),
             shared_runtime_lock: Arc::new(TokioMutex::new(())),
             proxy_probe_queue_lock: Arc::new(TokioMutex::new(())),
             task_events,
-            task_active_profiles: Arc::new(TokioMutex::new(HashSet::new())),
+            task_active_projects: Arc::new(TokioMutex::new(HashSet::new())),
             task_supervisor_started: Arc::new(AtomicBool::new(false)),
         }
     }
 
-    fn profile_lock_index(&self, profile_id: &str) -> usize {
+    fn project_lock_index(&self, project_id: &str) -> usize {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        profile_id.hash(&mut hasher);
-        (hasher.finish() as usize) % self.profile_locks.len()
+        project_id.hash(&mut hasher);
+        (hasher.finish() as usize) % self.project_locks.len()
     }
 
-    async fn lock_profile(&self, profile_id: &str) -> tokio::sync::OwnedMutexGuard<()> {
-        let lock = self.profile_locks[self.profile_lock_index(profile_id)].clone();
+    async fn lock_project(&self, project_id: &str) -> tokio::sync::OwnedMutexGuard<()> {
+        let lock = self.project_locks[self.project_lock_index(project_id)].clone();
         lock.lock_owned().await
     }
 
@@ -196,154 +196,154 @@ impl BrokerService {
         normalize_session_host(Some(bind_host)).unwrap_or_else(|| bind_host.trim().to_string())
     }
 
-    async fn profile_exists(&self, profile_id: &str) -> BrokerResult<bool> {
-        let profiles = self
+    async fn project_exists(&self, project_id: &str) -> BrokerResult<bool> {
+        let projects = self
             .store
-            .list_profiles()
+            .list_projects()
             .await
             .map_err(BrokerError::from)?;
-        Ok(profiles.into_iter().any(|item| item == profile_id))
+        Ok(projects.into_iter().any(|item| item == project_id))
     }
 
-    pub async fn require_profile_exists(&self, profile_id: &str) -> BrokerResult<()> {
-        if self.profile_exists(profile_id).await? {
+    pub async fn require_project_exists(&self, project_id: &str) -> BrokerResult<()> {
+        if self.project_exists(project_id).await? {
             Ok(())
         } else {
-            Err(BrokerError::ProfileNotFound)
+            Err(BrokerError::ProjectNotFound)
         }
     }
 
-    fn default_profile_proxy_settings(&self, profile_id: &str) -> ProfileProxySettings {
-        ProfileProxySettings {
-            profile_id: profile_id.to_string(),
+    fn default_project_proxy_settings(&self, project_id: &str) -> ProjectProxySettings {
+        ProjectProxySettings {
+            project_id: project_id.to_string(),
             use_global_proxies: true,
         }
     }
 
-    async fn get_profile_proxy_settings_effective(
+    async fn get_project_proxy_settings_effective(
         &self,
-        profile_id: &str,
-    ) -> BrokerResult<ProfileProxySettings> {
+        project_id: &str,
+    ) -> BrokerResult<ProjectProxySettings> {
         Ok(self
             .store
-            .get_profile_proxy_settings(profile_id)
+            .get_project_proxy_settings(project_id)
             .await
             .map_err(BrokerError::from)?
-            .unwrap_or_else(|| self.default_profile_proxy_settings(profile_id)))
+            .unwrap_or_else(|| self.default_project_proxy_settings(project_id)))
     }
 
-    async fn list_profile_ids_with_settings(
+    async fn list_project_ids_with_settings(
         &self,
-    ) -> BrokerResult<(Vec<String>, HashMap<String, ProfileProxySettings>)> {
-        let profiles = self
+    ) -> BrokerResult<(Vec<String>, HashMap<String, ProjectProxySettings>)> {
+        let projects = self
             .store
-            .list_profiles()
+            .list_projects()
             .await
             .map_err(BrokerError::from)?;
         let mut settings = HashMap::new();
-        for profile_id in &profiles {
+        for project_id in &projects {
             settings.insert(
-                profile_id.clone(),
-                self.get_profile_proxy_settings_effective(profile_id)
+                project_id.clone(),
+                self.get_project_proxy_settings_effective(project_id)
                     .await?,
             );
         }
-        Ok((profiles, settings))
+        Ok((projects, settings))
     }
 
-    fn effective_profile_ids_for_record(
+    fn effective_project_ids_for_record(
         &self,
         record: &ProxyInventoryRecord,
-        profiles: &[String],
-        settings: &HashMap<String, ProfileProxySettings>,
+        projects: &[String],
+        settings: &HashMap<String, ProjectProxySettings>,
     ) -> Vec<String> {
         match &record.allocation_scope {
-            ProxyScope::Global => profiles
+            ProxyScope::Global => projects
                 .iter()
-                .filter(|profile_id| {
+                .filter(|project_id| {
                     settings
-                        .get(profile_id.as_str())
+                        .get(project_id.as_str())
                         .map(|item| item.use_global_proxies)
                         .unwrap_or(true)
                 })
                 .cloned()
                 .collect(),
-            ProxyScope::Profile { profile_id } => vec![profile_id.clone()],
+            ProxyScope::Project { project_id } => vec![project_id.clone()],
         }
     }
 
     async fn normalize_api_key_scope(
         &self,
-        scope: &ApiKeyProfileScope,
-    ) -> BrokerResult<ApiKeyProfileScope> {
+        scope: &ApiKeyProjectScope,
+    ) -> BrokerResult<ApiKeyProjectScope> {
         match scope.kind {
-            ApiKeyProfileScopeKind::AllProfiles => {
-                if !scope.profile_ids.is_empty() {
+            ApiKeyProjectScopeKind::AllProjects => {
+                if !scope.project_ids.is_empty() {
                     return Err(BrokerError::InvalidRequest(
-                        "profile ids must be omitted when profile_scope.kind=all_profiles"
+                        "project ids must be omitted when project_scope.kind=all_projects"
                             .to_string(),
                     ));
                 }
-                Ok(ApiKeyProfileScope::all_profiles())
+                Ok(ApiKeyProjectScope::all_projects())
             }
-            ApiKeyProfileScopeKind::SelectedProfiles => {
-                let mut profile_ids = scope
-                    .profile_ids
+            ApiKeyProjectScopeKind::SelectedProjects => {
+                let mut project_ids = scope
+                    .project_ids
                     .iter()
                     .map(|item| item.trim())
                     .filter(|item| !item.is_empty())
                     .map(ToOwned::to_owned)
                     .collect::<Vec<_>>();
-                profile_ids.sort();
-                profile_ids.dedup();
-                if profile_ids.is_empty() {
+                project_ids.sort();
+                project_ids.dedup();
+                if project_ids.is_empty() {
                     return Err(BrokerError::InvalidRequest(
-                        "profile_scope.profile_ids must not be empty when kind=selected_profiles"
+                        "project_scope.project_ids must not be empty when kind=selected_projects"
                             .to_string(),
                     ));
                 }
 
-                let known_profiles = self
+                let known_projects = self
                     .store
-                    .list_profiles()
+                    .list_projects()
                     .await
                     .map_err(BrokerError::from)?
                     .into_iter()
                     .collect::<HashSet<_>>();
-                let unknown_profiles = profile_ids
+                let unknown_projects = project_ids
                     .iter()
-                    .filter(|profile_id| !known_profiles.contains(*profile_id))
+                    .filter(|project_id| !known_projects.contains(*project_id))
                     .cloned()
                     .collect::<Vec<_>>();
-                if !unknown_profiles.is_empty() {
+                if !unknown_projects.is_empty() {
                     return Err(BrokerError::InvalidRequest(format!(
-                        "unknown profiles in profile_scope.profile_ids: {}",
-                        unknown_profiles.join(", ")
+                        "unknown projects in project_scope.project_ids: {}",
+                        unknown_projects.join(", ")
                     )));
                 }
 
-                Ok(ApiKeyProfileScope::selected(profile_ids))
+                Ok(ApiKeyProjectScope::selected(project_ids))
             }
         }
     }
 
     async fn collect_all_sessions(
         &self,
-        override_profile_id: Option<&str>,
+        override_project_id: Option<&str>,
         override_sessions: Option<&[SessionRecord]>,
     ) -> BrokerResult<Vec<SessionRecord>> {
         let mut sessions = Vec::new();
-        for profile_id in self
+        for project_id in self
             .store
-            .list_profiles()
+            .list_projects()
             .await
             .map_err(BrokerError::from)?
         {
-            if override_profile_id == Some(profile_id.as_str()) {
+            if override_project_id == Some(project_id.as_str()) {
                 let override_sessions = override_sessions.unwrap_or(&[]);
                 let restorable_sessions = self
-                    .filter_restorable_sessions_for_profile(
-                        &profile_id,
+                    .filter_restorable_sessions_for_project(
+                        &project_id,
                         override_sessions,
                         "shared runtime apply kept persisted override session but left it out of runtime restore",
                     )
@@ -351,7 +351,7 @@ impl BrokerService {
                 sessions.extend(restorable_sessions);
                 continue;
             }
-            sessions.extend(self.list_sessions_backfilled(&profile_id).await?);
+            sessions.extend(self.list_sessions_backfilled(&project_id).await?);
         }
         sessions.sort_by(|left, right| {
             left.created_at
@@ -363,21 +363,21 @@ impl BrokerService {
 
     async fn collect_restorable_runtime_sessions(
         &self,
-        override_profile_id: Option<&str>,
+        override_project_id: Option<&str>,
         override_sessions: Option<&[SessionRecord]>,
     ) -> BrokerResult<Vec<SessionRecord>> {
         let mut sessions = Vec::new();
-        for profile_id in self
+        for project_id in self
             .store
-            .list_profiles()
+            .list_projects()
             .await
             .map_err(BrokerError::from)?
         {
-            if override_profile_id == Some(profile_id.as_str()) {
+            if override_project_id == Some(project_id.as_str()) {
                 let override_sessions = override_sessions.unwrap_or(&[]);
                 let restorable_sessions = self
-                    .filter_restorable_sessions_for_profile(
-                        &profile_id,
+                    .filter_restorable_sessions_for_project(
+                        &project_id,
                         override_sessions,
                         "shared runtime apply kept persisted override session but left it out of runtime restore",
                     )
@@ -385,10 +385,10 @@ impl BrokerService {
                 sessions.extend(restorable_sessions);
                 continue;
             }
-            let existing_sessions = self.list_sessions_backfilled(&profile_id).await?;
+            let existing_sessions = self.list_sessions_backfilled(&project_id).await?;
             let restorable_sessions = self
-                .filter_restorable_sessions_for_profile(
-                    &profile_id,
+                .filter_restorable_sessions_for_project(
+                    &project_id,
                     &existing_sessions,
                     "shared runtime apply kept persisted session but left it out of runtime restore",
                 )
@@ -405,7 +405,7 @@ impl BrokerService {
 
     fn filter_malformed_inventory_records(
         &self,
-        profile_id: &str,
+        project_id: &str,
         records: Vec<ProxyInventoryRecord>,
         log_message: &'static str,
     ) -> Vec<ProxyInventoryRecord> {
@@ -414,7 +414,7 @@ impl BrokerService {
             .filter(|item| {
                 if let Some(reason) = malformed_proxy_reason(&item.proxy_type, &item.raw_proxy) {
                     tracing::warn!(
-                        profile_id,
+                        project_id,
                         import_id = %item.import_id,
                         node_id = %item.node_id,
                         source_scope = %item.source_scope.key(),
@@ -435,7 +435,7 @@ impl BrokerService {
     async fn collect_all_runtime_nodes(&self) -> BrokerResult<Vec<ProxyNode>> {
         let mut nodes = self
             .filter_malformed_inventory_records(
-                GLOBAL_RUNTIME_PROFILE_ID,
+                GLOBAL_RUNTIME_PROJECT_ID,
                 self.store
                     .list_proxy_inventory()
                     .await
@@ -462,13 +462,13 @@ impl BrokerService {
 
     async fn apply_shared_runtime_config(
         &self,
-        override_profile_id: Option<&str>,
+        override_project_id: Option<&str>,
         override_sessions: Option<&[SessionRecord]>,
         start_without_sessions: bool,
     ) -> BrokerResult<()> {
         let _shared_runtime_guard = self.shared_runtime_lock.lock().await;
         self.apply_shared_runtime_config_locked(
-            override_profile_id,
+            override_project_id,
             override_sessions,
             start_without_sessions,
         )
@@ -477,12 +477,12 @@ impl BrokerService {
 
     async fn apply_shared_runtime_config_locked(
         &self,
-        override_profile_id: Option<&str>,
+        override_project_id: Option<&str>,
         override_sessions: Option<&[SessionRecord]>,
         start_without_sessions: bool,
     ) -> BrokerResult<()> {
         let sessions = self
-            .collect_restorable_runtime_sessions(override_profile_id, override_sessions)
+            .collect_restorable_runtime_sessions(override_project_id, override_sessions)
             .await?;
         self.apply_exact_shared_runtime_config_locked(&sessions, start_without_sessions, false)
             .await
@@ -499,7 +499,7 @@ impl BrokerService {
             if shutdown_when_empty {
                 if let Err(err) = self
                     .runtime
-                    .shutdown_profile(GLOBAL_RUNTIME_PROFILE_ID)
+                    .shutdown_project(GLOBAL_RUNTIME_PROJECT_ID)
                     .await
                 {
                     tracing::warn!(
@@ -515,36 +515,36 @@ impl BrokerService {
 
         let (controller, secret) = self
             .runtime
-            .controller_meta(GLOBAL_RUNTIME_PROFILE_ID)
+            .controller_meta(GLOBAL_RUNTIME_PROJECT_ID)
             .await
             .map_err(|e| BrokerError::MihomoUnavailable(e.to_string()))?;
         let payload = render_payload(&controller, secret.as_deref(), &nodes, sessions)
             .map_err(|e| BrokerError::MihomoUnavailable(e.to_string()))?;
         self.runtime
-            .apply_config(GLOBAL_RUNTIME_PROFILE_ID, &payload)
+            .apply_config(GLOBAL_RUNTIME_PROJECT_ID, &payload)
             .await
             .map_err(|e| BrokerError::MihomoUnavailable(e.to_string()))
     }
 
-    async fn apply_profile_restorable_sessions_locked(
+    async fn apply_project_restorable_sessions_locked(
         &self,
-        profile_id: &str,
+        project_id: &str,
         restorable_sessions: &[SessionRecord],
     ) -> BrokerResult<()> {
         let mut sessions = Vec::new();
-        let profile_ids = self
+        let project_ids = self
             .store
-            .list_profiles()
+            .list_projects()
             .await
             .map_err(BrokerError::from)?;
-        for current_profile_id in profile_ids {
-            if current_profile_id == profile_id {
+        for current_project_id in project_ids {
+            if current_project_id == project_id {
                 sessions.extend(restorable_sessions.iter().cloned());
             } else {
-                let existing_sessions = self.list_sessions_backfilled(&current_profile_id).await?;
+                let existing_sessions = self.list_sessions_backfilled(&current_project_id).await?;
                 let restorable_sessions = self
-                    .filter_restorable_sessions_for_profile(
-                        &current_profile_id,
+                    .filter_restorable_sessions_for_project(
+                        &current_project_id,
                         &existing_sessions,
                         "shared runtime rebuild kept persisted session but left it out of runtime restore",
                     )
@@ -561,9 +561,9 @@ impl BrokerService {
             .await
     }
 
-    async fn filter_restorable_sessions_for_profile(
+    async fn filter_restorable_sessions_for_project(
         &self,
-        profile_id: &str,
+        project_id: &str,
         existing_sessions: &[SessionRecord],
         unrestored_log_message: &'static str,
     ) -> BrokerResult<Vec<SessionRecord>> {
@@ -572,17 +572,17 @@ impl BrokerService {
         }
 
         let inventory_nodes = self
-            .compose_effective_proxy_inventory_records(profile_id)
+            .compose_effective_proxy_inventory_records(project_id)
             .await?;
         let restorable_sessions = if inventory_nodes.is_empty() {
-            let nodes = self.compose_effective_session_nodes(profile_id).await?;
+            let nodes = self.compose_effective_session_nodes(project_id).await?;
             let valid_proxy_ip_pairs = nodes
                 .iter()
                 .flat_map(valid_proxy_ip_pairs_for_node)
                 .collect::<HashSet<_>>();
 
             if valid_proxy_ip_pairs.is_empty() {
-                log_unrestored_sessions(profile_id, existing_sessions, &[], unrestored_log_message);
+                log_unrestored_sessions(project_id, existing_sessions, &[], unrestored_log_message);
                 return Ok(vec![]);
             }
 
@@ -606,7 +606,7 @@ impl BrokerService {
                 .collect::<Vec<_>>()
         };
         log_unrestored_sessions(
-            profile_id,
+            project_id,
             existing_sessions,
             &restorable_sessions,
             unrestored_log_message,
@@ -633,7 +633,7 @@ impl BrokerService {
 
         if let Err(err) = self
             .runtime
-            .shutdown_profile(GLOBAL_RUNTIME_PROFILE_ID)
+            .shutdown_project(GLOBAL_RUNTIME_PROJECT_ID)
             .await
         {
             tracing::warn!(
@@ -644,15 +644,15 @@ impl BrokerService {
     }
 
     pub async fn reconcile_startup_sessions(&self) -> BrokerResult<()> {
-        let profiles = self
+        let projects = self
             .store
-            .list_profiles()
+            .list_projects()
             .await
             .map_err(BrokerError::from)?;
-        for profile_id in profiles {
-            if let Err(err) = self.reconcile_profile_sessions(&profile_id).await {
+        for project_id in projects {
+            if let Err(err) = self.reconcile_project_sessions(&project_id).await {
                 tracing::warn!(
-                    profile_id,
+                    project_id,
                     error = %err,
                     "startup session reconciliation failed"
                 );
@@ -661,23 +661,23 @@ impl BrokerService {
         Ok(())
     }
 
-    async fn reconcile_profile_sessions(&self, profile_id: &str) -> BrokerResult<()> {
-        let _profile_guard = self.lock_profile(profile_id).await;
+    async fn reconcile_project_sessions(&self, project_id: &str) -> BrokerResult<()> {
+        let _project_guard = self.lock_project(project_id).await;
         let _shared_runtime_guard = self.shared_runtime_lock.lock().await;
 
-        let existing_sessions = self.list_sessions_backfilled(profile_id).await?;
+        let existing_sessions = self.list_sessions_backfilled(project_id).await?;
         if existing_sessions.is_empty() {
             self.cleanup_shared_runtime_if_idle_locked().await;
             return Ok(());
         }
 
         let inventory_nodes = self
-            .compose_effective_proxy_inventory_records(profile_id)
+            .compose_effective_proxy_inventory_records(project_id)
             .await?;
         let reconciled_sessions: Vec<SessionRecord> = if inventory_nodes.is_empty() {
             let nodes = self
                 .store
-                .list_subscription(profile_id)
+                .list_subscription(project_id)
                 .await
                 .map_err(BrokerError::from)?;
             let valid_proxy_ip_pairs = nodes
@@ -686,7 +686,7 @@ impl BrokerService {
                 .collect::<HashSet<_>>();
             if valid_proxy_ip_pairs.is_empty() {
                 tracing::warn!(
-                    profile_id,
+                    project_id,
                     session_count = existing_sessions.len(),
                     "startup session reconciliation skipped pruning because no authoritative proxy/IP pairs were available"
                 );
@@ -713,22 +713,22 @@ impl BrokerService {
         };
 
         log_unrestored_sessions(
-            profile_id,
+            project_id,
             &existing_sessions,
             &reconciled_sessions,
             "startup session reconciliation left persisted session out of runtime restore",
         );
 
         if reconciled_sessions.is_empty() {
-            self.apply_profile_restorable_sessions_locked(profile_id, &[])
+            self.apply_project_restorable_sessions_locked(project_id, &[])
                 .await?;
             return Ok(());
         }
 
-        self.apply_profile_restorable_sessions_locked(profile_id, &reconciled_sessions)
+        self.apply_project_restorable_sessions_locked(project_id, &reconciled_sessions)
             .await?;
         self.store
-            .insert_sessions(profile_id, &reconciled_sessions)
+            .insert_sessions(project_id, &reconciled_sessions)
             .await
             .map_err(BrokerError::from)?;
 
@@ -812,16 +812,16 @@ impl BrokerService {
             .map_err(BrokerError::from)?;
         let now = now_epoch_sec();
 
-        let mut configs_by_profile = HashMap::<String, Vec<ProxyImportSyncConfig>>::new();
+        let mut configs_by_project = HashMap::<String, Vec<ProxyImportSyncConfig>>::new();
         for config in configs {
-            configs_by_profile
-                .entry(config.profile_id.clone())
+            configs_by_project
+                .entry(config.project_id.clone())
                 .or_default()
                 .push(config);
         }
 
-        for (profile_id, configs) in configs_by_profile {
-            if self.has_pending_or_running_tasks(&profile_id).await? {
+        for (project_id, configs) in configs_by_project {
+            if self.has_pending_or_running_tasks(&project_id).await? {
                 continue;
             }
 
@@ -842,7 +842,7 @@ impl BrokerService {
 
             if sync_due {
                 self.enqueue_task_run(
-                    &profile_id,
+                    &project_id,
                     TaskRunKind::SubscriptionSync,
                     TaskRunTrigger::Schedule,
                     TaskRunScope::All,
@@ -852,7 +852,7 @@ impl BrokerService {
 
             if full_due {
                 self.enqueue_task_run(
-                    &profile_id,
+                    &project_id,
                     TaskRunKind::MetadataRefreshFull,
                     TaskRunTrigger::Schedule,
                     TaskRunScope::All,
@@ -870,7 +870,7 @@ impl BrokerService {
         let _probe_queue_guard = self.proxy_probe_queue_lock.lock().await;
         let settings = self.get_system_settings().await?;
         if self
-            .has_pending_or_running_tasks(GLOBAL_RUNTIME_PROFILE_ID)
+            .has_pending_or_running_tasks(GLOBAL_RUNTIME_PROJECT_ID)
             .await?
         {
             return Ok(());
@@ -891,7 +891,7 @@ impl BrokerService {
         let latest_scheduled_probe = self
             .store
             .list_task_runs(&TaskListQuery {
-                profile_id: Some(GLOBAL_RUNTIME_PROFILE_ID.to_string()),
+                project_id: Some(GLOBAL_RUNTIME_PROJECT_ID.to_string()),
                 kind: Some(TaskRunKind::ProxyLatencyProbe),
                 trigger: Some(TaskRunTrigger::Schedule),
                 ..TaskListQuery::default()
@@ -934,7 +934,7 @@ impl BrokerService {
         };
 
         self.enqueue_task_run(
-            GLOBAL_RUNTIME_PROFILE_ID,
+            GLOBAL_RUNTIME_PROJECT_ID,
             TaskRunKind::ProxyLatencyProbe,
             TaskRunTrigger::Schedule,
             scope,
@@ -965,7 +965,7 @@ impl BrokerService {
         sort_queued_runs_for_dispatch(&mut runs);
 
         for run in runs {
-            if !self.claim_task_profile(&run.profile_id).await {
+            if !self.claim_task_project(&run.project_id).await {
                 continue;
             }
 
@@ -978,21 +978,21 @@ impl BrokerService {
         Ok(())
     }
 
-    async fn claim_task_profile(&self, profile_id: &str) -> bool {
-        let mut active = self.task_active_profiles.lock().await;
-        active.insert(profile_id.to_string())
+    async fn claim_task_project(&self, project_id: &str) -> bool {
+        let mut active = self.task_active_projects.lock().await;
+        active.insert(project_id.to_string())
     }
 
-    async fn release_task_profile(&self, profile_id: &str) {
-        let mut active = self.task_active_profiles.lock().await;
-        active.remove(profile_id);
+    async fn release_task_project(&self, project_id: &str) {
+        let mut active = self.task_active_projects.lock().await;
+        active.remove(project_id);
     }
 
-    async fn has_pending_or_running_tasks(&self, profile_id: &str) -> BrokerResult<bool> {
+    async fn has_pending_or_running_tasks(&self, project_id: &str) -> BrokerResult<bool> {
         let runs = self
             .store
             .list_task_runs(&TaskListQuery {
-                profile_id: Some(profile_id.to_string()),
+                project_id: Some(project_id.to_string()),
                 ..TaskListQuery::default()
             })
             .await
@@ -1034,12 +1034,12 @@ impl BrokerService {
 
     async fn queued_or_running_task_runs(
         &self,
-        profile_id: &str,
+        project_id: &str,
     ) -> BrokerResult<Vec<TaskRunRecord>> {
         let runs = self
             .store
             .list_task_runs(&TaskListQuery {
-                profile_id: Some(profile_id.to_string()),
+                project_id: Some(project_id.to_string()),
                 ..TaskListQuery::default()
             })
             .await
@@ -1066,14 +1066,14 @@ impl BrokerService {
         if let Err(err) = result {
             tracing::warn!(
                 run_id = %run.run_id,
-                profile_id = %run.profile_id,
+                project_id = %run.project_id,
                 error = %err,
                 "task run failed"
             );
             let _ = self.fail_task_run(&mut run, err).await;
         }
 
-        self.release_task_profile(&run.profile_id).await;
+        self.release_task_project(&run.project_id).await;
     }
 
     async fn execute_subscription_sync_task(&self, run: &mut TaskRunRecord) -> BrokerResult<()> {
@@ -1083,7 +1083,7 @@ impl BrokerService {
             run,
             TaskEventLevel::Info,
             TaskRunStage::LoadingSubscription,
-            "Refreshing subscription feed for profile.",
+            "Refreshing subscription feed for project.",
             None,
         )
         .await?;
@@ -1091,7 +1091,7 @@ impl BrokerService {
         let now = now_epoch_sec();
         let configs = self
             .store
-            .list_proxy_import_sync_configs_for_profile(&run.profile_id)
+            .list_proxy_import_sync_configs_for_project(&run.project_id)
             .await
             .map_err(BrokerError::from)?
             .into_iter()
@@ -1101,8 +1101,8 @@ impl BrokerService {
             .collect::<Vec<_>>();
         if configs.is_empty() {
             return Err(BrokerError::InvalidRequest(format!(
-                "profile `{}` has no due persisted subscription source",
-                run.profile_id
+                "project `{}` has no due persisted subscription source",
+                run.project_id
             )));
         }
         let due_import_ids = configs
@@ -1118,7 +1118,7 @@ impl BrokerService {
         let mut completed_import_ids = Vec::<String>::new();
         for config in &configs {
             let outcome = match self
-                .load_subscription_internal(&run.profile_id, &config.source, None)
+                .load_subscription_internal(&run.project_id, &config.source, None)
                 .await
             {
                 Ok(outcome) => outcome,
@@ -1192,7 +1192,7 @@ impl BrokerService {
         }
 
         if self
-            .queued_or_running_task_runs(&run.profile_id)
+            .queued_or_running_task_runs(&run.project_id)
             .await?
             .into_iter()
             .any(|queued_run| {
@@ -1225,7 +1225,7 @@ impl BrokerService {
         let target_ip_set = new_ips.iter().cloned().collect::<HashSet<_>>();
         let refresh = match self
             .refresh_metadata_internal(
-                &run.profile_id,
+                &run.project_id,
                 false,
                 Some(&target_ip_set),
                 Some(&run.run_id),
@@ -1279,7 +1279,7 @@ impl BrokerService {
             }
             TaskRunScope::All => self
                 .store
-                .list_ip_records(&run.profile_id)
+                .list_ip_records(&run.project_id)
                 .await
                 .map_err(BrokerError::from)?
                 .into_iter()
@@ -1302,7 +1302,7 @@ impl BrokerService {
         let target_ip_set = target_ips.iter().cloned().collect::<HashSet<_>>();
         let refresh = self
             .refresh_metadata_internal(
-                &run.profile_id,
+                &run.project_id,
                 false,
                 Some(&target_ip_set),
                 Some(&run.run_id),
@@ -1325,17 +1325,17 @@ impl BrokerService {
     }
 
     async fn execute_full_refresh_task(&self, run: &mut TaskRunRecord) -> BrokerResult<()> {
-        self.mark_full_refresh_started(&run.profile_id).await?;
+        self.mark_full_refresh_started(&run.project_id).await?;
         let refresh = self
-            .refresh_metadata_internal(&run.profile_id, true, None, Some(&run.run_id))
+            .refresh_metadata_internal(&run.project_id, true, None, Some(&run.run_id))
             .await;
         let refresh = refresh?;
-        self.mark_full_refresh_finished(&run.profile_id, now_epoch_sec())
+        self.mark_full_refresh_finished(&run.project_id, now_epoch_sec())
             .await?;
 
         let targeted_ips = self
             .store
-            .list_ip_records(&run.profile_id)
+            .list_ip_records(&run.project_id)
             .await
             .map_err(BrokerError::from)?
             .len();
@@ -1357,14 +1357,14 @@ impl BrokerService {
 
     async fn enqueue_task_run(
         &self,
-        profile_id: &str,
+        project_id: &str,
         kind: TaskRunKind,
         trigger: TaskRunTrigger,
         scope: TaskRunScope,
     ) -> BrokerResult<TaskRunRecord> {
         let run = TaskRunRecord {
             run_id: ids::random_task_run_id(),
-            profile_id: profile_id.to_string(),
+            project_id: project_id.to_string(),
             kind,
             trigger,
             status: TaskRunStatus::Queued,
@@ -1393,7 +1393,7 @@ impl BrokerService {
 
     async fn insert_skipped_task_run(
         &self,
-        profile_id: &str,
+        project_id: &str,
         kind: TaskRunKind,
         trigger: TaskRunTrigger,
         scope: TaskRunScope,
@@ -1402,7 +1402,7 @@ impl BrokerService {
         let now = now_epoch_sec();
         let run = TaskRunRecord {
             run_id: ids::random_task_run_id(),
-            profile_id: profile_id.to_string(),
+            project_id: project_id.to_string(),
             kind,
             trigger,
             status: TaskRunStatus::Skipped,
@@ -1462,7 +1462,7 @@ impl BrokerService {
         let event = TaskRunEventRecord {
             event_id: ids::random_task_event_id(),
             run_id: run.run_id.clone(),
-            profile_id: run.profile_id.clone(),
+            project_id: run.project_id.clone(),
             at: now_epoch_sec(),
             level,
             stage,
@@ -1533,7 +1533,7 @@ impl BrokerService {
             match run.kind {
                 TaskRunKind::SubscriptionSync => {}
                 TaskRunKind::MetadataRefreshFull => {
-                    self.mark_full_refresh_failed(&run.profile_id, failed_at)
+                    self.mark_full_refresh_failed(&run.project_id, failed_at)
                         .await?;
                 }
                 TaskRunKind::MetadataRefreshIncremental
@@ -1572,10 +1572,10 @@ impl BrokerService {
             .await
     }
 
-    async fn register_profile_sync_source(
+    async fn register_project_sync_source(
         &self,
         import_id: &str,
-        profile_id: &str,
+        project_id: &str,
         source: &SubscriptionSource,
     ) -> BrokerResult<()> {
         let now = now_epoch_sec();
@@ -1586,7 +1586,7 @@ impl BrokerService {
             .map_err(BrokerError::from)?
             .unwrap_or(ProxyImportSyncConfig {
                 import_id: import_id.to_string(),
-                profile_id: profile_id.to_string(),
+                project_id: project_id.to_string(),
                 source: source.clone(),
                 enabled: true,
                 sync_every_sec: DEFAULT_AUTO_SYNC_EVERY_SEC,
@@ -1599,7 +1599,7 @@ impl BrokerService {
                 last_full_refresh_finished_at: None,
                 updated_at: now,
             });
-        config.profile_id = profile_id.to_string();
+        config.project_id = project_id.to_string();
         config.source = source.clone();
         config.enabled = true;
         config.sync_every_sec = DEFAULT_AUTO_SYNC_EVERY_SEC;
@@ -1621,12 +1621,12 @@ impl BrokerService {
             .map_err(BrokerError::from)
     }
 
-    async fn sync_configs_for_profile(
+    async fn sync_configs_for_project(
         &self,
-        profile_id: &str,
+        project_id: &str,
     ) -> BrokerResult<Vec<ProxyImportSyncConfig>> {
         self.store
-            .list_proxy_import_sync_configs_for_profile(profile_id)
+            .list_proxy_import_sync_configs_for_project(project_id)
             .await
             .map_err(BrokerError::from)
     }
@@ -1705,9 +1705,9 @@ impl BrokerService {
         Ok(())
     }
 
-    async fn mark_full_refresh_started(&self, profile_id: &str) -> BrokerResult<()> {
+    async fn mark_full_refresh_started(&self, project_id: &str) -> BrokerResult<()> {
         let now = now_epoch_sec();
-        for mut config in self.sync_configs_for_profile(profile_id).await? {
+        for mut config in self.sync_configs_for_project(project_id).await? {
             config.last_full_refresh_started_at = Some(now);
             config.updated_at = now;
             self.store
@@ -1718,8 +1718,8 @@ impl BrokerService {
         Ok(())
     }
 
-    async fn mark_full_refresh_failed(&self, profile_id: &str, failed_at: i64) -> BrokerResult<()> {
-        for mut config in self.sync_configs_for_profile(profile_id).await? {
+    async fn mark_full_refresh_failed(&self, project_id: &str, failed_at: i64) -> BrokerResult<()> {
+        for mut config in self.sync_configs_for_project(project_id).await? {
             config.last_full_refresh_due_at = Some(preserve_or_advance_due_at(
                 config.last_full_refresh_due_at,
                 failed_at,
@@ -1736,10 +1736,10 @@ impl BrokerService {
 
     async fn mark_full_refresh_finished(
         &self,
-        profile_id: &str,
+        project_id: &str,
         finished_at: i64,
     ) -> BrokerResult<()> {
-        for mut config in self.sync_configs_for_profile(profile_id).await? {
+        for mut config in self.sync_configs_for_project(project_id).await? {
             config.last_full_refresh_finished_at = Some(finished_at);
             config.last_full_refresh_due_at =
                 Some(finished_at + config.full_refresh_every_sec as i64);
@@ -2050,10 +2050,10 @@ impl BrokerService {
 
     async fn compose_effective_proxy_nodes(
         &self,
-        profile_id: &str,
+        project_id: &str,
     ) -> BrokerResult<Vec<ProxyNode>> {
         let records = self
-            .compose_effective_proxy_runtime_records(profile_id)
+            .compose_effective_proxy_runtime_records(project_id)
             .await?;
         let mut nodes = records
             .into_iter()
@@ -2072,10 +2072,10 @@ impl BrokerService {
 
     async fn compose_effective_proxy_inventory_records(
         &self,
-        profile_id: &str,
+        project_id: &str,
     ) -> BrokerResult<Vec<ProxyInventoryRecord>> {
         let settings = self
-            .get_profile_proxy_settings_effective(profile_id)
+            .get_project_proxy_settings_effective(project_id)
             .await?;
         let candidates = self
             .store
@@ -2085,20 +2085,20 @@ impl BrokerService {
             .into_iter()
             .filter(|item| match &item.allocation_scope {
                 ProxyScope::Global => settings.use_global_proxies,
-                ProxyScope::Profile {
-                    profile_id: allocated_profile_id,
-                } => allocated_profile_id == profile_id,
+                ProxyScope::Project {
+                    project_id: allocated_project_id,
+                } => allocated_project_id == project_id,
             })
             .collect::<Vec<_>>();
         let mut candidates = self.filter_malformed_inventory_records(
-            profile_id,
+            project_id,
             candidates,
-            "malformed proxy inventory node skipped from effective profile inventory",
+            "malformed proxy inventory node skipped from effective project inventory",
         );
         candidates.sort_by(|left, right| {
             left.proxy_name
                 .cmp(&right.proxy_name)
-                .then_with(|| compare_inventory_preference(profile_id, left, right))
+                .then_with(|| compare_inventory_preference(project_id, left, right))
                 .then_with(|| left.node_id.cmp(&right.node_id))
         });
         Ok(candidates)
@@ -2106,12 +2106,12 @@ impl BrokerService {
 
     async fn compose_effective_proxy_runtime_records(
         &self,
-        profile_id: &str,
+        project_id: &str,
     ) -> BrokerResult<Vec<ProxyInventoryRecord>> {
         let mut candidates = self
-            .compose_effective_proxy_inventory_records(profile_id)
+            .compose_effective_proxy_inventory_records(project_id)
             .await?;
-        candidates.sort_by(|left, right| compare_inventory_preference(profile_id, left, right));
+        candidates.sort_by(|left, right| compare_inventory_preference(project_id, left, right));
 
         let mut by_name = HashMap::new();
         for candidate in candidates {
@@ -2127,10 +2127,10 @@ impl BrokerService {
 
     async fn compose_effective_session_nodes(
         &self,
-        profile_id: &str,
+        project_id: &str,
     ) -> BrokerResult<Vec<ProxyNode>> {
         let effective_nodes = self
-            .compose_effective_proxy_inventory_records(profile_id)
+            .compose_effective_proxy_inventory_records(project_id)
             .await?
             .into_iter()
             .map(|record| ProxyNode {
@@ -2147,24 +2147,24 @@ impl BrokerService {
         }
 
         self.store
-            .list_subscription(profile_id)
+            .list_subscription(project_id)
             .await
             .map_err(BrokerError::from)
     }
 
-    async fn rebuild_effective_profile_locked(
+    async fn rebuild_effective_project_locked(
         &self,
-        profile_id: &str,
+        project_id: &str,
     ) -> BrokerResult<Vec<String>> {
         let _shared_runtime_guard = self.shared_runtime_lock.lock().await;
         let inventory_nodes = self
-            .compose_effective_proxy_inventory_records(profile_id)
+            .compose_effective_proxy_inventory_records(project_id)
             .await?;
         let metadata_by_pair = self.proxy_node_metadata_by_pair().await?;
-        let nodes = self.compose_effective_proxy_nodes(profile_id).await?;
+        let nodes = self.compose_effective_proxy_nodes(project_id).await?;
         let existing_ip_records = self
             .store
-            .list_ip_records(profile_id)
+            .list_ip_records(project_id)
             .await
             .map_err(BrokerError::from)?;
         let existing_ip_map: HashMap<String, IpRecord> = existing_ip_records
@@ -2172,20 +2172,20 @@ impl BrokerService {
             .map(|record| (record.ip.clone(), record))
             .collect();
         let existing_ip_keys: HashSet<String> = existing_ip_map.keys().cloned().collect();
-        let existing_sessions = self.list_sessions_backfilled(profile_id).await?;
+        let existing_sessions = self.list_sessions_backfilled(project_id).await?;
 
         if nodes.is_empty() {
             log_unrestored_sessions(
-                profile_id,
+                project_id,
                 &existing_sessions,
                 &[],
-                "effective profile rebuild kept persisted session but could not restore it because no effective nodes were available",
+                "effective project rebuild kept persisted session but could not restore it because no effective nodes were available",
             );
             self.store
-                .apply_subscription_snapshot(profile_id, &[], &[], &[])
+                .apply_subscription_snapshot(project_id, &[], &[], &[])
                 .await
                 .map_err(BrokerError::from)?;
-            self.apply_profile_restorable_sessions_locked(profile_id, &[])
+            self.apply_project_restorable_sessions_locked(project_id, &[])
                 .await?;
             return Ok(vec![]);
         }
@@ -2237,14 +2237,14 @@ impl BrokerService {
                 .collect()
         };
         log_unrestored_sessions(
-            profile_id,
+            project_id,
             &existing_sessions,
             &active_sessions,
-            "effective profile rebuild kept persisted session but left it out of runtime restore",
+            "effective project rebuild kept persisted session but left it out of runtime restore",
         );
         let fresh_probe_records = filter_probe_records_by_pair(
             self.store
-                .list_probe_records(profile_id)
+                .list_probe_records(project_id)
                 .await
                 .map_err(BrokerError::from)?,
             &valid_proxy_ip_pairs,
@@ -2252,25 +2252,25 @@ impl BrokerService {
         let mut next_ip_records = ip_map.values().cloned().collect::<Vec<_>>();
         clear_stale_probe_timestamps(&mut next_ip_records, &fresh_probe_records);
 
-        self.apply_profile_restorable_sessions_locked(profile_id, &active_sessions)
+        self.apply_project_restorable_sessions_locked(project_id, &active_sessions)
             .await?;
 
         if let Err(err) = self
             .store
-            .apply_subscription_snapshot(profile_id, &nodes, &next_ip_records, &fresh_probe_records)
+            .apply_subscription_snapshot(project_id, &nodes, &next_ip_records, &fresh_probe_records)
             .await
             .map_err(BrokerError::from)
         {
             if let Err(rollback_err) = self
-                .apply_profile_restorable_sessions_locked(profile_id, &existing_sessions)
+                .apply_project_restorable_sessions_locked(project_id, &existing_sessions)
                 .await
             {
                 tracing::error!(
-                    profile_id,
+                    project_id,
                     error = %rollback_err,
                     "runtime rollback failed after subscription snapshot persistence error"
                 );
-                self.recover_runtime_desync_locked(profile_id, &existing_sessions)
+                self.recover_runtime_desync_locked(project_id, &existing_sessions)
                     .await;
             }
             return Err(err);
@@ -2278,7 +2278,7 @@ impl BrokerService {
 
         if !active_sessions.is_empty() {
             self.store
-                .insert_sessions(profile_id, &active_sessions)
+                .insert_sessions(project_id, &active_sessions)
                 .await
                 .map_err(BrokerError::from)?;
         }
@@ -2292,12 +2292,12 @@ impl BrokerService {
         Ok(new_ips)
     }
 
-    async fn rebuild_profiles(&self, profile_ids: &HashSet<String>) -> BrokerResult<()> {
-        let mut profile_ids = profile_ids.iter().cloned().collect::<Vec<_>>();
-        profile_ids.sort();
-        for profile_id in profile_ids {
-            let _profile_guard = self.lock_profile(&profile_id).await;
-            self.rebuild_effective_profile_locked(&profile_id).await?;
+    async fn rebuild_projects(&self, project_ids: &HashSet<String>) -> BrokerResult<()> {
+        let mut project_ids = project_ids.iter().cloned().collect::<Vec<_>>();
+        project_ids.sort();
+        for project_id in project_ids {
+            let _project_guard = self.lock_project(&project_id).await;
+            self.rebuild_effective_project_locked(&project_id).await?;
         }
         Ok(())
     }
@@ -2306,9 +2306,9 @@ impl BrokerService {
         &self,
         record: ProxyInventoryRecord,
     ) -> BrokerResult<ProxyInventoryItem> {
-        let (profiles, settings) = self.list_profile_ids_with_settings().await?;
-        let effective_profile_ids =
-            self.effective_profile_ids_for_record(&record, &profiles, &settings);
+        let (projects, settings) = self.list_project_ids_with_settings().await?;
+        let effective_project_ids =
+            self.effective_project_ids_for_record(&record, &projects, &settings);
         Ok(ProxyInventoryItem {
             import_id: record.import_id,
             node_id: record.node_id,
@@ -2318,7 +2318,7 @@ impl BrokerService {
             resolved_ips: record.resolved_ips,
             source_scope: record.source_scope,
             allocation_scope: record.allocation_scope,
-            effective_profile_ids,
+            effective_project_ids,
         })
     }
 
@@ -2326,25 +2326,25 @@ impl BrokerService {
         &self,
         record: ProxyImportRecord,
     ) -> BrokerResult<ProxyImportItem> {
-        let summary_profile_id = match &record.allocation_scope {
-            ProxyScope::Global => GLOBAL_RUNTIME_PROFILE_ID,
-            ProxyScope::Profile { profile_id } => profile_id.as_str(),
+        let summary_project_id = match &record.allocation_scope {
+            ProxyScope::Global => GLOBAL_RUNTIME_PROJECT_ID,
+            ProxyScope::Project { project_id } => project_id.as_str(),
         };
-        let (profiles, settings) = self.list_profile_ids_with_settings().await?;
-        let effective_profile_ids = match &record.allocation_scope {
-            ProxyScope::Global => profiles
+        let (projects, settings) = self.list_project_ids_with_settings().await?;
+        let effective_project_ids = match &record.allocation_scope {
+            ProxyScope::Global => projects
                 .into_iter()
-                .filter(|profile_id| {
+                .filter(|project_id| {
                     settings
-                        .get(profile_id.as_str())
+                        .get(project_id.as_str())
                         .map(|item| item.use_global_proxies)
                         .unwrap_or(true)
                 })
                 .collect::<Vec<_>>(),
-            ProxyScope::Profile { profile_id } => vec![profile_id.clone()],
+            ProxyScope::Project { project_id } => vec![project_id.clone()],
         };
         let nodes = self.filter_malformed_inventory_records(
-            summary_profile_id,
+            summary_project_id,
             self.store
                 .list_proxy_inventory_for_import(&record.import_id)
                 .await
@@ -2365,7 +2365,7 @@ impl BrokerService {
             allocation_scope: record.allocation_scope,
             proxy_count: nodes.len(),
             distinct_ip_count,
-            effective_profile_ids,
+            effective_project_ids,
             subscription_metadata: record.subscription_metadata,
             created_at: record.created_at,
             updated_at: record.updated_at,
@@ -2375,11 +2375,11 @@ impl BrokerService {
     async fn build_proxy_catalog_response(
         &self,
         view: &str,
-        profile_id: Option<&str>,
+        project_id: Option<&str>,
         records: Vec<ProxyInventoryRecord>,
     ) -> BrokerResult<ProxyCatalogResponse> {
-        let (profiles, settings) = self.list_profile_ids_with_settings().await?;
-        let legacy_metadata = self.load_legacy_profile_metadata(&profiles).await?;
+        let (projects, settings) = self.list_project_ids_with_settings().await?;
+        let legacy_metadata = self.load_legacy_project_metadata(&projects).await?;
         let import_records = self
             .store
             .list_proxy_imports()
@@ -2443,8 +2443,8 @@ impl BrokerService {
             let node_items = nodes
                 .into_iter()
                 .map(|record| {
-                    let effective_profile_ids =
-                        self.effective_profile_ids_for_record(&record, &profiles, &settings);
+                    let effective_project_ids =
+                        self.effective_project_ids_for_record(&record, &projects, &settings);
                     let mut ip_metadata = metadata_by_node
                         .get(&record.node_id)
                         .cloned()
@@ -2456,7 +2456,7 @@ impl BrokerService {
                         if let Some(backfilled) = self.backfill_proxy_node_metadata(
                             &record,
                             ip,
-                            &effective_profile_ids,
+                            &effective_project_ids,
                             &legacy_metadata,
                         ) {
                             ip_metadata.push(backfilled);
@@ -2472,10 +2472,10 @@ impl BrokerService {
                         resolved_ips: record.resolved_ips.clone(),
                         source_scope: record.source_scope,
                         allocation_scope: record.allocation_scope,
-                        effective_profile_ids,
+                        effective_project_ids,
                         primary_ip: record.resolved_ips.first().cloned(),
                         ip_metadata,
-                        can_open_session: view == "profile",
+                        can_open_session: view == "project",
                     }
                 })
                 .collect::<Vec<_>>();
@@ -2487,20 +2487,20 @@ impl BrokerService {
 
         Ok(ProxyCatalogResponse {
             view: view.to_string(),
-            profile_id: profile_id.map(ToOwned::to_owned),
+            project_id: project_id.map(ToOwned::to_owned),
             groups,
         })
     }
 
-    async fn load_legacy_profile_metadata(
+    async fn load_legacy_project_metadata(
         &self,
-        profiles: &[String],
-    ) -> BrokerResult<HashMap<String, LegacyProfileMetadata>> {
+        projects: &[String],
+    ) -> BrokerResult<HashMap<String, LegacyProjectMetadata>> {
         let mut metadata = HashMap::new();
-        for profile_id in profiles {
+        for project_id in projects {
             let ip_records = self
                 .store
-                .list_ip_records(profile_id)
+                .list_ip_records(project_id)
                 .await
                 .map_err(BrokerError::from)?
                 .into_iter()
@@ -2510,7 +2510,7 @@ impl BrokerService {
             let mut probe_records = HashMap::<(String, String), Vec<ProbeRecord>>::new();
             for record in self
                 .store
-                .list_probe_records(profile_id)
+                .list_probe_records(project_id)
                 .await
                 .map_err(BrokerError::from)?
             {
@@ -2520,8 +2520,8 @@ impl BrokerService {
                     .push(record);
             }
             metadata.insert(
-                profile_id.clone(),
-                LegacyProfileMetadata {
+                project_id.clone(),
+                LegacyProjectMetadata {
                     ip_records,
                     probe_records,
                 },
@@ -2534,15 +2534,15 @@ impl BrokerService {
         &self,
         record: &ProxyInventoryRecord,
         ip: &str,
-        effective_profile_ids: &[String],
-        legacy_metadata: &HashMap<String, LegacyProfileMetadata>,
+        effective_project_ids: &[String],
+        legacy_metadata: &HashMap<String, LegacyProjectMetadata>,
     ) -> Option<ProxyNodeMetadataRecord> {
-        for profile_id in effective_profile_ids {
-            let Some(profile_metadata) = legacy_metadata.get(profile_id) else {
+        for project_id in effective_project_ids {
+            let Some(project_metadata) = legacy_metadata.get(project_id) else {
                 continue;
             };
-            let ip_record = profile_metadata.ip_records.get(ip);
-            let probe_records = profile_metadata
+            let ip_record = project_metadata.ip_records.get(ip);
+            let probe_records = project_metadata
                 .probe_records
                 .get(&(record.proxy_name.clone(), ip.to_string()));
             if ip_record.is_none() && probe_records.is_none() {
@@ -2611,7 +2611,7 @@ impl BrokerService {
         match view {
             "global" => {
                 let records = self.filter_malformed_inventory_records(
-                    GLOBAL_RUNTIME_PROFILE_ID,
+                    GLOBAL_RUNTIME_PROJECT_ID,
                     self.store
                         .list_proxy_inventory()
                         .await
@@ -2621,17 +2621,17 @@ impl BrokerService {
                 self.build_proxy_catalog_response("global", None, records)
                     .await
             }
-            "profile" => {
-                let Some(profile_id) = query.profile_id.as_deref() else {
+            "project" => {
+                let Some(project_id) = query.project_id.as_deref() else {
                     return Err(BrokerError::InvalidRequest(
-                        "profile_id is required when view=profile".to_string(),
+                        "project_id is required when view=project".to_string(),
                     ));
                 };
-                self.require_profile_exists(profile_id).await?;
+                self.require_project_exists(project_id).await?;
                 let records = self
-                    .compose_effective_proxy_inventory_records(profile_id)
+                    .compose_effective_proxy_inventory_records(project_id)
                     .await?;
-                self.build_proxy_catalog_response("profile", Some(profile_id), records)
+                self.build_proxy_catalog_response("project", Some(project_id), records)
                     .await
             }
             other => Err(BrokerError::InvalidRequest(format!(
@@ -2643,7 +2643,7 @@ impl BrokerService {
     async fn resolve_proxy_operation_nodes(
         &self,
         view: &str,
-        profile_id: Option<&str>,
+        project_id: Option<&str>,
         node_ids: &[String],
     ) -> BrokerResult<Vec<ProxyInventoryRecord>> {
         if node_ids.is_empty() {
@@ -2667,21 +2667,21 @@ impl BrokerService {
 
         let records = match view {
             "global" => self.filter_malformed_inventory_records(
-                GLOBAL_RUNTIME_PROFILE_ID,
+                GLOBAL_RUNTIME_PROJECT_ID,
                 self.store
                     .list_proxy_inventory()
                     .await
                     .map_err(BrokerError::from)?,
                 "malformed proxy inventory node skipped from proxy operation target resolution",
             ),
-            "profile" => {
-                let Some(profile_id) = profile_id else {
+            "project" => {
+                let Some(project_id) = project_id else {
                     return Err(BrokerError::InvalidRequest(
-                        "profile_id is required when view=profile".to_string(),
+                        "project_id is required when view=project".to_string(),
                     ));
                 };
-                self.require_profile_exists(profile_id).await?;
-                self.compose_effective_proxy_inventory_records(profile_id)
+                self.require_project_exists(project_id).await?;
+                self.compose_effective_proxy_inventory_records(project_id)
                     .await?
             }
             other => {
@@ -2705,11 +2705,11 @@ impl BrokerService {
         Ok(resolved)
     }
 
-    fn proxy_operation_profile_id(view: &str, profile_id: Option<&str>) -> BrokerResult<String> {
+    fn proxy_operation_project_id(view: &str, project_id: Option<&str>) -> BrokerResult<String> {
         match view {
-            "global" => Ok(GLOBAL_RUNTIME_PROFILE_ID.to_string()),
-            "profile" => profile_id.map(ToOwned::to_owned).ok_or_else(|| {
-                BrokerError::InvalidRequest("profile_id is required when view=profile".to_string())
+            "global" => Ok(GLOBAL_RUNTIME_PROJECT_ID.to_string()),
+            "project" => project_id.map(ToOwned::to_owned).ok_or_else(|| {
+                BrokerError::InvalidRequest("project_id is required when view=project".to_string())
             }),
             other => Err(BrokerError::InvalidRequest(format!(
                 "unsupported proxy operation view `{other}`"
@@ -2723,11 +2723,11 @@ impl BrokerService {
     ) -> BrokerResult<ProxyOperationAcceptedResponse> {
         let view = request.view.trim();
         let records = self
-            .resolve_proxy_operation_nodes(view, request.profile_id.as_deref(), &request.node_ids)
+            .resolve_proxy_operation_nodes(view, request.project_id.as_deref(), &request.node_ids)
             .await?;
         let run = self
             .enqueue_task_run(
-                &Self::proxy_operation_profile_id(view, request.profile_id.as_deref())?,
+                &Self::proxy_operation_project_id(view, request.project_id.as_deref())?,
                 TaskRunKind::ProxyMetadataRefresh,
                 TaskRunTrigger::Operator,
                 TaskRunScope::Nodes {
@@ -2745,7 +2745,7 @@ impl BrokerService {
         let _probe_queue_guard = self.proxy_probe_queue_lock.lock().await;
         let view = request.view.trim();
         let records = self
-            .resolve_proxy_operation_nodes(view, request.profile_id.as_deref(), &request.node_ids)
+            .resolve_proxy_operation_nodes(view, request.project_id.as_deref(), &request.node_ids)
             .await?;
         let active_node_ids = self.active_proxy_probe_node_ids().await?;
         let requested_nodes = records.len();
@@ -2762,11 +2762,11 @@ impl BrokerService {
         {
             return Err(BrokerError::SubscriptionInvalid);
         }
-        let profile_id = Self::proxy_operation_profile_id(view, request.profile_id.as_deref())?;
+        let project_id = Self::proxy_operation_project_id(view, request.project_id.as_deref())?;
         if target_records.is_empty() {
             let run = self
                 .insert_skipped_task_run(
-                    &profile_id,
+                    &project_id,
                     TaskRunKind::ProxyLatencyProbe,
                     TaskRunTrigger::Operator,
                     TaskRunScope::Nodes {
@@ -2784,7 +2784,7 @@ impl BrokerService {
         }
         let run = self
             .enqueue_task_run(
-                &profile_id,
+                &project_id,
                 TaskRunKind::ProxyLatencyProbe,
                 TaskRunTrigger::Operator,
                 TaskRunScope::Nodes {
@@ -2817,16 +2817,16 @@ impl BrokerService {
         &self,
         run: &TaskRunRecord,
     ) -> BrokerResult<Vec<ProxyInventoryRecord>> {
-        let view = if run.profile_id == GLOBAL_RUNTIME_PROFILE_ID {
+        let view = if run.project_id == GLOBAL_RUNTIME_PROJECT_ID {
             "global"
         } else {
-            "profile"
+            "project"
         };
         match &run.scope {
             TaskRunScope::Nodes { node_ids } => {
                 self.resolve_proxy_operation_nodes(
                     view,
-                    (view == "profile").then_some(run.profile_id.as_str()),
+                    (view == "project").then_some(run.project_id.as_str()),
                     node_ids,
                 )
                 .await
@@ -2842,7 +2842,7 @@ impl BrokerService {
                     };
                     Ok(self
                         .filter_malformed_inventory_records(
-                            GLOBAL_RUNTIME_PROFILE_ID,
+                            GLOBAL_RUNTIME_PROJECT_ID,
                             self.store
                                 .list_proxy_inventory()
                                 .await
@@ -2859,8 +2859,8 @@ impl BrokerService {
                         .filter(|record| !record.resolved_ips.is_empty())
                         .collect())
                 }
-                "profile" => Ok(self
-                    .compose_effective_proxy_inventory_records(&run.profile_id)
+                "project" => Ok(self
+                    .compose_effective_proxy_inventory_records(&run.project_id)
                     .await?
                     .into_iter()
                     .filter(|record| !record.resolved_ips.is_empty())
@@ -2928,7 +2928,7 @@ impl BrokerService {
             })
             .collect::<Vec<_>>();
         let geo_updated = self
-            .refresh_geo_records(GLOBAL_RUNTIME_PROFILE_ID, true, now, &mut ip_records, None)
+            .refresh_geo_records(GLOBAL_RUNTIME_PROJECT_ID, true, now, &mut ip_records, None)
             .await?;
 
         let by_ip = ip_records
@@ -3058,7 +3058,7 @@ impl BrokerService {
                         let sample = self
                             .runtime
                             .measure_proxy_delay(
-                                GLOBAL_RUNTIME_PROFILE_ID,
+                                GLOBAL_RUNTIME_PROJECT_ID,
                                 &runtime_alias,
                                 &probe_target,
                                 timeout_ms,
@@ -3209,11 +3209,11 @@ impl BrokerService {
 
     pub async fn load_subscription(
         &self,
-        profile_id: &str,
+        project_id: &str,
         source: &crate::models::SubscriptionSource,
     ) -> BrokerResult<LoadSubscriptionResponse> {
         self.load_subscription_request(
-            profile_id,
+            project_id,
             &crate::models::LoadSubscriptionRequest {
                 name: None,
                 source: Some(source.clone()),
@@ -3225,17 +3225,17 @@ impl BrokerService {
 
     pub async fn load_subscription_request(
         &self,
-        profile_id: &str,
+        project_id: &str,
         request: &crate::models::LoadSubscriptionRequest,
     ) -> BrokerResult<LoadSubscriptionResponse> {
         let (outcome, source) = self
-            .load_subscription_request_internal(profile_id, request)
+            .load_subscription_request_internal(project_id, request)
             .await?;
         let mut response = outcome.response;
         if let Some(source) = source
             && let Err(err) = self
                 .register_post_load_bookkeeping(
-                    profile_id,
+                    project_id,
                     &outcome.import_id,
                     &source,
                     &outcome.new_ips,
@@ -3243,7 +3243,7 @@ impl BrokerService {
                 .await
         {
             tracing::warn!(
-                profile_id,
+                project_id,
                 error = %err,
                 "post-load task bookkeeping failed after successful subscription import"
             );
@@ -3256,26 +3256,26 @@ impl BrokerService {
 
     pub async fn refresh(
         &self,
-        profile_id: &str,
+        project_id: &str,
         request: &RefreshRequest,
     ) -> BrokerResult<RefreshResponse> {
-        self.refresh_metadata_internal(profile_id, request.force, None, None)
+        self.refresh_metadata_internal(project_id, request.force, None, None)
             .await
     }
 
     async fn load_subscription_request_internal(
         &self,
-        profile_id: &str,
+        project_id: &str,
         request: &LoadSubscriptionRequest,
     ) -> BrokerResult<(LoadSubscriptionOutcome, Option<SubscriptionSource>)> {
         match (&request.source, request.content.as_deref()) {
             (Some(source), None) => Ok((
-                self.load_subscription_internal(profile_id, source, request.name.as_deref())
+                self.load_subscription_internal(project_id, source, request.name.as_deref())
                     .await?,
                 Some(source.clone()),
             )),
             (None, Some(content)) => Ok((
-                self.load_manual_proxy_group_internal(profile_id, content, request.name.as_deref())
+                self.load_manual_proxy_group_internal(project_id, content, request.name.as_deref())
                     .await?,
                 None,
             )),
@@ -3290,19 +3290,19 @@ impl BrokerService {
 
     async fn load_subscription_internal(
         &self,
-        profile_id: &str,
+        project_id: &str,
         source: &SubscriptionSource,
         requested_name: Option<&str>,
     ) -> BrokerResult<LoadSubscriptionOutcome> {
-        let _profile_guard = self.lock_profile(profile_id).await;
+        let _project_guard = self.lock_project(project_id).await;
         let imported = self
             .import_inventory_scope_from_source(
-                &ProxyScope::profile(profile_id),
+                &ProxyScope::project(project_id),
                 source,
                 requested_name,
             )
             .await?;
-        let new_ips = self.rebuild_effective_profile_locked(profile_id).await?;
+        let new_ips = self.rebuild_effective_project_locked(project_id).await?;
 
         Ok(LoadSubscriptionOutcome {
             response: imported.response,
@@ -3313,19 +3313,19 @@ impl BrokerService {
 
     async fn load_manual_proxy_group_internal(
         &self,
-        profile_id: &str,
+        project_id: &str,
         content: &str,
         requested_name: Option<&str>,
     ) -> BrokerResult<LoadSubscriptionOutcome> {
-        let _profile_guard = self.lock_profile(profile_id).await;
+        let _project_guard = self.lock_project(project_id).await;
         let imported = self
             .import_inventory_scope_from_content(
-                &ProxyScope::profile(profile_id),
+                &ProxyScope::project(project_id),
                 content,
                 requested_name,
             )
             .await?;
-        let new_ips = self.rebuild_effective_profile_locked(profile_id).await?;
+        let new_ips = self.rebuild_effective_project_locked(project_id).await?;
 
         Ok(LoadSubscriptionOutcome {
             response: imported.response,
@@ -3336,15 +3336,15 @@ impl BrokerService {
 
     async fn register_post_load_bookkeeping(
         &self,
-        profile_id: &str,
+        project_id: &str,
         import_id: &str,
         source: &SubscriptionSource,
         new_ips: &[String],
     ) -> BrokerResult<()> {
-        self.register_profile_sync_source(import_id, profile_id, source)
+        self.register_project_sync_source(import_id, project_id, source)
             .await?;
 
-        let queued_or_running = self.queued_or_running_task_runs(profile_id).await?;
+        let queued_or_running = self.queued_or_running_task_runs(project_id).await?;
         if queued_or_running
             .iter()
             .any(|run| run.kind == TaskRunKind::MetadataRefreshFull)
@@ -3375,7 +3375,7 @@ impl BrokerService {
             }
         } else {
             self.enqueue_task_run(
-                profile_id,
+                project_id,
                 TaskRunKind::MetadataRefreshIncremental,
                 TaskRunTrigger::PostLoad,
                 TaskRunScope::Ips {
@@ -3390,21 +3390,21 @@ impl BrokerService {
 
     async fn refresh_metadata_internal(
         &self,
-        profile_id: &str,
+        project_id: &str,
         force: bool,
         target_ips: Option<&HashSet<String>>,
         run_id: Option<&str>,
     ) -> BrokerResult<RefreshResponse> {
-        let _profile_guard = self.lock_profile(profile_id).await;
+        let _project_guard = self.lock_project(project_id).await;
 
-        let nodes = self.compose_effective_session_nodes(profile_id).await?;
+        let nodes = self.compose_effective_session_nodes(project_id).await?;
         if nodes.is_empty() {
             return Err(BrokerError::SubscriptionInvalid);
         }
 
         let mut ip_records = self
             .store
-            .list_ip_records(profile_id)
+            .list_ip_records(project_id)
             .await
             .map_err(BrokerError::from)?;
         let scoped_ip_set = scoped_ip_records(&ip_records, target_ips);
@@ -3419,7 +3419,7 @@ impl BrokerService {
 
         let stored_probe_records = self
             .store
-            .list_probe_records(profile_id)
+            .list_probe_records(project_id)
             .await
             .map_err(BrokerError::from)?;
         let scoped_probe_records =
@@ -3472,12 +3472,12 @@ impl BrokerService {
             }
             let sessions = self
                 .store
-                .list_sessions(profile_id)
+                .list_sessions(project_id)
                 .await
                 .map_err(BrokerError::from)?;
-            self.apply_shared_runtime_config(Some(profile_id), Some(&sessions), true)
+            self.apply_shared_runtime_config(Some(project_id), Some(&sessions), true)
                 .await?;
-            self.refresh_probe_records(profile_id, now, &nodes, Some(&scoped_ip_set))
+            self.refresh_probe_records(project_id, now, &nodes, Some(&scoped_ip_set))
                 .await?
         } else {
             scoped_probe_records
@@ -3492,7 +3492,7 @@ impl BrokerService {
                 }
             }
             self.store
-                .upsert_probe_records(profile_id, &probe_records)
+                .upsert_probe_records(project_id, &probe_records)
                 .await
                 .map_err(BrokerError::from)?;
         }
@@ -3513,7 +3513,7 @@ impl BrokerService {
 
         let geo_updated = self
             .refresh_geo_records(
-                profile_id,
+                project_id,
                 force,
                 now,
                 &mut ip_records,
@@ -3537,7 +3537,7 @@ impl BrokerService {
         }
 
         self.store
-            .upsert_ip_records(profile_id, &ip_records)
+            .upsert_ip_records(project_id, &ip_records)
             .await
             .map_err(BrokerError::from)?;
 
@@ -3545,7 +3545,7 @@ impl BrokerService {
             probe_records = filter_probe_records_to_ips(
                 &self
                     .store
-                    .list_probe_records(profile_id)
+                    .list_probe_records(project_id)
                     .await
                     .map_err(BrokerError::from)?,
                 &scoped_ip_set,
@@ -3566,7 +3566,7 @@ impl BrokerService {
 
     async fn refresh_probe_records(
         &self,
-        _profile_id: &str,
+        _project_id: &str,
         now: i64,
         nodes: &[ProxyNode],
         target_ips: Option<&HashSet<String>>,
@@ -3600,7 +3600,7 @@ impl BrokerService {
                 let delay = self
                     .runtime
                     .measure_proxy_delay(
-                        GLOBAL_RUNTIME_PROFILE_ID,
+                        GLOBAL_RUNTIME_PROJECT_ID,
                         &probe_proxy_name,
                         &target,
                         timeout_ms,
@@ -3693,7 +3693,7 @@ impl BrokerService {
 
     async fn refresh_geo_records(
         &self,
-        _profile_id: &str,
+        _project_id: &str,
         force: bool,
         now: i64,
         ip_records: &mut [IpRecord],
@@ -3906,35 +3906,35 @@ impl BrokerService {
 
     async fn apply_sessions_config_locked(
         &self,
-        profile_id: &str,
+        project_id: &str,
         sessions: &[SessionRecord],
     ) -> BrokerResult<()> {
-        self.apply_shared_runtime_config_locked(Some(profile_id), Some(sessions), false)
+        self.apply_shared_runtime_config_locked(Some(project_id), Some(sessions), false)
             .await
     }
 
     async fn rollback_runtime_sessions_locked(
         &self,
-        profile_id: &str,
+        project_id: &str,
         sessions: &[SessionRecord],
     ) -> anyhow::Result<()> {
-        self.apply_sessions_config_locked(profile_id, sessions)
+        self.apply_sessions_config_locked(project_id, sessions)
             .await
             .map_err(|e| anyhow!(e.to_string()))
     }
 
-    async fn recover_runtime_desync_locked(&self, profile_id: &str, sessions: &[SessionRecord]) {
+    async fn recover_runtime_desync_locked(&self, project_id: &str, sessions: &[SessionRecord]) {
         tracing::warn!(
-            profile_id,
+            project_id,
             "attempting runtime recovery after rollback failure"
         );
         if let Err(err) = self
             .runtime
-            .shutdown_profile(GLOBAL_RUNTIME_PROFILE_ID)
+            .shutdown_project(GLOBAL_RUNTIME_PROJECT_ID)
             .await
         {
             tracing::warn!(
-                profile_id,
+                project_id,
                 error = %err,
                 "failed to shutdown runtime during rollback recovery"
             );
@@ -3946,12 +3946,12 @@ impl BrokerService {
 
         if let Err(err) = self
             .runtime
-            .ensure_started(GLOBAL_RUNTIME_PROFILE_ID)
+            .ensure_started(GLOBAL_RUNTIME_PROJECT_ID)
             .await
             .map_err(|e| BrokerError::MihomoUnavailable(e.to_string()))
         {
             tracing::warn!(
-                profile_id,
+                project_id,
                 error = %err,
                 "failed to restart runtime during rollback recovery"
             );
@@ -3959,11 +3959,11 @@ impl BrokerService {
         }
 
         if let Err(err) = self
-            .apply_sessions_config_locked(profile_id, sessions)
+            .apply_sessions_config_locked(project_id, sessions)
             .await
         {
             tracing::warn!(
-                profile_id,
+                project_id,
                 error = %err,
                 "failed to reapply sessions during rollback recovery"
             );
@@ -3972,20 +3972,20 @@ impl BrokerService {
 
     pub async fn extract_ips(
         &self,
-        profile_id: &str,
+        project_id: &str,
         request: &ExtractIpRequest,
     ) -> BrokerResult<ExtractIpResponse> {
         validate_conflict(request)?;
-        let _profile_guard = self.lock_profile(profile_id).await;
+        let _project_guard = self.lock_project(project_id).await;
 
         let ip_records = self
             .store
-            .list_ip_records(profile_id)
+            .list_ip_records(project_id)
             .await
             .map_err(BrokerError::from)?;
         let probe_records = self
             .store
-            .list_probe_records(profile_id)
+            .list_probe_records(project_id)
             .await
             .map_err(BrokerError::from)?;
 
@@ -3998,29 +3998,29 @@ impl BrokerService {
 
     pub async fn open_session(
         &self,
-        profile_id: &str,
+        project_id: &str,
         request: &OpenSessionRequest,
         request_display_host: Option<&str>,
     ) -> BrokerResult<OpenSessionResponse> {
-        let _profile_guard = self.lock_profile(profile_id).await;
+        let _project_guard = self.lock_project(project_id).await;
         let _shared_runtime_guard = self.shared_runtime_lock.lock().await;
 
-        let nodes = self.compose_effective_session_nodes(profile_id).await?;
+        let nodes = self.compose_effective_session_nodes(project_id).await?;
         if nodes.is_empty() {
             return Err(BrokerError::SubscriptionInvalid);
         }
 
         let ip_records = self
             .store
-            .list_ip_records(profile_id)
+            .list_ip_records(project_id)
             .await
             .map_err(BrokerError::from)?;
         let probe_records = self
             .store
-            .list_probe_records(profile_id)
+            .list_probe_records(project_id)
             .await
             .map_err(BrokerError::from)?;
-        let existing = self.list_sessions_backfilled(profile_id).await?;
+        let existing = self.list_sessions_backfilled(project_id).await?;
 
         let retryable = request.desired_port.is_none();
         let max_attempts = if retryable { 3usize } else { 1usize };
@@ -4049,24 +4049,24 @@ impl BrokerService {
             let mut merged = existing.clone();
             merged.push(prepared.clone());
 
-            if let Err(err) = self.apply_sessions_config_locked(profile_id, &merged).await {
+            if let Err(err) = self.apply_sessions_config_locked(project_id, &merged).await {
                 tracing::warn!(
-                    profile_id,
+                    project_id,
                     attempt,
                     error = %err,
                     "session apply config failed"
                 );
                 if let Err(rollback_err) = self
-                    .rollback_runtime_sessions_locked(profile_id, &existing)
+                    .rollback_runtime_sessions_locked(project_id, &existing)
                     .await
                 {
                     tracing::error!(
-                        profile_id,
+                        project_id,
                         attempt,
                         error = %rollback_err,
                         "runtime rollback failed after session apply failure"
                     );
-                    self.recover_runtime_desync_locked(profile_id, &existing)
+                    self.recover_runtime_desync_locked(project_id, &existing)
                         .await;
                 }
                 if retryable && attempt < max_attempts {
@@ -4078,26 +4078,26 @@ impl BrokerService {
             let now = now_epoch_sec();
             if let Err(err) = self
                 .store
-                .insert_sessions_with_touch(profile_id, std::slice::from_ref(&prepared), now)
+                .insert_sessions_with_touch(project_id, std::slice::from_ref(&prepared), now)
                 .await
             {
                 tracing::error!(
-                    profile_id,
+                    project_id,
                     session_id = %prepared.session_id,
                     error = %err,
                     "persist session failed after runtime apply, rolling back runtime"
                 );
                 if let Err(rollback_err) = self
-                    .rollback_runtime_sessions_locked(profile_id, &existing)
+                    .rollback_runtime_sessions_locked(project_id, &existing)
                     .await
                 {
                     tracing::error!(
-                        profile_id,
+                        project_id,
                         session_id = %prepared.session_id,
                         error = %rollback_err,
                         "runtime rollback failed after session insert failure"
                     );
-                    self.recover_runtime_desync_locked(profile_id, &existing)
+                    self.recover_runtime_desync_locked(project_id, &existing)
                         .await;
                 }
                 return Err(BrokerError::from(err));
@@ -4111,7 +4111,7 @@ impl BrokerService {
 
     pub async fn open_batch(
         &self,
-        profile_id: &str,
+        project_id: &str,
         request: &OpenBatchRequest,
         request_display_host: Option<&str>,
     ) -> BrokerResult<OpenBatchResponse> {
@@ -4119,12 +4119,12 @@ impl BrokerService {
             return Ok(OpenBatchResponse { sessions: vec![] });
         }
 
-        let _profile_guard = self.lock_profile(profile_id).await;
+        let _project_guard = self.lock_project(project_id).await;
         let _shared_runtime_guard = self.shared_runtime_lock.lock().await;
 
         let nodes = self
             .store
-            .list_subscription(profile_id)
+            .list_subscription(project_id)
             .await
             .map_err(BrokerError::from)?;
         if nodes.is_empty() {
@@ -4133,15 +4133,15 @@ impl BrokerService {
 
         let ip_records = self
             .store
-            .list_ip_records(profile_id)
+            .list_ip_records(project_id)
             .await
             .map_err(BrokerError::from)?;
         let probe_records = self
             .store
-            .list_probe_records(profile_id)
+            .list_probe_records(project_id)
             .await
             .map_err(BrokerError::from)?;
-        let existing = self.list_sessions_backfilled(profile_id).await?;
+        let existing = self.list_sessions_backfilled(project_id).await?;
 
         let retryable = request.requests.iter().all(|r| r.desired_port.is_none());
         let max_attempts = if retryable { 3usize } else { 1usize };
@@ -4170,24 +4170,24 @@ impl BrokerService {
             let mut merged = existing.clone();
             merged.extend(staged.clone());
 
-            if let Err(err) = self.apply_sessions_config_locked(profile_id, &merged).await {
+            if let Err(err) = self.apply_sessions_config_locked(project_id, &merged).await {
                 tracing::warn!(
-                    profile_id,
+                    project_id,
                     attempt,
                     error = %err,
                     "batch apply config failed before persisting sessions"
                 );
                 if let Err(rollback_err) = self
-                    .rollback_runtime_sessions_locked(profile_id, &existing)
+                    .rollback_runtime_sessions_locked(project_id, &existing)
                     .await
                 {
                     tracing::error!(
-                        profile_id,
+                        project_id,
                         attempt,
                         error = %rollback_err,
                         "runtime rollback failed after batch apply failure"
                     );
-                    self.recover_runtime_desync_locked(profile_id, &existing)
+                    self.recover_runtime_desync_locked(project_id, &existing)
                         .await;
                 }
                 if retryable && attempt < max_attempts {
@@ -4199,24 +4199,24 @@ impl BrokerService {
             let now = now_epoch_sec();
             if let Err(err) = self
                 .store
-                .insert_sessions_with_touch(profile_id, &staged, now)
+                .insert_sessions_with_touch(project_id, &staged, now)
                 .await
             {
                 tracing::error!(
-                    profile_id,
+                    project_id,
                     error = %err,
                     "batch persist failed after runtime apply, rolling back"
                 );
                 if let Err(rollback_err) = self
-                    .rollback_runtime_sessions_locked(profile_id, &existing)
+                    .rollback_runtime_sessions_locked(project_id, &existing)
                     .await
                 {
                     tracing::error!(
-                        profile_id,
+                        project_id,
                         error = %rollback_err,
                         "runtime rollback failed after batch persist failure"
                     );
-                    self.recover_runtime_desync_locked(profile_id, &existing)
+                    self.recover_runtime_desync_locked(project_id, &existing)
                         .await;
                 }
                 return Err(BrokerError::BatchOpenFailed);
@@ -4233,14 +4233,14 @@ impl BrokerService {
         Err(BrokerError::BatchOpenFailed)
     }
 
-    async fn list_sessions_backfilled(&self, profile_id: &str) -> BrokerResult<Vec<SessionRecord>> {
+    async fn list_sessions_backfilled(&self, project_id: &str) -> BrokerResult<Vec<SessionRecord>> {
         let mut sessions = self
             .store
-            .list_sessions(profile_id)
+            .list_sessions(project_id)
             .await
             .map_err(BrokerError::from)?;
         let effective_nodes = self
-            .compose_effective_proxy_inventory_records(profile_id)
+            .compose_effective_proxy_inventory_records(project_id)
             .await
             .unwrap_or_default();
         let mut repaired = Vec::new();
@@ -4274,7 +4274,7 @@ impl BrokerService {
         }
         if !repaired.is_empty() {
             self.store
-                .insert_sessions(profile_id, &repaired)
+                .insert_sessions(project_id, &repaired)
                 .await
                 .map_err(BrokerError::from)?;
         }
@@ -4283,7 +4283,7 @@ impl BrokerService {
 
     async fn build_session_list_items(
         &self,
-        profile_id: &str,
+        project_id: &str,
         sessions: Vec<SessionRecord>,
         request_display_host: Option<&str>,
     ) -> BrokerResult<Vec<SessionListItem>> {
@@ -4291,9 +4291,9 @@ impl BrokerService {
             return Ok(Vec::new());
         }
 
-        let effective_profile_ids = vec![profile_id.to_string()];
+        let effective_project_ids = vec![project_id.to_string()];
         let effective_nodes = self
-            .compose_effective_proxy_inventory_records(profile_id)
+            .compose_effective_proxy_inventory_records(project_id)
             .await
             .unwrap_or_default()
             .into_iter()
@@ -4314,7 +4314,7 @@ impl BrokerService {
                 },
             );
         let legacy_metadata = self
-            .load_legacy_profile_metadata(&effective_profile_ids)
+            .load_legacy_project_metadata(&effective_project_ids)
             .await?;
 
         Ok(sessions
@@ -4333,7 +4333,7 @@ impl BrokerService {
                             self.backfill_proxy_node_metadata(
                                 record,
                                 &session.selected_ip,
-                                &effective_profile_ids,
+                                &effective_project_ids,
                                 &legacy_metadata,
                             )
                             .map(sanitize_proxy_node_metadata_record)
@@ -4399,14 +4399,14 @@ impl BrokerService {
 
     pub async fn open_session_by_node(
         &self,
-        profile_id: &str,
+        project_id: &str,
         request: &OpenSessionByNodeRequest,
         request_display_host: Option<&str>,
     ) -> BrokerResult<OpenSessionResponse> {
-        let _profile_guard = self.lock_profile(profile_id).await;
+        let _project_guard = self.lock_project(project_id).await;
         let _shared_runtime_guard = self.shared_runtime_lock.lock().await;
         let nodes = self
-            .compose_effective_proxy_inventory_records(profile_id)
+            .compose_effective_proxy_inventory_records(project_id)
             .await?;
         let Some(node) = nodes
             .into_iter()
@@ -4420,7 +4420,7 @@ impl BrokerService {
             .cloned()
             .ok_or(BrokerError::SubscriptionInvalid)?;
         let candidate_node_ids = vec![node.node_id.clone()];
-        let existing = self.list_sessions_backfilled(profile_id).await?;
+        let existing = self.list_sessions_backfilled(project_id).await?;
         let retryable = request.desired_port.is_none();
         let max_attempts = if retryable { 3usize } else { 1usize };
 
@@ -4454,24 +4454,24 @@ impl BrokerService {
             let mut merged = existing.clone();
             merged.push(prepared.clone());
 
-            if let Err(err) = self.apply_sessions_config_locked(profile_id, &merged).await {
+            if let Err(err) = self.apply_sessions_config_locked(project_id, &merged).await {
                 tracing::warn!(
-                    profile_id,
+                    project_id,
                     attempt,
                     error = %err,
                     "node-pinned session apply config failed"
                 );
                 if let Err(rollback_err) = self
-                    .rollback_runtime_sessions_locked(profile_id, &existing)
+                    .rollback_runtime_sessions_locked(project_id, &existing)
                     .await
                 {
                     tracing::error!(
-                        profile_id,
+                        project_id,
                         attempt,
                         error = %rollback_err,
                         "runtime rollback failed after node-pinned session apply failure"
                     );
-                    self.recover_runtime_desync_locked(profile_id, &existing)
+                    self.recover_runtime_desync_locked(project_id, &existing)
                         .await;
                 }
                 if retryable && attempt < max_attempts {
@@ -4483,26 +4483,26 @@ impl BrokerService {
             let now = now_epoch_sec();
             if let Err(err) = self
                 .store
-                .insert_sessions_with_touch(profile_id, std::slice::from_ref(&prepared), now)
+                .insert_sessions_with_touch(project_id, std::slice::from_ref(&prepared), now)
                 .await
             {
                 tracing::error!(
-                    profile_id,
+                    project_id,
                     session_id = %prepared.session_id,
                     error = %err,
                     "persist node-pinned session failed after runtime apply"
                 );
                 if let Err(rollback_err) = self
-                    .rollback_runtime_sessions_locked(profile_id, &existing)
+                    .rollback_runtime_sessions_locked(project_id, &existing)
                     .await
                 {
                     tracing::error!(
-                        profile_id,
+                        project_id,
                         session_id = %prepared.session_id,
                         error = %rollback_err,
                         "runtime rollback failed after node-pinned session insert failure"
                     );
-                    self.recover_runtime_desync_locked(profile_id, &existing)
+                    self.recover_runtime_desync_locked(project_id, &existing)
                         .await;
                 }
                 return Err(BrokerError::from(err));
@@ -4516,7 +4516,7 @@ impl BrokerService {
 
     pub async fn open_batch_by_node(
         &self,
-        profile_id: &str,
+        project_id: &str,
         request: &OpenBatchByNodeRequest,
         request_display_host: Option<&str>,
     ) -> BrokerResult<OpenBatchResponse> {
@@ -4538,15 +4538,15 @@ impl BrokerService {
                 sessions: Vec::new(),
             });
         }
-        let _profile_guard = self.lock_profile(profile_id).await;
+        let _project_guard = self.lock_project(project_id).await;
         let _shared_runtime_guard = self.shared_runtime_lock.lock().await;
         let node_map = self
-            .compose_effective_proxy_inventory_records(profile_id)
+            .compose_effective_proxy_inventory_records(project_id)
             .await?
             .into_iter()
             .map(|record| (record.node_id.clone(), record))
             .collect::<HashMap<_, _>>();
-        let existing = self.list_sessions_backfilled(profile_id).await?;
+        let existing = self.list_sessions_backfilled(project_id).await?;
         let retryable = requests.iter().all(|item| item.desired_port.is_none());
         let max_attempts = if retryable { 3usize } else { 1usize };
 
@@ -4597,24 +4597,24 @@ impl BrokerService {
                 continue;
             }
 
-            if let Err(err) = self.apply_sessions_config_locked(profile_id, &merged).await {
+            if let Err(err) = self.apply_sessions_config_locked(project_id, &merged).await {
                 tracing::warn!(
-                    profile_id,
+                    project_id,
                     attempt,
                     error = %err,
                     "node-pinned batch apply config failed before persisting sessions"
                 );
                 if let Err(rollback_err) = self
-                    .rollback_runtime_sessions_locked(profile_id, &existing)
+                    .rollback_runtime_sessions_locked(project_id, &existing)
                     .await
                 {
                     tracing::error!(
-                        profile_id,
+                        project_id,
                         attempt,
                         error = %rollback_err,
                         "runtime rollback failed after node-pinned batch apply failure"
                     );
-                    self.recover_runtime_desync_locked(profile_id, &existing)
+                    self.recover_runtime_desync_locked(project_id, &existing)
                         .await;
                 }
                 if retryable && attempt < max_attempts {
@@ -4626,26 +4626,26 @@ impl BrokerService {
             let now = now_epoch_sec();
             if let Err(err) = self
                 .store
-                .insert_sessions_with_touch(profile_id, &staged, now)
+                .insert_sessions_with_touch(project_id, &staged, now)
                 .await
             {
                 tracing::error!(
-                    profile_id,
+                    project_id,
                     attempt,
                     error = %err,
                     "persist node-pinned batch failed after runtime apply"
                 );
                 if let Err(rollback_err) = self
-                    .rollback_runtime_sessions_locked(profile_id, &existing)
+                    .rollback_runtime_sessions_locked(project_id, &existing)
                     .await
                 {
                     tracing::error!(
-                        profile_id,
+                        project_id,
                         attempt,
                         error = %rollback_err,
                         "runtime rollback failed after node-pinned batch insert failure"
                     );
-                    self.recover_runtime_desync_locked(profile_id, &existing)
+                    self.recover_runtime_desync_locked(project_id, &existing)
                         .await;
                 }
                 return Err(BrokerError::BatchOpenFailed);
@@ -4664,13 +4664,13 @@ impl BrokerService {
 
     pub async fn open_session_by_ip(
         &self,
-        profile_id: &str,
+        project_id: &str,
         request: &OpenSessionByIpRequest,
         request_display_host: Option<&str>,
     ) -> BrokerResult<OpenSessionResponse> {
         let batch = self
             .open_batch_by_ip(
-                profile_id,
+                project_id,
                 &OpenBatchByIpRequest {
                     requests: vec![request.clone()],
                 },
@@ -4686,7 +4686,7 @@ impl BrokerService {
 
     pub async fn open_batch_by_ip(
         &self,
-        profile_id: &str,
+        project_id: &str,
         request: &OpenBatchByIpRequest,
         request_display_host: Option<&str>,
     ) -> BrokerResult<OpenBatchResponse> {
@@ -4696,13 +4696,13 @@ impl BrokerService {
             });
         }
 
-        let _profile_guard = self.lock_profile(profile_id).await;
+        let _project_guard = self.lock_project(project_id).await;
         let _shared_runtime_guard = self.shared_runtime_lock.lock().await;
         let nodes = self
-            .compose_effective_proxy_inventory_records(profile_id)
+            .compose_effective_proxy_inventory_records(project_id)
             .await?;
         let metadata_by_pair = self.proxy_node_metadata_by_pair().await?;
-        let existing = self.list_sessions_backfilled(profile_id).await?;
+        let existing = self.list_sessions_backfilled(project_id).await?;
         let retryable = request
             .requests
             .iter()
@@ -4762,24 +4762,24 @@ impl BrokerService {
                 continue;
             }
 
-            if let Err(err) = self.apply_sessions_config_locked(profile_id, &merged).await {
+            if let Err(err) = self.apply_sessions_config_locked(project_id, &merged).await {
                 tracing::warn!(
-                    profile_id,
+                    project_id,
                     attempt,
                     error = %err,
                     "ip-candidate batch apply config failed before persisting sessions"
                 );
                 if let Err(rollback_err) = self
-                    .rollback_runtime_sessions_locked(profile_id, &existing)
+                    .rollback_runtime_sessions_locked(project_id, &existing)
                     .await
                 {
                     tracing::error!(
-                        profile_id,
+                        project_id,
                         attempt,
                         error = %rollback_err,
                         "runtime rollback failed after ip-candidate batch apply failure"
                     );
-                    self.recover_runtime_desync_locked(profile_id, &existing)
+                    self.recover_runtime_desync_locked(project_id, &existing)
                         .await;
                 }
                 if retryable && attempt < max_attempts {
@@ -4791,26 +4791,26 @@ impl BrokerService {
             let now = now_epoch_sec();
             if let Err(err) = self
                 .store
-                .insert_sessions_with_touch(profile_id, &staged, now)
+                .insert_sessions_with_touch(project_id, &staged, now)
                 .await
             {
                 tracing::error!(
-                    profile_id,
+                    project_id,
                     attempt,
                     error = %err,
                     "persist ip-candidate batch failed after runtime apply"
                 );
                 if let Err(rollback_err) = self
-                    .rollback_runtime_sessions_locked(profile_id, &existing)
+                    .rollback_runtime_sessions_locked(project_id, &existing)
                     .await
                 {
                     tracing::error!(
-                        profile_id,
+                        project_id,
                         attempt,
                         error = %rollback_err,
                         "runtime rollback failed after ip-candidate batch insert failure"
                     );
-                    self.recover_runtime_desync_locked(profile_id, &existing)
+                    self.recover_runtime_desync_locked(project_id, &existing)
                         .await;
                 }
                 return Err(BrokerError::BatchOpenFailed);
@@ -4827,13 +4827,13 @@ impl BrokerService {
         Err(BrokerError::BatchOpenFailed)
     }
 
-    pub async fn suggested_port(&self, profile_id: &str) -> BrokerResult<SuggestedPortResponse> {
-        if !self.profile_exists(profile_id).await? {
-            return Err(BrokerError::ProfileNotFound);
+    pub async fn suggested_port(&self, project_id: &str) -> BrokerResult<SuggestedPortResponse> {
+        if !self.project_exists(project_id).await? {
+            return Err(BrokerError::ProjectNotFound);
         }
 
-        let _profile_guard = self.lock_profile(profile_id).await;
-        let existing = self.list_sessions_backfilled(profile_id).await?;
+        let _project_guard = self.lock_project(project_id).await;
+        let existing = self.list_sessions_backfilled(project_id).await?;
         let port = allocate_port(
             &existing,
             None,
@@ -4845,16 +4845,16 @@ impl BrokerService {
 
     pub async fn search_session_options(
         &self,
-        profile_id: &str,
+        project_id: &str,
         request: &SearchSessionOptionsRequest,
     ) -> BrokerResult<SearchSessionOptionsResponse> {
-        if !self.profile_exists(profile_id).await? {
-            return Err(BrokerError::ProfileNotFound);
+        if !self.project_exists(project_id).await? {
+            return Err(BrokerError::ProjectNotFound);
         }
 
         let ip_records = self
             .store
-            .list_ip_records(profile_id)
+            .list_ip_records(project_id)
             .await
             .map_err(BrokerError::from)?;
 
@@ -4864,15 +4864,15 @@ impl BrokerService {
 
     pub async fn search_session_node_options(
         &self,
-        profile_id: &str,
+        project_id: &str,
         session_id: &str,
         request: &SearchSessionNodeOptionsRequest,
     ) -> BrokerResult<SearchSessionNodeOptionsResponse> {
-        if !self.profile_exists(profile_id).await? {
-            return Err(BrokerError::ProfileNotFound);
+        if !self.project_exists(project_id).await? {
+            return Err(BrokerError::ProjectNotFound);
         }
 
-        let sessions = self.list_sessions_backfilled(profile_id).await?;
+        let sessions = self.list_sessions_backfilled(project_id).await?;
         if !sessions
             .iter()
             .any(|session| session.session_id == session_id)
@@ -4888,15 +4888,15 @@ impl BrokerService {
             .to_ascii_lowercase();
         let session_usage = self
             .store
-            .list_session_node_usages(profile_id, session_id)
+            .list_session_node_usages(project_id, session_id)
             .await
             .map_err(BrokerError::from)?
             .into_iter()
             .map(|record| (record.node_id, record.last_used_at))
             .collect::<HashMap<_, _>>();
-        let profile_usage = self
+        let project_usage = self
             .store
-            .list_profile_node_usages(profile_id)
+            .list_project_node_usages(project_id)
             .await
             .map_err(BrokerError::from)?
             .into_iter()
@@ -4941,7 +4941,7 @@ impl BrokerService {
             );
 
         let mut items = self
-            .compose_effective_proxy_inventory_records(profile_id)
+            .compose_effective_proxy_inventory_records(project_id)
             .await?
             .into_iter()
             .filter_map(|record| {
@@ -4983,7 +4983,7 @@ impl BrokerService {
                     median_latency_ms: primary_metadata.and_then(|item| item.median_latency_ms),
                     recent_probe_samples,
                     session_last_used_at: session_usage.get(&record.node_id).copied(),
-                    profile_last_used_at: profile_usage.get(&record.node_id).copied(),
+                    project_last_used_at: project_usage.get(&record.node_id).copied(),
                 };
                 matches_session_node_query(&item, &query).then_some(item)
             })
@@ -4998,11 +4998,11 @@ impl BrokerService {
 
     pub async fn search_session_ip_node_options(
         &self,
-        profile_id: &str,
+        project_id: &str,
         request: &SearchSessionIpNodeOptionsRequest,
     ) -> BrokerResult<SearchSessionIpNodeOptionsResponse> {
-        if !self.profile_exists(profile_id).await? {
-            return Err(BrokerError::ProfileNotFound);
+        if !self.project_exists(project_id).await? {
+            return Err(BrokerError::ProjectNotFound);
         }
 
         let query = request
@@ -5014,7 +5014,7 @@ impl BrokerService {
         let session_id = request.session_id.as_deref();
         let session_usage = if let Some(session_id) = session_id {
             self.store
-                .list_session_node_usages(profile_id, session_id)
+                .list_session_node_usages(project_id, session_id)
                 .await
                 .map_err(BrokerError::from)?
                 .into_iter()
@@ -5023,9 +5023,9 @@ impl BrokerService {
         } else {
             HashMap::new()
         };
-        let profile_usage = self
+        let project_usage = self
             .store
-            .list_profile_node_usages(profile_id)
+            .list_project_node_usages(project_id)
             .await
             .map_err(BrokerError::from)?
             .into_iter()
@@ -5033,7 +5033,7 @@ impl BrokerService {
             .collect::<HashMap<_, _>>();
         let ip_usage = self
             .store
-            .list_ip_records(profile_id)
+            .list_ip_records(project_id)
             .await
             .map_err(BrokerError::from)?
             .into_iter()
@@ -5051,7 +5051,7 @@ impl BrokerService {
 
         let mut items_by_group_ip = HashMap::<(String, String), SessionIpNodeOptionIpItem>::new();
         for record in self
-            .compose_effective_proxy_inventory_records(profile_id)
+            .compose_effective_proxy_inventory_records(project_id)
             .await?
         {
             let import_record = import_records.get(&record.import_id);
@@ -5083,7 +5083,7 @@ impl BrokerService {
                     recent_probe_samples: metadata
                         .map(|item| item.recent_probe_samples.clone())
                         .unwrap_or_default(),
-                    profile_last_used_at: profile_usage.get(&record.node_id).copied(),
+                    project_last_used_at: project_usage.get(&record.node_id).copied(),
                     session_last_used_at: session_usage.get(&record.node_id).copied(),
                 };
                 if !matches_session_ip_node_query(ip, &subscription_name, &node_item, &query) {
@@ -5193,19 +5193,19 @@ impl BrokerService {
 
     pub async fn update_session_node(
         &self,
-        profile_id: &str,
+        project_id: &str,
         session_id: &str,
         request: &UpdateSessionNodeRequest,
         request_display_host: Option<&str>,
     ) -> BrokerResult<OpenSessionResponse> {
-        if !self.profile_exists(profile_id).await? {
-            return Err(BrokerError::ProfileNotFound);
+        if !self.project_exists(project_id).await? {
+            return Err(BrokerError::ProjectNotFound);
         }
 
-        let _profile_guard = self.lock_profile(profile_id).await;
+        let _project_guard = self.lock_project(project_id).await;
         let _shared_runtime_guard = self.shared_runtime_lock.lock().await;
         let nodes = self
-            .compose_effective_proxy_inventory_records(profile_id)
+            .compose_effective_proxy_inventory_records(project_id)
             .await?;
         let metadata_by_pair = self.proxy_node_metadata_by_pair().await?;
         let requested_candidates =
@@ -5239,7 +5239,7 @@ impl BrokerService {
             (node, selected_ip, candidate_node_ids)
         };
 
-        let mut sessions = self.list_sessions_backfilled(profile_id).await?;
+        let mut sessions = self.list_sessions_backfilled(project_id).await?;
         let Some(session_index) = sessions
             .iter()
             .position(|session| session.session_id == session_id)
@@ -5258,7 +5258,7 @@ impl BrokerService {
         {
             updated.candidate_node_ids = candidate_node_ids;
             self.store
-                .insert_sessions_with_touch(profile_id, std::slice::from_ref(&updated), touch_time)
+                .insert_sessions_with_touch(project_id, std::slice::from_ref(&updated), touch_time)
                 .await
                 .map_err(BrokerError::from)?;
             return Ok(self.build_open_session_response(updated, request_display_host));
@@ -5271,27 +5271,27 @@ impl BrokerService {
         sessions[session_index] = updated.clone();
 
         if let Err(err) = self
-            .apply_sessions_config_locked(profile_id, &sessions)
+            .apply_sessions_config_locked(project_id, &sessions)
             .await
         {
             tracing::warn!(
-                profile_id,
+                project_id,
                 session_id,
                 node_id = %updated.node_id,
                 error = %err,
                 "session node switch apply config failed"
             );
             if let Err(rollback_err) = self
-                .rollback_runtime_sessions_locked(profile_id, &previous_sessions)
+                .rollback_runtime_sessions_locked(project_id, &previous_sessions)
                 .await
             {
                 tracing::error!(
-                    profile_id,
+                    project_id,
                     session_id,
                     error = %rollback_err,
                     "runtime rollback failed after session node switch apply failure"
                 );
-                self.recover_runtime_desync_locked(profile_id, &previous_sessions)
+                self.recover_runtime_desync_locked(project_id, &previous_sessions)
                     .await;
             }
             return Err(err);
@@ -5299,27 +5299,27 @@ impl BrokerService {
 
         if let Err(err) = self
             .store
-            .insert_sessions_with_touch(profile_id, std::slice::from_ref(&updated), touch_time)
+            .insert_sessions_with_touch(project_id, std::slice::from_ref(&updated), touch_time)
             .await
         {
             tracing::error!(
-                profile_id,
+                project_id,
                 session_id,
                 node_id = %updated.node_id,
                 error = %err,
                 "persist session node switch failed after runtime apply"
             );
             if let Err(rollback_err) = self
-                .rollback_runtime_sessions_locked(profile_id, &previous_sessions)
+                .rollback_runtime_sessions_locked(project_id, &previous_sessions)
                 .await
             {
                 tracing::error!(
-                    profile_id,
+                    project_id,
                     session_id,
                     error = %rollback_err,
                     "runtime rollback failed after session node switch persist failure"
                 );
-                self.recover_runtime_desync_locked(profile_id, &previous_sessions)
+                self.recover_runtime_desync_locked(project_id, &previous_sessions)
                     .await;
             }
             return Err(BrokerError::from(err));
@@ -5328,42 +5328,42 @@ impl BrokerService {
         Ok(self.build_open_session_response(updated, request_display_host))
     }
 
-    pub async fn list_profiles(&self) -> BrokerResult<ListProfilesResponse> {
-        let profiles = self
+    pub async fn list_projects(&self) -> BrokerResult<ListProjectsResponse> {
+        let projects = self
             .store
-            .list_profiles()
+            .list_projects()
             .await
             .map_err(BrokerError::from)?;
-        Ok(ListProfilesResponse { profiles })
+        Ok(ListProjectsResponse { projects })
     }
 
-    pub async fn create_profile(&self, profile_id: &str) -> BrokerResult<CreateProfileResponse> {
-        let normalized = profile_id.trim();
+    pub async fn create_project(&self, project_id: &str) -> BrokerResult<CreateProjectResponse> {
+        let normalized = project_id.trim();
         if normalized.is_empty() {
             return Err(BrokerError::InvalidRequest(
-                "profile_id must not be empty".to_string(),
+                "project_id must not be empty".to_string(),
             ));
         }
 
-        let _profile_guard = self.lock_profile(normalized).await;
+        let _project_guard = self.lock_project(normalized).await;
         let exists = self
             .store
-            .list_profiles()
+            .list_projects()
             .await
             .map_err(BrokerError::from)?
             .into_iter()
             .any(|item| item == normalized);
         if exists {
-            return Err(BrokerError::ProfileExists);
+            return Err(BrokerError::ProjectExists);
         }
 
         self.store
-            .create_profile(normalized, now_epoch_sec())
+            .create_project(normalized, now_epoch_sec())
             .await
             .map_err(BrokerError::from)?;
 
-        Ok(CreateProfileResponse {
-            profile_id: normalized.to_string(),
+        Ok(CreateProjectResponse {
+            project_id: normalized.to_string(),
         })
     }
 
@@ -5383,7 +5383,7 @@ impl BrokerService {
         &self,
         request: &LoadSubscriptionRequest,
     ) -> BrokerResult<LoadSubscriptionResponse> {
-        let _global_guard = self.lock_profile("__global_proxy_scope__").await;
+        let _global_guard = self.lock_project("__global_proxy_scope__").await;
         let imported = match (&request.source, request.content.as_deref()) {
             (Some(source), None) => {
                 self.import_inventory_scope_from_source(
@@ -5412,24 +5412,24 @@ impl BrokerService {
                 ));
             }
         };
-        let (profiles, settings) = self.list_profile_ids_with_settings().await?;
-        let affected_profiles = profiles
+        let (projects, settings) = self.list_project_ids_with_settings().await?;
+        let affected_projects = projects
             .into_iter()
-            .filter(|profile_id| {
+            .filter(|project_id| {
                 settings
-                    .get(profile_id.as_str())
+                    .get(project_id.as_str())
                     .map(|item| item.use_global_proxies)
                     .unwrap_or(true)
             })
             .collect::<HashSet<_>>();
-        self.rebuild_profiles(&affected_profiles).await?;
+        self.rebuild_projects(&affected_projects).await?;
         Ok(imported.response)
     }
 
     pub async fn list_proxy_imports(
         &self,
         scope: Option<&str>,
-        profile_id: Option<&str>,
+        project_id: Option<&str>,
     ) -> BrokerResult<ListProxyImportResponse> {
         let mut items = self
             .store
@@ -5439,24 +5439,24 @@ impl BrokerService {
         match scope.unwrap_or("all") {
             "all" => {}
             "global" => items.retain(|item| matches!(&item.allocation_scope, ProxyScope::Global)),
-            "profile" => {
-                let profile_id = profile_id.ok_or_else(|| {
+            "project" => {
+                let project_id = project_id.ok_or_else(|| {
                     BrokerError::InvalidRequest(
-                        "profile_id is required when scope=profile".to_string(),
+                        "project_id is required when scope=project".to_string(),
                     )
                 })?;
                 items.retain(|item| {
                     matches!(
                         &item.allocation_scope,
-                        ProxyScope::Profile {
-                            profile_id: allocated_profile_id,
-                        } if allocated_profile_id == profile_id
+                        ProxyScope::Project {
+                            project_id: allocated_project_id,
+                        } if allocated_project_id == project_id
                     )
                 });
             }
             _ => {
                 return Err(BrokerError::InvalidRequest(
-                    "scope must be one of all|global|profile".to_string(),
+                    "scope must be one of all|global|project".to_string(),
                 ));
             }
         }
@@ -5478,7 +5478,7 @@ impl BrokerService {
     pub async fn list_proxy_inventory(
         &self,
         scope: Option<&str>,
-        profile_id: Option<&str>,
+        project_id: Option<&str>,
     ) -> BrokerResult<ListProxyInventoryResponse> {
         let scope = scope.unwrap_or("all");
         let mut items = self
@@ -5489,44 +5489,44 @@ impl BrokerService {
         match scope {
             "all" => {}
             "global" => items.retain(|item| matches!(&item.allocation_scope, ProxyScope::Global)),
-            "profile" => {
-                let profile_id = profile_id.ok_or_else(|| {
+            "project" => {
+                let project_id = project_id.ok_or_else(|| {
                     BrokerError::InvalidRequest(
-                        "profile_id is required when scope=profile".to_string(),
+                        "project_id is required when scope=project".to_string(),
                     )
                 })?;
                 items.retain(|item| {
                     matches!(
                         &item.allocation_scope,
-                        ProxyScope::Profile {
-                            profile_id: allocated_profile_id,
-                        } if allocated_profile_id == profile_id
+                        ProxyScope::Project {
+                            project_id: allocated_project_id,
+                        } if allocated_project_id == project_id
                     )
                 });
             }
             _ => {
                 return Err(BrokerError::InvalidRequest(
-                    "scope must be one of all|global|profile".to_string(),
+                    "scope must be one of all|global|project".to_string(),
                 ));
             }
         }
-        let listing_profile_id = if scope == "profile" {
-            profile_id.unwrap_or(GLOBAL_RUNTIME_PROFILE_ID)
+        let listing_project_id = if scope == "project" {
+            project_id.unwrap_or(GLOBAL_RUNTIME_PROJECT_ID)
         } else {
-            GLOBAL_RUNTIME_PROFILE_ID
+            GLOBAL_RUNTIME_PROJECT_ID
         };
         items = self.filter_malformed_inventory_records(
-            listing_profile_id,
+            listing_project_id,
             items,
             "malformed proxy inventory node skipped from inventory listing",
         );
 
-        let (profiles, settings) = self.list_profile_ids_with_settings().await?;
+        let (projects, settings) = self.list_project_ids_with_settings().await?;
         let items = items
             .into_iter()
             .map(|item| {
-                let effective_profile_ids =
-                    self.effective_profile_ids_for_record(&item, &profiles, &settings);
+                let effective_project_ids =
+                    self.effective_project_ids_for_record(&item, &projects, &settings);
                 ProxyInventoryItem {
                     import_id: item.import_id,
                     node_id: item.node_id,
@@ -5536,7 +5536,7 @@ impl BrokerService {
                     resolved_ips: item.resolved_ips,
                     source_scope: item.source_scope,
                     allocation_scope: item.allocation_scope,
-                    effective_profile_ids,
+                    effective_project_ids,
                 }
             })
             .collect::<Vec<_>>();
@@ -5555,10 +5555,10 @@ impl BrokerService {
         node_id: &str,
         allocation_scope: &ProxyScope,
     ) -> BrokerResult<ProxyInventoryItem> {
-        if let ProxyScope::Profile { profile_id } = allocation_scope
-            && !self.profile_exists(profile_id).await?
+        if let ProxyScope::Project { project_id } = allocation_scope
+            && !self.project_exists(project_id).await?
         {
-            return Err(BrokerError::ProfileNotFound);
+            return Err(BrokerError::ProjectNotFound);
         }
 
         let before = self
@@ -5585,10 +5585,10 @@ impl BrokerService {
         import_id: &str,
         allocation_scope: &ProxyScope,
     ) -> BrokerResult<ProxyImportItem> {
-        if let ProxyScope::Profile { profile_id } = allocation_scope
-            && !self.profile_exists(profile_id).await?
+        if let ProxyScope::Project { project_id } = allocation_scope
+            && !self.project_exists(project_id).await?
         {
-            return Err(BrokerError::ProfileNotFound);
+            return Err(BrokerError::ProjectNotFound);
         }
 
         let before = self
@@ -5597,19 +5597,19 @@ impl BrokerService {
             .await
             .map_err(BrokerError::from)?
             .ok_or(BrokerError::ProxyInventoryNodeNotFound)?;
-        let (profiles, settings) = self.list_profile_ids_with_settings().await?;
+        let (projects, settings) = self.list_project_ids_with_settings().await?;
         let before_effective = match &before.allocation_scope {
-            ProxyScope::Global => profiles
+            ProxyScope::Global => projects
                 .iter()
-                .filter(|profile_id| {
+                .filter(|project_id| {
                     settings
-                        .get(profile_id.as_str())
+                        .get(project_id.as_str())
                         .map(|item| item.use_global_proxies)
                         .unwrap_or(true)
                 })
                 .cloned()
                 .collect::<Vec<_>>(),
-            ProxyScope::Profile { profile_id } => vec![profile_id.clone()],
+            ProxyScope::Project { project_id } => vec![project_id.clone()],
         };
         let updated = self
             .store
@@ -5618,23 +5618,23 @@ impl BrokerService {
             .map_err(BrokerError::from)?
             .ok_or(BrokerError::ProxyInventoryNodeNotFound)?;
         let after_effective = match &updated.allocation_scope {
-            ProxyScope::Global => profiles
+            ProxyScope::Global => projects
                 .iter()
-                .filter(|profile_id| {
+                .filter(|project_id| {
                     settings
-                        .get(profile_id.as_str())
+                        .get(project_id.as_str())
                         .map(|item| item.use_global_proxies)
                         .unwrap_or(true)
                 })
                 .cloned()
                 .collect::<Vec<_>>(),
-            ProxyScope::Profile { profile_id } => vec![profile_id.clone()],
+            ProxyScope::Project { project_id } => vec![project_id.clone()],
         };
-        let affected_profiles = before_effective
+        let affected_projects = before_effective
             .into_iter()
             .chain(after_effective)
             .collect::<HashSet<_>>();
-        self.rebuild_profiles(&affected_profiles).await?;
+        self.rebuild_projects(&affected_projects).await?;
         self.proxy_import_item_from_record(updated).await
     }
 
@@ -5663,51 +5663,51 @@ impl BrokerService {
             .await
             .map_err(BrokerError::from)?
             .ok_or(BrokerError::ProxyInventoryNodeNotFound)?;
-        let (profiles, settings) = self.list_profile_ids_with_settings().await?;
-        let affected_profiles = match &before.allocation_scope {
-            ProxyScope::Global => profiles
+        let (projects, settings) = self.list_project_ids_with_settings().await?;
+        let affected_projects = match &before.allocation_scope {
+            ProxyScope::Global => projects
                 .into_iter()
-                .filter(|profile_id| {
+                .filter(|project_id| {
                     settings
-                        .get(profile_id.as_str())
+                        .get(project_id.as_str())
                         .map(|item| item.use_global_proxies)
                         .unwrap_or(true)
                 })
                 .collect::<HashSet<_>>(),
-            ProxyScope::Profile { profile_id } => std::iter::once(profile_id.clone()).collect(),
+            ProxyScope::Project { project_id } => std::iter::once(project_id.clone()).collect(),
         };
-        self.rebuild_profiles(&affected_profiles).await?;
+        self.rebuild_projects(&affected_projects).await?;
         Ok(())
     }
 
-    pub async fn get_profile_proxy_settings(
+    pub async fn get_project_proxy_settings(
         &self,
-        profile_id: &str,
-    ) -> BrokerResult<ProfileProxySettings> {
-        if !self.profile_exists(profile_id).await? {
-            return Err(BrokerError::ProfileNotFound);
+        project_id: &str,
+    ) -> BrokerResult<ProjectProxySettings> {
+        if !self.project_exists(project_id).await? {
+            return Err(BrokerError::ProjectNotFound);
         }
-        self.get_profile_proxy_settings_effective(profile_id).await
+        self.get_project_proxy_settings_effective(project_id).await
     }
 
-    pub async fn update_profile_proxy_settings(
+    pub async fn update_project_proxy_settings(
         &self,
-        profile_id: &str,
+        project_id: &str,
         use_global_proxies: bool,
-    ) -> BrokerResult<ProfileProxySettings> {
-        if !self.profile_exists(profile_id).await? {
-            return Err(BrokerError::ProfileNotFound);
+    ) -> BrokerResult<ProjectProxySettings> {
+        if !self.project_exists(project_id).await? {
+            return Err(BrokerError::ProjectNotFound);
         }
-        let _profile_guard = self.lock_profile(profile_id).await;
-        let settings = ProfileProxySettings {
-            profile_id: profile_id.to_string(),
+        let _project_guard = self.lock_project(project_id).await;
+        let settings = ProjectProxySettings {
+            project_id: project_id.to_string(),
             use_global_proxies,
         };
         self.store
-            .upsert_profile_proxy_settings(&settings)
+            .upsert_project_proxy_settings(&settings)
             .await
             .map_err(BrokerError::from)?;
-        self.rebuild_effective_profile_locked(profile_id).await?;
+        self.rebuild_effective_project_locked(project_id).await?;
         Ok(settings)
     }
 
@@ -5817,8 +5817,8 @@ impl BrokerService {
             ));
         }
 
-        let profile_scope = self.normalize_api_key_scope(&request.profile_scope).await?;
-        let issued = issue_api_key(name, created_by_subject, profile_scope);
+        let project_scope = self.normalize_api_key_scope(&request.project_scope).await?;
+        let issued = issue_api_key(name, created_by_subject, project_scope);
         self.store
             .insert_api_key(&issued.record)
             .await
@@ -5865,27 +5865,27 @@ impl BrokerService {
         Ok(Principal::api_key(
             api_key.key_id,
             api_key.created_by_subject,
-            api_key.profile_scope,
+            api_key.project_scope,
         ))
     }
 
     pub async fn list_sessions(
         &self,
-        profile_id: &str,
+        project_id: &str,
         request_display_host: Option<&str>,
     ) -> BrokerResult<ListSessionsResponse> {
-        let sessions = self.list_sessions_backfilled(profile_id).await?;
+        let sessions = self.list_sessions_backfilled(project_id).await?;
         let sessions = self
-            .build_session_list_items(profile_id, sessions, request_display_host)
+            .build_session_list_items(project_id, sessions, request_display_host)
             .await?;
         Ok(ListSessionsResponse { sessions })
     }
 
-    pub async fn close_session(&self, profile_id: &str, session_id: &str) -> BrokerResult<()> {
-        let _profile_guard = self.lock_profile(profile_id).await;
+    pub async fn close_session(&self, project_id: &str, session_id: &str) -> BrokerResult<()> {
+        let _project_guard = self.lock_project(project_id).await;
         let _shared_runtime_guard = self.shared_runtime_lock.lock().await;
 
-        let mut sessions = self.list_sessions_backfilled(profile_id).await?;
+        let mut sessions = self.list_sessions_backfilled(project_id).await?;
         let previous_sessions = sessions.clone();
 
         let old_len = sessions.len();
@@ -5896,34 +5896,34 @@ impl BrokerService {
 
         if sessions.is_empty() {
             self.store
-                .delete_session(profile_id, session_id)
+                .delete_session(project_id, session_id)
                 .await
                 .map_err(BrokerError::from)?;
             self.cleanup_shared_runtime_if_idle_locked().await;
             return Ok(());
         }
 
-        self.apply_sessions_config_locked(profile_id, &sessions)
+        self.apply_sessions_config_locked(project_id, &sessions)
             .await?;
 
-        if let Err(err) = self.store.delete_session(profile_id, session_id).await {
+        if let Err(err) = self.store.delete_session(project_id, session_id).await {
             tracing::error!(
-                profile_id,
+                project_id,
                 session_id,
                 error = %err,
                 "persist close-session failed, rolling back runtime"
             );
             if let Err(rollback_err) = self
-                .rollback_runtime_sessions_locked(profile_id, &previous_sessions)
+                .rollback_runtime_sessions_locked(project_id, &previous_sessions)
                 .await
             {
                 tracing::error!(
-                    profile_id,
+                    project_id,
                     session_id,
                     error = %rollback_err,
                     "runtime rollback failed after close-session persistence error"
                 );
-                self.recover_runtime_desync_locked(profile_id, &previous_sessions)
+                self.recover_runtime_desync_locked(project_id, &previous_sessions)
                     .await;
             }
             return Err(BrokerError::from(err));
@@ -6510,8 +6510,8 @@ fn compare_session_node_options(
         SessionNodeSortMode::SessionRecent => {
             compare_usage_desc(left.session_last_used_at, right.session_last_used_at)
         }
-        SessionNodeSortMode::ProfileRecent => {
-            compare_usage_desc(left.profile_last_used_at, right.profile_last_used_at)
+        SessionNodeSortMode::ProjectRecent => {
+            compare_usage_desc(left.project_last_used_at, right.project_last_used_at)
         }
     };
     ordering
@@ -6587,7 +6587,7 @@ fn choose_best_inventory_node_for_ip(
         });
         if !valid {
             return Err(BrokerError::InvalidRequest(
-                "candidate_node_ids must belong to selected_ip and current profile".to_string(),
+                "candidate_node_ids must belong to selected_ip and current project".to_string(),
             ));
         }
     }
@@ -6684,28 +6684,28 @@ fn reselect_session_from_inventory(
     Some(updated)
 }
 
-fn inventory_scope_matches_profile(scope: &ProxyScope, profile_id: &str) -> bool {
+fn inventory_scope_matches_project(scope: &ProxyScope, project_id: &str) -> bool {
     matches!(
         scope,
-        ProxyScope::Profile {
-            profile_id: scope_profile_id,
-        } if scope_profile_id == profile_id
+        ProxyScope::Project {
+            project_id: scope_project_id,
+        } if scope_project_id == project_id
     )
 }
 
 fn compare_inventory_preference(
-    profile_id: &str,
+    project_id: &str,
     left: &ProxyInventoryRecord,
     right: &ProxyInventoryRecord,
 ) -> CmpOrdering {
-    let left_direct = inventory_scope_matches_profile(&left.allocation_scope, profile_id);
-    let right_direct = inventory_scope_matches_profile(&right.allocation_scope, profile_id);
+    let left_direct = inventory_scope_matches_project(&left.allocation_scope, project_id);
+    let right_direct = inventory_scope_matches_project(&right.allocation_scope, project_id);
     right_direct
         .cmp(&left_direct)
         .then_with(|| {
-            let left_local_source = inventory_scope_matches_profile(&left.source_scope, profile_id);
+            let left_local_source = inventory_scope_matches_project(&left.source_scope, project_id);
             let right_local_source =
-                inventory_scope_matches_profile(&right.source_scope, profile_id);
+                inventory_scope_matches_project(&right.source_scope, project_id);
             right_local_source.cmp(&left_local_source)
         })
         .then_with(|| right.updated_at.cmp(&left.updated_at))
@@ -7299,7 +7299,7 @@ fn normalized_candidate_node_ids(node_id: &str, candidate_node_ids: &[String]) -
 }
 
 fn log_unrestored_sessions(
-    profile_id: &str,
+    project_id: &str,
     existing_sessions: &[SessionRecord],
     restorable_sessions: &[SessionRecord],
     message: &'static str,
@@ -7317,7 +7317,7 @@ fn log_unrestored_sessions(
         .filter(|session| !restorable_ids.contains(session.session_id.as_str()))
     {
         tracing::warn!(
-            profile_id,
+            project_id,
             session_id = %session.session_id,
             node_id = %session.node_id,
             proxy_name = %session.proxy_name,
@@ -7333,16 +7333,16 @@ fn sort_queued_runs_for_dispatch(runs: &mut [TaskRunRecord]) {
     runs.sort_by(|left, right| {
         left.created_at
             .cmp(&right.created_at)
-            .then_with(|| same_profile_schedule_dispatch_order(left, right))
+            .then_with(|| same_project_schedule_dispatch_order(left, right))
             .then_with(|| left.run_id.cmp(&right.run_id))
     });
 }
 
-fn same_profile_schedule_dispatch_order(
+fn same_project_schedule_dispatch_order(
     left: &TaskRunRecord,
     right: &TaskRunRecord,
 ) -> CmpOrdering {
-    if left.profile_id != right.profile_id
+    if left.project_id != right.project_id
         || left.created_at != right.created_at
         || left.trigger != TaskRunTrigger::Schedule
         || right.trigger != TaskRunTrigger::Schedule
@@ -7369,7 +7369,7 @@ mod tests {
     use crate::{
         models::{
             ApiKeyRecord, IpRecord, LoadSubscriptionRequest, NodeUsageRecord, ProbeRecord,
-            ProfileProxySettings, ProfileSyncConfig, ProxyCatalogQuery, ProxyImportKind,
+            ProjectProxySettings, ProjectSyncConfig, ProxyCatalogQuery, ProxyImportKind,
             ProxyImportRecord, ProxyImportSourceIdentity, ProxyImportSyncConfig,
             ProxyInventoryRecord, ProxyNodeMetadataRecord, ProxyScope, ResolvedImportNameSource,
             SessionRecord, SortMode, SubscriptionSource, TaskListQuery, TaskRunEventRecord,
@@ -7448,42 +7448,42 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct FailProfileSyncConfigStore {
+    struct FailProjectSyncConfigStore {
         inner: MemoryStore,
     }
 
     #[async_trait]
-    impl BrokerStore for FailProfileSyncConfigStore {
-        async fn list_profiles(&self) -> anyhow::Result<Vec<String>> {
-            self.inner.list_profiles().await
+    impl BrokerStore for FailProjectSyncConfigStore {
+        async fn list_projects(&self) -> anyhow::Result<Vec<String>> {
+            self.inner.list_projects().await
         }
 
-        async fn create_profile(&self, profile_id: &str, created_at: i64) -> anyhow::Result<()> {
-            self.inner.create_profile(profile_id, created_at).await
+        async fn create_project(&self, project_id: &str, created_at: i64) -> anyhow::Result<()> {
+            self.inner.create_project(project_id, created_at).await
         }
 
         async fn replace_subscription(
             &self,
-            profile_id: &str,
+            project_id: &str,
             nodes: &[ProxyNode],
         ) -> anyhow::Result<()> {
-            self.inner.replace_subscription(profile_id, nodes).await
+            self.inner.replace_subscription(project_id, nodes).await
         }
 
         async fn apply_subscription_snapshot(
             &self,
-            profile_id: &str,
+            project_id: &str,
             nodes: &[ProxyNode],
             ip_records: &[IpRecord],
             probe_records: &[ProbeRecord],
         ) -> anyhow::Result<()> {
             self.inner
-                .apply_subscription_snapshot(profile_id, nodes, ip_records, probe_records)
+                .apply_subscription_snapshot(project_id, nodes, ip_records, probe_records)
                 .await
         }
 
-        async fn list_subscription(&self, profile_id: &str) -> anyhow::Result<Vec<ProxyNode>> {
-            self.inner.list_subscription(profile_id).await
+        async fn list_subscription(&self, project_id: &str) -> anyhow::Result<Vec<ProxyNode>> {
+            self.inner.list_subscription(project_id).await
         }
 
         async fn list_proxy_inventory(&self) -> anyhow::Result<Vec<ProxyInventoryRecord>> {
@@ -7573,42 +7573,42 @@ mod tests {
 
         async fn replace_ip_records(
             &self,
-            profile_id: &str,
+            project_id: &str,
             records: &[IpRecord],
         ) -> anyhow::Result<()> {
-            self.inner.replace_ip_records(profile_id, records).await
+            self.inner.replace_ip_records(project_id, records).await
         }
 
         async fn upsert_ip_records(
             &self,
-            profile_id: &str,
+            project_id: &str,
             records: &[IpRecord],
         ) -> anyhow::Result<()> {
-            self.inner.upsert_ip_records(profile_id, records).await
+            self.inner.upsert_ip_records(project_id, records).await
         }
 
-        async fn list_ip_records(&self, profile_id: &str) -> anyhow::Result<Vec<IpRecord>> {
-            self.inner.list_ip_records(profile_id).await
+        async fn list_ip_records(&self, project_id: &str) -> anyhow::Result<Vec<IpRecord>> {
+            self.inner.list_ip_records(project_id).await
         }
 
         async fn replace_probe_records(
             &self,
-            profile_id: &str,
+            project_id: &str,
             records: &[ProbeRecord],
         ) -> anyhow::Result<()> {
-            self.inner.replace_probe_records(profile_id, records).await
+            self.inner.replace_probe_records(project_id, records).await
         }
 
         async fn upsert_probe_records(
             &self,
-            profile_id: &str,
+            project_id: &str,
             records: &[ProbeRecord],
         ) -> anyhow::Result<()> {
-            self.inner.upsert_probe_records(profile_id, records).await
+            self.inner.upsert_probe_records(project_id, records).await
         }
 
-        async fn list_probe_records(&self, profile_id: &str) -> anyhow::Result<Vec<ProbeRecord>> {
-            self.inner.list_probe_records(profile_id).await
+        async fn list_probe_records(&self, project_id: &str) -> anyhow::Result<Vec<ProbeRecord>> {
+            self.inner.list_probe_records(project_id).await
         }
 
         async fn upsert_proxy_node_metadata(
@@ -7648,53 +7648,53 @@ mod tests {
 
         async fn insert_session(
             &self,
-            profile_id: &str,
+            project_id: &str,
             session: &SessionRecord,
         ) -> anyhow::Result<()> {
-            self.inner.insert_session(profile_id, session).await
+            self.inner.insert_session(project_id, session).await
         }
 
         async fn insert_sessions(
             &self,
-            profile_id: &str,
+            project_id: &str,
             sessions: &[SessionRecord],
         ) -> anyhow::Result<()> {
-            self.inner.insert_sessions(profile_id, sessions).await
+            self.inner.insert_sessions(project_id, sessions).await
         }
 
         async fn insert_sessions_with_touch(
             &self,
-            profile_id: &str,
+            project_id: &str,
             sessions: &[SessionRecord],
             last_used_at: i64,
         ) -> anyhow::Result<()> {
             self.inner
-                .insert_sessions_with_touch(profile_id, sessions, last_used_at)
+                .insert_sessions_with_touch(project_id, sessions, last_used_at)
                 .await
         }
 
-        async fn delete_session(&self, profile_id: &str, session_id: &str) -> anyhow::Result<()> {
-            self.inner.delete_session(profile_id, session_id).await
+        async fn delete_session(&self, project_id: &str, session_id: &str) -> anyhow::Result<()> {
+            self.inner.delete_session(project_id, session_id).await
         }
 
-        async fn list_sessions(&self, profile_id: &str) -> anyhow::Result<Vec<SessionRecord>> {
-            self.inner.list_sessions(profile_id).await
+        async fn list_sessions(&self, project_id: &str) -> anyhow::Result<Vec<SessionRecord>> {
+            self.inner.list_sessions(project_id).await
         }
 
-        async fn list_profile_node_usages(
+        async fn list_project_node_usages(
             &self,
-            profile_id: &str,
+            project_id: &str,
         ) -> anyhow::Result<Vec<NodeUsageRecord>> {
-            self.inner.list_profile_node_usages(profile_id).await
+            self.inner.list_project_node_usages(project_id).await
         }
 
         async fn list_session_node_usages(
             &self,
-            profile_id: &str,
+            project_id: &str,
             session_id: &str,
         ) -> anyhow::Result<Vec<NodeUsageRecord>> {
             self.inner
-                .list_session_node_usages(profile_id, session_id)
+                .list_session_node_usages(project_id, session_id)
                 .await
         }
 
@@ -7733,29 +7733,29 @@ mod tests {
 
         async fn touch_ip_usage(
             &self,
-            profile_id: &str,
+            project_id: &str,
             ip: &str,
             last_used_at: i64,
         ) -> anyhow::Result<()> {
             self.inner
-                .touch_ip_usage(profile_id, ip, last_used_at)
+                .touch_ip_usage(project_id, ip, last_used_at)
                 .await
         }
 
         async fn touch_ip_usages(
             &self,
-            profile_id: &str,
+            project_id: &str,
             ips: &[String],
             last_used_at: i64,
         ) -> anyhow::Result<()> {
             self.inner
-                .touch_ip_usages(profile_id, ips, last_used_at)
+                .touch_ip_usages(project_id, ips, last_used_at)
                 .await
         }
 
-        async fn upsert_profile_sync_config(
+        async fn upsert_project_sync_config(
             &self,
-            _config: &ProfileSyncConfig,
+            _config: &ProjectSyncConfig,
         ) -> anyhow::Result<()> {
             Err(anyhow!("sync config unavailable"))
         }
@@ -7767,11 +7767,11 @@ mod tests {
             Err(anyhow!("sync config unavailable"))
         }
 
-        async fn get_profile_sync_config(
+        async fn get_project_sync_config(
             &self,
-            profile_id: &str,
-        ) -> anyhow::Result<Option<ProfileSyncConfig>> {
-            self.inner.get_profile_sync_config(profile_id).await
+            project_id: &str,
+        ) -> anyhow::Result<Option<ProjectSyncConfig>> {
+            self.inner.get_project_sync_config(project_id).await
         }
 
         async fn get_proxy_import_sync_config(
@@ -7781,8 +7781,8 @@ mod tests {
             self.inner.get_proxy_import_sync_config(import_id).await
         }
 
-        async fn list_profile_sync_configs(&self) -> anyhow::Result<Vec<ProfileSyncConfig>> {
-            self.inner.list_profile_sync_configs().await
+        async fn list_project_sync_configs(&self) -> anyhow::Result<Vec<ProjectSyncConfig>> {
+            self.inner.list_project_sync_configs().await
         }
 
         async fn list_proxy_import_sync_configs(
@@ -7791,12 +7791,12 @@ mod tests {
             self.inner.list_proxy_import_sync_configs().await
         }
 
-        async fn list_proxy_import_sync_configs_for_profile(
+        async fn list_proxy_import_sync_configs_for_project(
             &self,
-            profile_id: &str,
+            project_id: &str,
         ) -> anyhow::Result<Vec<ProxyImportSyncConfig>> {
             self.inner
-                .list_proxy_import_sync_configs_for_profile(profile_id)
+                .list_proxy_import_sync_configs_for_project(project_id)
                 .await
         }
 
@@ -7804,18 +7804,18 @@ mod tests {
             self.inner.delete_proxy_import_sync_config(import_id).await
         }
 
-        async fn get_profile_proxy_settings(
+        async fn get_project_proxy_settings(
             &self,
-            profile_id: &str,
-        ) -> anyhow::Result<Option<ProfileProxySettings>> {
-            self.inner.get_profile_proxy_settings(profile_id).await
+            project_id: &str,
+        ) -> anyhow::Result<Option<ProjectProxySettings>> {
+            self.inner.get_project_proxy_settings(project_id).await
         }
 
-        async fn upsert_profile_proxy_settings(
+        async fn upsert_project_proxy_settings(
             &self,
-            settings: &ProfileProxySettings,
+            settings: &ProjectProxySettings,
         ) -> anyhow::Result<()> {
-            self.inner.upsert_profile_proxy_settings(settings).await
+            self.inner.upsert_project_proxy_settings(settings).await
         }
 
         async fn insert_task_run(&self, run: &TaskRunRecord) -> anyhow::Result<()> {
@@ -7851,11 +7851,11 @@ mod tests {
 
     #[async_trait]
     impl MihomoRuntime for TestRuntime {
-        async fn ensure_started(&self, _profile_id: &str) -> anyhow::Result<()> {
+        async fn ensure_started(&self, _project_id: &str) -> anyhow::Result<()> {
             Ok(())
         }
 
-        async fn shutdown_profile(&self, _profile_id: &str) -> anyhow::Result<()> {
+        async fn shutdown_project(&self, _project_id: &str) -> anyhow::Result<()> {
             self.shutdown_calls.fetch_add(1, Ordering::SeqCst);
             if self.fail_shutdown {
                 return Err(anyhow!("shutdown unavailable"));
@@ -7865,7 +7865,7 @@ mod tests {
 
         async fn controller_meta(
             &self,
-            _profile_id: &str,
+            _project_id: &str,
         ) -> anyhow::Result<(String, Option<String>)> {
             if self.fail_controller_meta {
                 return Err(anyhow!("controller unavailable"));
@@ -7873,12 +7873,12 @@ mod tests {
             Ok(("127.0.0.1:9090".to_string(), None))
         }
 
-        async fn controller_addr(&self, profile_id: &str) -> anyhow::Result<String> {
-            let (addr, _) = self.controller_meta(profile_id).await?;
+        async fn controller_addr(&self, project_id: &str) -> anyhow::Result<String> {
+            let (addr, _) = self.controller_meta(project_id).await?;
             Ok(addr)
         }
 
-        async fn apply_config(&self, _profile_id: &str, _payload: &str) -> anyhow::Result<()> {
+        async fn apply_config(&self, _project_id: &str, _payload: &str) -> anyhow::Result<()> {
             self.apply_calls.fetch_add(1, Ordering::SeqCst);
             self.payloads.lock().await.push(_payload.to_string());
             if self.fail_controller_meta {
@@ -7889,7 +7889,7 @@ mod tests {
 
         async fn measure_proxy_delay(
             &self,
-            _profile_id: &str,
+            _project_id: &str,
             _proxy_name: &str,
             _url: &str,
             _timeout_ms: u64,
@@ -7900,27 +7900,27 @@ mod tests {
 
     #[async_trait]
     impl MihomoRuntime for ApplyFailOnCallRuntime {
-        async fn ensure_started(&self, _profile_id: &str) -> anyhow::Result<()> {
+        async fn ensure_started(&self, _project_id: &str) -> anyhow::Result<()> {
             Ok(())
         }
 
-        async fn shutdown_profile(&self, _profile_id: &str) -> anyhow::Result<()> {
+        async fn shutdown_project(&self, _project_id: &str) -> anyhow::Result<()> {
             Ok(())
         }
 
         async fn controller_meta(
             &self,
-            _profile_id: &str,
+            _project_id: &str,
         ) -> anyhow::Result<(String, Option<String>)> {
             Ok(("127.0.0.1:9090".to_string(), None))
         }
 
-        async fn controller_addr(&self, profile_id: &str) -> anyhow::Result<String> {
-            let (addr, _) = self.controller_meta(profile_id).await?;
+        async fn controller_addr(&self, project_id: &str) -> anyhow::Result<String> {
+            let (addr, _) = self.controller_meta(project_id).await?;
             Ok(addr)
         }
 
-        async fn apply_config(&self, _profile_id: &str, payload: &str) -> anyhow::Result<()> {
+        async fn apply_config(&self, _project_id: &str, payload: &str) -> anyhow::Result<()> {
             let call = self.apply_calls.fetch_add(1, Ordering::SeqCst) + 1;
             self.payloads.lock().await.push(payload.to_string());
             if call == self.fail_on_call {
@@ -7931,7 +7931,7 @@ mod tests {
 
         async fn measure_proxy_delay(
             &self,
-            _profile_id: &str,
+            _project_id: &str,
             _proxy_name: &str,
             _url: &str,
             _timeout_ms: u64,
@@ -7942,27 +7942,27 @@ mod tests {
 
     #[async_trait]
     impl MihomoRuntime for CoordinatedRuntime {
-        async fn ensure_started(&self, _profile_id: &str) -> anyhow::Result<()> {
+        async fn ensure_started(&self, _project_id: &str) -> anyhow::Result<()> {
             Ok(())
         }
 
-        async fn shutdown_profile(&self, _profile_id: &str) -> anyhow::Result<()> {
+        async fn shutdown_project(&self, _project_id: &str) -> anyhow::Result<()> {
             Ok(())
         }
 
         async fn controller_meta(
             &self,
-            _profile_id: &str,
+            _project_id: &str,
         ) -> anyhow::Result<(String, Option<String>)> {
             Ok(("127.0.0.1:9090".to_string(), None))
         }
 
-        async fn controller_addr(&self, profile_id: &str) -> anyhow::Result<String> {
-            let (addr, _) = self.controller_meta(profile_id).await?;
+        async fn controller_addr(&self, project_id: &str) -> anyhow::Result<String> {
+            let (addr, _) = self.controller_meta(project_id).await?;
             Ok(addr)
         }
 
-        async fn apply_config(&self, _profile_id: &str, payload: &str) -> anyhow::Result<()> {
+        async fn apply_config(&self, _project_id: &str, payload: &str) -> anyhow::Result<()> {
             let call_index = self.apply_calls.fetch_add(1, Ordering::SeqCst);
             if call_index == 0 {
                 self.first_apply_started.notify_waiters();
@@ -7974,7 +7974,7 @@ mod tests {
 
         async fn measure_proxy_delay(
             &self,
-            _profile_id: &str,
+            _project_id: &str,
             _proxy_name: &str,
             _url: &str,
             _timeout_ms: u64,
@@ -7985,34 +7985,34 @@ mod tests {
 
     #[async_trait]
     impl MihomoRuntime for ConcurrentProbeRuntime {
-        async fn ensure_started(&self, _profile_id: &str) -> anyhow::Result<()> {
+        async fn ensure_started(&self, _project_id: &str) -> anyhow::Result<()> {
             Ok(())
         }
 
-        async fn shutdown_profile(&self, _profile_id: &str) -> anyhow::Result<()> {
+        async fn shutdown_project(&self, _project_id: &str) -> anyhow::Result<()> {
             Ok(())
         }
 
         async fn controller_meta(
             &self,
-            _profile_id: &str,
+            _project_id: &str,
         ) -> anyhow::Result<(String, Option<String>)> {
             Ok(("127.0.0.1:9090".to_string(), None))
         }
 
-        async fn controller_addr(&self, profile_id: &str) -> anyhow::Result<String> {
-            let (addr, _) = self.controller_meta(profile_id).await?;
+        async fn controller_addr(&self, project_id: &str) -> anyhow::Result<String> {
+            let (addr, _) = self.controller_meta(project_id).await?;
             Ok(addr)
         }
 
-        async fn apply_config(&self, _profile_id: &str, _payload: &str) -> anyhow::Result<()> {
+        async fn apply_config(&self, _project_id: &str, _payload: &str) -> anyhow::Result<()> {
             self.apply_calls.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }
 
         async fn measure_proxy_delay(
             &self,
-            _profile_id: &str,
+            _project_id: &str,
             proxy_name: &str,
             _url: &str,
             _timeout_ms: u64,
@@ -8230,14 +8230,14 @@ mod tests {
 
     #[tokio::test]
     async fn load_subscription_preserves_unrestorable_sessions_without_runtime_apply() {
-        let profile_id = "p-load";
+        let project_id = "p-load";
         let store = Arc::new(MemoryStore::new());
         store
-            .replace_subscription(profile_id, &[make_node("old", "1.1.1.1")])
+            .replace_subscription(project_id, &[make_node("old", "1.1.1.1")])
             .await
             .expect("seed subscription should succeed");
         store
-            .insert_session(profile_id, &make_session("s1", "old", "1.1.1.1", 1))
+            .insert_session(project_id, &make_session("s1", "old", "1.1.1.1", 1))
             .await
             .expect("seed session should succeed");
 
@@ -8258,7 +8258,7 @@ proxies:
         .await;
 
         let result = service
-            .load_subscription(profile_id, &SubscriptionSource::File(source_path.clone()))
+            .load_subscription(project_id, &SubscriptionSource::File(source_path.clone()))
             .await;
 
         let _ = tokio::fs::remove_file(&source_path).await;
@@ -8270,7 +8270,7 @@ proxies:
         assert_eq!(runtime.apply_calls.load(Ordering::SeqCst), 0);
         assert_eq!(runtime.shutdown_calls.load(Ordering::SeqCst), 1);
         let sessions = store
-            .list_sessions(profile_id)
+            .list_sessions(project_id)
             .await
             .expect("list sessions should succeed");
         assert_eq!(
@@ -8282,28 +8282,28 @@ proxies:
     }
 
     #[tokio::test]
-    async fn load_subscription_keeps_other_profile_sessions_in_shared_runtime() {
-        let stale_profile_id = "p-load-stale";
-        let active_profile_id = "p-load-active";
+    async fn load_subscription_keeps_other_project_sessions_in_shared_runtime() {
+        let stale_project_id = "p-load-stale";
+        let active_project_id = "p-load-active";
         let store = Arc::new(MemoryStore::new());
         store
-            .replace_subscription(stale_profile_id, &[make_node("old", "1.1.1.1")])
+            .replace_subscription(stale_project_id, &[make_node("old", "1.1.1.1")])
             .await
             .expect("seed stale subscription should succeed");
         store
             .insert_session(
-                stale_profile_id,
+                stale_project_id,
                 &make_session("stale-session", "old", "1.1.1.1", 1),
             )
             .await
             .expect("seed stale session should succeed");
         store
-            .replace_subscription(active_profile_id, &[make_node("active", "3.3.3.3")])
+            .replace_subscription(active_project_id, &[make_node("active", "3.3.3.3")])
             .await
             .expect("seed active subscription should succeed");
         store
             .insert_session(
-                active_profile_id,
+                active_project_id,
                 &make_session("active-session", "active", "3.3.3.3", 2),
             )
             .await
@@ -8327,7 +8327,7 @@ proxies:
 
         service
             .load_subscription(
-                stale_profile_id,
+                stale_project_id,
                 &SubscriptionSource::File(source_path.clone()),
             )
             .await
@@ -8335,7 +8335,7 @@ proxies:
         let _ = tokio::fs::remove_file(&source_path).await;
 
         let stale_sessions = store
-            .list_sessions(stale_profile_id)
+            .list_sessions(stale_project_id)
             .await
             .expect("stale sessions should list");
         assert_eq!(stale_sessions.len(), 1);
@@ -8343,7 +8343,7 @@ proxies:
         assert_eq!(
             runtime.shutdown_calls.load(Ordering::SeqCst),
             0,
-            "refreshing one profile must not shutdown shared runtime for other active sessions"
+            "refreshing one project must not shutdown shared runtime for other active sessions"
         );
         let payloads = runtime.payloads.lock().await.clone();
         let latest_payload = payloads
@@ -8354,21 +8354,21 @@ proxies:
     }
 
     #[tokio::test]
-    async fn opening_session_filters_unrestorable_sessions_from_other_profiles() {
-        let stale_profile_id = "p-open-stale";
-        let active_profile_id = "p-open-active";
+    async fn opening_session_filters_unrestorable_sessions_from_other_projects() {
+        let stale_project_id = "p-open-stale";
+        let active_project_id = "p-open-active";
         let store = Arc::new(MemoryStore::new());
         store
-            .create_profile(stale_profile_id, 1)
+            .create_project(stale_project_id, 1)
             .await
-            .expect("stale profile should be created");
+            .expect("stale project should be created");
         store
-            .create_profile(active_profile_id, 1)
+            .create_project(active_project_id, 1)
             .await
-            .expect("active profile should be created");
+            .expect("active project should be created");
         store
             .insert_session(
-                stale_profile_id,
+                stale_project_id,
                 &make_session("stale-open-session", "old-node", "203.0.113.90", 1),
             )
             .await
@@ -8401,7 +8401,7 @@ proxies:
 
         service
             .open_session_by_node(
-                active_profile_id,
+                active_project_id,
                 &OpenSessionByNodeRequest {
                     node_id: active_node.node_id.clone(),
                     desired_port: Some(18_081),
@@ -8418,31 +8418,31 @@ proxies:
         assert!(latest_payload.contains("broker-"));
         assert!(
             !latest_payload.contains("broker-stale-open-session"),
-            "unrestorable retained sessions from other profiles must not render into runtime"
+            "unrestorable retained sessions from other projects must not render into runtime"
         );
         let stale_sessions = store
-            .list_sessions(stale_profile_id)
+            .list_sessions(stale_project_id)
             .await
             .expect("stale sessions should list");
         assert_eq!(stale_sessions.len(), 1);
     }
 
     #[tokio::test]
-    async fn opening_session_filters_unrestorable_sessions_from_same_profile() {
-        let profile_id = "p-open-same-profile-stale";
+    async fn opening_session_filters_unrestorable_sessions_from_same_project() {
+        let project_id = "p-open-same-project-stale";
         let store = Arc::new(MemoryStore::new());
         store
-            .create_profile(profile_id, 1)
+            .create_project(project_id, 1)
             .await
-            .expect("profile should be created");
+            .expect("project should be created");
         store
             .insert_session(
-                profile_id,
-                &make_session("same-profile-stale-session", "old-node", "203.0.113.91", 1),
+                project_id,
+                &make_session("same-project-stale-session", "old-node", "203.0.113.91", 1),
             )
             .await
             .expect("seed stale session should succeed");
-        let active_node = make_inventory_record("node-same-profile-active", "active", "3.3.3.4");
+        let active_node = make_inventory_record("node-same-project-active", "active", "3.3.3.4");
         store
             .replace_proxy_inventory_import(
                 &ProxyImportRecord {
@@ -8470,7 +8470,7 @@ proxies:
 
         service
             .open_session_by_node(
-                profile_id,
+                project_id,
                 &OpenSessionByNodeRequest {
                     node_id: active_node.node_id.clone(),
                     desired_port: Some(18_082),
@@ -8485,25 +8485,25 @@ proxies:
             .last()
             .expect("shared runtime should be configured for opened session");
         assert!(
-            !latest_payload.contains("broker-same-profile-stale-session"),
-            "same-profile stale retained sessions must not render into runtime"
+            !latest_payload.contains("broker-same-project-stale-session"),
+            "same-project stale retained sessions must not render into runtime"
         );
         let sessions = store
-            .list_sessions(profile_id)
+            .list_sessions(project_id)
             .await
             .expect("sessions should list");
         assert!(
             sessions
                 .iter()
-                .any(|session| session.session_id == "same-profile-stale-session"),
+                .any(|session| session.session_id == "same-project-stale-session"),
             "stale session should remain persisted"
         );
     }
 
     #[tokio::test]
     async fn load_subscription_returns_success_with_warning_when_post_load_bookkeeping_fails() {
-        let profile_id = "p-load-bookkeeping-warning";
-        let store = Arc::new(FailProfileSyncConfigStore::default());
+        let project_id = "p-load-bookkeeping-warning";
+        let store = Arc::new(FailProjectSyncConfigStore::default());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
         let source_path = write_subscription_file(
@@ -8517,7 +8517,7 @@ proxies:
         .await;
 
         let response = service
-            .load_subscription(profile_id, &SubscriptionSource::File(source_path.clone()))
+            .load_subscription(project_id, &SubscriptionSource::File(source_path.clone()))
             .await
             .expect("subscription import should still succeed");
 
@@ -8533,21 +8533,21 @@ proxies:
         );
 
         let nodes = store
-            .list_subscription(profile_id)
+            .list_subscription(project_id)
             .await
             .expect("subscription query should succeed");
         assert_eq!(nodes.len(), 1);
         assert_eq!(nodes[0].proxy_name, "new");
 
         let sync_config = store
-            .get_profile_sync_config(profile_id)
+            .get_project_sync_config(project_id)
             .await
             .expect("sync config query should succeed");
         assert!(sync_config.is_none());
 
         let task_runs = store
             .list_task_runs(&TaskListQuery {
-                profile_id: Some(profile_id.to_string()),
+                project_id: Some(project_id.to_string()),
                 ..TaskListQuery::default()
             })
             .await
@@ -8557,14 +8557,14 @@ proxies:
 
     #[tokio::test]
     async fn close_session_allows_last_session_cleanup_without_runtime() {
-        let profile_id = "p-close";
+        let project_id = "p-close";
         let store = Arc::new(MemoryStore::new());
         store
-            .replace_subscription(profile_id, &[make_node("old", "1.1.1.1")])
+            .replace_subscription(project_id, &[make_node("old", "1.1.1.1")])
             .await
             .expect("seed subscription should succeed");
         store
-            .insert_session(profile_id, &make_session("s1", "old", "1.1.1.1", 1))
+            .insert_session(project_id, &make_session("s1", "old", "1.1.1.1", 1))
             .await
             .expect("seed session should succeed");
 
@@ -8576,7 +8576,7 @@ proxies:
         );
 
         service
-            .close_session(profile_id, "s1")
+            .close_session(project_id, "s1")
             .await
             .expect("closing last session should still succeed");
 
@@ -8584,7 +8584,7 @@ proxies:
         assert_eq!(runtime.shutdown_calls.load(Ordering::SeqCst), 1);
         assert!(
             store
-                .list_sessions(profile_id)
+                .list_sessions(project_id)
                 .await
                 .expect("list sessions should succeed")
                 .is_empty(),
@@ -8594,7 +8594,7 @@ proxies:
 
     #[tokio::test]
     async fn load_subscription_rejects_when_no_resolved_ips() {
-        let profile_id = "p-no-ip";
+        let project_id = "p-no-ip";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
@@ -8609,7 +8609,7 @@ proxies:
         .await;
 
         let result = service
-            .load_subscription(profile_id, &SubscriptionSource::File(source_path.clone()))
+            .load_subscription(project_id, &SubscriptionSource::File(source_path.clone()))
             .await;
         let _ = tokio::fs::remove_file(&source_path).await;
 
@@ -8618,14 +8618,14 @@ proxies:
 
     #[tokio::test]
     async fn proxy_latency_probe_rejects_nodes_without_primary_ip() {
-        let profile_id = "alpha";
+        let project_id = "alpha";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
         service
-            .create_profile(profile_id)
+            .create_project(project_id)
             .await
-            .expect("profile should be created");
+            .expect("project should be created");
 
         let import_id = "import-alpha".to_string();
         let node_id = ids::stable_proxy_inventory_node_id_for_proxy(
@@ -8645,9 +8645,9 @@ proxies:
                     import_id: import_id.clone(),
                     name: Some("alpha-manual".to_string()),
                     import_kind: ProxyImportKind::SingleNode,
-                    source_scope: ProxyScope::profile(profile_id),
+                    source_scope: ProxyScope::project(project_id),
                     source_identity: ProxyImportSourceIdentity::manual(&import_id),
-                    allocation_scope: ProxyScope::profile(profile_id),
+                    allocation_scope: ProxyScope::project(project_id),
                     subscription_metadata: None,
                     created_at: 1,
                     updated_at: 1,
@@ -8655,8 +8655,8 @@ proxies:
                 &[ProxyInventoryRecord {
                     import_id: import_id.clone(),
                     node_id: node_id.clone(),
-                    source_scope: ProxyScope::profile(profile_id),
-                    allocation_scope: ProxyScope::profile(profile_id),
+                    source_scope: ProxyScope::project(project_id),
+                    allocation_scope: ProxyScope::project(project_id),
                     proxy_name: "alpha-unresolved".to_string(),
                     proxy_type: "socks5".to_string(),
                     server: "edge-a.example.com".to_string(),
@@ -8675,7 +8675,7 @@ proxies:
 
         let mut run = TaskRunRecord {
             run_id: "run-alpha-probe-no-ip".to_string(),
-            profile_id: profile_id.to_string(),
+            project_id: project_id.to_string(),
             kind: TaskRunKind::ProxyLatencyProbe,
             trigger: TaskRunTrigger::Operator,
             status: TaskRunStatus::Queued,
@@ -8701,8 +8701,8 @@ proxies:
             matches!(
                 service
                     .queue_proxy_latency_probe(&ProxyOperationRequest {
-                        view: "profile".to_string(),
-                        profile_id: Some(profile_id.to_string()),
+                        view: "project".to_string(),
+                        project_id: Some(project_id.to_string()),
                         node_ids: vec![node_id],
                     })
                     .await,
@@ -8805,7 +8805,7 @@ proxies:
 
         let mut run = TaskRunRecord {
             run_id: "run-global-probe".to_string(),
-            profile_id: GLOBAL_RUNTIME_PROFILE_ID.to_string(),
+            project_id: GLOBAL_RUNTIME_PROJECT_ID.to_string(),
             kind: TaskRunKind::ProxyLatencyProbe,
             trigger: TaskRunTrigger::Operator,
             status: TaskRunStatus::Queued,
@@ -8930,7 +8930,7 @@ proxies:
         let first = service
             .queue_proxy_latency_probe(&ProxyOperationRequest {
                 view: "global".to_string(),
-                profile_id: None,
+                project_id: None,
                 node_ids: vec!["node-probing".to_string()],
             })
             .await
@@ -8938,7 +8938,7 @@ proxies:
         let second = service
             .queue_proxy_latency_probe(&ProxyOperationRequest {
                 view: "global".to_string(),
-                profile_id: None,
+                project_id: None,
                 node_ids: vec!["node-probing".to_string(), "node-ready".to_string()],
             })
             .await
@@ -8946,7 +8946,7 @@ proxies:
         let skipped = service
             .queue_proxy_latency_probe(&ProxyOperationRequest {
                 view: "global".to_string(),
-                profile_id: None,
+                project_id: None,
                 node_ids: vec!["node-probing".to_string()],
             })
             .await
@@ -9070,7 +9070,7 @@ proxies:
 
         let mut run = TaskRunRecord {
             run_id: "run-scheduled-global-probe".to_string(),
-            profile_id: GLOBAL_RUNTIME_PROFILE_ID.to_string(),
+            project_id: GLOBAL_RUNTIME_PROJECT_ID.to_string(),
             kind: TaskRunKind::ProxyLatencyProbe,
             trigger: TaskRunTrigger::Schedule,
             status: TaskRunStatus::Queued,
@@ -9111,7 +9111,7 @@ proxies:
 
     #[tokio::test]
     async fn load_subscription_from_url_accepts_ua_gated_payload() {
-        let profile_id = "p-url-success";
+        let project_id = "p-url-success";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
@@ -9129,7 +9129,7 @@ proxies:
         .await;
 
         let result = service
-            .load_subscription(profile_id, &SubscriptionSource::Url(url))
+            .load_subscription(project_id, &SubscriptionSource::Url(url))
             .await;
 
         server.abort();
@@ -9143,7 +9143,7 @@ proxies:
 
     #[tokio::test]
     async fn load_subscription_from_url_maps_invalid_payload_to_subscription_invalid() {
-        let profile_id = "p-url-invalid";
+        let project_id = "p-url-invalid";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
@@ -9151,7 +9151,7 @@ proxies:
             spawn_subscription_server("still-not-a-subscription", StatusCode::OK, None, None).await;
 
         let result = service
-            .load_subscription(profile_id, &SubscriptionSource::Url(url))
+            .load_subscription(project_id, &SubscriptionSource::Url(url))
             .await;
 
         server.abort();
@@ -9161,7 +9161,7 @@ proxies:
 
     #[tokio::test]
     async fn load_subscription_from_url_maps_non_2xx_to_subscription_fetch_failed() {
-        let profile_id = "p-url-fetch";
+        let project_id = "p-url-fetch";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
@@ -9169,7 +9169,7 @@ proxies:
             spawn_subscription_server("blocked", StatusCode::FORBIDDEN, None, None).await;
 
         let result = service
-            .load_subscription(profile_id, &SubscriptionSource::Url(url))
+            .load_subscription(project_id, &SubscriptionSource::Url(url))
             .await;
 
         server.abort();
@@ -9181,7 +9181,7 @@ proxies:
 
     #[tokio::test]
     async fn load_subscription_request_persists_explicit_import_name() {
-        let profile_id = "p-named-import";
+        let project_id = "p-named-import";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
@@ -9197,7 +9197,7 @@ proxies:
 
         service
             .load_subscription_request(
-                profile_id,
+                project_id,
                 &LoadSubscriptionRequest {
                     name: Some("ops-feed".to_string()),
                     source: Some(SubscriptionSource::File(source_path.clone())),
@@ -9209,7 +9209,7 @@ proxies:
         let _ = tokio::fs::remove_file(&source_path).await;
 
         let imports = service
-            .list_proxy_imports(Some("profile"), Some(profile_id))
+            .list_proxy_imports(Some("project"), Some(project_id))
             .await
             .expect("proxy imports should list");
         assert_eq!(imports.items.len(), 1);
@@ -9218,7 +9218,7 @@ proxies:
 
     #[tokio::test]
     async fn load_subscription_request_uses_parsed_title_and_metadata_when_name_is_blank() {
-        let profile_id = "p-title-derived";
+        let project_id = "p-title-derived";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
@@ -9243,7 +9243,7 @@ proxies:
 
         let response = service
             .load_subscription_request(
-                profile_id,
+                project_id,
                 &LoadSubscriptionRequest {
                     name: None,
                     source: Some(SubscriptionSource::Url(url.clone())),
@@ -9270,7 +9270,7 @@ proxies:
         assert_eq!(metadata.expire_at, Some(1_710_000_000));
 
         let imports = service
-            .list_proxy_imports(Some("profile"), Some(profile_id))
+            .list_proxy_imports(Some("project"), Some(project_id))
             .await
             .expect("proxy imports should list");
         assert_eq!(imports.items.len(), 1);
@@ -9293,7 +9293,7 @@ proxies:
 
     #[tokio::test]
     async fn load_subscription_request_uses_file_name_without_persisting_source_title() {
-        let profile_id = "p-file-name-derived";
+        let project_id = "p-file-name-derived";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
@@ -9312,7 +9312,7 @@ proxies:
 
         let response = service
             .load_subscription_request(
-                profile_id,
+                project_id,
                 &LoadSubscriptionRequest {
                     name: None,
                     source: Some(SubscriptionSource::File(
@@ -9337,7 +9337,7 @@ proxies:
         assert!(response.subscription_metadata.is_none());
 
         let imports = service
-            .list_proxy_imports(Some("profile"), Some(profile_id))
+            .list_proxy_imports(Some("project"), Some(project_id))
             .await
             .expect("proxy imports should list");
         assert_eq!(imports.items.len(), 1);
@@ -9350,7 +9350,7 @@ proxies:
 
     #[tokio::test]
     async fn load_subscription_request_uses_url_host_when_headers_do_not_name_import() {
-        let profile_id = "p-url-host-derived";
+        let project_id = "p-url-host-derived";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
@@ -9384,7 +9384,7 @@ proxies:
 
         let response = service
             .load_subscription_request(
-                profile_id,
+                project_id,
                 &LoadSubscriptionRequest {
                     name: None,
                     source: Some(SubscriptionSource::Url(url)),
@@ -9404,7 +9404,7 @@ proxies:
         assert!(response.subscription_metadata.is_none());
 
         let imports = service
-            .list_proxy_imports(Some("profile"), Some(profile_id))
+            .list_proxy_imports(Some("project"), Some(project_id))
             .await
             .expect("proxy imports should list");
         assert_eq!(imports.items.len(), 1);
@@ -9414,7 +9414,7 @@ proxies:
 
     #[tokio::test]
     async fn load_subscription_request_keeps_existing_name_over_new_parsed_title() {
-        let profile_id = "p-existing-name";
+        let project_id = "p-existing-name";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
@@ -9435,7 +9435,7 @@ proxies:
 
         service
             .load_subscription_request(
-                profile_id,
+                project_id,
                 &LoadSubscriptionRequest {
                     name: Some("ops-feed".to_string()),
                     source: Some(SubscriptionSource::Url(url.clone())),
@@ -9447,7 +9447,7 @@ proxies:
 
         let response = service
             .load_subscription_request(
-                profile_id,
+                project_id,
                 &LoadSubscriptionRequest {
                     name: None,
                     source: Some(SubscriptionSource::Url(url)),
@@ -9475,7 +9475,7 @@ proxies:
 
     #[tokio::test]
     async fn load_subscription_request_filters_information_nodes_from_source_imports() {
-        let profile_id = "p-filtered-source";
+        let project_id = "p-filtered-source";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
@@ -9494,7 +9494,7 @@ proxies:
 
         let response = service
             .load_subscription_request(
-                profile_id,
+                project_id,
                 &LoadSubscriptionRequest {
                     name: None,
                     source: Some(SubscriptionSource::File(source_path.clone())),
@@ -9513,7 +9513,7 @@ proxies:
                 .any(|warning| warning.contains("filtered informational subscription entry"))
         );
         let imports = service
-            .list_proxy_imports(Some("profile"), Some(profile_id))
+            .list_proxy_imports(Some("project"), Some(project_id))
             .await
             .expect("proxy imports should list");
         assert_eq!(imports.items.len(), 1);
@@ -9522,7 +9522,7 @@ proxies:
 
     #[tokio::test]
     async fn load_subscription_request_filters_malformed_hysteria_nodes_from_source_imports() {
-        let profile_id = "p-filtered-malformed-source";
+        let project_id = "p-filtered-malformed-source";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
@@ -9543,7 +9543,7 @@ proxies:
 
         let response = service
             .load_subscription_request(
-                profile_id,
+                project_id,
                 &LoadSubscriptionRequest {
                     name: None,
                     source: Some(SubscriptionSource::File(source_path.clone())),
@@ -9562,7 +9562,7 @@ proxies:
                 .any(|warning| warning.contains("filtered malformed proxy entry `bad-hy`"))
         );
         let imports = service
-            .list_proxy_imports(Some("profile"), Some(profile_id))
+            .list_proxy_imports(Some("project"), Some(project_id))
             .await
             .expect("proxy imports should list");
         assert_eq!(imports.items.len(), 1);
@@ -9571,14 +9571,14 @@ proxies:
 
     #[tokio::test]
     async fn manual_node_group_import_autogenerates_group_name() {
-        let profile_id = "p-manual-group";
+        let project_id = "p-manual-group";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
 
         service
             .load_subscription_request(
-                profile_id,
+                project_id,
                 &LoadSubscriptionRequest {
                     name: None,
                     source: None,
@@ -9602,7 +9602,7 @@ proxies:
             .expect("manual node group import should succeed");
 
         let imports = service
-            .list_proxy_imports(Some("profile"), Some(profile_id))
+            .list_proxy_imports(Some("project"), Some(project_id))
             .await
             .expect("proxy imports should list");
         assert_eq!(imports.items.len(), 1);
@@ -9613,14 +9613,14 @@ proxies:
 
     #[tokio::test]
     async fn manual_node_group_import_filters_malformed_hysteria_nodes_and_warns() {
-        let profile_id = "p-manual-malformed-group";
+        let project_id = "p-manual-malformed-group";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
 
         let response = service
             .load_subscription_request(
-                profile_id,
+                project_id,
                 &LoadSubscriptionRequest {
                     name: None,
                     source: None,
@@ -9652,7 +9652,7 @@ proxies:
                 .any(|warning| warning.contains("filtered malformed proxy entry `bad-hy`"))
         );
         let imports = service
-            .list_proxy_imports(Some("profile"), Some(profile_id))
+            .list_proxy_imports(Some("project"), Some(project_id))
             .await
             .expect("proxy imports should list");
         assert_eq!(imports.items.len(), 1);
@@ -9661,18 +9661,18 @@ proxies:
     }
 
     #[tokio::test]
-    async fn global_pool_rebuilds_profiles_and_opt_out_removes_global_nodes() {
+    async fn global_pool_rebuilds_projects_and_opt_out_removes_global_nodes() {
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
         service
-            .create_profile("default")
+            .create_project("default")
             .await
-            .expect("default profile should be created");
+            .expect("default project should be created");
         service
-            .create_profile("edge-jp")
+            .create_project("edge-jp")
             .await
-            .expect("edge profile should be created");
+            .expect("edge project should be created");
 
         let source_path = write_subscription_file(
             r#"
@@ -9708,7 +9708,7 @@ proxies:
         );
 
         service
-            .update_profile_proxy_settings("edge-jp", false)
+            .update_project_proxy_settings("edge-jp", false)
             .await
             .expect("opt-out should succeed");
 
@@ -9730,18 +9730,18 @@ proxies:
     }
 
     #[tokio::test]
-    async fn profile_local_import_wins_over_same_named_global_proxy() {
+    async fn project_local_import_wins_over_same_named_global_proxy() {
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
         service
-            .create_profile("default")
+            .create_project("default")
             .await
-            .expect("default profile should be created");
+            .expect("default project should be created");
         service
-            .create_profile("edge-jp")
+            .create_project("edge-jp")
             .await
-            .expect("edge profile should be created");
+            .expect("edge project should be created");
 
         let global_source_path = write_subscription_file(
             r#"
@@ -9791,11 +9791,11 @@ proxies:
 
         let catalog = service
             .list_proxy_catalog(&ProxyCatalogQuery {
-                view: Some("profile".to_string()),
-                profile_id: Some("edge-jp".to_string()),
+                view: Some("project".to_string()),
+                project_id: Some("edge-jp".to_string()),
             })
             .await
-            .expect("profile catalog should list");
+            .expect("project catalog should list");
         let shared_nodes = catalog
             .groups
             .into_iter()
@@ -9807,15 +9807,15 @@ proxies:
     }
 
     #[tokio::test]
-    async fn proxy_catalog_backfills_node_metadata_from_legacy_profile_records() {
-        let profile_id = "edge-jp";
+    async fn proxy_catalog_backfills_node_metadata_from_legacy_project_records() {
+        let project_id = "edge-jp";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
         service
-            .create_profile(profile_id)
+            .create_project(project_id)
             .await
-            .expect("profile should be created");
+            .expect("project should be created");
 
         let source_path = write_subscription_file(
             r#"
@@ -9827,14 +9827,14 @@ proxies:
         )
         .await;
         service
-            .load_subscription(profile_id, &SubscriptionSource::File(source_path.clone()))
+            .load_subscription(project_id, &SubscriptionSource::File(source_path.clone()))
             .await
             .expect("subscription should load");
         let _ = tokio::fs::remove_file(&source_path).await;
 
         store
             .replace_ip_records(
-                profile_id,
+                project_id,
                 &[IpRecord {
                     ip: "1.1.1.1".to_string(),
                     country_code: Some("JP".to_string()),
@@ -9851,7 +9851,7 @@ proxies:
             .expect("legacy ip record should seed");
         store
             .replace_probe_records(
-                profile_id,
+                project_id,
                 &[ProbeRecord {
                     proxy_name: "edge-node".to_string(),
                     ip: "1.1.1.1".to_string(),
@@ -9866,11 +9866,11 @@ proxies:
 
         let catalog = service
             .list_proxy_catalog(&ProxyCatalogQuery {
-                view: Some("profile".to_string()),
-                profile_id: Some(profile_id.to_string()),
+                view: Some("project".to_string()),
+                project_id: Some(project_id.to_string()),
             })
             .await
-            .expect("profile catalog should list");
+            .expect("project catalog should list");
         let metadata = &catalog.groups[0].nodes[0].ip_metadata[0];
         assert_eq!(metadata.country_code.as_deref(), Some("JP"));
         assert_eq!(metadata.city.as_deref(), Some("Shibuya"));
@@ -9880,15 +9880,15 @@ proxies:
     }
 
     #[tokio::test]
-    async fn proxy_catalog_sanitizes_invalid_country_codes_from_legacy_profile_records() {
-        let profile_id = "edge-jp";
+    async fn proxy_catalog_sanitizes_invalid_country_codes_from_legacy_project_records() {
+        let project_id = "edge-jp";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
         service
-            .create_profile(profile_id)
+            .create_project(project_id)
             .await
-            .expect("profile should be created");
+            .expect("project should be created");
 
         let source_path = write_subscription_file(
             r#"
@@ -9900,14 +9900,14 @@ proxies:
         )
         .await;
         service
-            .load_subscription(profile_id, &SubscriptionSource::File(source_path.clone()))
+            .load_subscription(project_id, &SubscriptionSource::File(source_path.clone()))
             .await
             .expect("subscription should load");
         let _ = tokio::fs::remove_file(&source_path).await;
 
         store
             .replace_ip_records(
-                profile_id,
+                project_id,
                 &[IpRecord {
                     ip: "1.1.1.1".to_string(),
                     country_code: Some("global".to_string()),
@@ -9925,11 +9925,11 @@ proxies:
 
         let catalog = service
             .list_proxy_catalog(&ProxyCatalogQuery {
-                view: Some("profile".to_string()),
-                profile_id: Some(profile_id.to_string()),
+                view: Some("project".to_string()),
+                project_id: Some(project_id.to_string()),
             })
             .await
-            .expect("profile catalog should list");
+            .expect("project catalog should list");
         let metadata = &catalog.groups[0].nodes[0].ip_metadata[0];
         assert_eq!(metadata.country_code, None);
         assert_eq!(metadata.country_name.as_deref(), Some("Japan"));
@@ -10041,14 +10041,14 @@ proxies:
 
     #[tokio::test]
     async fn load_subscription_accepts_duplicate_proxy_names_with_distinct_node_ids() {
-        let profile_id = "dup-names";
+        let project_id = "dup-names";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
         service
-            .create_profile(profile_id)
+            .create_project(project_id)
             .await
-            .expect("profile should be created");
+            .expect("project should be created");
 
         let source_path = write_subscription_file(
             r#"
@@ -10064,7 +10064,7 @@ proxies:
         .await;
 
         let response = service
-            .load_subscription(profile_id, &SubscriptionSource::File(source_path.clone()))
+            .load_subscription(project_id, &SubscriptionSource::File(source_path.clone()))
             .await
             .expect("duplicate-name subscription should load");
         let _ = tokio::fs::remove_file(&source_path).await;
@@ -10073,11 +10073,11 @@ proxies:
 
         let catalog = service
             .list_proxy_catalog(&ProxyCatalogQuery {
-                view: Some("profile".to_string()),
-                profile_id: Some(profile_id.to_string()),
+                view: Some("project".to_string()),
+                project_id: Some(project_id.to_string()),
             })
             .await
-            .expect("profile catalog should list");
+            .expect("project catalog should list");
         let duplicate_nodes = catalog
             .groups
             .into_iter()
@@ -10094,9 +10094,9 @@ proxies:
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
         service
-            .create_profile("edge-jp")
+            .create_project("edge-jp")
             .await
-            .expect("edge profile should be created");
+            .expect("edge project should be created");
 
         let source_path = write_subscription_file(
             r#"
@@ -10115,11 +10115,11 @@ proxies:
 
         let catalog = service
             .list_proxy_catalog(&ProxyCatalogQuery {
-                view: Some("profile".to_string()),
-                profile_id: Some("edge-jp".to_string()),
+                view: Some("project".to_string()),
+                project_id: Some("edge-jp".to_string()),
             })
             .await
-            .expect("profile catalog should list");
+            .expect("project catalog should list");
         let node_id = catalog.groups[0].nodes[0].node_id.clone();
 
         let response = service
@@ -10150,9 +10150,9 @@ proxies:
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
         service
-            .create_profile("browser")
+            .create_project("browser")
             .await
-            .expect("browser profile should be created");
+            .expect("browser project should be created");
 
         let source_path = write_subscription_file(
             r#"
@@ -10188,11 +10188,11 @@ proxies:
 
         let catalog = service
             .list_proxy_catalog(&ProxyCatalogQuery {
-                view: Some("profile".to_string()),
-                profile_id: Some("browser".to_string()),
+                view: Some("project".to_string()),
+                project_id: Some("browser".to_string()),
             })
             .await
-            .expect("profile catalog should list");
+            .expect("project catalog should list");
         let target_node = catalog
             .groups
             .iter()
@@ -10262,7 +10262,7 @@ proxies:
                 &opened.session_id,
                 &SearchSessionNodeOptionsRequest {
                     query: Some("2.2.2.2".to_string()),
-                    sort_mode: SessionNodeSortMode::ProfileRecent,
+                    sort_mode: SessionNodeSortMode::ProjectRecent,
                     ..SearchSessionNodeOptionsRequest::default()
                 },
             )
@@ -10278,9 +10278,9 @@ proxies:
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
         service
-            .create_profile("browser")
+            .create_project("browser")
             .await
-            .expect("browser profile should be created");
+            .expect("browser project should be created");
 
         let proxies = (0..55)
             .map(|index| {
@@ -10297,11 +10297,11 @@ proxies:
 
         let catalog = service
             .list_proxy_catalog(&ProxyCatalogQuery {
-                view: Some("profile".to_string()),
-                profile_id: Some("browser".to_string()),
+                view: Some("project".to_string()),
+                project_id: Some("browser".to_string()),
             })
             .await
-            .expect("profile catalog should list");
+            .expect("project catalog should list");
         let first_node_id = catalog.groups[0].nodes[0].node_id.clone();
 
         let opened = service
@@ -10321,7 +10321,7 @@ proxies:
                 "browser",
                 &opened.session_id,
                 &SearchSessionNodeOptionsRequest {
-                    sort_mode: SessionNodeSortMode::ProfileRecent,
+                    sort_mode: SessionNodeSortMode::ProjectRecent,
                     limit: None,
                     ..SearchSessionNodeOptionsRequest::default()
                 },
@@ -10335,7 +10335,7 @@ proxies:
                 "browser",
                 &opened.session_id,
                 &SearchSessionNodeOptionsRequest {
-                    sort_mode: SessionNodeSortMode::ProfileRecent,
+                    sort_mode: SessionNodeSortMode::ProjectRecent,
                     limit: Some(50),
                     ..SearchSessionNodeOptionsRequest::default()
                 },
@@ -10347,14 +10347,14 @@ proxies:
 
     #[tokio::test]
     async fn list_sessions_includes_selected_ip_geo_metadata() {
-        let profile_id = "geo-browser";
+        let project_id = "geo-browser";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
         service
-            .create_profile(profile_id)
+            .create_project(project_id)
             .await
-            .expect("profile should be created");
+            .expect("project should be created");
 
         let node = make_node("jp-tokyo-entry", "203.0.113.10");
         let node_id = node
@@ -10362,7 +10362,7 @@ proxies:
             .clone()
             .expect("test node should include a node id");
         store
-            .replace_subscription(profile_id, &[node])
+            .replace_subscription(project_id, &[node])
             .await
             .expect("seed subscription should succeed");
         store
@@ -10387,14 +10387,14 @@ proxies:
             .expect("metadata should be stored");
         store
             .insert_session(
-                profile_id,
+                project_id,
                 &make_session("s1", "jp-tokyo-entry", "203.0.113.10", 1),
             )
             .await
             .expect("seed session should succeed");
 
         let sessions = service
-            .list_sessions(profile_id, None)
+            .list_sessions(project_id, None)
             .await
             .expect("sessions should list");
         assert_eq!(sessions.sessions.len(), 1);
@@ -10407,29 +10407,29 @@ proxies:
 
     #[tokio::test]
     async fn list_sessions_uses_request_host_for_wildcard_display_address() {
-        let profile_id = "display-wildcard";
+        let project_id = "display-wildcard";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
         service
-            .create_profile(profile_id)
+            .create_project(project_id)
             .await
-            .expect("profile should be created");
+            .expect("project should be created");
 
         let mut session = make_session("s-display", "wild-node", "203.0.113.10", 1);
         session.listen = "0.0.0.0".to_string();
         session.port = 20002;
         store
-            .replace_subscription(profile_id, &[make_node("wild-node", "203.0.113.10")])
+            .replace_subscription(project_id, &[make_node("wild-node", "203.0.113.10")])
             .await
             .expect("seed subscription should succeed");
         store
-            .insert_session(profile_id, &session)
+            .insert_session(project_id, &session)
             .await
             .expect("seed session should succeed");
 
         let sessions = service
-            .list_sessions(profile_id, Some("panel.example.test"))
+            .list_sessions(project_id, Some("panel.example.test"))
             .await
             .expect("sessions should list");
         assert_eq!(sessions.sessions[0].listen, "0.0.0.0:20002");
@@ -10443,22 +10443,22 @@ proxies:
 
     #[tokio::test]
     async fn search_session_ip_node_options_keeps_stable_groups_and_probe_history() {
-        let profile_id = "ip-node-options";
+        let project_id = "ip-node-options";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
         service
-            .create_profile(profile_id)
+            .create_project(project_id)
             .await
-            .expect("profile should be created");
+            .expect("project should be created");
 
         let first_import = ProxyImportRecord {
             import_id: "import-one".to_string(),
             name: Some("shared-name".to_string()),
             import_kind: ProxyImportKind::SingleNode,
-            source_scope: ProxyScope::profile(profile_id),
+            source_scope: ProxyScope::project(project_id),
             source_identity: ProxyImportSourceIdentity::manual("one"),
-            allocation_scope: ProxyScope::profile(profile_id),
+            allocation_scope: ProxyScope::project(project_id),
             subscription_metadata: None,
             created_at: 1,
             updated_at: 1,
@@ -10467,9 +10467,9 @@ proxies:
             import_id: "import-two".to_string(),
             name: Some("shared-name".to_string()),
             import_kind: ProxyImportKind::SingleNode,
-            source_scope: ProxyScope::profile(profile_id),
+            source_scope: ProxyScope::project(project_id),
             source_identity: ProxyImportSourceIdentity::manual("two"),
-            allocation_scope: ProxyScope::profile(profile_id),
+            allocation_scope: ProxyScope::project(project_id),
             subscription_metadata: None,
             created_at: 1,
             updated_at: 1,
@@ -10477,8 +10477,8 @@ proxies:
         let first_node = ProxyInventoryRecord {
             import_id: first_import.import_id.clone(),
             node_id: "node-one".to_string(),
-            source_scope: ProxyScope::profile(profile_id),
-            allocation_scope: ProxyScope::profile(profile_id),
+            source_scope: ProxyScope::project(project_id),
+            allocation_scope: ProxyScope::project(project_id),
             proxy_name: "node-one".to_string(),
             proxy_type: "socks5".to_string(),
             server: "203.0.113.10".to_string(),
@@ -10490,8 +10490,8 @@ proxies:
         let second_node = ProxyInventoryRecord {
             import_id: second_import.import_id.clone(),
             node_id: "node-two".to_string(),
-            source_scope: ProxyScope::profile(profile_id),
-            allocation_scope: ProxyScope::profile(profile_id),
+            source_scope: ProxyScope::project(project_id),
+            allocation_scope: ProxyScope::project(project_id),
             proxy_name: "node-two".to_string(),
             proxy_type: "socks5".to_string(),
             server: "203.0.113.10".to_string(),
@@ -10538,7 +10538,7 @@ proxies:
 
         let options = service
             .search_session_ip_node_options(
-                profile_id,
+                project_id,
                 &SearchSessionIpNodeOptionsRequest {
                     group_by: SessionIpNodeGroupBy::Subscription,
                     ..SearchSessionIpNodeOptionsRequest::default()
@@ -10567,7 +10567,7 @@ proxies:
 
     #[tokio::test]
     async fn list_sessions_prefers_public_host_only_for_wildcard_binds() {
-        let profile_id = "display-explicit";
+        let project_id = "display-explicit";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(
@@ -10579,9 +10579,9 @@ proxies:
             },
         );
         service
-            .create_profile(profile_id)
+            .create_project(project_id)
             .await
-            .expect("profile should be created");
+            .expect("project should be created");
 
         let mut wildcard = make_session("s-wild", "wild-node", "203.0.113.10", 1);
         wildcard.listen = "0.0.0.0".to_string();
@@ -10592,7 +10592,7 @@ proxies:
 
         store
             .replace_subscription(
-                profile_id,
+                project_id,
                 &[
                     make_node("wild-node", "203.0.113.10"),
                     make_node("explicit-node", "203.0.113.20"),
@@ -10601,12 +10601,12 @@ proxies:
             .await
             .expect("seed subscription should succeed");
         store
-            .insert_sessions(profile_id, &[wildcard, explicit.clone()])
+            .insert_sessions(project_id, &[wildcard, explicit.clone()])
             .await
             .expect("seed sessions should succeed");
 
         let sessions = service
-            .list_sessions(profile_id, Some("console.example.test"))
+            .list_sessions(project_id, Some("console.example.test"))
             .await
             .expect("sessions should list");
         let wildcard_session = sessions
@@ -10631,29 +10631,29 @@ proxies:
 
     #[tokio::test]
     async fn list_sessions_reuses_explicit_bind_host_without_public_override() {
-        let profile_id = "display-bind-host";
+        let project_id = "display-bind-host";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
         service
-            .create_profile(profile_id)
+            .create_project(project_id)
             .await
-            .expect("profile should be created");
+            .expect("project should be created");
 
         let mut session = make_session("s-bind", "bind-node", "203.0.113.30", 1);
         session.listen = "192.168.31.15".to_string();
         session.port = 20005;
         store
-            .replace_subscription(profile_id, &[make_node("bind-node", "203.0.113.30")])
+            .replace_subscription(project_id, &[make_node("bind-node", "203.0.113.30")])
             .await
             .expect("seed subscription should succeed");
         store
-            .insert_session(profile_id, &session)
+            .insert_session(project_id, &session)
             .await
             .expect("seed session should succeed");
 
         let sessions = service
-            .list_sessions(profile_id, Some("console.example.test"))
+            .list_sessions(project_id, Some("console.example.test"))
             .await
             .expect("sessions should list");
         assert_eq!(sessions.sessions[0].listen, "192.168.31.15:20005");
@@ -10662,18 +10662,18 @@ proxies:
     }
 
     #[tokio::test]
-    async fn update_session_node_rejects_node_outside_effective_profile_pool() {
+    async fn update_session_node_rejects_node_outside_effective_project_pool() {
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
         service
-            .create_profile("browser")
+            .create_project("browser")
             .await
-            .expect("browser profile should be created");
+            .expect("browser project should be created");
         service
-            .create_profile("lab")
+            .create_project("lab")
             .await
-            .expect("lab profile should be created");
+            .expect("lab project should be created");
 
         let browser_source = write_subscription_file(
             r#"
@@ -10721,8 +10721,8 @@ proxies:
 
         let lab_catalog = service
             .list_proxy_catalog(&ProxyCatalogQuery {
-                view: Some("profile".to_string()),
-                profile_id: Some("lab".to_string()),
+                view: Some("project".to_string()),
+                project_id: Some("lab".to_string()),
             })
             .await
             .expect("lab catalog should list");
@@ -10750,9 +10750,9 @@ proxies:
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
         service
-            .create_profile("browser")
+            .create_project("browser")
             .await
-            .expect("browser profile should be created");
+            .expect("browser project should be created");
 
         let source_path = write_subscription_file(
             r#"
@@ -10774,11 +10774,11 @@ proxies:
 
         let catalog = service
             .list_proxy_catalog(&ProxyCatalogQuery {
-                view: Some("profile".to_string()),
-                profile_id: Some("browser".to_string()),
+                view: Some("project".to_string()),
+                project_id: Some("browser".to_string()),
             })
             .await
-            .expect("profile catalog should list");
+            .expect("project catalog should list");
         let start_node = catalog
             .groups
             .iter()
@@ -10826,18 +10826,18 @@ proxies:
     }
 
     #[tokio::test]
-    async fn update_session_node_rejects_candidate_node_ids_outside_effective_profile_pool() {
+    async fn update_session_node_rejects_candidate_node_ids_outside_effective_project_pool() {
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
         service
-            .create_profile("browser")
+            .create_project("browser")
             .await
-            .expect("browser profile should be created");
+            .expect("browser project should be created");
         service
-            .create_profile("lab")
+            .create_project("lab")
             .await
-            .expect("lab profile should be created");
+            .expect("lab project should be created");
 
         let browser_source = write_subscription_file(
             r#"
@@ -10871,16 +10871,16 @@ proxies:
 
         let browser_catalog = service
             .list_proxy_catalog(&ProxyCatalogQuery {
-                view: Some("profile".to_string()),
-                profile_id: Some("browser".to_string()),
+                view: Some("project".to_string()),
+                project_id: Some("browser".to_string()),
             })
             .await
             .expect("browser catalog should list");
         let valid_node_id = browser_catalog.groups[0].nodes[0].node_id.clone();
         let lab_catalog = service
             .list_proxy_catalog(&ProxyCatalogQuery {
-                view: Some("profile".to_string()),
-                profile_id: Some("lab".to_string()),
+                view: Some("project".to_string()),
+                project_id: Some("lab".to_string()),
             })
             .await
             .expect("lab catalog should list");
@@ -10930,9 +10930,9 @@ proxies:
             BrokerServiceOptions::default(),
         );
         service
-            .create_profile("browser")
+            .create_project("browser")
             .await
-            .expect("browser profile should be created");
+            .expect("browser project should be created");
 
         let source_path = write_subscription_file(
             r#"
@@ -10954,11 +10954,11 @@ proxies:
 
         let catalog = service
             .list_proxy_catalog(&ProxyCatalogQuery {
-                view: Some("profile".to_string()),
-                profile_id: Some("browser".to_string()),
+                view: Some("project".to_string()),
+                project_id: Some("browser".to_string()),
             })
             .await
-            .expect("profile catalog should list");
+            .expect("project catalog should list");
         let start_node = catalog
             .groups
             .iter()
@@ -11040,9 +11040,9 @@ proxies:
             BrokerServiceOptions::default(),
         );
         service
-            .create_profile("browser")
+            .create_project("browser")
             .await
-            .expect("browser profile should be created");
+            .expect("browser project should be created");
 
         let bad_import_id = "imp-bad-global".to_string();
         store
@@ -11098,8 +11098,8 @@ proxies:
 
         let catalog = service
             .list_proxy_catalog(&ProxyCatalogQuery {
-                view: Some("profile".to_string()),
-                profile_id: Some("browser".to_string()),
+                view: Some("project".to_string()),
+                project_id: Some("browser".to_string()),
             })
             .await
             .expect("browser catalog should list");
@@ -11211,7 +11211,7 @@ proxies:
     }
 
     #[tokio::test]
-    async fn concurrent_node_pinned_opens_keep_both_profiles_in_shared_runtime_payload() {
+    async fn concurrent_node_pinned_opens_keep_both_projects_in_shared_runtime_payload() {
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(CoordinatedRuntime::default());
         let service = Arc::new(BrokerService::new(
@@ -11219,19 +11219,19 @@ proxies:
             runtime.clone(),
             BrokerServiceOptions::default(),
         ));
-        for profile_id in ["alpha", "beta"] {
+        for project_id in ["alpha", "beta"] {
             service
-                .create_profile(profile_id)
+                .create_project(project_id)
                 .await
-                .expect("profile should be created");
+                .expect("project should be created");
             let source_path = write_subscription_file(&format!(
                 r#"
 proxies:
-  - name: {profile_id}-node
+  - name: {project_id}-node
     type: socks5
     server: {}
 "#,
-                if profile_id == "alpha" {
+                if project_id == "alpha" {
                     "1.1.1.1"
                 } else {
                     "2.2.2.2"
@@ -11239,7 +11239,7 @@ proxies:
             ))
             .await;
             service
-                .load_subscription(profile_id, &SubscriptionSource::File(source_path.clone()))
+                .load_subscription(project_id, &SubscriptionSource::File(source_path.clone()))
                 .await
                 .expect("subscription should load");
             let _ = tokio::fs::remove_file(&source_path).await;
@@ -11247,8 +11247,8 @@ proxies:
 
         let alpha_node_id = service
             .list_proxy_catalog(&ProxyCatalogQuery {
-                view: Some("profile".to_string()),
-                profile_id: Some("alpha".to_string()),
+                view: Some("project".to_string()),
+                project_id: Some("alpha".to_string()),
             })
             .await
             .expect("alpha catalog should list")
@@ -11258,8 +11258,8 @@ proxies:
             .clone();
         let beta_node_id = service
             .list_proxy_catalog(&ProxyCatalogQuery {
-                view: Some("profile".to_string()),
-                profile_id: Some("beta".to_string()),
+                view: Some("project".to_string()),
+                project_id: Some("beta".to_string()),
             })
             .await
             .expect("beta catalog should list")
@@ -11324,7 +11324,7 @@ proxies:
 
     #[tokio::test]
     async fn reconcile_startup_preserves_node_pinned_sessions_created_from_inventory_nodes() {
-        let profile_id = "edge-jp";
+        let project_id = "edge-jp";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(
@@ -11333,9 +11333,9 @@ proxies:
             BrokerServiceOptions::default(),
         );
         service
-            .create_profile(profile_id)
+            .create_project(project_id)
             .await
-            .expect("profile should be created");
+            .expect("project should be created");
 
         let source_path = write_subscription_file(
             r#"
@@ -11347,23 +11347,23 @@ proxies:
         )
         .await;
         service
-            .load_subscription(profile_id, &SubscriptionSource::File(source_path.clone()))
+            .load_subscription(project_id, &SubscriptionSource::File(source_path.clone()))
             .await
             .expect("subscription should load");
         let _ = tokio::fs::remove_file(&source_path).await;
 
         let catalog = service
             .list_proxy_catalog(&ProxyCatalogQuery {
-                view: Some("profile".to_string()),
-                profile_id: Some(profile_id.to_string()),
+                view: Some("project".to_string()),
+                project_id: Some(project_id.to_string()),
             })
             .await
-            .expect("profile catalog should list");
+            .expect("project catalog should list");
         let node_id = catalog.groups[0].nodes[0].node_id.clone();
 
         let opened = service
             .open_session_by_node(
-                profile_id,
+                project_id,
                 &OpenSessionByNodeRequest {
                     node_id,
                     desired_port: Some(10080),
@@ -11380,7 +11380,7 @@ proxies:
             .expect("startup reconcile should succeed");
 
         let sessions = restarted
-            .list_sessions(profile_id, None)
+            .list_sessions(project_id, None)
             .await
             .expect("sessions should list");
         assert_eq!(sessions.sessions.len(), 1);
@@ -11394,13 +11394,13 @@ proxies:
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
         service
-            .create_profile("alpha")
+            .create_project("alpha")
             .await
-            .expect("alpha profile should be created");
+            .expect("alpha project should be created");
         service
-            .create_profile("beta")
+            .create_project("beta")
             .await
-            .expect("beta profile should be created");
+            .expect("beta project should be created");
 
         let source_path = write_subscription_file(
             r#"
@@ -11482,7 +11482,7 @@ proxies:
 
     #[tokio::test]
     async fn reconcile_startup_keeps_session_when_port_is_occupied() {
-        let profile_id = "p-reconcile";
+        let project_id = "p-reconcile";
         let occupied = std::net::TcpListener::bind(("127.0.0.1", 0))
             .expect("should reserve a local port for test");
         let occupied_port = occupied
@@ -11492,12 +11492,12 @@ proxies:
 
         let store = Arc::new(MemoryStore::new());
         store
-            .replace_subscription(profile_id, &[make_node("node-a", "1.1.1.1")])
+            .replace_subscription(project_id, &[make_node("node-a", "1.1.1.1")])
             .await
             .expect("seed subscription should succeed");
         store
             .insert_session(
-                profile_id,
+                project_id,
                 &SessionRecord {
                     session_id: "s1".to_string(),
                     listen: "127.0.0.1".to_string(),
@@ -11526,7 +11526,7 @@ proxies:
             .expect("startup reconcile should complete");
 
         let sessions = store
-            .list_sessions(profile_id)
+            .list_sessions(project_id)
             .await
             .expect("list sessions should succeed");
         assert_eq!(
@@ -11539,14 +11539,14 @@ proxies:
 
     #[tokio::test]
     async fn reconcile_startup_preserves_legacy_sessions_when_subscription_rows_lack_node_ids() {
-        let profile_id = "p-legacy-node-alias";
+        let project_id = "p-legacy-node-alias";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
         service
-            .create_profile(profile_id)
+            .create_project(project_id)
             .await
-            .expect("profile should be created");
+            .expect("project should be created");
 
         let legacy_proxy_name = "legacy-node";
         let legacy_ip = "203.0.113.10";
@@ -11557,7 +11557,7 @@ proxies:
         });
         store
             .replace_subscription(
-                profile_id,
+                project_id,
                 &[ProxyNode {
                     node_id: None,
                     proxy_name: legacy_proxy_name.to_string(),
@@ -11571,7 +11571,7 @@ proxies:
             .expect("seed subscription should succeed");
         store
             .insert_session(
-                profile_id,
+                project_id,
                 &SessionRecord {
                     session_id: "legacy-proxy-name".to_string(),
                     listen: "127.0.0.1".to_string(),
@@ -11587,7 +11587,7 @@ proxies:
             .expect("proxy-name session should persist");
         store
             .insert_session(
-                profile_id,
+                project_id,
                 &SessionRecord {
                     session_id: "legacy-blank-node".to_string(),
                     listen: "127.0.0.1".to_string(),
@@ -11608,7 +11608,7 @@ proxies:
             .expect("startup reconcile should complete");
 
         let sessions = store
-            .list_sessions(profile_id)
+            .list_sessions(project_id)
             .await
             .expect("list sessions should succeed");
         assert_eq!(sessions.len(), 2, "legacy sessions should be preserved");
@@ -11622,7 +11622,7 @@ proxies:
 
     #[tokio::test]
     async fn reconcile_startup_keeps_persisted_sessions_when_proxy_validity_is_unknown() {
-        let profile_id = "p-unknown-validity";
+        let project_id = "p-unknown-validity";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(
@@ -11631,12 +11631,12 @@ proxies:
             BrokerServiceOptions::default(),
         );
         service
-            .create_profile(profile_id)
+            .create_project(project_id)
             .await
-            .expect("profile should be created");
+            .expect("project should be created");
         store
             .insert_session(
-                profile_id,
+                project_id,
                 &make_session("s-keep", "orphaned-node", "203.0.113.90", 1),
             )
             .await
@@ -11648,7 +11648,7 @@ proxies:
             .expect("startup reconcile should complete");
 
         let sessions = store
-            .list_sessions(profile_id)
+            .list_sessions(project_id)
             .await
             .expect("list sessions should succeed");
         assert_eq!(sessions.len(), 1, "session should remain persisted");
@@ -11658,15 +11658,15 @@ proxies:
 
     #[tokio::test]
     async fn reconcile_startup_preserves_session_when_proxy_pair_is_not_in_current_pool() {
-        let profile_id = "p-pair-missing";
+        let project_id = "p-pair-missing";
         let store = Arc::new(MemoryStore::new());
         store
-            .replace_subscription(profile_id, &[make_node("current-node", "198.51.100.10")])
+            .replace_subscription(project_id, &[make_node("current-node", "198.51.100.10")])
             .await
             .expect("seed subscription should succeed");
         store
             .insert_session(
-                profile_id,
+                project_id,
                 &make_session("s-keep-missing-pair", "old-node", "203.0.113.90", 1),
             )
             .await
@@ -11684,7 +11684,7 @@ proxies:
             .expect("startup reconcile should complete");
 
         let sessions = store
-            .list_sessions(profile_id)
+            .list_sessions(project_id)
             .await
             .expect("list sessions should succeed");
         assert_eq!(
@@ -11707,7 +11707,7 @@ proxies:
 
     #[tokio::test]
     async fn sqlite_backed_sessions_survive_service_restart_and_startup_reconcile() {
-        let profile_id = "sqlite-restart";
+        let project_id = "sqlite-restart";
         let path = temp_sqlite_store_path();
         let store = Arc::new(
             SqliteStore::open(&path)
@@ -11717,9 +11717,9 @@ proxies:
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
         service
-            .create_profile(profile_id)
+            .create_project(project_id)
             .await
-            .expect("profile should be created");
+            .expect("project should be created");
 
         let source_path = write_subscription_file(
             r#"
@@ -11731,14 +11731,14 @@ proxies:
         )
         .await;
         service
-            .load_subscription(profile_id, &SubscriptionSource::File(source_path.clone()))
+            .load_subscription(project_id, &SubscriptionSource::File(source_path.clone()))
             .await
             .expect("subscription should load");
         let _ = tokio::fs::remove_file(&source_path).await;
 
         let opened = service
             .open_session(
-                profile_id,
+                project_id,
                 &OpenSessionRequest {
                     selection_mode: SessionSelectionMode::Ip,
                     specified_ips: vec!["5.5.5.5".to_string()],
@@ -11769,7 +11769,7 @@ proxies:
             .expect("startup reconcile should complete");
 
         let sessions = restarted
-            .list_sessions(profile_id, None)
+            .list_sessions(project_id, None)
             .await
             .expect("sessions should list");
         assert_eq!(sessions.sessions.len(), 1);
@@ -11800,14 +11800,14 @@ proxies:
 
     #[tokio::test]
     async fn open_batch_surfaces_invalid_request_errors() {
-        let profile_id = "p-batch-invalid";
+        let project_id = "p-batch-invalid";
         let store = Arc::new(MemoryStore::new());
         store
-            .replace_subscription(profile_id, &[make_node("node-a", "1.1.1.1")])
+            .replace_subscription(project_id, &[make_node("node-a", "1.1.1.1")])
             .await
             .expect("seed subscription should succeed");
         store
-            .replace_ip_records(profile_id, &[sample_ip("1.1.1.1", None)])
+            .replace_ip_records(project_id, &[sample_ip("1.1.1.1", None)])
             .await
             .expect("seed ip records should succeed");
 
@@ -11816,7 +11816,7 @@ proxies:
 
         let err = service
             .open_batch(
-                profile_id,
+                project_id,
                 &OpenBatchRequest {
                     requests: vec![OpenSessionRequest {
                         desired_port: Some(0),
@@ -11836,40 +11836,40 @@ proxies:
     }
 
     #[tokio::test]
-    async fn create_profile_trims_and_lists_empty_profile() {
+    async fn create_project_trims_and_lists_empty_project() {
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
 
         let created = service
-            .create_profile("  fresh-lab  ")
+            .create_project("  fresh-lab  ")
             .await
             .expect("create should succeed");
-        assert_eq!(created.profile_id, "fresh-lab");
+        assert_eq!(created.project_id, "fresh-lab");
 
-        let profiles = service
-            .list_profiles()
+        let projects = service
+            .list_projects()
             .await
             .expect("list should succeed")
-            .profiles;
-        assert_eq!(profiles, vec!["fresh-lab"]);
+            .projects;
+        assert_eq!(projects, vec!["fresh-lab"]);
     }
 
     #[tokio::test]
-    async fn create_profile_rejects_duplicates() {
+    async fn create_project_rejects_duplicates() {
         let store = Arc::new(MemoryStore::new());
         store
-            .create_profile("default", 1)
+            .create_project("default", 1)
             .await
             .expect("seed create should succeed");
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
 
         let err = service
-            .create_profile("default")
+            .create_project("default")
             .await
             .expect_err("duplicate create should fail");
-        assert!(matches!(err, BrokerError::ProfileExists));
+        assert!(matches!(err, BrokerError::ProjectExists));
     }
 
     fn sample_ip(ip: &str, last_used_at: Option<i64>) -> IpRecord {
@@ -12526,7 +12526,7 @@ proxies:
 
     #[tokio::test]
     async fn load_subscription_registers_sync_config_and_queues_post_load_task() {
-        let profile_id = "p-tasks";
+        let project_id = "p-tasks";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
@@ -12541,7 +12541,7 @@ proxies:
         .await;
 
         let response = service
-            .load_subscription(profile_id, &SubscriptionSource::File(source_path.clone()))
+            .load_subscription(project_id, &SubscriptionSource::File(source_path.clone()))
             .await
             .expect("load should succeed");
 
@@ -12550,7 +12550,7 @@ proxies:
         assert_eq!(response.loaded_proxies, 1);
 
         let config = store
-            .get_profile_sync_config(profile_id)
+            .get_project_sync_config(project_id)
             .await
             .expect("sync config query should succeed")
             .expect("sync config should be persisted");
@@ -12559,7 +12559,7 @@ proxies:
 
         let tasks = service
             .list_tasks(&TaskListQuery {
-                profile_id: Some(profile_id.to_string()),
+                project_id: Some(project_id.to_string()),
                 ..TaskListQuery::default()
             })
             .await
@@ -12580,7 +12580,7 @@ proxies:
 
     #[tokio::test]
     async fn load_subscription_skips_post_load_task_when_full_refresh_is_pending() {
-        let profile_id = "p-tasks-with-full-refresh";
+        let project_id = "p-tasks-with-full-refresh";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
@@ -12596,7 +12596,7 @@ proxies:
 
         service
             .enqueue_task_run(
-                profile_id,
+                project_id,
                 TaskRunKind::MetadataRefreshFull,
                 TaskRunTrigger::Schedule,
                 TaskRunScope::All,
@@ -12605,7 +12605,7 @@ proxies:
             .expect("full refresh queue should succeed");
 
         service
-            .load_subscription(profile_id, &SubscriptionSource::File(source_path.clone()))
+            .load_subscription(project_id, &SubscriptionSource::File(source_path.clone()))
             .await
             .expect("load should succeed");
 
@@ -12613,7 +12613,7 @@ proxies:
 
         let tasks = service
             .list_tasks(&TaskListQuery {
-                profile_id: Some(profile_id.to_string()),
+                project_id: Some(project_id.to_string()),
                 ..TaskListQuery::default()
             })
             .await
@@ -12625,7 +12625,7 @@ proxies:
 
     #[tokio::test]
     async fn load_subscription_preserves_existing_auto_refresh_due_times() {
-        let profile_id = "p-tasks-preserve-due-at";
+        let project_id = "p-tasks-preserve-due-at";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
@@ -12640,7 +12640,7 @@ proxies:
         .await;
         let source = SubscriptionSource::File(source_path.clone());
         let import_id = service.proxy_import_id(
-            &ProxyScope::profile(profile_id),
+            &ProxyScope::project(project_id),
             &service.proxy_import_source_identity(&source),
         );
         let now = now_epoch_sec();
@@ -12648,9 +12648,9 @@ proxies:
         let expected_full_due_at = now + 456;
 
         store
-            .upsert_profile_sync_config(&ProfileSyncConfig {
+            .upsert_project_sync_config(&ProjectSyncConfig {
                 import_id: import_id.clone(),
-                profile_id: profile_id.to_string(),
+                project_id: project_id.to_string(),
                 source: source.clone(),
                 enabled: true,
                 sync_every_sec: DEFAULT_AUTO_SYNC_EVERY_SEC,
@@ -12667,7 +12667,7 @@ proxies:
             .expect("sync config seed should succeed");
 
         service
-            .load_subscription(profile_id, &source)
+            .load_subscription(project_id, &source)
             .await
             .expect("load should succeed");
 
@@ -12684,7 +12684,7 @@ proxies:
 
     #[tokio::test]
     async fn load_subscription_advances_overdue_sync_due_without_moving_full_refresh_due_at() {
-        let profile_id = "p-tasks-preserve-overdue-full-refresh-due-at";
+        let project_id = "p-tasks-preserve-overdue-full-refresh-due-at";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
@@ -12699,15 +12699,15 @@ proxies:
         .await;
         let source = SubscriptionSource::File(source_path.clone());
         let import_id = service.proxy_import_id(
-            &ProxyScope::profile(profile_id),
+            &ProxyScope::project(project_id),
             &service.proxy_import_source_identity(&source),
         );
         let now = now_epoch_sec();
 
         store
-            .upsert_profile_sync_config(&ProfileSyncConfig {
+            .upsert_project_sync_config(&ProjectSyncConfig {
                 import_id: import_id.clone(),
-                profile_id: profile_id.to_string(),
+                project_id: project_id.to_string(),
                 source: source.clone(),
                 enabled: true,
                 sync_every_sec: DEFAULT_AUTO_SYNC_EVERY_SEC,
@@ -12724,7 +12724,7 @@ proxies:
             .expect("sync config seed should succeed");
 
         service
-            .load_subscription(profile_id, &source)
+            .load_subscription(project_id, &source)
             .await
             .expect("load should succeed");
 
@@ -12741,7 +12741,7 @@ proxies:
 
     #[tokio::test]
     async fn load_subscription_creates_post_load_task_even_when_no_new_ips_arrive() {
-        let profile_id = "p-tasks-no-new-ips";
+        let project_id = "p-tasks-no-new-ips";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
@@ -12756,12 +12756,12 @@ proxies:
         .await;
 
         service
-            .load_subscription(profile_id, &SubscriptionSource::File(source_path.clone()))
+            .load_subscription(project_id, &SubscriptionSource::File(source_path.clone()))
             .await
             .expect("first load should succeed");
         let mut existing_runs = store
             .list_task_runs(&TaskListQuery {
-                profile_id: Some(profile_id.to_string()),
+                project_id: Some(project_id.to_string()),
                 ..TaskListQuery::default()
             })
             .await
@@ -12775,7 +12775,7 @@ proxies:
             .await
             .expect("task run update should succeed");
         service
-            .load_subscription(profile_id, &SubscriptionSource::File(source_path.clone()))
+            .load_subscription(project_id, &SubscriptionSource::File(source_path.clone()))
             .await
             .expect("second load should succeed");
 
@@ -12783,7 +12783,7 @@ proxies:
 
         let tasks = service
             .list_tasks(&TaskListQuery {
-                profile_id: Some(profile_id.to_string()),
+                project_id: Some(project_id.to_string()),
                 ..TaskListQuery::default()
             })
             .await
@@ -12797,7 +12797,7 @@ proxies:
 
     #[tokio::test]
     async fn failed_full_refresh_advances_due_at_before_retry() {
-        let profile_id = "p-tasks-full-refresh-retry";
+        let project_id = "p-tasks-full-refresh-retry";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::with_failures(true, false));
         let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
@@ -12813,24 +12813,24 @@ proxies:
         let now = now_epoch_sec();
 
         service
-            .load_subscription(profile_id, &SubscriptionSource::File(source_path.clone()))
+            .load_subscription(project_id, &SubscriptionSource::File(source_path.clone()))
             .await
             .expect("load should succeed");
 
         let mut config = store
-            .get_profile_sync_config(profile_id)
+            .get_project_sync_config(project_id)
             .await
             .expect("sync config query should succeed")
             .expect("sync config should exist");
         config.last_full_refresh_due_at = Some(now - 1);
         store
-            .upsert_profile_sync_config(&config)
+            .upsert_project_sync_config(&config)
             .await
             .expect("sync config update should succeed");
 
         let mut run = service
             .enqueue_task_run(
-                profile_id,
+                project_id,
                 TaskRunKind::MetadataRefreshFull,
                 TaskRunTrigger::Schedule,
                 TaskRunScope::All,
@@ -12851,7 +12851,7 @@ proxies:
         let _ = tokio::fs::remove_file(&source_path).await;
 
         let config = store
-            .get_profile_sync_config(profile_id)
+            .get_project_sync_config(project_id)
             .await
             .expect("sync config query should succeed")
             .expect("sync config should persist");
@@ -12866,7 +12866,7 @@ proxies:
 
     #[tokio::test]
     async fn failed_subscription_sync_advances_due_at_before_retry() {
-        let profile_id = "p-tasks-sync-retry";
+        let project_id = "p-tasks-sync-retry";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::with_failures(true, false));
         let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
@@ -12882,7 +12882,7 @@ proxies:
         let now = now_epoch_sec();
 
         service
-            .load_subscription(profile_id, &SubscriptionSource::File(source_path.clone()))
+            .load_subscription(project_id, &SubscriptionSource::File(source_path.clone()))
             .await
             .expect("initial load should succeed");
         tokio::fs::write(
@@ -12901,19 +12901,19 @@ proxies:
         .expect("subscription rewrite should succeed");
 
         let mut config = store
-            .get_profile_sync_config(profile_id)
+            .get_project_sync_config(project_id)
             .await
             .expect("sync config query should succeed")
             .expect("sync config should exist");
         config.last_sync_due_at = Some(now - 1);
         store
-            .upsert_profile_sync_config(&config)
+            .upsert_project_sync_config(&config)
             .await
             .expect("sync config update should succeed");
 
         let mut run = service
             .enqueue_task_run(
-                profile_id,
+                project_id,
                 TaskRunKind::SubscriptionSync,
                 TaskRunTrigger::Schedule,
                 TaskRunScope::All,
@@ -12934,7 +12934,7 @@ proxies:
         let _ = tokio::fs::remove_file(&source_path).await;
 
         let config = store
-            .get_profile_sync_config(profile_id)
+            .get_project_sync_config(project_id)
             .await
             .expect("sync config query should succeed")
             .expect("sync config should persist");
@@ -12947,16 +12947,16 @@ proxies:
 
     #[tokio::test]
     async fn failed_subscription_sync_only_advances_attempted_imports() {
-        let profile_id = "p-tasks-sync-partial-failure";
+        let project_id = "p-tasks-sync-partial-failure";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
         let now = now_epoch_sec();
 
         store
-            .create_profile(profile_id, now)
+            .create_project(project_id, now)
             .await
-            .expect("profile create should succeed");
+            .expect("project create should succeed");
 
         let first_source_path = write_subscription_file(
             r#"
@@ -12994,7 +12994,7 @@ proxies:
         .into_iter()
         .map(|source| {
             let import_id = service.proxy_import_id(
-                &ProxyScope::profile(profile_id),
+                &ProxyScope::project(project_id),
                 &service.proxy_import_source_identity(&source),
             );
             (source, import_id)
@@ -13012,9 +13012,9 @@ proxies:
 
         for (source, import_id) in &imports {
             store
-                .upsert_profile_sync_config(&ProfileSyncConfig {
+                .upsert_project_sync_config(&ProjectSyncConfig {
                     import_id: import_id.clone(),
-                    profile_id: profile_id.to_string(),
+                    project_id: project_id.to_string(),
                     source: source.clone(),
                     enabled: true,
                     sync_every_sec: DEFAULT_AUTO_SYNC_EVERY_SEC,
@@ -13033,7 +13033,7 @@ proxies:
 
         let mut run = service
             .enqueue_task_run(
-                profile_id,
+                project_id,
                 TaskRunKind::SubscriptionSync,
                 TaskRunTrigger::Schedule,
                 TaskRunScope::All,
@@ -13083,7 +13083,7 @@ proxies:
 
     #[tokio::test]
     async fn load_subscription_coalesces_post_load_task_scope() {
-        let profile_id = "p-tasks-coalesce";
+        let project_id = "p-tasks-coalesce";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
@@ -13110,11 +13110,11 @@ proxies:
         .await;
 
         service
-            .load_subscription(profile_id, &SubscriptionSource::File(first_source.clone()))
+            .load_subscription(project_id, &SubscriptionSource::File(first_source.clone()))
             .await
             .expect("first load should succeed");
         service
-            .load_subscription(profile_id, &SubscriptionSource::File(second_source.clone()))
+            .load_subscription(project_id, &SubscriptionSource::File(second_source.clone()))
             .await
             .expect("second load should succeed");
 
@@ -13123,7 +13123,7 @@ proxies:
 
         let tasks = store
             .list_task_runs(&TaskListQuery {
-                profile_id: Some(profile_id.to_string()),
+                project_id: Some(project_id.to_string()),
                 ..TaskListQuery::default()
             })
             .await
@@ -13144,7 +13144,7 @@ proxies:
 
     #[tokio::test]
     async fn load_subscription_queues_follow_up_post_load_task_when_incremental_is_running() {
-        let profile_id = "p-tasks-follow-up-while-running";
+        let project_id = "p-tasks-follow-up-while-running";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
@@ -13171,13 +13171,13 @@ proxies:
         .await;
 
         service
-            .load_subscription(profile_id, &SubscriptionSource::File(first_source.clone()))
+            .load_subscription(project_id, &SubscriptionSource::File(first_source.clone()))
             .await
             .expect("first load should succeed");
 
         let mut run = store
             .list_task_runs(&TaskListQuery {
-                profile_id: Some(profile_id.to_string()),
+                project_id: Some(project_id.to_string()),
                 ..TaskListQuery::default()
             })
             .await
@@ -13194,7 +13194,7 @@ proxies:
             .expect("task run update should succeed");
 
         service
-            .load_subscription(profile_id, &SubscriptionSource::File(second_source.clone()))
+            .load_subscription(project_id, &SubscriptionSource::File(second_source.clone()))
             .await
             .expect("second load should succeed");
 
@@ -13203,7 +13203,7 @@ proxies:
 
         let tasks = store
             .list_task_runs(&TaskListQuery {
-                profile_id: Some(profile_id.to_string()),
+                project_id: Some(project_id.to_string()),
                 ..TaskListQuery::default()
             })
             .await
@@ -13234,17 +13234,17 @@ proxies:
     }
 
     #[tokio::test]
-    async fn enqueue_due_tasks_queues_sync_then_full_refresh_for_due_profile() {
-        let profile_id = "p-schedule";
+    async fn enqueue_due_tasks_queues_sync_then_full_refresh_for_due_project() {
+        let project_id = "p-schedule";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
         let now = now_epoch_sec();
 
         store
-            .upsert_profile_sync_config(&ProfileSyncConfig {
-                import_id: format!("import::{profile_id}"),
-                profile_id: profile_id.to_string(),
+            .upsert_project_sync_config(&ProjectSyncConfig {
+                import_id: format!("import::{project_id}"),
+                project_id: project_id.to_string(),
                 source: SubscriptionSource::Url("https://example.com/subscription".to_string()),
                 enabled: true,
                 sync_every_sec: DEFAULT_AUTO_SYNC_EVERY_SEC,
@@ -13267,7 +13267,7 @@ proxies:
 
         let tasks = service
             .list_tasks(&TaskListQuery {
-                profile_id: Some(profile_id.to_string()),
+                project_id: Some(project_id.to_string()),
                 ..TaskListQuery::default()
             })
             .await
@@ -13338,7 +13338,7 @@ proxies:
 
         let tasks = store
             .list_task_runs(&TaskListQuery {
-                profile_id: Some(GLOBAL_RUNTIME_PROFILE_ID.to_string()),
+                project_id: Some(GLOBAL_RUNTIME_PROJECT_ID.to_string()),
                 kind: Some(TaskRunKind::ProxyLatencyProbe),
                 trigger: Some(TaskRunTrigger::Schedule),
                 ..TaskListQuery::default()
@@ -13381,11 +13381,11 @@ proxies:
     }
 
     #[test]
-    fn dispatch_sort_keeps_due_sync_before_full_refresh_for_same_profile() {
+    fn dispatch_sort_keeps_due_sync_before_full_refresh_for_same_project() {
         let mut runs = vec![
             TaskRunRecord {
                 run_id: "zzz".to_string(),
-                profile_id: "profile-a".to_string(),
+                project_id: "project-a".to_string(),
                 kind: TaskRunKind::MetadataRefreshFull,
                 trigger: TaskRunTrigger::Schedule,
                 status: TaskRunStatus::Queued,
@@ -13402,7 +13402,7 @@ proxies:
             },
             TaskRunRecord {
                 run_id: "aaa".to_string(),
-                profile_id: "profile-a".to_string(),
+                project_id: "project-a".to_string(),
                 kind: TaskRunKind::SubscriptionSync,
                 trigger: TaskRunTrigger::Schedule,
                 status: TaskRunStatus::Queued,
@@ -13427,7 +13427,7 @@ proxies:
 
     #[tokio::test]
     async fn subscription_sync_defers_incremental_refresh_when_full_refresh_is_queued() {
-        let profile_id = "p-sync-deferred";
+        let project_id = "p-sync-deferred";
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
@@ -13443,9 +13443,9 @@ proxies:
         let now = now_epoch_sec();
 
         store
-            .upsert_profile_sync_config(&ProfileSyncConfig {
-                import_id: format!("import::{profile_id}"),
-                profile_id: profile_id.to_string(),
+            .upsert_project_sync_config(&ProjectSyncConfig {
+                import_id: format!("import::{project_id}"),
+                project_id: project_id.to_string(),
                 source: SubscriptionSource::File(source_path.clone()),
                 enabled: true,
                 sync_every_sec: DEFAULT_AUTO_SYNC_EVERY_SEC,
@@ -13463,7 +13463,7 @@ proxies:
 
         service
             .enqueue_task_run(
-                profile_id,
+                project_id,
                 TaskRunKind::MetadataRefreshFull,
                 TaskRunTrigger::Schedule,
                 TaskRunScope::All,
@@ -13472,7 +13472,7 @@ proxies:
             .expect("full refresh queue should succeed");
         let mut sync_run = service
             .enqueue_task_run(
-                profile_id,
+                project_id,
                 TaskRunKind::SubscriptionSync,
                 TaskRunTrigger::Schedule,
                 TaskRunScope::All,
@@ -13507,7 +13507,7 @@ proxies:
         );
 
         let probe_records = store
-            .list_probe_records(profile_id)
+            .list_probe_records(project_id)
             .await
             .expect("probe record query should succeed");
         assert!(probe_records.is_empty());

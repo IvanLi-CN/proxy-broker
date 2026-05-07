@@ -16,7 +16,7 @@ Authentication defaults to `enforce`, which means the UI and protected APIs
 expect either:
 
 - a forwarded human identity that resolves to an admin user or admin group, or
-- a valid owner-scoped machine API key whose scope allows the target profile business endpoint.
+- a valid owner-scoped machine API key whose scope allows the target project business endpoint.
 
 ## Start the service
 
@@ -88,7 +88,7 @@ Machine callers use owner-scoped API keys issued through:
 
 - `POST /api/v1/api-keys`
 
-Then call profile business endpoints with either:
+Then call project business endpoints with either:
 
 - `Authorization: Bearer pbk_<key_id>_<random>`
 - `X-API-Key: pbk_<key_id>_<random>`
@@ -240,7 +240,7 @@ curl http://127.0.0.1:8080/api/v1/auth/me \
 
 ## REST API
 
-Base path: `http://127.0.0.1:8080/api/v1/profiles/{profile_id}`
+Base path: `http://127.0.0.1:8080/api/v1/projects/{project_id}`
 
 Key management base path: `http://127.0.0.1:8080/api/v1/api-keys`
 
@@ -396,14 +396,14 @@ stay disambiguated by country.
 ```json
 {
   "name": "deploy-bot",
-  "profile_scope": {
-    "kind": "selected_profiles",
-    "profile_ids": ["default"]
+  "project_scope": {
+    "kind": "selected_projects",
+    "project_ids": ["default"]
   }
 }
 ```
 
-Use `"kind": "all_profiles"` to issue a key that can access both current and future profiles.
+Use `"kind": "all_projects"` to issue a key that can access both current and future projects.
 
 ### List owner API keys
 
@@ -416,7 +416,7 @@ Use `"kind": "all_profiles"` to issue a key that can access both current and fut
 ### Machine caller example
 
 ```bash
-curl -X POST http://127.0.0.1:8080/api/v1/profiles/default/refresh \
+curl -X POST http://127.0.0.1:8080/api/v1/projects/default/refresh \
   -H "Authorization: Bearer pbk_key-Q4w8Er2Ty6Ui1Op5_A1b2C3d4E5f6G7h8J9kLm2No" \
   -H "Content-Type: application/json" \
   -d '{"force":true}'

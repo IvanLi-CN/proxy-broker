@@ -50,37 +50,37 @@
   - `is_admin`
   - `api_key_id?`
   - `api_key_owner_subject?`
-  - `api_key_profile_scope?`
-  - `profile_id?` (compatibility field; only returned for single-profile API keys)
+  - `api_key_project_scope?`
+  - `project_id?` (compatibility field; only returned for single-project API keys)
 - Error:
   - `authentication_required` (401)
   - `api_key_invalid` (401)
   - `api_key_revoked` (401)
 
-## GET /api/v1/profiles
+## GET /api/v1/projects
 
 - Change: New
 - Auth: admin human or development principal
 - Success:
-  - `profiles[]`
-  - Sorted by `profile_id` ascending
+  - `projects[]`
+  - Sorted by `project_id` ascending
 - Error:
   - `authentication_required` (401)
   - `admin_required` (403)
 
-## POST /api/v1/profiles
+## POST /api/v1/projects
 
 - Change: New
 - Auth: admin human or development principal
 - Body:
-  - `profile_id`: `string`
+  - `project_id`: `string`
 - Success:
-  - `profile_id`
+  - `project_id`
 - Error:
   - `authentication_required` (401)
   - `admin_required` (403)
-  - `invalid_request` (400) when `profile_id` is empty after `trim`
-  - `profile_exists` (409) when the exact `profile_id` already exists
+  - `invalid_request` (400) when `project_id` is empty after `trim`
+  - `project_exists` (409) when the exact `project_id` already exists
 
 ## POST /api/v1/proxies/global/subscriptions/load
 
@@ -113,8 +113,8 @@
   - other global imports remain untouched
   - source-based imports parse `profile-title`, `Content-Disposition filename/filename*`, URL/file fallback names, and `subscription-userinfo`
   - source-based imports conservatively filter informational pseudo-nodes (for example traffic/expire/notice style names) and expose those drops via `warnings[]`
-  - rebuilds effective pools for every profile with `use_global_proxies=true`
-  - does not create or update profile auto-sync schedules
+  - rebuilds effective pools for every project with `use_global_proxies=true`
+  - does not create or update project auto-sync schedules
 - Error:
   - `authentication_required` (401)
   - `admin_required` (403)
@@ -127,8 +127,8 @@
 - Change: New
 - Auth: admin human or development principal
 - Query:
-  - `scope`: `all|global|profile` (defaults to `all`)
-  - `profile_id`: required when `scope=profile`
+  - `scope`: `all|global|project` (defaults to `all`)
+  - `project_id`: required when `scope=project`
 - Success:
   - `items[]`
   - each item contains:
@@ -142,7 +142,7 @@
     - `allocation_scope`
     - `proxy_count`
     - `distinct_ip_count`
-    - `effective_profile_ids[]`
+    - `effective_project_ids[]`
     - `subscription_metadata?`
       - `source_title?`
       - `upload_bytes?`
@@ -162,15 +162,15 @@
 - Error:
   - `authentication_required` (401)
   - `admin_required` (403)
-  - `invalid_request` (400) when `scope` is invalid or `profile_id` is missing for `scope=profile`
+  - `invalid_request` (400) when `scope` is invalid or `project_id` is missing for `scope=project`
 
 ## GET /api/v1/proxies
 
 - Change: Compatibility
 - Auth: admin human or development principal
 - Query:
-  - `scope`: `all|global|profile` (defaults to `all`)
-  - `profile_id`: required when `scope=profile`
+  - `scope`: `all|global|project` (defaults to `all`)
+  - `project_id`: required when `scope=project`
 - Success:
   - `items[]`
   - each item contains:
@@ -182,7 +182,7 @@
     - `import_id`
     - `source_scope`
     - `allocation_scope`
-    - `effective_profile_ids[]`
+    - `effective_project_ids[]`
 - Notes:
   - kept for compatibility and internal detail views
   - no longer the primary admin allocation surface
@@ -190,7 +190,7 @@
 - Error:
   - `authentication_required` (401)
   - `admin_required` (403)
-  - `invalid_request` (400) when `scope` is invalid or `profile_id` is missing for `scope=profile`
+  - `invalid_request` (400) when `scope` is invalid or `project_id` is missing for `scope=project`
 
 ## PATCH /api/v1/proxy-imports/{import_id}/allocation
 
@@ -199,18 +199,18 @@
 - Body:
   - `allocation_scope`
     - `{ "type": "global" }`
-    - `{ "type": "profile", "profile_id": "..." }`
+    - `{ "type": "project", "project_id": "..." }`
 - Success:
-  - returns the updated import item with recomputed `effective_profile_ids`
+  - returns the updated import item with recomputed `effective_project_ids`
 - Notes:
   - reallocates the whole original import batch
   - for `single_node` imports this is equivalent to reassigning that one node
-  - only the affected profiles are rebuilt
+  - only the affected projects are rebuilt
 - Error:
   - `authentication_required` (401)
   - `admin_required` (403)
   - `invalid_request` (400)
-  - `profile_not_found` (404) when the target profile does not exist
+  - `project_not_found` (404) when the target project does not exist
   - `proxy_inventory_node_not_found` (404)
 
 ## PATCH /api/v1/proxies/{node_id}/allocation
@@ -220,9 +220,9 @@
 - Body:
   - `allocation_scope`
     - `{ "type": "global" }`
-    - `{ "type": "profile", "profile_id": "..." }`
+    - `{ "type": "project", "project_id": "..." }`
 - Success:
-  - returns the updated inventory item with recomputed `effective_profile_ids`
+  - returns the updated inventory item with recomputed `effective_project_ids`
 - Notes:
   - compatibility wrapper around import-level allocation
   - for nodes that belong to a subscription import, the whole original import batch is reallocated
@@ -230,7 +230,7 @@
   - `authentication_required` (401)
   - `admin_required` (403)
   - `invalid_request` (400)
-  - `profile_not_found` (404) when the target profile does not exist
+  - `project_not_found` (404) when the target project does not exist
   - `proxy_inventory_node_not_found` (404)
 
 ## DELETE /api/v1/proxy-imports/{import_id}
@@ -261,26 +261,26 @@
   - `admin_required` (403)
   - `proxy_inventory_node_not_found` (404)
 
-## GET /api/v1/profiles/{profile_id}/proxy-settings
+## GET /api/v1/projects/{project_id}/proxy-settings
 
 - Change: New
 - Auth: admin human or development principal
 - Success:
-  - `profile_id`
+  - `project_id`
   - `use_global_proxies`
 - Error:
   - `authentication_required` (401)
   - `admin_required` (403)
-  - `profile_not_found` (404)
+  - `project_not_found` (404)
 
-## PATCH /api/v1/profiles/{profile_id}/proxy-settings
+## PATCH /api/v1/projects/{project_id}/proxy-settings
 
 - Change: New
 - Auth: admin human or development principal
 - Body:
   - `use_global_proxies`: `bool`
 - Success:
-  - `profile_id`
+  - `project_id`
   - `use_global_proxies`
 - Notes:
   - toggling the flag rebuilds the effective pool immediately
@@ -288,14 +288,14 @@
   - `authentication_required` (401)
   - `admin_required` (403)
   - `invalid_request` (400)
-  - `profile_not_found` (404)
+  - `project_not_found` (404)
 
-## POST /api/v1/profiles/{profile_id}/subscriptions/load
+## POST /api/v1/projects/{project_id}/subscriptions/load
 
 - Change: Updated
 - Auth:
   - admin human or development principal
-  - API key whose scope allows `{profile_id}`
+  - API key whose scope allows `{project_id}`
 - Body:
   - `name?`: optional import display name
   - exactly one of:
@@ -303,10 +303,10 @@
     - `source.value`: `string`
     - `content`: raw Clash-compatible `proxies:` YAML or plain proxy list for one manual node group
 - Notes:
-  - upserts one original import inside the current profile-local inventory scope and then rebuilds the effective pool for `{profile_id}`
+  - upserts one original import inside the current project-local inventory scope and then rebuilds the effective pool for `{project_id}`
   - only replaces nodes that belong to the same original import batch
-  - other profile-local imports in the same profile remain untouched
-  - profile-local imports register auto-sync state per `import_id`, so multiple subscriptions can coexist without overwriting each other
+  - other project-local imports in the same project remain untouched
+  - project-local imports register auto-sync state per `import_id`, so multiple subscriptions can coexist without overwriting each other
   - manual node-group loads do not register auto-sync config and always create a fresh original import batch
   - `source.type=url` is fetched server-side with a compatibility UA fallback
     set, currently trying `Clash.Meta/1.18.3`, `mihomo/1.18.3`, then
@@ -332,19 +332,19 @@
   - `admin_required` (403) for non-admin human callers
   - `api_key_invalid` (401)
   - `api_key_revoked` (401)
-  - `profile_access_denied` (403)
+  - `project_access_denied` (403)
   - `invalid_request` (400) when JSON body is malformed
   - `subscription_invalid` (400) when the upstream returns 2xx but the payload
     is not a supported Clash/Mihomo subscription
   - `subscription_fetch_failed` (502) when the upstream URL is unreachable or
     returns non-2xx
 
-## POST /api/v1/profiles/{profile_id}/refresh
+## POST /api/v1/projects/{project_id}/refresh
 
 - Change: New
 - Auth:
   - admin human or development principal
-  - API key whose scope allows `{profile_id}`
+  - API key whose scope allows `{project_id}`
 - Body (optional):
   - `force`: `bool`
 - Success:
@@ -354,15 +354,15 @@
   - `admin_required` (403) for non-admin human callers
   - `api_key_invalid` (401)
   - `api_key_revoked` (401)
-  - `profile_access_denied` (403)
+  - `project_access_denied` (403)
   - `invalid_request` (400) when JSON body is malformed
 
-## POST /api/v1/profiles/{profile_id}/ips/extract
+## POST /api/v1/projects/{project_id}/ips/extract
 
 - Change: New
 - Auth:
   - admin human or development principal
-  - API key whose scope allows `{profile_id}`
+  - API key whose scope allows `{project_id}`
 - Body:
   - `country_codes`: `string[]`
   - `cities`: `string[]`
@@ -377,16 +377,16 @@
   - `admin_required` (403) for non-admin human callers
   - `api_key_invalid` (401)
   - `api_key_revoked` (401)
-  - `profile_access_denied` (403)
+  - `project_access_denied` (403)
   - `invalid_request` (400) when JSON body is malformed
   - `ip_conflict_blacklist` (400)
 
-## POST /api/v1/profiles/{profile_id}/ips/options/search
+## POST /api/v1/projects/{project_id}/ips/options/search
 
 - Change: New
 - Auth:
   - admin human or development principal
-  - API key whose scope allows `{profile_id}`
+  - API key whose scope allows `{project_id}`
 - Body:
   - `kind`: `country|city|ip`
   - `query`: `string?`
@@ -405,15 +405,15 @@
   - `admin_required` (403) for non-admin human callers
   - `api_key_invalid` (401)
   - `api_key_revoked` (401)
-  - `profile_access_denied` (403)
+  - `project_access_denied` (403)
   - `invalid_request` (400) when JSON body is malformed
 
-## POST /api/v1/profiles/{profile_id}/sessions/open
+## POST /api/v1/projects/{project_id}/sessions/open
 
 - Change: New
 - Auth:
   - admin human or development principal
-  - API key whose scope allows `{profile_id}`
+  - API key whose scope allows `{project_id}`
 - Body:
   - `selection_mode`: `any|geo|ip` (defaults to `any`)
   - `country_codes`: `string[]`
@@ -446,18 +446,18 @@
   - `admin_required` (403) for non-admin human callers
   - `api_key_invalid` (401)
   - `api_key_revoked` (401)
-  - `profile_access_denied` (403)
+  - `project_access_denied` (403)
   - `invalid_request` (400) when JSON body is malformed
   - `invalid_port` (400)
   - `ip_not_found` (404)
   - `ip_conflict_blacklist` (400)
 
-## POST /api/v1/profiles/{profile_id}/sessions/open-batch
+## POST /api/v1/projects/{project_id}/sessions/open-batch
 
 - Change: New
 - Auth:
   - admin human or development principal
-  - API key whose scope allows `{profile_id}`
+  - API key whose scope allows `{project_id}`
 - Body:
   - `requests[]`: same shape and constraints as `POST /sessions/open`
 - Success:
@@ -467,23 +467,23 @@
   - `admin_required` (403) for non-admin human callers
   - `api_key_invalid` (401)
   - `api_key_revoked` (401)
-  - `profile_access_denied` (403)
+  - `project_access_denied` (403)
   - `invalid_request` (400) when JSON body is malformed
   - `invalid_port` (400)
   - `ip_not_found` (404)
   - `ip_conflict_blacklist` (400)
   - `batch_open_failed` (409), strict rollback for runtime/persist stage failures
 
-## GET /api/v1/profiles/{profile_id}/sessions/suggested-port
+## GET /api/v1/projects/{project_id}/sessions/suggested-port
 
 - Change: New
 - Auth:
   - admin human or development principal
-  - API key whose scope allows `{profile_id}`
+  - API key whose scope allows `{project_id}`
 - Success:
   - `port`
 - Notes:
-  - returns the next available listener port suggestion for the profile
+  - returns the next available listener port suggestion for the project
   - the port is not reserved; callers must still omit `desired_port` or submit
     a real value when opening the session
 - Error:
@@ -491,14 +491,14 @@
   - `admin_required` (403) for non-admin human callers
   - `api_key_invalid` (401)
   - `api_key_revoked` (401)
-  - `profile_access_denied` (403)
+  - `project_access_denied` (403)
 
-## GET /api/v1/profiles/{profile_id}/sessions
+## GET /api/v1/projects/{project_id}/sessions
 
 - Change: New
 - Auth:
   - admin human or development principal
-  - API key whose scope allows `{profile_id}`
+  - API key whose scope allows `{project_id}`
 - Success:
   - `sessions[]`
   - each item carries `listen`, `bind_host`, `display_host`, `display_address`,
@@ -510,21 +510,21 @@
   - `admin_required` (403) for non-admin human callers
   - `api_key_invalid` (401)
   - `api_key_revoked` (401)
-  - `profile_access_denied` (403)
+  - `project_access_denied` (403)
 
-## DELETE /api/v1/profiles/{profile_id}/sessions/{session_id}
+## DELETE /api/v1/projects/{project_id}/sessions/{session_id}
 
 - Change: New
 - Auth:
   - admin human or development principal
-  - API key whose scope allows `{profile_id}`
+  - API key whose scope allows `{project_id}`
 - Success: 204
 - Error:
   - `authentication_required` (401)
   - `admin_required` (403) for non-admin human callers
   - `api_key_invalid` (401)
   - `api_key_revoked` (401)
-  - `profile_access_denied` (403)
+  - `project_access_denied` (403)
 
 ## GET /api/v1/api-keys
 
@@ -532,8 +532,8 @@
 - Auth: admin human or development principal
 - Success:
   - `api_keys[]`
-  - each item contains `key_id`, `name`, `prefix`, `created_by`, `owner_subject`, `profile_scope`, `created_at`, `last_used_at?`, `revoked_at?`
-  - `profile_id?` is a compatibility field and only appears when `profile_scope.kind=selected_profiles` with exactly one selected profile
+  - each item contains `key_id`, `name`, `prefix`, `created_by`, `owner_subject`, `project_scope`, `created_at`, `last_used_at?`, `revoked_at?`
+  - `project_id?` is a compatibility field and only appears when `project_scope.kind=selected_projects` with exactly one selected project
   - `key_id` is an opaque short string (`key-<16 alnum chars>`)
 - Error:
   - `authentication_required` (401)
@@ -545,8 +545,8 @@
 - Auth: admin human or development principal
 - Body:
   - `name`: `string`
-  - `profile_scope.kind`: `selected_profiles|all_profiles`
-  - `profile_scope.profile_ids[]`: required for `selected_profiles`, forbidden for `all_profiles`
+  - `project_scope.kind`: `selected_projects|all_projects`
+  - `project_scope.project_ids[]`: required for `selected_projects`, forbidden for `all_projects`
 - Success:
   - `api_key`
   - `secret`
@@ -558,7 +558,7 @@
   - `authentication_required` (401)
   - `admin_required` (403)
   - `invalid_request` (400) when `name` is empty after `trim`
-  - `invalid_request` (400) when `profile_scope` is malformed, `selected_profiles` is empty, `all_profiles` includes `profile_ids`, or any referenced profile does not exist
+  - `invalid_request` (400) when `project_scope` is malformed, `selected_projects` is empty, `all_projects` includes `project_ids`, or any referenced project does not exist
 
 ## DELETE /api/v1/api-keys/{key_id}
 

@@ -10,9 +10,9 @@ pub enum TaskBusEvent {
 }
 
 pub fn matches_task_query(run: &TaskRunSummary, query: &TaskListQuery) -> bool {
-    if let Some(profile_id) = &query.profile_id
-        && profile_id != "all"
-        && &run.profile_id != profile_id
+    if let Some(project_id) = &query.project_id
+        && project_id != "all"
+        && &run.project_id != project_id
     {
         return false;
     }
@@ -124,18 +124,18 @@ mod tests {
     use super::*;
     use crate::models::{TaskRunKind, TaskRunStage, TaskRunTrigger};
 
-    fn sample_run_id(profile_id: &str) -> &'static str {
-        match profile_id {
+    fn sample_run_id(project_id: &str) -> &'static str {
+        match project_id {
             "default" => "run-H6r2Lp8XmQ4Tn7Vc",
             "edge-jp" => "run-P4v8Kb2Yt7Lm1Cx5",
             _ => "run-R6m2Hd8Wp3Qs9Ty4",
         }
     }
 
-    fn sample_run(profile_id: &str, kind: TaskRunKind, status: TaskRunStatus) -> TaskRunSummary {
+    fn sample_run(project_id: &str, kind: TaskRunKind, status: TaskRunStatus) -> TaskRunSummary {
         TaskRunSummary {
-            run_id: sample_run_id(profile_id).to_string(),
-            profile_id: profile_id.to_string(),
+            run_id: sample_run_id(project_id).to_string(),
+            project_id: project_id.to_string(),
             kind,
             trigger: TaskRunTrigger::Schedule,
             status,
@@ -152,21 +152,21 @@ mod tests {
     }
 
     #[test]
-    fn matches_task_query_treats_all_profile_as_aggregate_scope() {
+    fn matches_task_query_treats_all_project_as_aggregate_scope() {
         let run = sample_run(
             "edge-jp",
             TaskRunKind::MetadataRefreshFull,
             TaskRunStatus::Succeeded,
         );
         let query = TaskListQuery {
-            profile_id: Some("all".to_string()),
+            project_id: Some("all".to_string()),
             ..TaskListQuery::default()
         };
         assert!(matches_task_query(&run, &query));
     }
 
     #[test]
-    fn matches_task_query_applies_non_profile_filters() {
+    fn matches_task_query_applies_non_project_filters() {
         let run = sample_run(
             "default",
             TaskRunKind::SubscriptionSync,

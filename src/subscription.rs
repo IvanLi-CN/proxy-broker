@@ -32,7 +32,7 @@ struct ParsedResponseMetadata {
     metadata: Option<SubscriptionMetadata>,
     parsed_name: Option<String>,
     warnings: Vec<String>,
-    _profile_update_interval_sec: Option<u64>,
+    _project_update_interval_sec: Option<u64>,
 }
 
 fn decode_base64_yaml(input: &str) -> anyhow::Result<String> {
@@ -209,7 +209,7 @@ fn clean_source_title(value: &str) -> Option<String> {
     }
 }
 
-fn decode_profile_title(value: &str) -> anyhow::Result<Option<String>> {
+fn decode_project_title(value: &str) -> anyhow::Result<Option<String>> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return Ok(None);
@@ -347,7 +347,7 @@ fn parse_subscription_userinfo(value: &str) -> (Option<SubscriptionMetadata>, Op
     (metadata, warning)
 }
 
-fn parse_profile_update_interval(value: &str) -> Option<u64> {
+fn parse_project_update_interval(value: &str) -> Option<u64> {
     value.trim().parse::<u64>().ok()
 }
 
@@ -465,7 +465,7 @@ fn parse_response_metadata(
 
     let mut source_title = None;
     if let Some(raw_title) = find_header_value(headers, "profile-title", false) {
-        match decode_profile_title(&raw_title) {
+        match decode_project_title(&raw_title) {
             Ok(title) => source_title = title,
             Err(err) => {
                 warnings.push(format!("ignored invalid `profile-title` header: {err}"));
@@ -495,8 +495,8 @@ fn parse_response_metadata(
         metadata: metadata.normalized(),
         parsed_name,
         warnings,
-        _profile_update_interval_sec: find_header_value(headers, "profile-update-interval", false)
-            .and_then(|value| parse_profile_update_interval(&value)),
+        _project_update_interval_sec: find_header_value(headers, "project-update-interval", false)
+            .and_then(|value| parse_project_update_interval(&value)),
     }
 }
 
@@ -517,7 +517,7 @@ async fn fetch_url_source(
     let mut received_success_body = false;
 
     let attempts: Vec<(Option<&str>, String)> =
-        std::iter::once((None, "default request profile".to_string()))
+        std::iter::once((None, "default request project".to_string()))
             .chain(
                 SUBSCRIPTION_FETCH_USER_AGENTS
                     .iter()
@@ -892,7 +892,7 @@ proxies:
     }
 
     #[tokio::test]
-    async fn url_source_keeps_default_request_profile_before_fallbacks() {
+    async fn url_source_keeps_default_request_project_before_fallbacks() {
         let client = reqwest::Client::new();
         let app = Router::new()
             .route("/subscription", get(test_subscription_handler))
@@ -922,7 +922,7 @@ proxies:
 
         let result = load_from_source(&client, &source)
             .await
-            .expect("default request profile should still work");
+            .expect("default request project should still work");
 
         server.abort();
 
@@ -1141,12 +1141,12 @@ proxies:
         server.abort();
 
         assert!(
-            matches!(err, SubscriptionLoadError::InvalidPayload(message) if message.contains("default request profile"))
+            matches!(err, SubscriptionLoadError::InvalidPayload(message) if message.contains("default request project"))
         );
     }
 
     #[tokio::test]
-    async fn url_source_parses_profile_title_and_subscription_userinfo_metadata() {
+    async fn url_source_parses_project_title_and_subscription_userinfo_metadata() {
         let client = reqwest::Client::new();
         let mut response_headers = HeaderMap::new();
         response_headers.insert(
@@ -1200,7 +1200,7 @@ proxies:
     }
 
     #[test]
-    fn response_metadata_falls_back_to_content_disposition_when_profile_title_is_invalid() {
+    fn response_metadata_falls_back_to_content_disposition_when_project_title_is_invalid() {
         let mut headers = HeaderMap::new();
         headers.insert(
             "profile-title",

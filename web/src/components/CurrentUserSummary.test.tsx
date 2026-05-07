@@ -24,9 +24,9 @@ describe("CurrentUserSummary", () => {
             is_admin: false,
             api_key_id: "key-Q4w8Er2Ty6Ui1Op5",
             api_key_owner_subject: "admin@example.com",
-            api_key_profile_scope: {
-              kind: "selected_profiles",
-              profile_ids: ["default", "edge-jp"],
+            api_key_project_scope: {
+              kind: "selected_projects",
+              project_ids: ["default", "edge-jp"],
             },
           },
         }}

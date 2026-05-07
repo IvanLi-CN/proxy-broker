@@ -3,8 +3,8 @@
 ## GET /api/v1/proxy-catalog
 
 - Query:
-  - `view=global|profile`
-  - `profile_id` required when `view=profile`
+  - `view=global|project`
+  - `project_id` required when `view=project`
 - Success:
   - grouped imports with node rows, node metadata summary, and capability flags
   - node metadata includes legacy `last_probe_samples` and `recent_probe_samples[]`
@@ -19,8 +19,8 @@
 ## POST /api/v1/proxy-ops/refresh
 
 - Body:
-  - `view=global|profile`
-  - `profile_id?`
+  - `view=global|project`
+  - `project_id?`
   - `node_ids[]`
 - Success:
   - `202 Accepted`
@@ -29,8 +29,8 @@
 ## POST /api/v1/proxy-ops/probe
 
 - Body:
-  - `view=global|profile`
-  - `profile_id?`
+  - `view=global|project`
+  - `project_id?`
   - `node_ids[]`
 - Success:
   - `202 Accepted`
@@ -41,7 +41,7 @@
   - if every requested node is ignored, the accepted `run_id` points to a terminal `skipped` run
   - each completed sample is persisted immediately and becomes visible through `recent_probe_samples`
 
-## POST /api/v1/profiles/{profile_id}/sessions/open-by-node
+## POST /api/v1/projects/{project_id}/sessions/open-by-node
 
 - Body:
   - `node_id`
@@ -55,14 +55,14 @@
   - `node_id`
   - `candidate_node_ids`
 
-## POST /api/v1/profiles/{profile_id}/sessions/open-batch-by-node
+## POST /api/v1/projects/{project_id}/sessions/open-batch-by-node
 
 - Body:
   - `node_ids[]`
 - Success:
   - `sessions[]` with the same shape as single-open-by-node
 
-## POST /api/v1/profiles/{profile_id}/sessions/ip-node-options/search
+## POST /api/v1/projects/{project_id}/sessions/ip-node-options/search
 
 - Body:
   - `query?`
@@ -72,9 +72,9 @@
 - Success:
   - grouped IP rows with `ip`, grouping labels, usage/latency summaries, and candidate node rows
 - Notes:
-  - used by `/sessions` create and switch dialogs; rows are limited to the profile effective proxy pool
+  - used by `/sessions` create and switch dialogs; rows are limited to the project effective proxy pool
 
-## POST /api/v1/profiles/{profile_id}/sessions/open-by-ip
+## POST /api/v1/projects/{project_id}/sessions/open-by-ip
 
 - Body:
   - `selected_ip`
@@ -85,14 +85,14 @@
 - Notes:
   - active `node_id` is selected from the candidate set by availability and lowest known median latency
 
-## POST /api/v1/profiles/{profile_id}/sessions/open-batch-by-ip
+## POST /api/v1/projects/{project_id}/sessions/open-batch-by-ip
 
 - Body:
   - `requests[]` where each row matches `open-by-ip`
 - Success:
   - `sessions[]` with one session per requested IP
 
-## PATCH /api/v1/profiles/{profile_id}/sessions/{session_id}/node
+## PATCH /api/v1/projects/{project_id}/sessions/{session_id}/node
 
 - Body:
   - preferred: `selected_ip` + `candidate_node_ids[]`

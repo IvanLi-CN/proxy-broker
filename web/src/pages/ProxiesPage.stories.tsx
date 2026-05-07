@@ -7,10 +7,10 @@ import { ActionResponsePanel } from "@/components/ActionResponsePanel";
 import { AppShell } from "@/components/AppShell";
 import { Toaster } from "@/components/ui/sonner";
 import type { ProxyNodeLiveState } from "@/hooks/use-proxy-operation-events";
-import { GLOBAL_PROFILE_ID } from "@/lib/profile-selection";
+import { GLOBAL_PROJECT_ID } from "@/lib/project-selection";
 import type {
   CurrentUserState,
-  ProfileProxySettings,
+  ProjectProxySettings,
   ProxyCatalogResponse,
   ProxyNodeProbeSampleRecord,
 } from "@/lib/types";
@@ -22,7 +22,7 @@ import {
   type ProxiesPageProps,
 } from "@/pages/ProxiesPage";
 
-const profiles = ["default", "edge-jp", "lab-us"];
+const projects = ["default", "edge-jp", "lab-us"];
 
 const currentUser: CurrentUserState = {
   status: "resolved",
@@ -64,7 +64,7 @@ const proxyImportsFixture = {
         source_value: "https://example.com/global-jp.yaml",
       },
       allocation_scope: { type: "global" as const },
-      effective_profile_ids: ["default", "edge-jp", "lab-us"],
+      effective_project_ids: ["default", "edge-jp", "lab-us"],
       proxy_count: 12,
       distinct_ip_count: 9,
       subscription_metadata: {
@@ -83,13 +83,13 @@ const proxyImportsFixture = {
       import_id: "imp-V5k3Ld9Hq2Cx8Zm4",
       name: "edge-manual",
       import_kind: "single_node" as const,
-      source_scope: { type: "profile" as const, profile_id: "edge-jp" },
+      source_scope: { type: "project" as const, project_id: "edge-jp" },
       source_identity: {
         source_type: "manual",
         source_value: "imp-V5k3Ld9Hq2Cx8Zm4",
       },
-      allocation_scope: { type: "profile" as const, profile_id: "edge-jp" },
-      effective_profile_ids: ["edge-jp"],
+      allocation_scope: { type: "project" as const, project_id: "edge-jp" },
+      effective_project_ids: ["edge-jp"],
       proxy_count: 4,
       distinct_ip_count: 3,
       subscription_metadata: null,
@@ -101,7 +101,7 @@ const proxyImportsFixture = {
 
 const globalCatalogFixture: ProxyCatalogResponse = {
   view: "global",
-  profile_id: null,
+  project_id: null,
   groups: [
     {
       import: proxyImportsFixture.items[0],
@@ -115,7 +115,7 @@ const globalCatalogFixture: ProxyCatalogResponse = {
           resolved_ips: ["203.0.113.10"],
           source_scope: { type: "global" },
           allocation_scope: { type: "global" },
-          effective_profile_ids: ["default", "edge-jp", "lab-us"],
+          effective_project_ids: ["default", "edge-jp", "lab-us"],
           primary_ip: "203.0.113.10",
           can_open_session: false,
           ip_metadata: [
@@ -158,7 +158,7 @@ const globalCatalogFixture: ProxyCatalogResponse = {
           resolved_ips: ["203.0.113.88"],
           source_scope: { type: "global" },
           allocation_scope: { type: "global" },
-          effective_profile_ids: ["default", "edge-jp"],
+          effective_project_ids: ["default", "edge-jp"],
           primary_ip: "203.0.113.88",
           can_open_session: false,
           ip_metadata: [
@@ -199,9 +199,9 @@ const globalCatalogFixture: ProxyCatalogResponse = {
           proxy_type: "ss",
           server: "edge-jp.example.com:8443",
           resolved_ips: ["198.51.100.42"],
-          source_scope: { type: "profile", profile_id: "edge-jp" },
-          allocation_scope: { type: "profile", profile_id: "edge-jp" },
-          effective_profile_ids: ["edge-jp"],
+          source_scope: { type: "project", project_id: "edge-jp" },
+          allocation_scope: { type: "project", project_id: "edge-jp" },
+          effective_project_ids: ["edge-jp"],
           primary_ip: "198.51.100.42",
           can_open_session: false,
           ip_metadata: [],
@@ -211,9 +211,9 @@ const globalCatalogFixture: ProxyCatalogResponse = {
   ],
 };
 
-const profileCatalogFixture: ProxyCatalogResponse = {
-  view: "profile",
-  profile_id: "edge-jp",
+const projectCatalogFixture: ProxyCatalogResponse = {
+  view: "project",
+  project_id: "edge-jp",
   groups: globalCatalogFixture.groups.map((group) => ({
     import: group.import,
     nodes: group.nodes.map((node) => ({
@@ -252,8 +252,8 @@ const liveNodeStates: Record<string, ProxyNodeLiveState> = {
   },
 };
 
-const profileSettingsFixture: ProfileProxySettings = {
-  profile_id: "edge-jp",
+const projectSettingsFixture: ProjectProxySettings = {
+  project_id: "edge-jp",
   use_global_proxies: true,
 };
 
@@ -266,7 +266,7 @@ const meta = {
     docs: {
       description: {
         component:
-          "Unified proxy workspace that follows the current config selector. Pick Global to manage the shared pool and allocations, or pick a profile to manage local imports, grouped nodes, and node-pinned session creation.",
+          "Unified proxy workspace that follows the current project selector. Pick Global to manage the shared pool and allocations, or pick a project to manage local imports, grouped nodes, and node-pinned session creation.",
       },
     },
   },
@@ -275,23 +275,23 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-function createProfileCatalogFixture(): ProxyCatalogResponse {
+function createProjectCatalogFixture(): ProxyCatalogResponse {
   return {
-    view: profileCatalogFixture.view,
-    profile_id: profileCatalogFixture.profile_id,
-    groups: profileCatalogFixture.groups.map((group) => ({
+    view: projectCatalogFixture.view,
+    project_id: projectCatalogFixture.project_id,
+    groups: projectCatalogFixture.groups.map((group) => ({
       import: {
         ...group.import,
         source_scope: { ...group.import.source_scope },
         source_identity: { ...group.import.source_identity },
         allocation_scope: { ...group.import.allocation_scope },
-        effective_profile_ids: [...group.import.effective_profile_ids],
+        effective_project_ids: [...group.import.effective_project_ids],
       },
       nodes: group.nodes.map((node) => ({
         ...node,
         source_scope: { ...node.source_scope },
         allocation_scope: { ...node.allocation_scope },
-        effective_profile_ids: [...node.effective_profile_ids],
+        effective_project_ids: [...node.effective_project_ids],
         resolved_ips: [...node.resolved_ips],
         ip_metadata: node.ip_metadata.map((metadata) => ({
           ...metadata,
@@ -313,11 +313,11 @@ function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-function InteractiveProfileStory(args: Extract<ProxiesPageProps, { mode: "profile" }>) {
+function InteractiveProjectStory(args: Extract<ProxiesPageProps, { mode: "project" }>) {
   const [proxyCatalog, setProxyCatalog] = useState<ProxyCatalogResponse>(
-    createProfileCatalogFixture,
+    createProjectCatalogFixture,
   );
-  const [proxySettings, setProxySettings] = useState<ProfileProxySettings>(profileSettingsFixture);
+  const [proxySettings, setProxySettings] = useState<ProjectProxySettings>(projectSettingsFixture);
   const [liveState, setLiveState] =
     useState<Record<string, ProxyNodeLiveState>>(createLiveNodeStates);
   const [queueingOperation, setQueueingOperation] = useState(false);
@@ -393,16 +393,16 @@ function InteractiveProfileStory(args: Extract<ProxiesPageProps, { mode: "profil
 
   return (
     <AppShell
-      profileId="edge-jp"
-      profiles={profiles}
-      profilesLoading={false}
-      profilesCreating={false}
-      profilesError={null}
+      projectId="edge-jp"
+      projects={projects}
+      projectsLoading={false}
+      projectsCreating={false}
+      projectsError={null}
       healthStatus="ok"
       currentUser={currentUser}
-      onProfileIdChange={() => undefined}
-      onCreateProfile={async (value: string) => value}
-      onRetryProfiles={() => undefined}
+      onProjectIdChange={() => undefined}
+      onCreateProject={async (value: string) => value}
+      onRetryProjects={() => undefined}
     >
       <div className="space-y-5">
         <Toaster richColors position="top-right" />
@@ -428,13 +428,13 @@ function InteractiveProfileStory(args: Extract<ProxiesPageProps, { mode: "profil
             toast.success(nextValue ? "Global pool enabled" : "Global pool disabled", {
               description: nextValue
                 ? "edge-jp now composes inherited global nodes together with its local imports."
-                : "edge-jp now restricts the effective pool to profile-local imports only.",
+                : "edge-jp now restricts the effective pool to project-local imports only.",
             });
             setFeedback({
               title: nextValue ? "Global pool enabled" : "Global pool disabled",
               description: nextValue
                 ? "edge-jp now composes inherited global nodes together with its local imports."
-                : "edge-jp now restricts the effective pool to profile-local imports only.",
+                : "edge-jp now restricts the effective pool to project-local imports only.",
               tone: "success",
             });
           }}
@@ -452,7 +452,7 @@ function InteractiveProfileStory(args: Extract<ProxiesPageProps, { mode: "profil
             });
             toast.loading(`Refreshing ${nodeIds.length} node(s)…`, {
               description: "Mock metadata refresh is running inside this story.",
-              id: "profile-refresh",
+              id: "project-refresh",
             });
             await sleep(220);
             patchNodeMetadata(nodeIds, (nodeId) =>
@@ -461,7 +461,7 @@ function InteractiveProfileStory(args: Extract<ProxiesPageProps, { mode: "profil
             setQueueingOperation(false);
             toast.success("Metadata refresh applied", {
               description: "Selected nodes now show refreshed metadata.",
-              id: "profile-refresh",
+              id: "project-refresh",
             });
             setFeedback({
               title: "Metadata refresh applied",
@@ -474,7 +474,7 @@ function InteractiveProfileStory(args: Extract<ProxiesPageProps, { mode: "profil
             setQueueingOperation(true);
             toast.loading(`Probing ${nodeIds.length} node(s)…`, {
               description: "Watch the status column update while mock rounds progress.",
-              id: "profile-probe",
+              id: "project-probe",
             });
             setLiveState(
               Object.fromEntries(
@@ -529,7 +529,7 @@ function InteractiveProfileStory(args: Extract<ProxiesPageProps, { mode: "profil
             toast.success("Latency probe finished", {
               description:
                 "Successful nodes keep the final median; timeout-only nodes remain failed.",
-              id: "profile-probe",
+              id: "project-probe",
             });
             setFeedback({
               title: "Latency probe finished",
@@ -547,12 +547,12 @@ function InteractiveProfileStory(args: Extract<ProxiesPageProps, { mode: "profil
             }));
             setDeletingImportId(null);
             toast.success("Local import removed", {
-              description: `${importId} was removed from this profile-only story state.`,
+              description: `${importId} was removed from this project-only story state.`,
             });
             setFeedback({
               title: "Local import removed",
               description:
-                "The local node-group import was deleted from this profile view. Inherited global imports remain protected here.",
+                "The local node-group import was deleted from this project view. Inherited global imports remain protected here.",
               tone: "success",
             });
           }}
@@ -603,7 +603,7 @@ function InteractiveProfileStory(args: Extract<ProxiesPageProps, { mode: "profil
               tone: "success",
             });
           }}
-          onLoadProfile={async () => {
+          onLoadProject={async () => {
             toast.success("Local import form submitted", {
               description:
                 "The form stays non-destructive in Storybook, but the grouped-node controls below are fully interactive.",
@@ -622,41 +622,41 @@ function InteractiveProfileStory(args: Extract<ProxiesPageProps, { mode: "profil
 }
 
 function renderInShell(storyArgs: Story["args"]) {
-  const profileId = storyArgs?.mode === "profile" ? storyArgs.profileId : GLOBAL_PROFILE_ID;
+  const projectId = storyArgs?.mode === "project" ? storyArgs.projectId : GLOBAL_PROJECT_ID;
   return (
     <AppShell
-      profileId={profileId}
-      profiles={profiles}
-      profilesLoading={false}
-      profilesCreating={false}
-      profilesError={null}
+      projectId={projectId}
+      projects={projects}
+      projectsLoading={false}
+      projectsCreating={false}
+      projectsError={null}
       healthStatus="ok"
       currentUser={currentUser}
-      onProfileIdChange={() => undefined}
-      onCreateProfile={async (value: string) => value}
-      onRetryProfiles={() => undefined}
+      onProjectIdChange={() => undefined}
+      onCreateProject={async (value: string) => value}
+      onRetryProjects={() => undefined}
     >
       <ProxiesPage {...storyArgs} />
     </AppShell>
   );
 }
 
-function renderProfileSurface(
-  storyArgs: Extract<ProxiesPageProps, { mode: "profile" }>,
+function renderProjectSurface(
+  storyArgs: Extract<ProxiesPageProps, { mode: "project" }>,
   overlay?: ReactNode,
 ) {
   return (
     <AppShell
-      profileId={storyArgs.profileId}
-      profiles={profiles}
-      profilesLoading={false}
-      profilesCreating={false}
-      profilesError={null}
+      projectId={storyArgs.projectId}
+      projects={projects}
+      projectsLoading={false}
+      projectsCreating={false}
+      projectsError={null}
       healthStatus="ok"
       currentUser={currentUser}
-      onProfileIdChange={() => undefined}
-      onCreateProfile={async (value: string) => value}
-      onRetryProfiles={() => undefined}
+      onProjectIdChange={() => undefined}
+      onCreateProject={async (value: string) => value}
+      onRetryProjects={() => undefined}
     >
       <div className="contents">
         <ProxiesPage {...storyArgs} />
@@ -666,10 +666,10 @@ function renderProfileSurface(
   );
 }
 
-export const GlobalConfig: Story = {
+export const GlobalProject: Story = {
   args: {
     mode: "global",
-    profiles,
+    projects,
     currentUser,
     accessDenied: false,
     authError: null,
@@ -727,12 +727,12 @@ export const GlobalConfig: Story = {
   },
 };
 
-export const ProfileConfig: Story = {
+export const ConcreteProject: Story = {
   args: {
-    mode: "profile",
-    profileId: "edge-jp",
+    mode: "project",
+    projectId: "edge-jp",
     currentUser,
-    profileLoadResponse: {
+    projectLoadResponse: {
       loaded_proxies: 4,
       distinct_ips: 3,
       resolved_name: "edge-feed",
@@ -746,17 +746,17 @@ export const ProfileConfig: Story = {
       },
       warnings: ["filtered informational subscription entry `剩余流量 42GB`"],
     },
-    profileLoadError: null,
-    loadingProfile: false,
+    projectLoadError: null,
+    loadingProject: false,
     proxySettings: {
-      profile_id: "edge-jp",
+      project_id: "edge-jp",
       use_global_proxies: true,
     },
     proxySettingsLoading: false,
     proxySettingsError: null,
     updatingSettings: false,
     showProxyPolicy: true,
-    proxyCatalog: profileCatalogFixture,
+    proxyCatalog: projectCatalogFixture,
     proxyCatalogLoading: false,
     proxyCatalogError: null,
     liveConnectionState: "connected",
@@ -765,7 +765,7 @@ export const ProfileConfig: Story = {
     suggestedPort: 10080,
     openingSessionNodeId: null,
     openingBatch: false,
-    onLoadProfile: fn(),
+    onLoadProject: fn(),
     onToggleUseGlobalProxies: fn(),
     onRefreshNodes: fn(),
     onProbeNodes: fn(),
@@ -775,12 +775,12 @@ export const ProfileConfig: Story = {
     deletingImportId: null,
   },
   render: (args) => (
-    <InteractiveProfileStory {...(args as Extract<ProxiesPageProps, { mode: "profile" }>)} />
+    <InteractiveProjectStory {...(args as Extract<ProxiesPageProps, { mode: "project" }>)} />
   ),
   async play({ canvasElement }) {
     const canvas = within(canvasElement);
     const dialog = within(canvasElement.ownerDocument.body);
-    await expect(await canvas.findByText(/Current profile grouped nodes/i)).toBeVisible();
+    await expect(await canvas.findByText(/Current project grouped nodes/i)).toBeVisible();
     await expect(await canvas.findByRole("button", { name: /^Create sessions$/i })).toBeVisible();
     await expect((await canvas.findAllByRole("button", { name: /^Delete$/i })).length).toBe(1);
     await userEvent.click(await canvas.findByRole("button", { name: /^Delete$/i }));
@@ -812,7 +812,7 @@ export const ProfileConfig: Story = {
 };
 
 export const ZhCN: Story = {
-  ...GlobalConfig,
+  ...GlobalProject,
   globals: {
     locale: "zh-CN",
   },
@@ -825,10 +825,10 @@ export const ZhCN: Story = {
 };
 
 export const GlobalMalformedGeoMetadata: Story = {
-  ...GlobalConfig,
+  ...GlobalProject,
   name: "Global Malformed Geo Metadata",
   args: {
-    ...GlobalConfig.args,
+    ...GlobalProject.args,
     proxyCatalog: globalCatalogMalformedGeoFixture,
   },
   globals: {
@@ -842,16 +842,16 @@ export const GlobalMalformedGeoMetadata: Story = {
   },
 };
 
-export const ProfileCatalog: Story = {
-  args: { ...ProfileConfig.args },
-  name: "Profile Catalog",
+export const ProjectCatalog: Story = {
+  args: { ...ConcreteProject.args },
+  name: "Project Catalog",
   render: (args) => renderInShell(args),
 };
 
-export const ProfileBatchActions: Story = {
-  ...ProfileConfig,
+export const ProjectBatchActions: Story = {
+  ...ConcreteProject,
   render: (args) => (
-    <InteractiveProfileStory {...(args as Extract<ProxiesPageProps, { mode: "profile" }>)} />
+    <InteractiveProjectStory {...(args as Extract<ProxiesPageProps, { mode: "project" }>)} />
   ),
   async play({ canvasElement }) {
     const canvas = within(canvasElement);
@@ -876,10 +876,10 @@ export const ProfileBatchActions: Story = {
   },
 };
 
-export const ProfileSelectionFlow: Story = {
-  ...ProfileConfig,
+export const ProjectSelectionFlow: Story = {
+  ...ConcreteProject,
   render: (args) => (
-    <InteractiveProfileStory {...(args as Extract<ProxiesPageProps, { mode: "profile" }>)} />
+    <InteractiveProjectStory {...(args as Extract<ProxiesPageProps, { mode: "project" }>)} />
   ),
   async play({ canvasElement }) {
     const canvas = within(canvasElement);
@@ -906,15 +906,15 @@ export const ProfileSelectionFlow: Story = {
   },
 };
 
-export const ProfileCreateSessionDialog: Story = {
-  args: { ...ProfileConfig.args },
-  name: "Profile Create Session Dialog",
+export const ProjectCreateSessionDialog: Story = {
+  args: { ...ConcreteProject.args },
+  name: "Project Create Session Dialog",
   render: (args) =>
-    renderProfileSurface(
-      args as Extract<ProxiesPageProps, { mode: "profile" }>,
+    renderProjectSurface(
+      args as Extract<ProxiesPageProps, { mode: "project" }>,
       <NodePinnedSessionDialog
         open
-        node={profileCatalogFixture.groups[0]?.nodes[0] ?? null}
+        node={projectCatalogFixture.groups[0]?.nodes[0] ?? null}
         suggestedPort={10080}
         isPending={false}
         onOpenChange={() => undefined}
@@ -923,15 +923,15 @@ export const ProfileCreateSessionDialog: Story = {
     ),
 };
 
-export const ProfileBatchCreateDialog: Story = {
-  args: { ...ProfileConfig.args },
-  name: "Profile Batch Create Dialog",
+export const ProjectBatchCreateDialog: Story = {
+  args: { ...ConcreteProject.args },
+  name: "Project Batch Create Dialog",
   render: (args) =>
-    renderProfileSurface(
-      args as Extract<ProxiesPageProps, { mode: "profile" }>,
+    renderProjectSurface(
+      args as Extract<ProxiesPageProps, { mode: "project" }>,
       <NodePinnedBatchDialog
         open
-        nodes={profileCatalogFixture.groups[0]?.nodes.slice(0, 2) ?? []}
+        nodes={projectCatalogFixture.groups[0]?.nodes.slice(0, 2) ?? []}
         suggestedPort={10080}
         isPending={false}
         onOpenChange={() => undefined}
@@ -940,12 +940,12 @@ export const ProfileBatchCreateDialog: Story = {
     ),
 };
 
-export const ProfileDeleteConfirmDialog: Story = {
-  args: { ...ProfileConfig.args },
-  name: "Profile Delete Confirm Dialog",
+export const ProjectDeleteConfirmDialog: Story = {
+  args: { ...ConcreteProject.args },
+  name: "Project Delete Confirm Dialog",
   render: (args) =>
-    renderProfileSurface(
-      args as Extract<ProxiesPageProps, { mode: "profile" }>,
+    renderProjectSurface(
+      args as Extract<ProxiesPageProps, { mode: "project" }>,
       <DeleteImportConfirmDialog
         open
         item={proxyImportsFixture.items[1]}
@@ -959,7 +959,7 @@ export const ProfileDeleteConfirmDialog: Story = {
 export const AccessDenied: Story = {
   args: {
     mode: "global",
-    profiles,
+    projects,
     currentUser,
     accessDenied: true,
     authError: null,

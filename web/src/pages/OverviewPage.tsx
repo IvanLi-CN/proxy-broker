@@ -19,8 +19,8 @@ interface OverviewPageProps {
   refreshError?: string | null;
   refreshing: boolean;
   currentUser: CurrentUserState;
-  currentProfileId: string;
-  availableProfiles: string[];
+  currentProjectId: string;
+  availableProjects: string[];
   apiKeys?: ApiKeySummary[];
   latestCreatedApiKey?: CreateApiKeyResponse | null;
   apiKeysLoading?: boolean;
@@ -39,8 +39,8 @@ export function OverviewPage({
   refreshError,
   refreshing,
   currentUser,
-  currentProfileId,
-  availableProfiles,
+  currentProjectId,
+  availableProjects,
   apiKeys = [],
   latestCreatedApiKey = null,
   apiKeysLoading = false,
@@ -79,9 +79,9 @@ export function OverviewPage({
 
         <div className="space-y-6">
           <AccessControlCard
-            availableProfiles={availableProfiles}
+            availableProjects={availableProjects}
             currentUser={currentUser}
-            currentProfileId={currentProfileId}
+            currentProjectId={currentProjectId}
             apiKeys={apiKeys}
             latestCreatedKey={latestCreatedApiKey}
             apiKeysLoading={apiKeysLoading}

@@ -571,11 +571,11 @@ export function SessionIpNodePicker({
                               <TooltipTrigger asChild>
                                 <span className="inline-flex items-center gap-1">
                                   <Clock3Icon className="size-3" />
-                                  {relativeTime(locale, t, node.profile_last_used_at)}
+                                  {relativeTime(locale, t, node.project_last_used_at)}
                                 </span>
                               </TooltipTrigger>
                               <TooltipContent>
-                                {formatTimestamp(locale, t, node.profile_last_used_at)}
+                                {formatTimestamp(locale, t, node.project_last_used_at)}
                               </TooltipContent>
                             </Tooltip>
                           </div>

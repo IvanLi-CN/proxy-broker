@@ -201,18 +201,18 @@ The same render step also allocates a free private `/24` subnet when you do not 
   - admin human or development principal only
 - `/api/v1/auth/me`
   - any authenticated principal
-- `/api/v1/profiles`
+- `/api/v1/projects`
   - admin human or development principal only
-- `/api/v1/profiles/{profile_id}/subscriptions/load`
-- `/api/v1/profiles/{profile_id}/refresh`
-- `/api/v1/profiles/{profile_id}/ips/extract`
-- `/api/v1/profiles/{profile_id}/ips/options/search`
-- `/api/v1/profiles/{profile_id}/sessions`
-- `/api/v1/profiles/{profile_id}/sessions/open`
-- `/api/v1/profiles/{profile_id}/sessions/open-batch`
-- `/api/v1/profiles/{profile_id}/sessions/suggested-port`
-- `/api/v1/profiles/{profile_id}/sessions/{session_id}`
-  - admin human, development principal, or API key whose scope allows that `profile_id`
+- `/api/v1/projects/{project_id}/subscriptions/load`
+- `/api/v1/projects/{project_id}/refresh`
+- `/api/v1/projects/{project_id}/ips/extract`
+- `/api/v1/projects/{project_id}/ips/options/search`
+- `/api/v1/projects/{project_id}/sessions`
+- `/api/v1/projects/{project_id}/sessions/open`
+- `/api/v1/projects/{project_id}/sessions/open-batch`
+- `/api/v1/projects/{project_id}/sessions/suggested-port`
+- `/api/v1/projects/{project_id}/sessions/{session_id}`
+  - admin human, development principal, or API key whose scope allows that `project_id`
 - `/api/v1/api-keys`
 - `/api/v1/api-keys/{key_id}`
   - admin human or development principal only
@@ -224,7 +224,7 @@ Owner-scoped API keys can be sent either as a bearer token or through `X-API-Key
 Bearer example:
 
 ```bash
-curl -X POST http://127.0.0.1:8080/api/v1/profiles/default/refresh \
+curl -X POST http://127.0.0.1:8080/api/v1/projects/default/refresh \
   -H "Authorization: Bearer pbk_<key_id>_<secret>" \
   -H "Content-Type: application/json" \
   -d '{"force":true}'
@@ -233,11 +233,11 @@ curl -X POST http://127.0.0.1:8080/api/v1/profiles/default/refresh \
 Header example:
 
 ```bash
-curl http://127.0.0.1:8080/api/v1/profiles/default/sessions \
+curl http://127.0.0.1:8080/api/v1/projects/default/sessions \
   -H "X-API-Key: pbk_<key_id>_<secret>"
 ```
 
-Issue a selected-profile key:
+Issue a selected-project key:
 
 ```bash
 curl -X POST http://127.0.0.1:8080/api/v1/api-keys \
@@ -245,10 +245,10 @@ curl -X POST http://127.0.0.1:8080/api/v1/api-keys \
   -H "X-Forwarded-Email: admin@example.com" \
   -H "X-Forwarded-Groups: proxy-broker-admins" \
   -H "Content-Type: application/json" \
-  -d '{"name":"deploy-bot","profile_scope":{"kind":"selected_profiles","profile_ids":["default"]}}'
+  -d '{"name":"deploy-bot","project_scope":{"kind":"selected_projects","project_ids":["default"]}}'
 ```
 
-Issue an all-profile key:
+Issue an all-project key:
 
 ```bash
 curl -X POST http://127.0.0.1:8080/api/v1/api-keys \
@@ -256,7 +256,7 @@ curl -X POST http://127.0.0.1:8080/api/v1/api-keys \
   -H "X-Forwarded-Email: admin@example.com" \
   -H "X-Forwarded-Groups: proxy-broker-admins" \
   -H "Content-Type: application/json" \
-  -d '{"name":"fleet-bot","profile_scope":{"kind":"all_profiles"}}'
+  -d '{"name":"fleet-bot","project_scope":{"kind":"all_projects"}}'
 ```
 
 ## Session Port Pool
@@ -267,4 +267,4 @@ curl -X POST http://127.0.0.1:8080/api/v1/api-keys \
   - use this when the deployment only exposes a fixed host port pool such as
     `20000-20999`
 
-Selected-profile API keys are limited to the chosen `profile_ids`. All-profile API keys dynamically cover both current and future profiles. Using a valid key against a profile outside its scope returns `403 profile_access_denied`.
+Selected-project API keys are limited to the chosen `project_ids`. All-project API keys dynamically cover both current and future projects. Using a valid key against a project outside its scope returns `403 project_access_denied`.

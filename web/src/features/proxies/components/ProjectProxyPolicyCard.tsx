@@ -8,8 +8,8 @@ import { Label } from "@/components/ui/label";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 
-interface ProfileProxyPolicyCardProps {
-  profileId: string;
+interface ProjectProxyPolicyCardProps {
+  projectId: string;
   useGlobalProxies: boolean;
   proxySettingsLoading: boolean;
   updatingSettings: boolean;
@@ -17,14 +17,14 @@ interface ProfileProxyPolicyCardProps {
   onToggleUseGlobalProxies: (nextValue: boolean) => void | Promise<void>;
 }
 
-export function ProfileProxyPolicyCard({
-  profileId,
+export function ProjectProxyPolicyCard({
+  projectId,
   useGlobalProxies,
   proxySettingsLoading,
   updatingSettings,
   proxySettingsError,
   onToggleUseGlobalProxies,
-}: ProfileProxyPolicyCardProps) {
+}: ProjectProxyPolicyCardProps) {
   const { t } = useI18n();
 
   return (
@@ -32,12 +32,12 @@ export function ProfileProxyPolicyCard({
       <CardHeader className="gap-3 border-b border-border/70 bg-muted/15 pb-4">
         <div className="space-y-1.5">
           <div className="text-[11px] font-semibold uppercase tracking-[0.32em] text-primary/80">
-            {t("Profile policy")}
+            {t("Project policy")}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <CardTitle className="flex items-center gap-2 text-lg tracking-tight">
               <Settings2Icon className="size-4 text-primary" />
-              {t("Use global pool for {profileId}", { profileId })}
+              {t("Use global pool for {projectId}", { projectId })}
             </CardTitle>
             <Badge
               variant={useGlobalProxies ? "default" : "secondary"}
@@ -50,8 +50,8 @@ export function ProfileProxyPolicyCard({
             </Badge>
           </div>
           <CardDescription className="text-sm leading-5 text-muted-foreground">
-            {t("Only changes whether {profileId} inherits the global pool.", {
-              profileId,
+            {t("Only changes whether {projectId} inherits the global pool.", {
+              projectId,
             })}
           </CardDescription>
         </div>
@@ -66,26 +66,26 @@ export function ProfileProxyPolicyCard({
               onCheckedChange={(checked) => {
                 void onToggleUseGlobalProxies(checked === true);
               }}
-              aria-label={t("Use global pool for {profileId}", { profileId })}
+              aria-label={t("Use global pool for {projectId}", { projectId })}
             />
             <Label
               htmlFor="use-global-proxies"
               className="cursor-pointer text-sm font-medium text-foreground"
             >
-              {t("Compose {profileId} from the global pool as well", { profileId })}
+              {t("Compose {projectId} from the global pool as well", { projectId })}
             </Label>
           </div>
         </div>
 
         <p className="text-xs leading-5 text-muted-foreground">
           {t(
-            "Turning this off immediately rebuilds the profile from local nodes only and removes sessions that depended on global-only nodes.",
+            "Turning this off immediately rebuilds the project from local nodes only and removes sessions that depended on global-only nodes.",
           )}
         </p>
 
         {proxySettingsError ? (
           <ActionResponsePanel
-            title={t("Profile proxy settings unavailable")}
+            title={t("Project proxy settings unavailable")}
             description={proxySettingsError}
             tone="error"
           />

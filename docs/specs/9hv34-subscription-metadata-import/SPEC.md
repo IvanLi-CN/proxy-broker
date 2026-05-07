@@ -43,7 +43,7 @@
 ### Out of scope
 
 - 订阅元信息的用户编辑能力。
-- 运行时流量统计替代或 profile/task 概览页扩展。
+- 运行时流量统计替代或 project/task 概览页扩展。
 - 非订阅来源（manual node group）的 source title / traffic / expire 解析。
 
 ## 需求（Requirements）
@@ -65,7 +65,7 @@
 
 ### COULD
 
-- 内部保留 `profile-update-interval` 解析结果，为后续自动同步策略扩展做准备，但首版不要求展示。
+- 内部保留 `project-update-interval` 解析结果，为后续自动同步策略扩展做准备，但首版不要求展示。
 
 ## 功能与行为规格（Functional/Behavior Spec）
 
@@ -235,5 +235,5 @@
 - `docs/specs/qvbmc-proxy-import-allocation/SPEC.md`
 - `docs/specs/s5fwx-proxy-node-groups-live-ops/SPEC.md`
 - Mihomo proxy-providers 文档
-- clash-nyanpasu `backend/tauri/src/config/profile/item/remote.rs`
+- clash-nyanpasu `backend/tauri/src/config/project/item/remote.rs`
 - clash-verge-rev `src-tauri/src/config/prfitem.rs`

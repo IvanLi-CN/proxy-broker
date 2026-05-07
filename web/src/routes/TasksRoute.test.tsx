@@ -77,7 +77,7 @@ describe("TasksRoute", () => {
 
   it("shows access denied when the current user is anonymous", () => {
     mockOutletContext.mockReturnValue({
-      profileId: "default",
+      projectId: "default",
       authMe: null,
       currentUser: { status: "anonymous" },
     });
@@ -89,7 +89,7 @@ describe("TasksRoute", () => {
 
   it("keeps access denied hidden while auth state is still loading", () => {
     mockOutletContext.mockReturnValue({
-      profileId: "default",
+      projectId: "default",
       authMe: null,
       currentUser: { status: "loading" },
     });
@@ -101,7 +101,7 @@ describe("TasksRoute", () => {
 
   it("surfaces auth resolution failures without mislabeling them as access denied", () => {
     mockOutletContext.mockReturnValue({
-      profileId: "default",
+      projectId: "default",
       authMe: null,
       currentUser: { status: "error", message: "auth_unavailable: upstream timeout" },
     });
@@ -113,12 +113,12 @@ describe("TasksRoute", () => {
     expect(latestTasksPageProps?.streamState).toBe("reconnecting");
   });
 
-  it("scopes the request task query to the current profile and 7-day backend window", () => {
+  it("scopes the request task query to the current project and 7-day backend window", () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(new Date("2026-03-23T00:00:00Z"));
       mockOutletContext.mockReturnValue({
-        profileId: "default",
+        projectId: "default",
         authMe: { is_admin: true },
         currentUser: { status: "resolved", identity: { is_admin: true } },
       });
@@ -127,7 +127,7 @@ describe("TasksRoute", () => {
 
       expect(latestTasksQueryKey).not.toBeNull();
       expect(latestTasksQueryKey?.[1]).toMatchObject({
-        profile_id: "default",
+        project_id: "default",
         since: 1773619200,
       });
     } finally {
@@ -153,7 +153,7 @@ describe("TasksRoute", () => {
           runs: [
             {
               run_id: "run-H6r2Lp8XmQ4Tn7Vc",
-              profile_id: "default",
+              project_id: "default",
               kind: "subscription_sync",
               trigger: "schedule",
               status: "running",
@@ -175,7 +175,7 @@ describe("TasksRoute", () => {
         isLoading: false,
       };
       mockOutletContext.mockReturnValue({
-        profileId: "default",
+        projectId: "default",
         authMe: { is_admin: true },
         currentUser: { status: "resolved", identity: { is_admin: true } },
       });
@@ -183,7 +183,7 @@ describe("TasksRoute", () => {
       render(<TasksRoute />);
 
       expect(latestTasksQueryKey?.[1]).toMatchObject({
-        profile_id: "default",
+        project_id: "default",
         since: 1773619200,
       });
       expect(latestTasksPageProps?.taskList?.runs).toHaveLength(1);
@@ -193,7 +193,7 @@ describe("TasksRoute", () => {
       });
 
       expect(latestTasksQueryKey?.[1]).toMatchObject({
-        profile_id: "default",
+        project_id: "default",
         since: 1773619200,
       });
       expect(latestTasksPageProps?.taskList?.runs).toHaveLength(0);
@@ -208,7 +208,7 @@ describe("TasksRoute", () => {
       vi.setSystemTime(new Date("2026-03-23T00:00:00Z"));
       const run = {
         run_id: "run-H6r2Lp8XmQ4Tn7Vc",
-        profile_id: "default",
+        project_id: "default",
         kind: "subscription_sync",
         trigger: "schedule",
         status: "running",
@@ -223,7 +223,7 @@ describe("TasksRoute", () => {
         error_message: null,
       };
       mockOutletContext.mockReturnValue({
-        profileId: "default",
+        projectId: "default",
         authMe: { is_admin: true },
         currentUser: { status: "resolved", identity: { is_admin: true } },
       });
@@ -260,7 +260,7 @@ describe("TasksRoute", () => {
       });
 
       expect(latestTasksQueryKey?.[1]).toMatchObject({
-        profile_id: "default",
+        project_id: "default",
         since: 1773619200,
       });
       expect(latestTasksPageProps?.selectedRunId).toBe("run-H6r2Lp8XmQ4Tn7Vc");
@@ -274,7 +274,7 @@ describe("TasksRoute", () => {
     try {
       vi.setSystemTime(new Date("2026-03-23T00:00:00Z"));
       mockOutletContext.mockReturnValue({
-        profileId: "default",
+        projectId: "default",
         authMe: { is_admin: true },
         currentUser: { status: "resolved", identity: { is_admin: true } },
       });
@@ -282,7 +282,7 @@ describe("TasksRoute", () => {
       render(<TasksRoute />);
 
       expect(latestTasksQueryKey?.[1]).toMatchObject({
-        profile_id: "default",
+        project_id: "default",
         since: 1773619200,
       });
 
@@ -291,7 +291,7 @@ describe("TasksRoute", () => {
       });
 
       expect(latestTasksQueryKey?.[1]).toMatchObject({
-        profile_id: "default",
+        project_id: "default",
         since: 1773622800,
       });
     } finally {
@@ -305,7 +305,7 @@ describe("TasksRoute", () => {
       vi.setSystemTime(new Date("2026-03-23T00:00:00Z"));
       const run = {
         run_id: "run-H6r2Lp8XmQ4Tn7Vc",
-        profile_id: "default",
+        project_id: "default",
         kind: "subscription_sync",
         trigger: "schedule",
         status: "running",
@@ -320,7 +320,7 @@ describe("TasksRoute", () => {
         error_message: null,
       };
       let outletContext = {
-        profileId: "default",
+        projectId: "default",
         authMe: { is_admin: true },
         currentUser: { status: "authenticated" },
       };
@@ -357,7 +357,7 @@ describe("TasksRoute", () => {
 
       outletContext = {
         ...outletContext,
-        profileId: "other",
+        projectId: "other",
       };
       tasksQueryResult = {
         data: null,

@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { useI18n } from "@/i18n";
 import { api } from "@/lib/api";
 import { formatApiErrorMessage } from "@/lib/error-messages";
-import { isGlobalProfileId } from "@/lib/profile-selection";
+import { isGlobalProjectId } from "@/lib/project-selection";
 import type { ExtractIpRequest, ExtractIpResponse } from "@/lib/types";
 import { IpExtractPage } from "@/pages/IpExtractPage";
 import type { RootOutletContext } from "@/routes/RootRoute";
@@ -14,26 +14,26 @@ import type { RootOutletContext } from "@/routes/RootRoute";
 export function IpExtractRoute() {
   const { t } = useI18n();
   const outlet = useOutletContext<RootOutletContext>();
-  const { profileId } = outlet;
-  const isGlobalConfig = outlet.isGlobalConfig ?? isGlobalProfileId(profileId);
-  const activeProfileId = outlet.activeProfileId ?? (isGlobalConfig ? null : profileId);
-  const previousProfileId = useRef(activeProfileId ?? "");
-  const [resultByProfile, setResultByProfile] = useState<
+  const { projectId } = outlet;
+  const isGlobalProject = outlet.isGlobalProject ?? isGlobalProjectId(projectId);
+  const activeProjectId = outlet.activeProjectId ?? (isGlobalProject ? null : projectId);
+  const previousProjectId = useRef(activeProjectId ?? "");
+  const [resultByProject, setResultByProject] = useState<
     Record<string, { request: ExtractIpRequest; response: ExtractIpResponse } | null>
   >({});
 
   const mutation = useMutation({
     mutationFn: ({
-      profileId: requestedProfileId,
+      projectId: requestedProjectId,
       payload,
     }: {
-      profileId: string;
+      projectId: string;
       payload: Parameters<typeof api.extractIps>[1];
-    }) => api.extractIps(requestedProfileId, payload),
-    onSuccess: (data, { profileId: requestedProfileId, payload }) => {
-      setResultByProfile((current) => ({
+    }) => api.extractIps(requestedProjectId, payload),
+    onSuccess: (data, { projectId: requestedProjectId, payload }) => {
+      setResultByProject((current) => ({
         ...current,
-        [requestedProfileId]: { request: payload, response: data },
+        [requestedProjectId]: { request: payload, response: data },
       }));
       toast.success(t("Extracted {count} candidate IPs", { count: data.items.length }));
     },
@@ -43,17 +43,17 @@ export function IpExtractRoute() {
   const { reset: resetMutation } = mutation;
 
   useEffect(() => {
-    if (!activeProfileId) {
+    if (!activeProjectId) {
       return;
     }
-    if (previousProfileId.current === activeProfileId) {
+    if (previousProjectId.current === activeProjectId) {
       return;
     }
-    previousProfileId.current = activeProfileId;
+    previousProjectId.current = activeProjectId;
     resetMutation();
-  }, [activeProfileId, resetMutation]);
+  }, [activeProjectId, resetMutation]);
 
-  if (!activeProfileId) {
+  if (!activeProjectId) {
     return <Navigate replace to="/proxies" />;
   }
 
@@ -61,11 +61,11 @@ export function IpExtractRoute() {
     <IpExtractPage
       error={mutation.isError ? formatApiErrorMessage(mutation.error, t) : null}
       isPending={mutation.isPending}
-      lastRequest={resultByProfile[activeProfileId]?.request ?? null}
+      lastRequest={resultByProject[activeProjectId]?.request ?? null}
       onSubmit={async (payload) => {
-        await mutation.mutateAsync({ profileId: activeProfileId, payload });
+        await mutation.mutateAsync({ projectId: activeProjectId, payload });
       }}
-      response={resultByProfile[activeProfileId]?.response ?? null}
+      response={resultByProject[activeProjectId]?.response ?? null}
     />
   );
 }

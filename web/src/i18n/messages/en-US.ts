@@ -16,7 +16,7 @@ export const enUS: MessageCatalog = {
   "Loaded proxies": "Loaded proxies",
   "Distinct IPs": "Distinct IPs",
   Reason: "Reason",
-  "Refreshing subscription feed for profile.": "Refreshing subscription feed for profile.",
+  "Refreshing subscription feed for project.": "Refreshing subscription feed for project.",
   "Refreshing probe metadata.": "Refreshing probe metadata.",
   "Task run queued.": "Task run queued.",
   "Task run completed successfully.": "Task run completed successfully.",
@@ -48,8 +48,8 @@ export const enUS: MessageCatalog = {
     "These IPs appear in both the include list and the blacklist: {conflicts}.",
   "error.api.session_not_found": "The requested session could not be found.",
   "error.api.port_in_use": "That port is already in use.",
-  "error.api.profile_exists": "Profile already exists",
-  "error.api.profile_not_found": "The requested profile could not be found.",
+  "error.api.project_exists": "Project already exists",
+  "error.api.project_not_found": "The requested project could not be found.",
   "error.api.invalid_port": "The requested port is invalid.",
   "error.api.invalid_request": "The request payload is invalid.",
   "error.api.authentication_required": "Authentication is required.",
@@ -58,7 +58,7 @@ export const enUS: MessageCatalog = {
   "error.api.api_key_revoked": "The API key has been revoked.",
   "error.api.api_key_not_found": "The API key could not be found.",
   "error.api.task_run_not_found": "The task run could not be found.",
-  "error.api.profile_access_denied": "The current identity cannot access this profile.",
+  "error.api.project_access_denied": "The current identity cannot access this project.",
   "error.api.mihomo_unavailable": "The mihomo runtime is currently unavailable.",
   "error.api.batch_open_failed": "Batch open failed.",
   "error.api.internal_error": "An internal error occurred.",
@@ -70,26 +70,26 @@ export const enUS: MessageCatalog = {
   "The control surface only exposes Overview, Tasks, Proxies, IP Extract, and Sessions right now.":
     "The control surface only exposes Overview, Tasks, Proxies, IP Extract, and Sessions right now.",
   Global: "Global",
-  "Profile {profileId}": "Profile {profileId}",
-  "Current config": "Current config",
-  "Config ID": "Config ID",
-  "Search configs or type a new ID": "Search configs or type a new ID",
-  "Loading configs...": "Loading configs...",
+  "Project {projectId}": "Project {projectId}",
+  "Current project": "Current project",
+  "Project ID": "Project ID",
+  "Search projects or type a new ID": "Search projects or type a new ID",
+  "Loading projects...": "Loading projects...",
   Contexts: "Contexts",
-  "Known configs": "Known configs",
-  "Shared pool and allocation control across every profile.":
-    "Shared pool and allocation control across every profile.",
-  "Start an empty config catalog entry and switch to it immediately.":
-    "Start an empty config catalog entry and switch to it immediately.",
-  "No matching configs. Type a new ID to create one.":
-    "No matching configs. Type a new ID to create one.",
-  "Search the catalog or create a new empty config before loading any feed.":
-    "Search the catalog or create a new empty config before loading any feed.",
-  "Profile workspace": "Profile workspace",
+  "Known projects": "Known projects",
+  "Shared pool and allocation control across every project.":
+    "Shared pool and allocation control across every project.",
+  "Start an empty project catalog entry and switch to it immediately.":
+    "Start an empty project catalog entry and switch to it immediately.",
+  "No matching projects. Type a new ID to create one.":
+    "No matching projects. Type a new ID to create one.",
+  "Search the catalog or create a new empty project before loading any feed.":
+    "Search the catalog or create a new empty project before loading any feed.",
+  "Project workspace": "Project workspace",
   "error.api.proxy_inventory_node_not_found": "The imported proxy node could not be found.",
   Proxies: "Proxies",
   "Global proxies": "Global proxies",
-  "Shared pool and cross-profile allocations": "Shared pool and cross-profile allocations",
+  "Shared pool and cross-project allocations": "Shared pool and cross-project allocations",
   "Manage local imports, global pool usage, and allocations":
     "Manage local imports, global pool usage, and allocations",
   "Create, switch, and close sessions": "Create, switch, and close sessions",
@@ -101,46 +101,46 @@ export const enUS: MessageCatalog = {
   "HTTP URI": "HTTP URI",
   "Host:port": "Host:port",
   "Copy proxy address for {sessionId}": "Copy proxy address for {sessionId}",
-  "Profile only": "Profile only",
-  "Select a concrete profile to use this workspace.":
-    "Select a concrete profile to use this workspace.",
-  "Manage the global pool, profile imports, and allocations":
-    "Manage the global pool, profile imports, and allocations",
-  "Manage the global pool and cross-profile allocations":
-    "Manage the global pool and cross-profile allocations",
+  "Project only": "Project only",
+  "Select a concrete project to use this workspace.":
+    "Select a concrete project to use this workspace.",
+  "Manage the global pool, project imports, and allocations":
+    "Manage the global pool, project imports, and allocations",
+  "Manage the global pool and cross-project allocations":
+    "Manage the global pool and cross-project allocations",
   "The proxies workspace is restricted to the admin operator plane because it can change global pool allocation.":
     "The proxies workspace is restricted to the admin operator plane because it can change global pool allocation.",
-  "Manage the global pool, the current profile's local imports, and where each imported node is allocated.":
-    "Manage the global pool, the current profile's local imports, and where each imported node is allocated.",
-  "Manage the shared global pool and cross-profile allocations from one place.":
-    "Manage the shared global pool and cross-profile allocations from one place.",
-  "Manage the shared global pool and cross-profile allocations from one place. Profile-local imports and usage stay inside each profile overview.":
-    "Manage the shared global pool and cross-profile allocations from one place. Profile-local imports and usage stay inside each profile overview.",
-  "Keep the global pool in its own workspace, then manage local imports and policy separately for the current profile.":
-    "Keep the global pool in its own workspace, then manage local imports and policy separately for the current profile.",
+  "Manage the global pool, the current project's local imports, and where each imported node is allocated.":
+    "Manage the global pool, the current project's local imports, and where each imported node is allocated.",
+  "Manage the shared global pool and cross-project allocations from one place.":
+    "Manage the shared global pool and cross-project allocations from one place.",
+  "Manage the shared global pool and cross-project allocations from one place. Project-local imports and usage stay inside each project overview.":
+    "Manage the shared global pool and cross-project allocations from one place. Project-local imports and usage stay inside each project overview.",
+  "Keep the global pool in its own workspace, then manage local imports and policy separately for the current project.":
+    "Keep the global pool in its own workspace, then manage local imports and policy separately for the current project.",
   "Global workspace": "Global workspace",
   "Global entry": "Global entry",
-  "Current profile workspace": "Current profile workspace",
+  "Current project workspace": "Current project workspace",
   "Shared proxy administration": "Shared proxy administration",
-  "Global pool and cross-profile allocations live here.":
-    "Global pool and cross-profile allocations live here.",
-  "Enter from the left nav. This page does not follow the current profile.":
-    "Enter from the left nav. This page does not follow the current profile.",
+  "Global pool and cross-project allocations live here.":
+    "Global pool and cross-project allocations live here.",
+  "Enter from the left nav. This page does not follow the current project.":
+    "Enter from the left nav. This page does not follow the current project.",
   "Global operator plane": "Global operator plane",
   "Shared global pool": "Shared global pool",
   "Global scope": "Global scope",
-  "Applies to every profile that keeps global pool enabled.":
-    "Applies to every profile that keeps global pool enabled.",
-  "Applies across all profiles.": "Applies across all profiles.",
+  "Applies to every project that keeps global pool enabled.":
+    "Applies to every project that keeps global pool enabled.",
+  "Applies across all projects.": "Applies across all projects.",
   "allocation defaults to global": "allocation defaults to global",
-  "allocation defaults to {profileId}": "allocation defaults to {profileId}",
+  "allocation defaults to {projectId}": "allocation defaults to {projectId}",
   "remote fetch": "remote fetch",
   "host file": "host file",
   "Re-import restores nodes that still exist upstream.":
     "Re-import restores nodes that still exist upstream.",
   "Imported {count} global proxies": "Imported {count} global proxies",
-  "Imported {count} profile proxies for {profileId}":
-    "Imported {count} profile proxies for {profileId}",
+  "Imported {count} project proxies for {projectId}":
+    "Imported {count} project proxies for {projectId}",
   "Import global proxy pool": "Import global proxy pool",
   "Import type": "Import type",
   Subscription: "Subscription",
@@ -163,22 +163,21 @@ export const enUS: MessageCatalog = {
     "Each submit creates one original import group that can later be reallocated or deleted as a whole.",
   "Batch node imports keep every pasted node inside the same allocation group.":
     "Batch node imports keep every pasted node inside the same allocation group.",
-  "Import one source into the shared global pool. Profiles that keep global usage enabled will inherit these nodes immediately.":
-    "Import one source into the shared global pool. Profiles that keep global usage enabled will inherit these nodes immediately.",
-  "Import one upstream into the shared pool. Profiles that keep global usage enabled inherit these nodes immediately.":
-    "Import one upstream into the shared pool. Profiles that keep global usage enabled inherit these nodes immediately.",
-  "Import one subscription source or one node group into the shared pool. Profiles that keep global usage enabled inherit these nodes immediately.":
-    "Import one subscription source or one node group into the shared pool. Profiles that keep global usage enabled inherit these nodes immediately.",
+  "Import one source into the shared global pool. Projects that keep global usage enabled will inherit these nodes immediately.":
+    "Import one source into the shared global pool. Projects that keep global usage enabled will inherit these nodes immediately.",
+  "Import one upstream into the shared pool. Projects that keep global usage enabled inherit these nodes immediately.":
+    "Import one upstream into the shared pool. Projects that keep global usage enabled inherit these nodes immediately.",
+  "Import one subscription source or one node group into the shared pool. Projects that keep global usage enabled inherit these nodes immediately.":
+    "Import one subscription source or one node group into the shared pool. Projects that keep global usage enabled inherit these nodes immediately.",
   "Import global pool": "Import global pool",
   "Global pool updated": "Global pool updated",
   "Imported {proxyCount} proxies across {ipCount} distinct IPs into the global pool.":
     "Imported {proxyCount} proxies across {ipCount} distinct IPs into the global pool.",
-  "Manage the shared global pool and every profile allocation from here.":
-    "Manage the shared global pool and every profile allocation from here.",
-  "Global pool and configuration allocations": "Global pool and configuration allocations",
+  "Manage the shared global pool and every project allocation from here.":
+    "Manage the shared global pool and every project allocation from here.",
   "Original imports": "Original imports",
-  "Allocate by original import source. Subscription rows are reassigned or deleted as a whole; profile composition still happens from their member nodes behind the scenes.":
-    "Allocate by original import source. Subscription rows are reassigned or deleted as a whole; profile composition still happens from their member nodes behind the scenes.",
+  "Allocate by original import source. Subscription rows are reassigned or deleted as a whole; project composition still happens from their member nodes behind the scenes.":
+    "Allocate by original import source. Subscription rows are reassigned or deleted as a whole; project composition still happens from their member nodes behind the scenes.",
   "{count} import": "{count} import",
   "{count} imports": "{count} imports",
   "loading imports": "loading imports",
@@ -199,53 +198,53 @@ export const enUS: MessageCatalog = {
   "Updated allocation for {importId}": "Updated allocation for {importId}",
   "Deleted imported source {importId}": "Deleted imported source {importId}",
   "Proxy imports unavailable": "Proxy imports unavailable",
-  "The global config can change the shared pool and profile allocations, so only admins can open it.":
-    "The global config can change the shared pool and profile allocations, so only admins can open it.",
-  "Import local pool for {profileId}": "Import local pool for {profileId}",
-  "Import nodes for the current profile only. These nodes stay local unless you later reassign them from the inventory table.":
-    "Import nodes for the current profile only. These nodes stay local unless you later reassign them from the inventory table.",
-  "Import nodes for the current profile only. These nodes stay local unless you later reassign them from the global inventory.":
-    "Import nodes for the current profile only. These nodes stay local unless you later reassign them from the global inventory.",
-  "Import nodes for this profile only. They stay local unless you later reassign them from the global config.":
-    "Import nodes for this profile only. They stay local unless you later reassign them from the global config.",
-  "Import one subscription source or one node group for this profile only. They stay local unless you later reassign them from the global config.":
-    "Import one subscription source or one node group for this profile only. They stay local unless you later reassign them from the global config.",
-  "Only the local import and policy below are scoped to this profile.":
-    "Only the local import and policy below are scoped to this profile.",
-  "Scoped to {profileId} only.": "Scoped to {profileId} only.",
-  "Import profile pool": "Import profile pool",
+  "The global project can change the shared pool and project allocations, so only admins can open it.":
+    "The global project can change the shared pool and project allocations, so only admins can open it.",
+  "Import local pool for {projectId}": "Import local pool for {projectId}",
+  "Import nodes for the current project only. These nodes stay local unless you later reassign them from the inventory table.":
+    "Import nodes for the current project only. These nodes stay local unless you later reassign them from the inventory table.",
+  "Import nodes for the current project only. These nodes stay local unless you later reassign them from the global inventory.":
+    "Import nodes for the current project only. These nodes stay local unless you later reassign them from the global inventory.",
+  "Import nodes for this project only. They stay local unless you later reassign them from the global project.":
+    "Import nodes for this project only. They stay local unless you later reassign them from the global project.",
+  "Import one subscription source or one node group for this project only. They stay local unless you later reassign them from the global project.":
+    "Import one subscription source or one node group for this project only. They stay local unless you later reassign them from the global project.",
+  "Only the local import and policy below are scoped to this project.":
+    "Only the local import and policy below are scoped to this project.",
+  "Scoped to {projectId} only.": "Scoped to {projectId} only.",
+  "Import project pool": "Import project pool",
   "Import local pool": "Import local pool",
-  "Profile pool updated": "Profile pool updated",
+  "Project pool updated": "Project pool updated",
   "Local pool updated": "Local pool updated",
   "Import local proxy pool": "Import local proxy pool",
-  "Imported {proxyCount} proxies across {ipCount} distinct IPs into profile {profileId}.":
-    "Imported {proxyCount} proxies across {ipCount} distinct IPs into profile {profileId}.",
-  "Manage local imports and whether {profileId} also composes the global pool.":
-    "Manage local imports and whether {profileId} also composes the global pool.",
-  "Profile policy": "Profile policy",
-  "Use global pool for {profileId}": "Use global pool for {profileId}",
-  "Only changes whether {profileId} inherits the global pool.":
-    "Only changes whether {profileId} inherits the global pool.",
-  "Toggle whether this profile composes its effective pool from both local imports and the global pool, or only from local imports.":
-    "Toggle whether this profile composes its effective pool from both local imports and the global pool, or only from local imports.",
+  "Imported {proxyCount} proxies across {ipCount} distinct IPs into project {projectId}.":
+    "Imported {proxyCount} proxies across {ipCount} distinct IPs into project {projectId}.",
+  "Manage local imports and whether {projectId} also composes the global pool.":
+    "Manage local imports and whether {projectId} also composes the global pool.",
+  "Project policy": "Project policy",
+  "Use global pool for {projectId}": "Use global pool for {projectId}",
+  "Only changes whether {projectId} inherits the global pool.":
+    "Only changes whether {projectId} inherits the global pool.",
+  "Toggle whether this project composes its effective pool from both local imports and the global pool, or only from local imports.":
+    "Toggle whether this project composes its effective pool from both local imports and the global pool, or only from local imports.",
   "global enabled": "global enabled",
   "local-only": "local-only",
-  "Enabled global pool for {profileId}": "Enabled global pool for {profileId}",
-  "Disabled global pool for {profileId}": "Disabled global pool for {profileId}",
-  "Compose {profileId} from the global pool as well":
-    "Compose {profileId} from the global pool as well",
-  "Turning this off immediately rebuilds the profile from local nodes only and removes sessions that depended on global-only nodes.":
-    "Turning this off immediately rebuilds the profile from local nodes only and removes sessions that depended on global-only nodes.",
-  "Profile proxy settings unavailable": "Profile proxy settings unavailable",
+  "Enabled global pool for {projectId}": "Enabled global pool for {projectId}",
+  "Disabled global pool for {projectId}": "Disabled global pool for {projectId}",
+  "Compose {projectId} from the global pool as well":
+    "Compose {projectId} from the global pool as well",
+  "Turning this off immediately rebuilds the project from local nodes only and removes sessions that depended on global-only nodes.":
+    "Turning this off immediately rebuilds the project from local nodes only and removes sessions that depended on global-only nodes.",
+  "Project proxy settings unavailable": "Project proxy settings unavailable",
   "Unified inventory": "Unified inventory",
-  "Global pool and profile allocations": "Global pool and profile allocations",
+  "Global pool and project allocations": "Global pool and project allocations",
   "Global inventory and allocations": "Global inventory and allocations",
   "Track source scope, current allocation, and where each node is effective.":
     "Track source scope, current allocation, and where each node is effective.",
   "Track source scope, current allocation, and where each imported node is effective.":
     "Track source scope, current allocation, and where each imported node is effective.",
-  "See where each imported node came from, where it is allocated now, and which profiles currently inherit it.":
-    "See where each imported node came from, where it is allocated now, and which profiles currently inherit it.",
+  "See where each imported node came from, where it is allocated now, and which projects currently inherit it.":
+    "See where each imported node came from, where it is allocated now, and which projects currently inherit it.",
   "Every imported node records both its source scope and its current allocation scope. Re-imports follow the source of truth and restore nodes that upstreams still serve.":
     "Every imported node records both its source scope and its current allocation scope. Re-imports follow the source of truth and restore nodes that upstreams still serve.",
   "{count} nodes": "{count} nodes",
@@ -270,7 +269,7 @@ export const enUS: MessageCatalog = {
   "Pick one imported source before confirming deletion.":
     "Pick one imported source before confirming deletion.",
   Cancel: "Cancel",
-  "current profile {profileId}": "current profile {profileId}",
+  "current project {projectId}": "current project {projectId}",
   "loading inventory": "loading inventory",
   "inventory live": "inventory live",
   "Deleting or reallocating an imported node only affects the current inventory snapshot. The next source reload restores anything the upstream still contains.":
@@ -278,23 +277,23 @@ export const enUS: MessageCatalog = {
   Proxy: "Proxy",
   "Source scope": "Source scope",
   "Allocation scope": "Allocation scope",
-  "Effective profiles": "Effective profiles",
+  "Effective projects": "Effective projects",
   "Resolved IPs": "Resolved IPs",
   Actions: "Actions",
   "Loading proxy inventory...": "Loading proxy inventory...",
-  "No imported nodes yet. Import the shared global pool here, or add local nodes from a profile overview first.":
-    "No imported nodes yet. Import the shared global pool here, or add local nodes from a profile overview first.",
+  "No imported nodes yet. Import the shared global pool here, or add local nodes from a project overview first.":
+    "No imported nodes yet. Import the shared global pool here, or add local nodes from a project overview first.",
   "No imported nodes yet. Load the global pool first.":
     "No imported nodes yet. Load the global pool first.",
   "Global pool": "Global pool",
   "Current user unavailable": "Current user unavailable",
   "Admin access required": "Admin access required",
-  "No active profiles": "No active profiles",
+  "No active projects": "No active projects",
   "+{count} more": "+{count} more",
   "Subscription groups": "Subscription groups",
   "Available grouped nodes": "Available grouped nodes",
   "Grouped proxy catalog": "Grouped proxy catalog",
-  "Current profile grouped nodes": "Current profile grouped nodes",
+  "Current project grouped nodes": "Current project grouped nodes",
   "Proxy catalog unavailable": "Proxy catalog unavailable",
   Details: "Details",
   Status: "Status",
@@ -328,8 +327,8 @@ export const enUS: MessageCatalog = {
   "close action in flight": "close action in flight",
   "close action idle": "close action idle",
   "session control": "session control",
-  "Polling the backend for sessions on this profile.":
-    "Polling the backend for sessions on this profile.",
+  "Polling the backend for sessions on this project.":
+    "Polling the backend for sessions on this project.",
   "The current session list appears here as soon as the first response lands.":
     "The current session list appears here as soon as the first response lands.",
   "No sessions yet": "No sessions yet",
@@ -360,7 +359,7 @@ export const enUS: MessageCatalog = {
   "Group by subscription": "Group by subscription",
   Source: "Source",
   "Current session last used": "Current session last used",
-  "Current profile last used": "Current profile last used",
+  "Current project last used": "Current project last used",
   "{available} / {total} available": "{available} / {total} available",
   "Unknown region": "Unknown region",
   "Unknown source": "Unknown source",
@@ -370,7 +369,7 @@ export const enUS: MessageCatalog = {
   Current: "Current",
   Selected: "Selected",
   "Session last used {time}": "Session last used {time}",
-  "Profile last used {time}": "Profile last used {time}",
+  "Project last used {time}": "Project last used {time}",
   "Probe failed": "Probe failed",
   "Switching proxy…": "Switching proxy…",
   "Use selected node": "Use selected node",
@@ -415,8 +414,8 @@ export const enUS: MessageCatalog = {
   "Updated allocation for {nodeId}": "Updated allocation for {nodeId}",
   "Deleted imported node {nodeId}": "Deleted imported node {nodeId}",
   "Proxy inventory unavailable": "Proxy inventory unavailable",
-  "Cross-profile allocation and node deletion are only available after switching the current config to Global.":
-    "Cross-profile allocation and node deletion are only available after switching the current config to Global.",
+  "Cross-project allocation and node deletion are only available after switching the current project to Global.":
+    "Cross-project allocation and node deletion are only available after switching the current project to Global.",
   "Choose one or more IPs, then keep the candidate nodes that may serve each session.":
     "Choose one or more IPs, then keep the candidate nodes that may serve each session.",
   "Create session failed": "Create session failed",

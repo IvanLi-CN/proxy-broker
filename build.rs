@@ -22,10 +22,10 @@ fn generate_embedded_web_assets() -> Result<(), Box<dyn std::error::Error>> {
     let dist_dir = manifest_dir.join("web").join("dist");
     let index_html = dist_dir.join("index.html");
     let out_file = PathBuf::from(env::var("OUT_DIR")?).join("embedded_web_assets.rs");
-    let profile = env::var("PROFILE").unwrap_or_default();
+    let project = env::var("PROFILE").unwrap_or_default();
 
     if !index_html.is_file() {
-        if profile == "release" {
+        if project == "release" {
             return Err(format!(
                 "missing web/dist/index.html at {:?}; run `cd web && bun run build` before release builds",
                 index_html

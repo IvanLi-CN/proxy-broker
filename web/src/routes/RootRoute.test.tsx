@@ -10,7 +10,7 @@ const {
   mockUseLocation,
   mockUseMutation,
   mockUseNavigate,
-  mockUseProfilePreference,
+  mockUseProjectPreference,
   mockUseQuery,
   mockUseQueryClient,
 } = vi.hoisted(() => ({
@@ -22,7 +22,7 @@ const {
   mockUseLocation: vi.fn(),
   mockUseMutation: vi.fn(),
   mockUseNavigate: vi.fn(),
-  mockUseProfilePreference: vi.fn(),
+  mockUseProjectPreference: vi.fn(),
   mockUseQuery: vi.fn(),
   mockUseQueryClient: vi.fn(),
 }));
@@ -40,8 +40,8 @@ vi.mock("sonner", () => ({
   toast: mockToast,
 }));
 
-vi.mock("@/hooks/use-profile-preference", () => ({
-  useProfilePreference: () => mockUseProfilePreference(),
+vi.mock("@/hooks/use-project-preference", () => ({
+  useProjectPreference: () => mockUseProjectPreference(),
 }));
 
 vi.mock("@/components/AppShell", () => ({
@@ -62,7 +62,7 @@ describe("RootRoute", () => {
     latestAppShellProps = null;
     mockUseMutation.mockReset();
     mockUseNavigate.mockReset();
-    mockUseProfilePreference.mockReset();
+    mockUseProjectPreference.mockReset();
     mockUseQuery.mockReset();
     mockUseQueryClient.mockReset();
     mockUseLocation.mockReset();
@@ -70,7 +70,7 @@ describe("RootRoute", () => {
     mockToast.info.mockReset();
     mockToast.success.mockReset();
 
-    mockUseProfilePreference.mockReturnValue(["default", vi.fn()]);
+    mockUseProjectPreference.mockReturnValue(["default", vi.fn()]);
     mockUseLocation.mockReturnValue({ pathname: "/" });
     mockUseNavigate.mockReturnValue(vi.fn());
     mockUseQueryClient.mockReturnValue({
@@ -82,7 +82,7 @@ describe("RootRoute", () => {
     });
   });
 
-  it("keeps cached profiles visible when a background refetch fails", () => {
+  it("keeps cached projects visible when a background refetch fails", () => {
     mockUseQuery
       .mockReturnValueOnce({
         data: { status: "healthy" },
@@ -98,10 +98,10 @@ describe("RootRoute", () => {
         },
       })
       .mockReturnValueOnce({
-        data: { profiles: ["default", "edge-jp"] },
+        data: { projects: ["default", "edge-jp"] },
         error: new ApiError(500, {
           code: "http_500",
-          message: "Profiles temporarily unavailable",
+          message: "Projects temporarily unavailable",
         }),
         isError: true,
         isLoading: false,
@@ -110,19 +110,19 @@ describe("RootRoute", () => {
 
     render(<RootRoute />);
 
-    expect(latestAppShellProps?.profiles).toEqual(["default", "edge-jp"]);
-    expect(latestAppShellProps?.profilesError).toBeNull();
+    expect(latestAppShellProps?.projects).toEqual(["default", "edge-jp"]);
+    expect(latestAppShellProps?.projectsError).toBeNull();
   });
 
-  it("keeps the active profile unchanged when create returns profile_exists", async () => {
-    const setProfileId = vi.fn();
+  it("keeps the active project unchanged when create returns project_exists", async () => {
+    const setProjectId = vi.fn();
     const invalidateQueries = vi.fn().mockResolvedValue(undefined);
     const duplicateError = new ApiError(409, {
-      code: "profile_exists",
-      message: "Profile already exists",
+      code: "project_exists",
+      message: "Project already exists",
     });
 
-    mockUseProfilePreference.mockReturnValue(["default", setProfileId]);
+    mockUseProjectPreference.mockReturnValue(["default", setProjectId]);
     mockUseQueryClient.mockReturnValue({ invalidateQueries });
     mockUseQuery
       .mockReturnValueOnce({
@@ -139,7 +139,7 @@ describe("RootRoute", () => {
         },
       })
       .mockReturnValueOnce({
-        data: { profiles: ["default", "edge-jp"] },
+        data: { projects: ["default", "edge-jp"] },
         isError: false,
         isLoading: false,
         refetch: vi.fn(),
@@ -151,13 +151,13 @@ describe("RootRoute", () => {
 
     render(<RootRoute />);
 
-    await expect(latestAppShellProps?.onCreateProfile("  edge-jp  ")).rejects.toBe(duplicateError);
-    expect(setProfileId).not.toHaveBeenCalled();
-    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["profiles"] });
+    await expect(latestAppShellProps?.onCreateProject("  edge-jp  ")).rejects.toBe(duplicateError);
+    expect(setProjectId).not.toHaveBeenCalled();
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["projects"] });
     expect(mockToast.info).toHaveBeenCalledWith(
-      "Profile edge-jp already exists. Refreshing catalog.",
+      "Project edge-jp already exists. Refreshing catalog.",
     );
-    expect(mockToast.error).toHaveBeenCalledWith("profile_exists: Profile already exists");
+    expect(mockToast.error).toHaveBeenCalledWith("project_exists: Project already exists");
   });
 
   it("maps auth 401 into an anonymous current-user state", () => {
@@ -175,7 +175,7 @@ describe("RootRoute", () => {
         isLoading: false,
       })
       .mockReturnValueOnce({
-        data: { profiles: ["default"] },
+        data: { projects: ["default"] },
         isError: false,
         isLoading: false,
         refetch: vi.fn(),
@@ -192,7 +192,7 @@ describe("RootRoute", () => {
     const navigate = vi.fn();
 
     mockUseNavigate.mockReturnValue(navigate);
-    mockUseProfilePreference.mockReturnValue(["__global__", vi.fn()]);
+    mockUseProjectPreference.mockReturnValue(["__global__", vi.fn()]);
     mockUseLocation.mockReturnValue({ pathname: "/" });
     mockUseQuery
       .mockReturnValueOnce({
@@ -209,7 +209,7 @@ describe("RootRoute", () => {
         },
       })
       .mockReturnValueOnce({
-        data: { profiles: ["default", "edge-jp"] },
+        data: { projects: ["default", "edge-jp"] },
         isError: false,
         isLoading: false,
         refetch: vi.fn(),

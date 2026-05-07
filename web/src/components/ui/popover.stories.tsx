@@ -17,7 +17,7 @@ const meta = {
   render: () => (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="outline">Open profile menu</Button>
+        <Button variant="outline">Open project menu</Button>
       </PopoverTrigger>
       <PopoverContent>
         <div className="space-y-1.5 p-3 text-sm">

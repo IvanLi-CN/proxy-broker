@@ -10,16 +10,16 @@
 
 - 当前 inventory layer 只按 `source_scope + proxy_name` 建模，导致同一 scope 下的多个订阅会互相覆盖，无法保留“原始导入”边界。
 - `/proxies` 全局页当前按节点展示与分配，无法表达“整份订阅属于哪个导入、当前被分配到哪里”。
-- profile 自动订阅维护目前只支持“每个 profile 一条 source 配置”，多个本地订阅会互相覆盖。
+- project 自动订阅维护目前只支持“每个 project 一条 source 配置”，多个本地订阅会互相覆盖。
 
 ## 目标 / 非目标
 
 ### Goals
 
 - 把“原始导入（import）”升格为一等实体，订阅内节点按 `import + proxy_name` 唯一。
-- 同一 `global/profile` scope 下允许多个订阅并存，同源重导入只覆盖对应 import。
+- 同一 `global/project` scope 下允许多个订阅并存，同源重导入只覆盖对应 import。
 - `/proxies` 全局页改成一维 import 列表，订阅只支持整批分配/删除。
-- 把 profile 自动订阅维护改成 import 级配置，避免多个本地订阅互相覆盖。
+- 把 project 自动订阅维护改成 import 级配置，避免多个本地订阅互相覆盖。
 
 ### Non-goals
 
@@ -49,14 +49,14 @@
 - 同一 scope 下的多个订阅能并存，即使它们含有同名代理。
 - 同源重导入仅替换对应 import 下节点，不影响其它 import。
 - import 级 allocation/delete 会整批作用于订阅导入。
-- profile-local 多订阅自动同步彼此独立，不再互相覆盖 source。
+- project-local 多订阅自动同步彼此独立，不再互相覆盖 source。
 - 订阅导入与节点组导入都提供可选名称；列表主列只显示名称，缺省时回退到 import ID。
 - 节点组导入允许一次提交一个或多个 Clash-compatible 节点，并作为单个原始导入进行分配/删除。
 
 ### SHOULD
 
 - 旧 node 级 API 保持可调用，但语义跟随 import 级规则。
-- import 列表清楚展示来源、当前分配、生效 profile、节点数与 IP 数。
+- import 列表清楚展示来源、当前分配、生效 project、节点数与 IP 数。
 
 ### COULD
 
@@ -67,16 +67,16 @@
 ### Core flows
 
 - `POST /api/v1/proxies/global/subscriptions/load`：根据 `source.type + source.value` 归一化结果，在 `global` scope 内 upsert 一个 subscription import；保留既有 allocation，并只替换该 import 下节点。
-- `POST /api/v1/profiles/{profile_id}/subscriptions/load`：在当前 profile scope 内按 source upsert import，并为该 import 建立/更新自动维护配置。
+- `POST /api/v1/projects/{project_id}/subscriptions/load`：在当前 project scope 内按 source upsert import，并为该 import 建立/更新自动维护配置。
 - 同一 load 接口也接受 inline node-group 内容：不注册自动同步，并把一次提交的全部节点作为单个原始导入持久化。
 - `GET /api/v1/proxy-imports`：返回 import 列表，供 `/proxies` 全局页一维表格展示与操作。
-- `PATCH/DELETE /api/v1/proxy-imports/{import_id}`：分别更新整批 allocation、删除整批 import，并重建受影响 profile 的 effective pool。
+- `PATCH/DELETE /api/v1/proxy-imports/{import_id}`：分别更新整批 allocation、删除整批 import，并重建受影响 project 的 effective pool。
 
 ### Edge cases / errors
 
 - source 不可解析、订阅无有效代理、所有节点 DNS 都失败时，维持现有订阅无效错误。
 - load 请求同时提交 `source` 与 `content`，或两者都缺失时，返回 `invalid_request`。
-- allocation 指向不存在的 profile 时拒绝。
+- allocation 指向不存在的 project 时拒绝。
 - 删除 import 时需一并移除其 sync config；全局 import 不允许注册自动同步。
 
 ## 接口契约（Interfaces & Contracts）
@@ -100,14 +100,14 @@
 
 - Given 同一 scope 下导入两个不同订阅且都含 `proxy_name=jp-a`
   When 导入完成
-  Then 两个 import 都保留，effective pool 只在 profile 组合阶段做去重。
-- Given 某订阅已被分配到 `profile:edge-jp`
+  Then 两个 import 都保留，effective pool 只在 project 组合阶段做去重。
+- Given 某订阅已被分配到 `project:edge-jp`
   When 对同一 source 再次重导入
-  Then allocation 保持 `profile:edge-jp`，且只替换该 import 下节点。
+  Then allocation 保持 `project:edge-jp`，且只替换该 import 下节点。
 - Given `/proxies` 处于全局上下文
   When 打开 import 列表
   Then 页面只展示原始导入行，不展示订阅内部节点的分配控件。
-- Given 某 profile 有两个本地订阅 import
+- Given 某 project 有两个本地订阅 import
   When 自动同步其中一个 source
   Then 只更新对应 import，不覆盖另一个 import 的 source 配置。
 - Given operator 留空节点组名称并粘贴两个节点
@@ -127,7 +127,7 @@
 - Stories to add/update: `web/src/pages/ProxiesPage.stories.tsx`
 - Stories to add/update: `web/src/features/proxies/components/ProxyLoadCard.stories.tsx`
 - Docs pages / state galleries to add/update: 复用该 stories 的 autodocs/canvas 入口
-- `play` / interaction coverage to add/update: global/profile/access denied 三个关键态，以及节点组导入态
+- `play` / interaction coverage to add/update: global/project/access denied 三个关键态，以及节点组导入态
 
 ### Quality checks
 
@@ -156,11 +156,11 @@
   ![全局原始导入列表](./assets/proxies-global-imports-zhcn.png)
 
 - source_type: storybook_canvas
-  story_id_or_title: `Pages/ProxiesPage/Profile Config`
-  state: profile-local import policy
-  evidence_note: 验证 profile 侧保留“导入本地代理池 + 是否组合全局池”的入口，不再在该视图里暴露跨配置的节点级分配。
+  story_id_or_title: `Pages/ProxiesPage/Project Config`
+  state: project-local import policy
+  evidence_note: 验证 project 侧保留“导入本地代理池 + 是否组合全局池”的入口，不再在该视图里暴露跨配置的节点级分配。
   image:
-  ![Profile 本地导入与全局池策略](./assets/proxies-profile-import-policy.png)
+  ![Project 本地导入与全局池策略](./assets/proxies-project-import-policy.png)
 
 - source_type: storybook_canvas
   story_id_or_title: `Features/Proxies/ProxyLoadCard/Node Group Mode`
@@ -182,8 +182,8 @@ None
 ## 方案概述（Approach, high-level）
 
 - 在 inventory node 之外新增 import 头实体，节点改为从属于 import，并把 allocation 提升到 import 层统一管理。
-- profile effective pool 继续从 node 明细层组合，但同名去重只发生在 profile 组合阶段。
-- 自动订阅维护改为“按 profile 聚合调度、按 import 独立 source 执行”的混合模式，避免改动现有 task API 形状。
+- project effective pool 继续从 node 明细层组合，但同名去重只发生在 project 组合阶段。
+- 自动订阅维护改为“按 project 聚合调度、按 import 独立 source 执行”的混合模式，避免改动现有 task API 形状。
 
 ## 风险 / 开放问题 / 假设（Risks, Open Questions, Assumptions）
 

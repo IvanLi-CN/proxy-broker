@@ -188,7 +188,7 @@ export const sessionIpNodeOptionsFixture: SearchSessionIpNodeOptionsResponse = {
                 null,
               ]),
               session_last_used_at: 1_741_748_520,
-              profile_last_used_at: 1_741_748_520,
+              project_last_used_at: 1_741_748_520,
             },
             {
               node_id: "node-jp-tokyo-backup",
@@ -207,7 +207,7 @@ export const sessionIpNodeOptionsFixture: SearchSessionIpNodeOptionsResponse = {
                 [96, 101, 117],
               ),
               session_last_used_at: 1_741_748_200,
-              profile_last_used_at: 1_741_748_200,
+              project_last_used_at: 1_741_748_200,
             },
           ],
         },
@@ -240,7 +240,7 @@ export const sessionIpNodeOptionsFixture: SearchSessionIpNodeOptionsResponse = {
                 [103, 118, 155, 229, 301],
               ),
               session_last_used_at: 1_741_748_200,
-              profile_last_used_at: 1_741_748_460,
+              project_last_used_at: 1_741_748_460,
             },
           ],
         },
@@ -279,7 +279,7 @@ export const sessionIpNodeOptionsFixture: SearchSessionIpNodeOptionsResponse = {
                 340,
               ]),
               session_last_used_at: null,
-              profile_last_used_at: 1_741_747_900,
+              project_last_used_at: 1_741_747_900,
             },
           ],
         },
@@ -311,7 +311,7 @@ export const sessionNodeOptionsFixture: SearchSessionNodeOptionsResponse = {
         null,
       ]),
       session_last_used_at: 1_741_748_520,
-      profile_last_used_at: 1_741_748_520,
+      project_last_used_at: 1_741_748_520,
     },
     {
       node_id: "node-jp-osaka-edge",
@@ -331,7 +331,7 @@ export const sessionNodeOptionsFixture: SearchSessionNodeOptionsResponse = {
         [103, 118, 155, 229, 301],
       ),
       session_last_used_at: 1_741_748_200,
-      profile_last_used_at: 1_741_748_460,
+      project_last_used_at: 1_741_748_460,
     },
     {
       node_id: "node-us-sanjose-edge",
@@ -351,7 +351,7 @@ export const sessionNodeOptionsFixture: SearchSessionNodeOptionsResponse = {
         340,
       ]),
       session_last_used_at: null,
-      profile_last_used_at: 1_741_747_900,
+      project_last_used_at: 1_741_747_900,
     },
   ],
 };
@@ -369,7 +369,7 @@ export const tasksFixture: TaskListResponse = {
   runs: [
     {
       run_id: "run-H6r2Lp8XmQ4Tn7Vc",
-      profile_id: "default",
+      project_id: "default",
       kind: "subscription_sync",
       trigger: "schedule",
       status: "running",
@@ -385,7 +385,7 @@ export const tasksFixture: TaskListResponse = {
     },
     {
       run_id: "run-J5w3Ns9Qa1Ze6Ru2",
-      profile_id: "default",
+      project_id: "default",
       kind: "metadata_refresh_incremental",
       trigger: "post_load",
       status: "queued",
@@ -401,7 +401,7 @@ export const tasksFixture: TaskListResponse = {
     },
     {
       run_id: "run-P4v8Kb2Yt7Lm1Cx5",
-      profile_id: "edge-jp",
+      project_id: "edge-jp",
       kind: "metadata_refresh_full",
       trigger: "schedule",
       status: "succeeded",
@@ -427,7 +427,7 @@ export const tasksFixture: TaskListResponse = {
 export const taskDetailFixture: TaskRunDetail = {
   run: tasksFixture.runs[0] ?? {
     run_id: "run-R6m2Hd8Wp3Qs9Ty4",
-    profile_id: "default",
+    project_id: "default",
     kind: "subscription_sync",
     trigger: "schedule",
     status: "queued",
@@ -448,7 +448,7 @@ export const taskDetailFixture: TaskRunDetail = {
       at: recentTaskBaseSec - 9,
       level: "info",
       stage: "loading_subscription",
-      message: "Refreshing subscription feed for profile.",
+      message: "Refreshing subscription feed for project.",
       payload_json: null,
     },
     {

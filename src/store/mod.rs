@@ -4,7 +4,7 @@ mod sqlite;
 use async_trait::async_trait;
 
 use crate::models::{
-    ApiKeyRecord, IpRecord, NodeUsageRecord, ProbeRecord, ProfileProxySettings, ProxyImportRecord,
+    ApiKeyRecord, IpRecord, NodeUsageRecord, ProbeRecord, ProjectProxySettings, ProxyImportRecord,
     ProxyImportSyncConfig, ProxyInventoryRecord, ProxyNode, ProxyNodeMetadataRecord,
     ProxyNodeProbeSampleRecord, ProxyScope, SessionRecord, SystemSettings, TaskListQuery,
     TaskRunEventRecord, TaskRunRecord,
@@ -15,22 +15,22 @@ pub use sqlite::SqliteStore;
 
 #[async_trait]
 pub trait BrokerStore: Send + Sync {
-    async fn list_profiles(&self) -> anyhow::Result<Vec<String>>;
-    async fn create_profile(&self, profile_id: &str, created_at: i64) -> anyhow::Result<()>;
+    async fn list_projects(&self) -> anyhow::Result<Vec<String>>;
+    async fn create_project(&self, project_id: &str, created_at: i64) -> anyhow::Result<()>;
 
     async fn replace_subscription(
         &self,
-        profile_id: &str,
+        project_id: &str,
         nodes: &[ProxyNode],
     ) -> anyhow::Result<()>;
     async fn apply_subscription_snapshot(
         &self,
-        profile_id: &str,
+        project_id: &str,
         nodes: &[ProxyNode],
         ip_records: &[IpRecord],
         probe_records: &[ProbeRecord],
     ) -> anyhow::Result<()>;
-    async fn list_subscription(&self, profile_id: &str) -> anyhow::Result<Vec<ProxyNode>>;
+    async fn list_subscription(&self, project_id: &str) -> anyhow::Result<Vec<ProxyNode>>;
 
     async fn list_proxy_inventory(&self) -> anyhow::Result<Vec<ProxyInventoryRecord>>;
     async fn replace_proxy_inventory_scope(
@@ -76,24 +76,24 @@ pub trait BrokerStore: Send + Sync {
 
     async fn replace_ip_records(
         &self,
-        profile_id: &str,
+        project_id: &str,
         records: &[IpRecord],
     ) -> anyhow::Result<()>;
-    async fn upsert_ip_records(&self, profile_id: &str, records: &[IpRecord])
+    async fn upsert_ip_records(&self, project_id: &str, records: &[IpRecord])
     -> anyhow::Result<()>;
-    async fn list_ip_records(&self, profile_id: &str) -> anyhow::Result<Vec<IpRecord>>;
+    async fn list_ip_records(&self, project_id: &str) -> anyhow::Result<Vec<IpRecord>>;
 
     async fn replace_probe_records(
         &self,
-        profile_id: &str,
+        project_id: &str,
         records: &[ProbeRecord],
     ) -> anyhow::Result<()>;
     async fn upsert_probe_records(
         &self,
-        profile_id: &str,
+        project_id: &str,
         records: &[ProbeRecord],
     ) -> anyhow::Result<()>;
-    async fn list_probe_records(&self, profile_id: &str) -> anyhow::Result<Vec<ProbeRecord>>;
+    async fn list_probe_records(&self, project_id: &str) -> anyhow::Result<Vec<ProbeRecord>>;
 
     async fn upsert_proxy_node_metadata(
         &self,
@@ -112,28 +112,28 @@ pub trait BrokerStore: Send + Sync {
     async fn get_system_settings(&self) -> anyhow::Result<Option<SystemSettings>>;
     async fn upsert_system_settings(&self, settings: &SystemSettings) -> anyhow::Result<()>;
 
-    async fn insert_session(&self, profile_id: &str, session: &SessionRecord)
+    async fn insert_session(&self, project_id: &str, session: &SessionRecord)
     -> anyhow::Result<()>;
     async fn insert_sessions(
         &self,
-        profile_id: &str,
+        project_id: &str,
         sessions: &[SessionRecord],
     ) -> anyhow::Result<()>;
     async fn insert_sessions_with_touch(
         &self,
-        profile_id: &str,
+        project_id: &str,
         sessions: &[SessionRecord],
         last_used_at: i64,
     ) -> anyhow::Result<()>;
-    async fn delete_session(&self, profile_id: &str, session_id: &str) -> anyhow::Result<()>;
-    async fn list_sessions(&self, profile_id: &str) -> anyhow::Result<Vec<SessionRecord>>;
-    async fn list_profile_node_usages(
+    async fn delete_session(&self, project_id: &str, session_id: &str) -> anyhow::Result<()>;
+    async fn list_sessions(&self, project_id: &str) -> anyhow::Result<Vec<SessionRecord>>;
+    async fn list_project_node_usages(
         &self,
-        profile_id: &str,
+        project_id: &str,
     ) -> anyhow::Result<Vec<NodeUsageRecord>>;
     async fn list_session_node_usages(
         &self,
-        profile_id: &str,
+        project_id: &str,
         session_id: &str,
     ) -> anyhow::Result<Vec<NodeUsageRecord>>;
 
@@ -150,13 +150,13 @@ pub trait BrokerStore: Send + Sync {
 
     async fn touch_ip_usage(
         &self,
-        profile_id: &str,
+        project_id: &str,
         ip: &str,
         last_used_at: i64,
     ) -> anyhow::Result<()>;
     async fn touch_ip_usages(
         &self,
-        profile_id: &str,
+        project_id: &str,
         ips: &[String],
         last_used_at: i64,
     ) -> anyhow::Result<()>;
@@ -170,41 +170,41 @@ pub trait BrokerStore: Send + Sync {
         import_id: &str,
     ) -> anyhow::Result<Option<ProxyImportSyncConfig>>;
     async fn list_proxy_import_sync_configs(&self) -> anyhow::Result<Vec<ProxyImportSyncConfig>>;
-    async fn list_proxy_import_sync_configs_for_profile(
+    async fn list_proxy_import_sync_configs_for_project(
         &self,
-        profile_id: &str,
+        project_id: &str,
     ) -> anyhow::Result<Vec<ProxyImportSyncConfig>>;
     async fn delete_proxy_import_sync_config(&self, import_id: &str) -> anyhow::Result<()>;
 
-    async fn upsert_profile_sync_config(
+    async fn upsert_project_sync_config(
         &self,
         config: &ProxyImportSyncConfig,
     ) -> anyhow::Result<()> {
         self.upsert_proxy_import_sync_config(config).await
     }
 
-    async fn get_profile_sync_config(
+    async fn get_project_sync_config(
         &self,
-        profile_id: &str,
+        project_id: &str,
     ) -> anyhow::Result<Option<ProxyImportSyncConfig>> {
         Ok(self
-            .list_proxy_import_sync_configs_for_profile(profile_id)
+            .list_proxy_import_sync_configs_for_project(project_id)
             .await?
             .into_iter()
             .next())
     }
 
-    async fn list_profile_sync_configs(&self) -> anyhow::Result<Vec<ProxyImportSyncConfig>> {
+    async fn list_project_sync_configs(&self) -> anyhow::Result<Vec<ProxyImportSyncConfig>> {
         self.list_proxy_import_sync_configs().await
     }
 
-    async fn get_profile_proxy_settings(
+    async fn get_project_proxy_settings(
         &self,
-        profile_id: &str,
-    ) -> anyhow::Result<Option<ProfileProxySettings>>;
-    async fn upsert_profile_proxy_settings(
+        project_id: &str,
+    ) -> anyhow::Result<Option<ProjectProxySettings>>;
+    async fn upsert_project_proxy_settings(
         &self,
-        settings: &ProfileProxySettings,
+        settings: &ProjectProxySettings,
     ) -> anyhow::Result<()>;
 
     async fn insert_task_run(&self, run: &TaskRunRecord) -> anyhow::Result<()>;

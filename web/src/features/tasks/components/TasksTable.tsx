@@ -59,7 +59,7 @@ export function TasksTable({ runs, isLoading, selectedRunId, onSelectRun }: Task
     <Table className="min-w-[980px]">
       <TableHeader>
         <TableRow className="border-b border-border/70 bg-muted/20">
-          <TableHead className="px-4">{t("Profile")}</TableHead>
+          <TableHead className="px-4">{t("Project")}</TableHead>
           <TableHead>{t("Task")}</TableHead>
           <TableHead>{t("Status")}</TableHead>
           <TableHead>{t("Stage")}</TableHead>
@@ -79,7 +79,7 @@ export function TasksTable({ runs, isLoading, selectedRunId, onSelectRun }: Task
             onClick={() => onSelectRun(run.run_id)}
           >
             <TableCell className="px-4">
-              <div className="font-mono text-xs md:text-sm">{run.profile_id}</div>
+              <div className="font-mono text-xs md:text-sm">{run.project_id}</div>
             </TableCell>
             <TableCell>
               <div className="space-y-1">

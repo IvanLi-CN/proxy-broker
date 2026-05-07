@@ -10,7 +10,7 @@
 
 - 当前仓库在运行期、持久化层与稳定派生命名里同时使用随机 UUID 与 UUIDv5；这让公开 ID 形状过长，也与“项目不得主动使用 UUID”的约束冲突。
 - `session_id`、`run_id`、`event_id`、`key_id`、`import_id`、`node_id` 等字段已经对外暴露给 API、前端、测试夹具与文档；单纯局部替换会让存量 SQLite 数据与既有路径参数失配。
-- `import_id`、`node_id`、`profile_safe_name`、`broker-ip-*` 依赖“同输入 -> 同输出”的稳定映射；如果把它们误改成普通随机 ID，会破坏重复导入、节点追踪与运行时命名稳定性。
+- `import_id`、`node_id`、`project_safe_name`、`broker-ip-*` 依赖“同输入 -> 同输出”的稳定映射；如果把它们误改成普通随机 ID，会破坏重复导入、节点追踪与运行时命名稳定性。
 - 现有 API key 只落库存 `salt + sha256(secret)`，无法把历史 `pbk_<uuid>_<uuid>` secret 无损改写为新 `key_id`，所以必须明确历史 key 的处理策略。
 
 ## 目标 / 非目标
@@ -40,7 +40,7 @@
 ### Out of scope
 
 - 新增 UUID/短 ID 双栈兼容层。
-- 变更 profile 自定义 ID 的输入语义。
+- 变更 project 自定义 ID 的输入语义。
 - UI 视觉布局或交互重构。
 
 ## 需求（Requirements）
@@ -49,7 +49,7 @@
 
 - 共享 alphabet 固定为 `0-9A-Za-z`，且所有第一方随机/稳定短 ID 都只能使用这一 alphabet。
 - `session_id` / `run_id` / `event_id` / `import_id` / `node_id` / `key_id` 对外仍保持 string 字段，但不再声明或示例化 UUID 形状。
-- `import_id`、`node_id`、`profile_safe_name`、`broker-ip-*` 必须继续满足“同输入 -> 同输出”。
+- `import_id`、`node_id`、`project_safe_name`、`broker-ip-*` 必须继续满足“同输入 -> 同输出”。
 - SQLite 升级后，所有相关表之间的 ID 关联必须完整指向新短 ID。
 - 历史 API keys 必须在迁移中统一清空或撤销，迁移后旧 secret 不能再认证成功。
 - `Cargo.toml` 与第一方源码中不得残留 `uuid` 依赖和 `Uuid::new_v4/new_v5/NAMESPACE_URL` 调用。
@@ -69,7 +69,7 @@
 ### Core flows
 
 - 服务生成新的 session / task run / task event / manual import / API key 时，改为生成带固定前缀的短 ID。
-- 服务根据订阅来源、节点名、profile ID 或 `(proxy_name, ip)` 派生稳定标识时，改为输出确定性的短 ID，但业务判定依据保持不变。
+- 服务根据订阅来源、节点名、project ID 或 `(proxy_name, ip)` 派生稳定标识时，改为输出确定性的短 ID，但业务判定依据保持不变。
 - 旧 SQLite 库首次升级时，服务会在现有 schema repair/backfill 后继续执行短 ID 改写，把相关记录和引用迁移到新形状。
 - API key 创建接口继续返回 `pbk_<key_id>_<random>` 形状的 secret，但 `key_id` 与随机段都改为 underscore-safe 的短 ID 片段。
 
@@ -197,13 +197,13 @@ None
 
 - 2026-04-19: 新建规格，锁定“稳定短 ID + 禁止主动使用 UUID + 旧 API key 统一失效并重发”的迁移契约。
 - 2026-04-19: 已落地统一 `src/ids.rs`、SQLite 一次性改写、API key 短 ID/重发策略，以及前端 fixtures / stories / smoke data 同步；补充 Storybook 视觉证据。
-- 2026-04-19: 修复迁移清理 legacy API key 时遗漏 `api_key_profiles` 残留的问题，并完成 PR #37 的 review、CI 与 spec drift 收口。
+- 2026-04-19: 修复迁移清理 legacy API key 时遗漏 `api_key_projects` 残留的问题，并完成 PR #37 的 review、CI 与 spec drift 收口。
 
 ## 参考（References）
 
 - `docs/contracts/http-apis.md`
 - `docs/contracts/db.md`
 - `docs/contracts/file-formats.md`
-- `docs/specs/h2w7p-forward-auth-admin-and-profile-keys/SPEC.md`
+- `docs/specs/h2w7p-forward-auth-admin-and-project-keys/SPEC.md`
 - `docs/specs/qvbmc-proxy-import-allocation/SPEC.md`
 - `docs/specs/y5yx8-task-module-and-auto-subscription-maintenance/SPEC.md`

@@ -31,7 +31,7 @@ function createProbeSamples(nodeId: string, ip: string, samples: Array<number | 
 
 const globalCatalogWithInvalidCountryCode: ProxyCatalogResponse = {
   view: "global",
-  profile_id: null,
+  project_id: null,
   groups: [
     {
       import: {
@@ -44,7 +44,7 @@ const globalCatalogWithInvalidCountryCode: ProxyCatalogResponse = {
           source_value: "https://example.test/global-jp.yaml",
         },
         allocation_scope: { type: "global" },
-        effective_profile_ids: ["default"],
+        effective_project_ids: ["default"],
         proxy_count: 1,
         distinct_ip_count: 1,
         created_at: 1_713_308_400,
@@ -60,7 +60,7 @@ const globalCatalogWithInvalidCountryCode: ProxyCatalogResponse = {
           resolved_ips: ["203.0.113.10"],
           source_scope: { type: "global" },
           allocation_scope: { type: "global" },
-          effective_profile_ids: ["default"],
+          effective_project_ids: ["default"],
           primary_ip: "203.0.113.10",
           can_open_session: false,
           ip_metadata: [
@@ -99,7 +99,7 @@ describe("ProxiesPage", () => {
         <TooltipProvider>
           <ProxiesPage
             mode="global"
-            profiles={["default"]}
+            projects={["default"]}
             currentUser={currentUser}
             accessDenied={false}
             authError={null}

@@ -22,7 +22,7 @@ type Story = StoryObj<typeof meta>;
 export const Default: Story = {
   render: () => (
     <div className="grid max-w-sm gap-2">
-      <Label htmlFor="story-label">Profile ID</Label>
+      <Label htmlFor="story-label">Project ID</Label>
       <Input id="story-label" defaultValue="default" />
     </div>
   ),

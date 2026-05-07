@@ -39,7 +39,7 @@ export const Default: Story = {
           </Button>
         </CardAction>
       </CardHeader>
-      <CardContent>26 reachable IPs are ready for session selection in this profile.</CardContent>
+      <CardContent>26 reachable IPs are ready for session selection in this project.</CardContent>
       <CardFooter>Updated 2 minutes ago</CardFooter>
     </Card>
   ),

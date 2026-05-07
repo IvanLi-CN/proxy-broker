@@ -21,28 +21,28 @@ interface CurrentUserSummaryProps {
 
 function summarizeApiKeyScope(
   scope: NonNullable<
-    Extract<CurrentUserState, { status: "resolved" }>["identity"]["api_key_profile_scope"]
+    Extract<CurrentUserState, { status: "resolved" }>["identity"]["api_key_project_scope"]
   >,
   t: Translator,
 ) {
-  if (scope.kind === "all_profiles") {
+  if (scope.kind === "all_projects") {
     return {
-      badge: t("all profiles"),
-      detail: t("All profiles"),
+      badge: t("all projects"),
+      detail: t("All projects"),
     };
   }
 
-  const profileIds = scope.profile_ids ?? [];
-  if (profileIds.length === 1) {
+  const projectIds = scope.project_ids ?? [];
+  if (projectIds.length === 1) {
     return {
-      badge: t("profile {profileId}", { profileId: profileIds[0] }),
-      detail: profileIds[0] ?? "",
+      badge: t("project {projectId}", { projectId: projectIds[0] }),
+      detail: projectIds[0] ?? "",
     };
   }
 
   return {
-    badge: t("{count} selected profiles", { count: profileIds.length }),
-    detail: profileIds.join(" / "),
+    badge: t("{count} selected projects", { count: projectIds.length }),
+    detail: projectIds.join(" / "),
   };
 }
 
@@ -231,8 +231,8 @@ function describeCurrentUser(currentUser: CurrentUserState, t: ReturnType<typeof
         metaLines: commonMeta,
       };
     case "api_key": {
-      const scopeSummary = identity.api_key_profile_scope
-        ? summarizeApiKeyScope(identity.api_key_profile_scope, t)
+      const scopeSummary = identity.api_key_project_scope
+        ? summarizeApiKeyScope(identity.api_key_project_scope, t)
         : null;
       return {
         icon: KeyRoundIcon,

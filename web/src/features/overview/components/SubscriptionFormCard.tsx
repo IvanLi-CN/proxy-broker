@@ -68,7 +68,7 @@ export function SubscriptionFormCard({
             </CardTitle>
             <CardDescription className="max-w-2xl text-sm leading-6 text-muted-foreground md:text-[15px]">
               {t(
-                "Reset the working inventory for the current profile before you extract IPs or open any new listeners.",
+                "Reset the working inventory for the current project before you extract IPs or open any new listeners.",
               )}
             </CardDescription>
           </div>
@@ -159,7 +159,7 @@ export function SubscriptionFormCard({
               <div className="text-sm font-semibold text-foreground">{t("What happens next")}</div>
               <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
                 {t(
-                  "A successful load replaces the candidate pool for this profile. Review warnings at once if the upstream feed contains skipped or malformed records.",
+                  "A successful load replaces the candidate pool for this project. Review warnings at once if the upstream feed contains skipped or malformed records.",
                 )}
               </p>
             </div>

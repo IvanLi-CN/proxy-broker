@@ -149,14 +149,14 @@ status="$(request_json \
 assert_json_field "$viewer_me" "subject" "$FORWARD_AUTH_VIEWER_USER"
 assert_json_field "$viewer_me" "is_admin" "False"
 
-viewer_profiles="$TMP_DIR/viewer-profiles.json"
+viewer_projects="$TMP_DIR/viewer-projects.json"
 status="$(request_json \
   GET \
-  "https://${FORWARD_AUTH_BROKER_BASIC_HOST}:${FORWARD_AUTH_HTTPS_PORT}/api/v1/profiles" \
-  "$viewer_profiles" \
+  "https://${FORWARD_AUTH_BROKER_BASIC_HOST}:${FORWARD_AUTH_HTTPS_PORT}/api/v1/projects" \
+  "$viewer_projects" \
   -H "$(basic_header "$FORWARD_AUTH_VIEWER_USER" "$FORWARD_AUTH_VIEWER_PASSWORD")")"
 [ "$status" = "403" ]
-assert_json_field "$viewer_profiles" "code" "admin_required"
+assert_json_field "$viewer_projects" "code" "admin_required"
 
 viewer_ui="$TMP_DIR/viewer-ui.json"
 status="$(request_json \
@@ -167,28 +167,28 @@ status="$(request_json \
 [ "$status" = "403" ]
 assert_json_field "$viewer_ui" "code" "admin_required"
 
-echo "[smoke] creating profiles and owner-scoped API keys as admin"
+echo "[smoke] creating projects and owner-scoped API keys as admin"
 create_default="$TMP_DIR/create-default.json"
 status="$(request_json \
   POST \
-  "https://${FORWARD_AUTH_BROKER_BASIC_HOST}:${FORWARD_AUTH_HTTPS_PORT}/api/v1/profiles" \
+  "https://${FORWARD_AUTH_BROKER_BASIC_HOST}:${FORWARD_AUTH_HTTPS_PORT}/api/v1/projects" \
   "$create_default" \
   -H "$(basic_header "$FORWARD_AUTH_ADMIN_USER" "$FORWARD_AUTH_ADMIN_PASSWORD")" \
   -H "Content-Type: application/json" \
-  --data '{"profile_id":"default"}')"
+  --data '{"project_id":"default"}')"
 [ "$status" = "201" ]
-assert_json_field "$create_default" "profile_id" "default"
+assert_json_field "$create_default" "project_id" "default"
 
 create_other="$TMP_DIR/create-other.json"
 status="$(request_json \
   POST \
-  "https://${FORWARD_AUTH_BROKER_BASIC_HOST}:${FORWARD_AUTH_HTTPS_PORT}/api/v1/profiles" \
+  "https://${FORWARD_AUTH_BROKER_BASIC_HOST}:${FORWARD_AUTH_HTTPS_PORT}/api/v1/projects" \
   "$create_other" \
   -H "$(basic_header "$FORWARD_AUTH_ADMIN_USER" "$FORWARD_AUTH_ADMIN_PASSWORD")" \
   -H "Content-Type: application/json" \
-  --data '{"profile_id":"other"}')"
+  --data '{"project_id":"other"}')"
 [ "$status" = "201" ]
-assert_json_field "$create_other" "profile_id" "other"
+assert_json_field "$create_other" "project_id" "other"
 
 create_key="$TMP_DIR/create-key.json"
 status="$(request_json \
@@ -197,11 +197,11 @@ status="$(request_json \
   "$create_key" \
   -H "$(basic_header "$FORWARD_AUTH_ADMIN_USER" "$FORWARD_AUTH_ADMIN_PASSWORD")" \
   -H "Content-Type: application/json" \
-  --data '{"name":"smoke-bot","profile_scope":{"kind":"selected_profiles","profile_ids":["default"]}}')"
+  --data '{"name":"smoke-bot","project_scope":{"kind":"selected_projects","project_ids":["default"]}}')"
 [ "$status" = "201" ]
 assert_json_field "$create_key" "api_key.name" "smoke-bot"
 assert_json_field "$create_key" "api_key.owner_subject" "$FORWARD_AUTH_ADMIN_USER"
-assert_json_field "$create_key" "api_key.profile_scope.kind" "selected_profiles"
+assert_json_field "$create_key" "api_key.project_scope.kind" "selected_projects"
 
 api_key_secret="$(python3 - "$create_key" <<'PY'
 import json
@@ -217,10 +217,10 @@ status="$(request_json \
   "$create_all_key" \
   -H "$(basic_header "$FORWARD_AUTH_ADMIN_USER" "$FORWARD_AUTH_ADMIN_PASSWORD")" \
   -H "Content-Type: application/json" \
-  --data '{"name":"fleet-bot","profile_scope":{"kind":"all_profiles"}}')"
+  --data '{"name":"fleet-bot","project_scope":{"kind":"all_projects"}}')"
 [ "$status" = "201" ]
 assert_json_field "$create_all_key" "api_key.name" "fleet-bot"
-assert_json_field "$create_all_key" "api_key.profile_scope.kind" "all_profiles"
+assert_json_field "$create_all_key" "api_key.project_scope.kind" "all_projects"
 
 all_api_key_secret="$(python3 - "$create_all_key" <<'PY'
 import json
@@ -229,7 +229,7 @@ print(json.load(open(sys.argv[1], "r", encoding="utf-8"))["secret"])
 PY
 )"
 
-echo "[smoke] machine host accepts selected-profile API key and enforces scope"
+echo "[smoke] machine host accepts selected-project API key and enforces scope"
 machine_me="$TMP_DIR/machine-me.json"
 status="$(request_json \
   GET \
@@ -239,13 +239,13 @@ status="$(request_json \
 [ "$status" = "200" ]
 assert_json_field "$machine_me" "principal_type" "api_key"
 assert_json_field "$machine_me" "api_key_owner_subject" "$FORWARD_AUTH_ADMIN_USER"
-assert_json_field "$machine_me" "api_key_profile_scope.kind" "selected_profiles"
-assert_json_field "$machine_me" "profile_id" "default"
+assert_json_field "$machine_me" "api_key_project_scope.kind" "selected_projects"
+assert_json_field "$machine_me" "project_id" "default"
 
 machine_default="$TMP_DIR/machine-default.json"
 status="$(request_json \
   GET \
-  "https://${FORWARD_AUTH_MACHINE_HOST}:${FORWARD_AUTH_HTTPS_PORT}/api/v1/profiles/default/sessions" \
+  "https://${FORWARD_AUTH_MACHINE_HOST}:${FORWARD_AUTH_HTTPS_PORT}/api/v1/projects/default/sessions" \
   "$machine_default" \
   -H "Authorization: Bearer ${api_key_secret}")"
 [ "$status" = "200" ]
@@ -253,24 +253,24 @@ status="$(request_json \
 machine_other="$TMP_DIR/machine-other.json"
 status="$(request_json \
   GET \
-  "https://${FORWARD_AUTH_MACHINE_HOST}:${FORWARD_AUTH_HTTPS_PORT}/api/v1/profiles/other/sessions" \
+  "https://${FORWARD_AUTH_MACHINE_HOST}:${FORWARD_AUTH_HTTPS_PORT}/api/v1/projects/other/sessions" \
   "$machine_other" \
   -H "Authorization: Bearer ${api_key_secret}")"
 [ "$status" = "403" ]
-assert_json_field "$machine_other" "code" "profile_access_denied"
+assert_json_field "$machine_other" "code" "project_access_denied"
 
 create_future="$TMP_DIR/create-future.json"
 status="$(request_json \
   POST \
-  "https://${FORWARD_AUTH_BROKER_BASIC_HOST}:${FORWARD_AUTH_HTTPS_PORT}/api/v1/profiles" \
+  "https://${FORWARD_AUTH_BROKER_BASIC_HOST}:${FORWARD_AUTH_HTTPS_PORT}/api/v1/projects" \
   "$create_future" \
   -H "$(basic_header "$FORWARD_AUTH_ADMIN_USER" "$FORWARD_AUTH_ADMIN_PASSWORD")" \
   -H "Content-Type: application/json" \
-  --data '{"profile_id":"future"}')"
+  --data '{"project_id":"future"}')"
 [ "$status" = "201" ]
-assert_json_field "$create_future" "profile_id" "future"
+assert_json_field "$create_future" "project_id" "future"
 
-echo "[smoke] all-profile API key reaches profiles created after issuance"
+echo "[smoke] all-project API key reaches projects created after issuance"
 all_machine_me="$TMP_DIR/all-machine-me.json"
 status="$(request_json \
   GET \
@@ -280,12 +280,12 @@ status="$(request_json \
 [ "$status" = "200" ]
 assert_json_field "$all_machine_me" "principal_type" "api_key"
 assert_json_field "$all_machine_me" "api_key_owner_subject" "$FORWARD_AUTH_ADMIN_USER"
-assert_json_field "$all_machine_me" "api_key_profile_scope.kind" "all_profiles"
+assert_json_field "$all_machine_me" "api_key_project_scope.kind" "all_projects"
 
 machine_future="$TMP_DIR/machine-future.json"
 status="$(request_json \
   GET \
-  "https://${FORWARD_AUTH_MACHINE_HOST}:${FORWARD_AUTH_HTTPS_PORT}/api/v1/profiles/future/sessions" \
+  "https://${FORWARD_AUTH_MACHINE_HOST}:${FORWARD_AUTH_HTTPS_PORT}/api/v1/projects/future/sessions" \
   "$machine_future" \
   -H "Authorization: Bearer ${all_api_key_secret}")"
 [ "$status" = "200" ]

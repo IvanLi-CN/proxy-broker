@@ -8,8 +8,8 @@ use async_trait::async_trait;
 
 use crate::{
     models::{
-        ApiKeyRecord, IpRecord, NodeUsageRecord, ProbeRecord, ProfileProxySettings,
-        ProfileSnapshot, ProxyImportRecord, ProxyImportSyncConfig, ProxyInventoryRecord, ProxyNode,
+        ApiKeyRecord, IpRecord, NodeUsageRecord, ProbeRecord, ProjectProxySettings,
+        ProjectSnapshot, ProxyImportRecord, ProxyImportSyncConfig, ProxyInventoryRecord, ProxyNode,
         ProxyNodeMetadataRecord, ProxyNodeProbeSampleRecord, ProxyScope, SessionRecord,
         SystemSettings, TaskListQuery, TaskRunEventRecord, TaskRunRecord,
     },
@@ -19,14 +19,14 @@ use crate::{
 
 #[derive(Default)]
 struct MemoryStoreState {
-    profiles: HashMap<String, ProfileSnapshot>,
+    projects: HashMap<String, ProjectSnapshot>,
     proxy_imports: HashMap<String, ProxyImportRecord>,
     proxy_inventory: HashMap<String, ProxyInventoryRecord>,
     proxy_node_metadata: HashMap<(String, String), ProxyNodeMetadataRecord>,
     proxy_node_probe_sample_seq: u64,
     proxy_node_probe_samples: Vec<MemoryProxyNodeProbeSample>,
     proxy_import_sync_configs: HashMap<String, ProxyImportSyncConfig>,
-    profile_proxy_settings: HashMap<String, ProfileProxySettings>,
+    project_proxy_settings: HashMap<String, ProjectProxySettings>,
     system_settings: Option<SystemSettings>,
     api_keys: HashMap<String, ApiKeyRecord>,
 }
@@ -47,77 +47,77 @@ impl MemoryStore {
         Self::default()
     }
 
-    fn with_profile_mut<R, F>(&self, profile_id: &str, f: F) -> anyhow::Result<R>
+    fn with_project_mut<R, F>(&self, project_id: &str, f: F) -> anyhow::Result<R>
     where
-        F: FnOnce(&mut ProfileSnapshot) -> R,
+        F: FnOnce(&mut ProjectSnapshot) -> R,
     {
         let mut guard = self
             .inner
             .write()
             .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
-        let profile = guard.profiles.entry(profile_id.to_string()).or_default();
-        Ok(f(profile))
+        let project = guard.projects.entry(project_id.to_string()).or_default();
+        Ok(f(project))
     }
 
-    fn with_profile<R, F>(&self, profile_id: &str, f: F) -> anyhow::Result<R>
+    fn with_project<R, F>(&self, project_id: &str, f: F) -> anyhow::Result<R>
     where
-        F: FnOnce(&ProfileSnapshot) -> R,
+        F: FnOnce(&ProjectSnapshot) -> R,
     {
         let guard = self
             .inner
             .read()
             .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
-        if let Some(profile) = guard.profiles.get(profile_id) {
-            Ok(f(profile))
+        if let Some(project) = guard.projects.get(project_id) {
+            Ok(f(project))
         } else {
-            Ok(f(&ProfileSnapshot::default()))
+            Ok(f(&ProjectSnapshot::default()))
         }
     }
 }
 
 #[async_trait]
 impl BrokerStore for MemoryStore {
-    async fn list_profiles(&self) -> anyhow::Result<Vec<String>> {
+    async fn list_projects(&self) -> anyhow::Result<Vec<String>> {
         let guard = self
             .inner
             .read()
             .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
-        let mut profiles = HashSet::new();
-        profiles.extend(guard.profiles.keys().cloned());
-        profiles.extend(guard.profile_proxy_settings.keys().cloned());
+        let mut projects = HashSet::new();
+        projects.extend(guard.projects.keys().cloned());
+        projects.extend(guard.project_proxy_settings.keys().cloned());
         for config in guard.proxy_import_sync_configs.values() {
-            profiles.insert(config.profile_id.clone());
+            projects.insert(config.project_id.clone());
         }
-        profiles.extend(
+        projects.extend(
             guard
                 .api_keys
                 .values()
-                .flat_map(|record| record.profile_scope.profile_ids.iter().cloned()),
+                .flat_map(|record| record.project_scope.project_ids.iter().cloned()),
         );
         for item in guard.proxy_inventory.values() {
-            if let Some(profile_id) = item.source_scope.profile_id() {
-                profiles.insert(profile_id.to_string());
+            if let Some(project_id) = item.source_scope.project_id() {
+                projects.insert(project_id.to_string());
             }
-            if let Some(profile_id) = item.allocation_scope.profile_id() {
-                profiles.insert(profile_id.to_string());
+            if let Some(project_id) = item.allocation_scope.project_id() {
+                projects.insert(project_id.to_string());
             }
         }
-        let mut profiles = profiles.into_iter().collect::<Vec<_>>();
-        profiles.sort();
-        Ok(profiles)
+        let mut projects = projects.into_iter().collect::<Vec<_>>();
+        projects.sort();
+        Ok(projects)
     }
 
-    async fn create_profile(&self, profile_id: &str, _created_at: i64) -> anyhow::Result<()> {
+    async fn create_project(&self, project_id: &str, _created_at: i64) -> anyhow::Result<()> {
         let mut guard = self
             .inner
             .write()
             .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
-        guard.profiles.entry(profile_id.to_string()).or_default();
+        guard.projects.entry(project_id.to_string()).or_default();
         guard
-            .profile_proxy_settings
-            .entry(profile_id.to_string())
-            .or_insert(ProfileProxySettings {
-                profile_id: profile_id.to_string(),
+            .project_proxy_settings
+            .entry(project_id.to_string())
+            .or_insert(ProjectProxySettings {
+                project_id: project_id.to_string(),
                 use_global_proxies: true,
             });
         Ok(())
@@ -125,11 +125,11 @@ impl BrokerStore for MemoryStore {
 
     async fn replace_subscription(
         &self,
-        profile_id: &str,
+        project_id: &str,
         nodes: &[ProxyNode],
     ) -> anyhow::Result<()> {
-        self.with_profile_mut(profile_id, |profile| {
-            profile.nodes = nodes.to_vec();
+        self.with_project_mut(project_id, |project| {
+            project.nodes = nodes.to_vec();
         })
         .context("replace subscription failed")?;
         Ok(())
@@ -137,26 +137,26 @@ impl BrokerStore for MemoryStore {
 
     async fn apply_subscription_snapshot(
         &self,
-        profile_id: &str,
+        project_id: &str,
         nodes: &[ProxyNode],
         ip_records: &[IpRecord],
         probe_records: &[ProbeRecord],
     ) -> anyhow::Result<()> {
-        self.with_profile_mut(profile_id, |profile| {
-            profile.nodes = nodes.to_vec();
-            profile.ip_records = ip_records
+        self.with_project_mut(project_id, |project| {
+            project.nodes = nodes.to_vec();
+            project.ip_records = ip_records
                 .iter()
                 .cloned()
                 .map(|record| (record.ip.clone(), record))
                 .collect();
-            profile.probe_records = probe_records.to_vec();
+            project.probe_records = probe_records.to_vec();
         })
         .context("apply subscription snapshot failed")?;
         Ok(())
     }
 
-    async fn list_subscription(&self, profile_id: &str) -> anyhow::Result<Vec<ProxyNode>> {
-        self.with_profile(profile_id, |profile| profile.nodes.clone())
+    async fn list_subscription(&self, project_id: &str) -> anyhow::Result<Vec<ProxyNode>> {
+        self.with_project(project_id, |project| project.nodes.clone())
     }
 
     async fn list_proxy_inventory(&self) -> anyhow::Result<Vec<ProxyInventoryRecord>> {
@@ -338,15 +338,15 @@ impl BrokerStore for MemoryStore {
 
     async fn replace_ip_records(
         &self,
-        profile_id: &str,
+        project_id: &str,
         records: &[IpRecord],
     ) -> anyhow::Result<()> {
-        self.with_profile_mut(profile_id, |profile| {
+        self.with_project_mut(project_id, |project| {
             let mut next = HashMap::new();
             for record in records {
                 next.insert(record.ip.clone(), record.clone());
             }
-            profile.ip_records = next;
+            project.ip_records = next;
         })
         .context("replace ip records failed")?;
         Ok(())
@@ -354,31 +354,31 @@ impl BrokerStore for MemoryStore {
 
     async fn upsert_ip_records(
         &self,
-        profile_id: &str,
+        project_id: &str,
         records: &[IpRecord],
     ) -> anyhow::Result<()> {
-        self.with_profile_mut(profile_id, |profile| {
+        self.with_project_mut(project_id, |project| {
             for record in records {
-                profile.ip_records.insert(record.ip.clone(), record.clone());
+                project.ip_records.insert(record.ip.clone(), record.clone());
             }
         })
         .context("upsert ip records failed")?;
         Ok(())
     }
 
-    async fn list_ip_records(&self, profile_id: &str) -> anyhow::Result<Vec<IpRecord>> {
-        self.with_profile(profile_id, |profile| {
-            profile.ip_records.values().cloned().collect()
+    async fn list_ip_records(&self, project_id: &str) -> anyhow::Result<Vec<IpRecord>> {
+        self.with_project(project_id, |project| {
+            project.ip_records.values().cloned().collect()
         })
     }
 
     async fn replace_probe_records(
         &self,
-        profile_id: &str,
+        project_id: &str,
         records: &[ProbeRecord],
     ) -> anyhow::Result<()> {
-        self.with_profile_mut(profile_id, |profile| {
-            profile.probe_records = records.to_vec();
+        self.with_project_mut(project_id, |project| {
+            project.probe_records = records.to_vec();
         })
         .context("replace probe records failed")?;
         Ok(())
@@ -386,11 +386,11 @@ impl BrokerStore for MemoryStore {
 
     async fn upsert_probe_records(
         &self,
-        profile_id: &str,
+        project_id: &str,
         records: &[ProbeRecord],
     ) -> anyhow::Result<()> {
-        self.with_profile_mut(profile_id, |profile| {
-            let mut index: HashMap<(String, String, String), ProbeRecord> = profile
+        self.with_project_mut(project_id, |project| {
+            let mut index: HashMap<(String, String, String), ProbeRecord> = project
                 .probe_records
                 .iter()
                 .cloned()
@@ -411,14 +411,14 @@ impl BrokerStore for MemoryStore {
                     record.clone(),
                 );
             }
-            profile.probe_records = index.into_values().collect();
+            project.probe_records = index.into_values().collect();
         })
         .context("upsert probe records failed")?;
         Ok(())
     }
 
-    async fn list_probe_records(&self, profile_id: &str) -> anyhow::Result<Vec<ProbeRecord>> {
-        self.with_profile(profile_id, |profile| profile.probe_records.clone())
+    async fn list_probe_records(&self, project_id: &str) -> anyhow::Result<Vec<ProbeRecord>> {
+        self.with_project(project_id, |project| project.probe_records.clone())
     }
 
     async fn upsert_proxy_node_metadata(
@@ -542,21 +542,21 @@ impl BrokerStore for MemoryStore {
 
     async fn insert_session(
         &self,
-        profile_id: &str,
+        project_id: &str,
         session: &SessionRecord,
     ) -> anyhow::Result<()> {
-        self.insert_sessions(profile_id, std::slice::from_ref(session))
+        self.insert_sessions(project_id, std::slice::from_ref(session))
             .await
     }
 
     async fn insert_sessions(
         &self,
-        profile_id: &str,
+        project_id: &str,
         sessions: &[SessionRecord],
     ) -> anyhow::Result<()> {
-        self.with_profile_mut(profile_id, |profile| {
+        self.with_project_mut(project_id, |project| {
             for session in sessions {
-                profile
+                project
                     .sessions
                     .insert(session.session_id.clone(), session.clone());
             }
@@ -566,18 +566,18 @@ impl BrokerStore for MemoryStore {
 
     async fn insert_sessions_with_touch(
         &self,
-        profile_id: &str,
+        project_id: &str,
         sessions: &[SessionRecord],
         last_used_at: i64,
     ) -> anyhow::Result<()> {
-        self.with_profile_mut(profile_id, |profile| {
+        self.with_project_mut(project_id, |project| {
             for session in sessions {
-                profile
+                project
                     .sessions
                     .insert(session.session_id.clone(), session.clone());
             }
             for session in sessions {
-                let entry = profile
+                let entry = project
                     .ip_records
                     .entry(session.selected_ip.clone())
                     .or_insert(IpRecord {
@@ -592,10 +592,10 @@ impl BrokerStore for MemoryStore {
                         last_used_at: None,
                     });
                 entry.last_used_at = Some(last_used_at);
-                profile
-                    .profile_node_usages
+                project
+                    .project_node_usages
                     .insert(session.node_id.clone(), last_used_at);
-                profile
+                project
                     .session_node_usages
                     .entry(session.session_id.clone())
                     .or_default()
@@ -605,17 +605,17 @@ impl BrokerStore for MemoryStore {
         Ok(())
     }
 
-    async fn delete_session(&self, profile_id: &str, session_id: &str) -> anyhow::Result<()> {
-        self.with_profile_mut(profile_id, |profile| {
-            profile.sessions.remove(session_id);
-            profile.session_node_usages.remove(session_id);
+    async fn delete_session(&self, project_id: &str, session_id: &str) -> anyhow::Result<()> {
+        self.with_project_mut(project_id, |project| {
+            project.sessions.remove(session_id);
+            project.session_node_usages.remove(session_id);
         })?;
         Ok(())
     }
 
-    async fn list_sessions(&self, profile_id: &str) -> anyhow::Result<Vec<SessionRecord>> {
-        self.with_profile(profile_id, |profile| {
-            let mut sessions = profile.sessions.values().cloned().collect::<Vec<_>>();
+    async fn list_sessions(&self, project_id: &str) -> anyhow::Result<Vec<SessionRecord>> {
+        self.with_project(project_id, |project| {
+            let mut sessions = project.sessions.values().cloned().collect::<Vec<_>>();
             sessions.sort_by(|a, b| {
                 a.created_at
                     .cmp(&b.created_at)
@@ -625,13 +625,13 @@ impl BrokerStore for MemoryStore {
         })
     }
 
-    async fn list_profile_node_usages(
+    async fn list_project_node_usages(
         &self,
-        profile_id: &str,
+        project_id: &str,
     ) -> anyhow::Result<Vec<NodeUsageRecord>> {
-        self.with_profile(profile_id, |profile| {
-            let mut usages = profile
-                .profile_node_usages
+        self.with_project(project_id, |project| {
+            let mut usages = project
+                .project_node_usages
                 .iter()
                 .map(|(node_id, last_used_at)| NodeUsageRecord {
                     node_id: node_id.clone(),
@@ -650,11 +650,11 @@ impl BrokerStore for MemoryStore {
 
     async fn list_session_node_usages(
         &self,
-        profile_id: &str,
+        project_id: &str,
         session_id: &str,
     ) -> anyhow::Result<Vec<NodeUsageRecord>> {
-        self.with_profile(profile_id, |profile| {
-            let mut usages = profile
+        self.with_project(project_id, |project| {
+            let mut usages = project
                 .session_node_usages
                 .get(session_id)
                 .into_iter()
@@ -748,23 +748,23 @@ impl BrokerStore for MemoryStore {
 
     async fn touch_ip_usage(
         &self,
-        profile_id: &str,
+        project_id: &str,
         ip: &str,
         last_used_at: i64,
     ) -> anyhow::Result<()> {
-        self.touch_ip_usages(profile_id, &[ip.to_string()], last_used_at)
+        self.touch_ip_usages(project_id, &[ip.to_string()], last_used_at)
             .await
     }
 
     async fn touch_ip_usages(
         &self,
-        profile_id: &str,
+        project_id: &str,
         ips: &[String],
         last_used_at: i64,
     ) -> anyhow::Result<()> {
-        self.with_profile_mut(profile_id, |profile| {
+        self.with_project_mut(project_id, |project| {
             for ip in ips {
-                let entry = profile
+                let entry = project
                     .ip_records
                     .entry(ip.to_string())
                     .or_insert(IpRecord {
@@ -823,9 +823,9 @@ impl BrokerStore for MemoryStore {
         Ok(items)
     }
 
-    async fn list_proxy_import_sync_configs_for_profile(
+    async fn list_proxy_import_sync_configs_for_project(
         &self,
-        profile_id: &str,
+        project_id: &str,
     ) -> anyhow::Result<Vec<ProxyImportSyncConfig>> {
         let guard = self
             .inner
@@ -834,7 +834,7 @@ impl BrokerStore for MemoryStore {
         let mut items = guard
             .proxy_import_sync_configs
             .values()
-            .filter(|config| config.profile_id == profile_id)
+            .filter(|config| config.project_id == project_id)
             .cloned()
             .collect::<Vec<_>>();
         items.sort_by(|left, right| left.import_id.cmp(&right.import_id));
@@ -850,41 +850,41 @@ impl BrokerStore for MemoryStore {
         Ok(())
     }
 
-    async fn get_profile_proxy_settings(
+    async fn get_project_proxy_settings(
         &self,
-        profile_id: &str,
-    ) -> anyhow::Result<Option<ProfileProxySettings>> {
+        project_id: &str,
+    ) -> anyhow::Result<Option<ProjectProxySettings>> {
         let guard = self
             .inner
             .read()
             .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
-        Ok(guard.profile_proxy_settings.get(profile_id).cloned())
+        Ok(guard.project_proxy_settings.get(project_id).cloned())
     }
 
-    async fn upsert_profile_proxy_settings(
+    async fn upsert_project_proxy_settings(
         &self,
-        settings: &ProfileProxySettings,
+        settings: &ProjectProxySettings,
     ) -> anyhow::Result<()> {
         let mut guard = self
             .inner
             .write()
             .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
         guard
-            .profile_proxy_settings
-            .insert(settings.profile_id.clone(), settings.clone());
+            .project_proxy_settings
+            .insert(settings.project_id.clone(), settings.clone());
         Ok(())
     }
 
     async fn insert_task_run(&self, run: &TaskRunRecord) -> anyhow::Result<()> {
-        self.with_profile_mut(&run.profile_id, |profile| {
-            profile.task_runs.insert(run.run_id.clone(), run.clone());
+        self.with_project_mut(&run.project_id, |project| {
+            project.task_runs.insert(run.run_id.clone(), run.clone());
         })?;
         Ok(())
     }
 
     async fn update_task_run(&self, run: &TaskRunRecord) -> anyhow::Result<()> {
-        self.with_profile_mut(&run.profile_id, |profile| {
-            profile.task_runs.insert(run.run_id.clone(), run.clone());
+        self.with_project_mut(&run.project_id, |project| {
+            project.task_runs.insert(run.run_id.clone(), run.clone());
         })?;
         Ok(())
     }
@@ -895,9 +895,9 @@ impl BrokerStore for MemoryStore {
             .read()
             .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
         Ok(guard
-            .profiles
+            .projects
             .values()
-            .find_map(|profile| profile.task_runs.get(run_id).cloned()))
+            .find_map(|project| project.task_runs.get(run_id).cloned()))
     }
 
     async fn list_task_runs(&self, query: &TaskListQuery) -> anyhow::Result<Vec<TaskRunRecord>> {
@@ -906,9 +906,9 @@ impl BrokerStore for MemoryStore {
             .read()
             .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
         let mut runs = guard
-            .profiles
+            .projects
             .values()
-            .flat_map(|profile| profile.task_runs.values().cloned())
+            .flat_map(|project| project.task_runs.values().cloned())
             .filter(|run| matches_task_query(&run.as_summary(), query))
             .collect::<Vec<_>>();
         runs.sort_by(|left, right| {
@@ -929,8 +929,8 @@ impl BrokerStore for MemoryStore {
     }
 
     async fn insert_task_run_event(&self, event: &TaskRunEventRecord) -> anyhow::Result<()> {
-        self.with_profile_mut(&event.profile_id, |profile| {
-            profile
+        self.with_project_mut(&event.project_id, |project| {
+            project
                 .task_run_events
                 .entry(event.run_id.clone())
                 .or_default()
@@ -945,9 +945,9 @@ impl BrokerStore for MemoryStore {
             .read()
             .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
         let mut events = guard
-            .profiles
+            .projects
             .values()
-            .find_map(|profile| profile.task_run_events.get(run_id).cloned())
+            .find_map(|project| project.task_run_events.get(run_id).cloned())
             .unwrap_or_default();
         events.sort_by(|left, right| {
             left.at
@@ -964,7 +964,7 @@ mod tests {
     use crate::{
         auth::issue_api_key,
         models::{
-            ApiKeyProfileScope, ProfileProxySettings, ProxyImportKind, ProxyImportRecord,
+            ApiKeyProjectScope, ProjectProxySettings, ProxyImportKind, ProxyImportRecord,
             ProxyImportSourceIdentity, ProxyImportSyncConfig, ProxyInventoryRecord,
             ProxyNodeProbeSampleRecord, ProxyScope, SessionRecord, SubscriptionSource,
         },
@@ -972,28 +972,28 @@ mod tests {
     };
 
     #[tokio::test]
-    async fn create_profile_persists_empty_profiles_in_list() {
+    async fn create_project_persists_empty_projects_in_list() {
         let store = MemoryStore::new();
 
         store
-            .create_profile("empty-profile", 1)
+            .create_project("empty-project", 1)
             .await
             .expect("create should succeed");
 
-        let profiles = store.list_profiles().await.expect("list should succeed");
-        assert_eq!(profiles, vec!["empty-profile"]);
+        let projects = store.list_projects().await.expect("list should succeed");
+        assert_eq!(projects, vec!["empty-project"]);
     }
 
     #[tokio::test]
-    async fn create_profile_defaults_global_proxy_usage_to_enabled() {
+    async fn create_project_defaults_global_proxy_usage_to_enabled() {
         let store = MemoryStore::new();
         store
-            .create_profile("default", 1)
+            .create_project("default", 1)
             .await
             .expect("create should succeed");
 
         let settings = store
-            .get_profile_proxy_settings("default")
+            .get_project_proxy_settings("default")
             .await
             .expect("get should succeed")
             .expect("settings should exist");
@@ -1001,15 +1001,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn inventory_profiles_are_included_in_profile_catalog() {
+    async fn inventory_projects_are_included_in_project_catalog() {
         let store = MemoryStore::new();
         store
             .replace_proxy_inventory_scope(
-                &ProxyScope::profile("edge-jp"),
+                &ProxyScope::project("edge-jp"),
                 &[ProxyInventoryRecord {
                     import_id: "import-a".to_string(),
                     node_id: "node-a".to_string(),
-                    source_scope: ProxyScope::profile("edge-jp"),
+                    source_scope: ProxyScope::project("edge-jp"),
                     allocation_scope: ProxyScope::global(),
                     proxy_name: "proxy-a".to_string(),
                     proxy_type: "socks5".to_string(),
@@ -1023,21 +1023,21 @@ mod tests {
             .await
             .expect("replace should succeed");
         store
-            .upsert_profile_proxy_settings(&ProfileProxySettings {
-                profile_id: "lab-us".to_string(),
+            .upsert_project_proxy_settings(&ProjectProxySettings {
+                project_id: "lab-us".to_string(),
                 use_global_proxies: true,
             })
             .await
             .expect("upsert should succeed");
 
-        let profiles = store.list_profiles().await.expect("list should succeed");
-        assert_eq!(profiles, vec!["edge-jp", "lab-us"]);
+        let projects = store.list_projects().await.expect("list should succeed");
+        assert_eq!(projects, vec!["edge-jp", "lab-us"]);
     }
 
     #[tokio::test]
     async fn list_sessions_is_sorted_by_created_at_then_session_id() {
         let store = MemoryStore::new();
-        let profile_id = "memory-sort";
+        let project_id = "memory-sort";
         let sessions = vec![
             SessionRecord {
                 session_id: "b".to_string(),
@@ -1072,12 +1072,12 @@ mod tests {
         ];
 
         store
-            .insert_sessions(profile_id, &sessions)
+            .insert_sessions(project_id, &sessions)
             .await
             .expect("insert should succeed");
 
         let listed = store
-            .list_sessions(profile_id)
+            .list_sessions(project_id)
             .await
             .expect("list should succeed");
 
@@ -1099,12 +1099,12 @@ mod tests {
                     import_id: import_id.to_string(),
                     name: Some("edge-jp".to_string()),
                     import_kind: ProxyImportKind::Subscription,
-                    source_scope: ProxyScope::profile("edge-jp"),
+                    source_scope: ProxyScope::project("edge-jp"),
                     source_identity: ProxyImportSourceIdentity {
                         source_type: "file".to_string(),
                         source_value: "/tmp/edge-jp.yaml".to_string(),
                     },
-                    allocation_scope: ProxyScope::profile("edge-jp"),
+                    allocation_scope: ProxyScope::project("edge-jp"),
                     subscription_metadata: None,
                     created_at: 1,
                     updated_at: 1,
@@ -1112,8 +1112,8 @@ mod tests {
                 &[ProxyInventoryRecord {
                     import_id: import_id.to_string(),
                     node_id: "node-N4m6P8q2R5s7T1u3".to_string(),
-                    source_scope: ProxyScope::profile("edge-jp"),
-                    allocation_scope: ProxyScope::profile("edge-jp"),
+                    source_scope: ProxyScope::project("edge-jp"),
+                    allocation_scope: ProxyScope::project("edge-jp"),
                     proxy_name: "proxy-1".to_string(),
                     proxy_type: "socks5".to_string(),
                     server: "edge.example.com".to_string(),
@@ -1128,7 +1128,7 @@ mod tests {
         store
             .upsert_proxy_import_sync_config(&ProxyImportSyncConfig {
                 import_id: import_id.to_string(),
-                profile_id: "edge-jp".to_string(),
+                project_id: "edge-jp".to_string(),
                 source: SubscriptionSource::File("/tmp/edge-jp.yaml".to_string()),
                 enabled: true,
                 sync_every_sec: 60,
@@ -1193,7 +1193,7 @@ mod tests {
         let issued = issue_api_key(
             "deploy-bot",
             "admin@example.com",
-            ApiKeyProfileScope::selected(["alpha".to_string()]),
+            ApiKeyProjectScope::selected(["alpha".to_string()]),
         );
 
         store
