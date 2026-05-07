@@ -1614,6 +1614,7 @@ impl SqliteStore {
             "api_key_projects",
             "api_keys",
             "task_runs",
+            "task_run_events",
             "proxy_import_sync_configs",
         ] {
             self.rename_column_if_needed(table, "profile_id", "project_id")
@@ -4364,6 +4365,68 @@ mod tests {
             .await
             .expect("api key scope kind should load");
         assert_eq!(scope_kind, "selected_projects");
+
+        let _ = tokio::fs::remove_file(path).await;
+    }
+
+    #[tokio::test]
+    async fn open_migrates_legacy_task_run_event_profile_columns_to_projects() {
+        let path = temp_store_path();
+        let options = SqliteConnectOptions::new()
+            .filename(&path)
+            .create_if_missing(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .expect("legacy sqlite should open");
+
+        pool.execute(
+            r#"
+            CREATE TABLE task_run_events (
+              event_id TEXT PRIMARY KEY,
+              run_id TEXT NOT NULL,
+              profile_id TEXT NOT NULL,
+              at INTEGER NOT NULL,
+              level TEXT NOT NULL,
+              stage TEXT NOT NULL,
+              message TEXT NOT NULL,
+              payload_json TEXT
+            )
+            "#,
+        )
+        .await
+        .expect("legacy task run events table should seed");
+        sqlx::query(
+            r#"
+            INSERT INTO task_run_events (
+              event_id, run_id, profile_id, at, level, stage, message, payload_json
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            "#,
+        )
+        .bind("evt-legacy")
+        .bind("run-legacy")
+        .bind("legacy-project")
+        .bind(7_i64)
+        .bind("info")
+        .bind("loading_subscription")
+        .bind("loaded")
+        .bind(Option::<String>::None)
+        .execute(&pool)
+        .await
+        .expect("legacy task event should seed");
+        pool.close().await;
+
+        let store = SqliteStore::open(&path)
+            .await
+            .expect("sqlite store should migrate legacy task events");
+        let events = store
+            .list_task_run_events("run-legacy")
+            .await
+            .expect("task events should list after migration");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].project_id, "legacy-project");
 
         let _ = tokio::fs::remove_file(path).await;
     }
