@@ -12,7 +12,7 @@ const meta = {
     docs: {
       description: {
         component:
-          "Dialog for switching the current session to another node, with keyword filtering and recency-based sorting.",
+          "Dialog for switching the current session to another node, with keyword filtering, two pinned recency groups, and region/source grouping.",
       },
     },
   },
@@ -34,6 +34,13 @@ export const Default: Story = {
   args: {},
   async play({ canvasElement }) {
     const dialog = within(canvasElement.ownerDocument.body);
+    await expect(await dialog.findByText(/Group nodes/i)).toBeInTheDocument();
+    await expect(
+      await dialog.findByRole("button", { name: /Current session last used/i }),
+    ).toBeInTheDocument();
+    await expect((await dialog.findAllByRole("button", { name: /Japan/i })).length).toBeGreaterThan(
+      0,
+    );
     await expect((await dialog.findAllByText(/JP-Tokyo-Entry/i)).length).toBeGreaterThan(0);
     const latencyLabels = await dialog.findAllByText(/88 ms/i);
     await expect(latencyLabels.length).toBeGreaterThan(0);
@@ -59,5 +66,21 @@ export const ZhCN: Story = {
   args: {},
   globals: {
     locale: "zh-CN",
+  },
+};
+
+export const SourceGrouping: Story = {
+  args: {},
+  async play({ canvasElement }) {
+    const dialog = within(canvasElement.ownerDocument.body);
+    await userEvent.click(await dialog.findByRole("radio", { name: /Group by subscription/i }));
+    await expect(
+      (await dialog.findAllByRole("button", { name: /browser-core/i })).length,
+    ).toBeGreaterThan(0);
+    const fallbackButtons = await dialog.findAllByRole("button", { name: /fallback-lab/i });
+    await userEvent.click(fallbackButtons[0] as HTMLElement);
+    await expect(
+      await dialog.findByRole("button", { name: /US-SanJose-Edge/i }),
+    ).toBeInTheDocument();
   },
 };

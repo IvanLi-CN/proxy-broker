@@ -239,7 +239,8 @@ export const SwitchDialogFlow: Story = {
     );
     const dialog = within(canvasElement.ownerDocument.body);
     await dialog.findByRole("dialog", { name: /Switch session proxy/i });
-    await dialog.findByRole("combobox", { name: /Sort by/i });
+    await dialog.findByRole("radio", { name: /Group by region/i });
+    await dialog.findByRole("button", { name: /Current session last used/i });
     await dialog.findByRole("button", { name: /Use selected node/i });
   },
 };

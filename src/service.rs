@@ -62,7 +62,6 @@ const DEFAULT_AUTO_FULL_REFRESH_EVERY_SEC: u64 = 86_400;
 const TASK_SCHEDULE_SCAN_SEC: u64 = 30;
 const TASK_DISPATCH_POLL_SEC: u64 = 1;
 const DEFAULT_SESSION_OPTIONS_LIMIT: usize = 25;
-const DEFAULT_SESSION_NODE_OPTIONS_LIMIT: usize = 50;
 const GLOBAL_RUNTIME_PROFILE_ID: &str = "__global__";
 const PROXY_PROBE_ROUNDS: usize = 5;
 
@@ -4706,7 +4705,9 @@ impl BrokerService {
             .collect::<Vec<_>>();
 
         items.sort_by(|left, right| compare_session_node_options(left, right, request.sort_mode));
-        items.truncate(request.limit.unwrap_or(DEFAULT_SESSION_NODE_OPTIONS_LIMIT));
+        if let Some(limit) = request.limit {
+            items.truncate(limit);
+        }
         Ok(SearchSessionNodeOptionsResponse { items })
     }
 
@@ -9360,6 +9361,79 @@ proxies:
             .expect("filtered node options should load");
         assert_eq!(filtered.items.len(), 1);
         assert_eq!(filtered.items[0].proxy_name, "aaa-node");
+    }
+
+    #[tokio::test]
+    async fn search_session_node_options_returns_all_effective_nodes_without_limit() {
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
+        service
+            .create_profile("browser")
+            .await
+            .expect("browser profile should be created");
+
+        let proxies = (0..55)
+            .map(|index| {
+                format!("  - name: node-{index:02}\n    type: socks5\n    server: 10.0.0.{index}\n")
+            })
+            .collect::<Vec<_>>()
+            .join("");
+        let source_path = write_subscription_file(&format!("proxies:\n{proxies}")).await;
+        service
+            .load_subscription("browser", &SubscriptionSource::File(source_path.clone()))
+            .await
+            .expect("seed subscription should succeed");
+        let _ = tokio::fs::remove_file(&source_path).await;
+
+        let catalog = service
+            .list_proxy_catalog(&ProxyCatalogQuery {
+                view: Some("profile".to_string()),
+                profile_id: Some("browser".to_string()),
+            })
+            .await
+            .expect("profile catalog should list");
+        let first_node_id = catalog.groups[0].nodes[0].node_id.clone();
+
+        let opened = service
+            .open_session_by_node(
+                "browser",
+                &OpenSessionByNodeRequest {
+                    node_id: first_node_id,
+                    desired_port: None,
+                },
+                None,
+            )
+            .await
+            .expect("session should open");
+
+        let all_options = service
+            .search_session_node_options(
+                "browser",
+                &opened.session_id,
+                &SearchSessionNodeOptionsRequest {
+                    sort_mode: SessionNodeSortMode::ProfileRecent,
+                    limit: None,
+                    ..SearchSessionNodeOptionsRequest::default()
+                },
+            )
+            .await
+            .expect("node options should load");
+        assert_eq!(all_options.items.len(), 55);
+
+        let limited_options = service
+            .search_session_node_options(
+                "browser",
+                &opened.session_id,
+                &SearchSessionNodeOptionsRequest {
+                    sort_mode: SessionNodeSortMode::ProfileRecent,
+                    limit: Some(50),
+                    ..SearchSessionNodeOptionsRequest::default()
+                },
+            )
+            .await
+            .expect("limited node options should load");
+        assert_eq!(limited_options.items.len(), 50);
     }
 
     #[tokio::test]
