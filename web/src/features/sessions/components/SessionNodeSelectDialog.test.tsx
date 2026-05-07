@@ -17,12 +17,9 @@ function renderWithProviders(node: ReactNode) {
 }
 
 describe("SessionNodeSelectDialog", () => {
-  it("loads node options, switches sort mode, and submits the selected node", async () => {
+  it("loads all node options, switches groups, and submits the selected node", async () => {
     const user = userEvent.setup();
-    const onSearch = vi
-      .fn()
-      .mockResolvedValueOnce(sessionNodeOptionsFixture.items)
-      .mockResolvedValueOnce([...sessionNodeOptionsFixture.items].reverse());
+    const onSearch = vi.fn().mockResolvedValue(sessionNodeOptionsFixture.items);
     const onSubmit = vi.fn();
 
     renderWithProviders(
@@ -41,20 +38,17 @@ describe("SessionNodeSelectDialog", () => {
       expect(onSearch).toHaveBeenCalledWith(sessionsFixture.sessions[0]?.session_id, {
         query: undefined,
         sort_mode: "session_recent",
-        limit: 50,
       });
     });
 
-    await user.click(screen.getByRole("combobox", { name: /Sort by/i }));
-    await user.click(screen.getByRole("option", { name: /Current profile last used/i }));
+    expect(screen.getByRole("button", { name: /Current session last used/i })).toHaveClass(
+      "bg-primary",
+    );
+    expect(screen.getAllByRole("button", { name: /Japan/i }).length).toBeGreaterThan(0);
 
-    await waitFor(() => {
-      expect(onSearch).toHaveBeenLastCalledWith(sessionsFixture.sessions[0]?.session_id, {
-        query: undefined,
-        sort_mode: "profile_recent",
-        limit: 50,
-      });
-    });
+    await user.click(screen.getByRole("button", { name: /Current profile last used/i }));
+    await user.click(screen.getByRole("radio", { name: /Group by subscription/i }));
+    expect(screen.getAllByRole("button", { name: /fallback-lab/i }).length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole("button", { name: /US-SanJose-Edge/i }));
     await user.click(screen.getByRole("button", { name: /Use selected node/i }));
