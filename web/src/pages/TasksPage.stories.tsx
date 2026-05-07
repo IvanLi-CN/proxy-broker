@@ -21,11 +21,11 @@ const meta = {
   },
   render: (args) => (
     <AppShell
-      profileId={args.profileId}
-      profiles={["default", "edge-jp", "lab-us"]}
-      profilesLoading={false}
-      profilesCreating={false}
-      profilesError={null}
+      projectId={args.projectId}
+      projects={["default", "edge-jp", "lab-us"]}
+      projectsLoading={false}
+      projectsCreating={false}
+      projectsError={null}
       healthStatus="ok"
       currentUser={{
         status: "resolved",
@@ -38,15 +38,15 @@ const meta = {
           is_admin: true,
         },
       }}
-      onProfileIdChange={() => undefined}
-      onCreateProfile={async (value: string) => value}
-      onRetryProfiles={() => undefined}
+      onProjectIdChange={() => undefined}
+      onCreateProject={async (value: string) => value}
+      onRetryProjects={() => undefined}
     >
       <TasksPage {...args} />
     </AppShell>
   ),
   args: {
-    profileId: "default",
+    projectId: "default",
     scope: "current",
     kind: undefined,
     status: undefined,

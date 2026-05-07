@@ -18,7 +18,7 @@ import type {
 } from "@/lib/types";
 
 interface TasksPageProps {
-  profileId: string;
+  projectId: string;
   scope: "current" | "all";
   kind?: TaskRunKind;
   status?: TaskRunStatus;
@@ -42,7 +42,7 @@ interface TasksPageProps {
 }
 
 export function TasksPage({
-  profileId: _profileId,
+  projectId: _projectId,
   scope,
   kind,
   status,

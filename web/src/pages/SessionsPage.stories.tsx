@@ -60,11 +60,11 @@ const meta = {
 
     return (
       <AppShell
-        profileId="default"
-        profiles={["default", "edge-jp", "lab-us"]}
-        profilesLoading={false}
-        profilesCreating={false}
-        profilesError={null}
+        projectId="default"
+        projects={["default", "edge-jp", "lab-us"]}
+        projectsLoading={false}
+        projectsCreating={false}
+        projectsError={null}
         healthStatus="ok"
         currentUser={{
           status: "resolved",
@@ -77,9 +77,9 @@ const meta = {
             is_admin: true,
           },
         }}
-        onProfileIdChange={() => undefined}
-        onCreateProfile={async (value: string) => value}
-        onRetryProfiles={() => undefined}
+        onProjectIdChange={() => undefined}
+        onCreateProject={async (value: string) => value}
+        onRetryProjects={() => undefined}
       >
         <SessionsPage {...args} />
       </AppShell>

@@ -68,9 +68,9 @@ export function TaskRunDetailPanel({ detail, isLoading }: TaskRunDetailPanelProp
             </CardTitle>
             <CardDescription className="text-sm leading-6 text-muted-foreground">
               {run
-                ? t("{trigger} for {profileId}", {
+                ? t("{trigger} for {projectId}", {
                     trigger: formatTaskTrigger(run.trigger, t),
-                    profileId: run.profile_id,
+                    projectId: run.project_id,
                   })
                 : t("Waiting for the run payload.")}
             </CardDescription>

@@ -10,7 +10,7 @@
 
 - 101 上 `proxy-broker` 当前服务健康，但创建节点定向会话会被共享 Mihomo runtime 的 `/configs` 阶段拒绝。
 - 已确认根因是上游订阅返回了 `hysteria` 节点空 `up/down` 速率字段；当前导入链路会把该节点原样写入 `proxy_inventory_nodes` / `subscription_nodes`，shared runtime 渲染时又把脏节点直接带进 Mihomo payload。
-- shared runtime 以“全量 inventory 节点 + 全量活动 session”建模，所以单个 profile 的坏节点会污染其他 profile 的会话创建与任务运行。
+- shared runtime 以“全量 inventory 节点 + 全量活动 session”建模，所以单个 project 的坏节点会污染其他 project 的会话创建与任务运行。
 
 ## 目标 / 非目标
 
@@ -62,7 +62,7 @@
 
 - source-based 导入：订阅 payload 解析完成后，对每个候选节点执行协议感知校验；命中 malformed 规则的节点直接丢弃，并在 warnings 里记录节点名、协议和字段原因。
 - manual content 导入：复用同一校验器；命中 malformed 规则的节点同样不得进入 inventory。
-- profile/global inventory rebuild：即使历史库里还残留坏节点，shared runtime / effective profile 组装路径也只消费校验通过的节点。
+- project/global inventory rebuild：即使历史库里还残留坏节点，shared runtime / effective project 组装路径也只消费校验通过的节点。
 - SQLite open：所有 schema/migration 完成后扫描 `subscription_nodes` 与 `proxy_inventory_nodes`，删除命中的坏记录，并保留 import 头记录与 sync 配置可读。
 
 ### Edge cases / errors
@@ -93,7 +93,7 @@
 
 - Given 历史 SQLite 中保留了 malformed hysteria inventory 节点
   When 新版本启动并进入 shared runtime / startup reconcile
-  Then Mihomo payload 不再因该节点 `/configs 400`，无关 profile 的会话创建恢复成功。
+  Then Mihomo payload 不再因该节点 `/configs 400`，无关 project 的会话创建恢复成功。
 
 - Given 101 上当前坏节点来自 `Tavily / 江江公益` 订阅
   When 合并、release 并在 101 更新到修复版
@@ -125,7 +125,7 @@
 ## 实现里程碑（Milestones / Delivery checklist）
 
 - [x] M1: 引入 malformed hysteria 速率节点校验器，并在 source/manual 导入路径整节点丢弃 + warnings 落地
-- [x] M2: 为 shared runtime / effective profile 组装路径补运行时 guard，并补齐 SQLite 打开自愈
+- [x] M2: 为 shared runtime / effective project 组装路径补运行时 guard，并补齐 SQLite 打开自愈
 - [ ] M3: 完成回归测试、PR/CI/release/101 更新与维护记录收尾
 
 ## 方案概述（Approach, high-level）

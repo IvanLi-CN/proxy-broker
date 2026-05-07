@@ -4,19 +4,19 @@ import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
 import { AppShell } from "@/components/AppShell";
-import { useProfilePreference } from "@/hooks/use-profile-preference";
+import { useProjectPreference } from "@/hooks/use-project-preference";
 import { useI18n } from "@/i18n";
 import { ApiError, api } from "@/lib/api";
 import { resolveCurrentUserState } from "@/lib/current-user";
 import { formatApiErrorMessage } from "@/lib/error-messages";
-import { isGlobalProfileId } from "@/lib/profile-selection";
+import { isGlobalProjectId } from "@/lib/project-selection";
 import type { AuthMeResponse, CurrentUserState } from "@/lib/types";
 
 export interface RootOutletContext {
-  profileId: string;
-  activeProfileId: string | null;
-  isGlobalConfig: boolean;
-  profiles: string[];
+  projectId: string;
+  activeProjectId: string | null;
+  isGlobalProject: boolean;
+  projects: string[];
   authMe: AuthMeResponse | null;
   currentUser: CurrentUserState;
 }
@@ -25,7 +25,7 @@ export function RootRoute() {
   const { t } = useI18n();
   const location = useLocation();
   const navigate = useNavigate();
-  const [profileId, setProfileId] = useProfilePreference();
+  const [projectId, setProjectId] = useProjectPreference();
   const queryClient = useQueryClient();
   const healthQuery = useQuery({
     queryKey: ["health"],
@@ -37,23 +37,23 @@ export function RootRoute() {
     queryFn: api.getAuthMe,
     refetchInterval: 30_000,
   });
-  const profilesQuery = useQuery({
-    queryKey: ["profiles"],
-    queryFn: api.listProfiles,
+  const projectsQuery = useQuery({
+    queryKey: ["projects"],
+    queryFn: api.listProjects,
   });
-  const createProfileMutation = useMutation({
-    mutationFn: (nextProfileId: string) => api.createProfile({ profile_id: nextProfileId }),
+  const createProjectMutation = useMutation({
+    mutationFn: (nextProjectId: string) => api.createProject({ project_id: nextProjectId }),
   });
-  const profiles = Array.from(
+  const projects = Array.from(
     new Set(
       [
-        ...(profilesQuery.data?.profiles ?? []),
-        isGlobalProfileId(profileId) ? null : profileId,
+        ...(projectsQuery.data?.projects ?? []),
+        isGlobalProjectId(projectId) ? null : projectId,
       ].filter((value): value is string => Boolean(value)),
     ),
   ).sort((left, right) => left.localeCompare(right));
-  const isGlobalConfig = isGlobalProfileId(profileId);
-  const activeProfileId = isGlobalConfig ? null : profileId;
+  const isGlobalProject = isGlobalProjectId(projectId);
+  const activeProjectId = isGlobalProject ? null : projectId;
   const currentUser = resolveCurrentUserState({
     identity: authMeQuery.data ?? null,
     isLoading: authMeQuery.isLoading && !authMeQuery.data,
@@ -61,28 +61,28 @@ export function RootRoute() {
   });
 
   useEffect(() => {
-    if (!isGlobalConfig || location.pathname === "/proxies") {
+    if (!isGlobalProject || location.pathname === "/proxies") {
       return;
     }
     navigate("/proxies", { replace: true });
-  }, [isGlobalConfig, location.pathname, navigate]);
+  }, [isGlobalProject, location.pathname, navigate]);
 
-  const handleCreateProfile = async (nextProfileId: string) => {
+  const handleCreateProject = async (nextProjectId: string) => {
     try {
-      const created = await createProfileMutation.mutateAsync(nextProfileId);
-      setProfileId(created.profile_id);
-      toast.success(t("Created profile {profileId}", { profileId: created.profile_id }));
-      await queryClient.invalidateQueries({ queryKey: ["profiles"] });
-      return created.profile_id;
+      const created = await createProjectMutation.mutateAsync(nextProjectId);
+      setProjectId(created.project_id);
+      toast.success(t("Created project {projectId}", { projectId: created.project_id }));
+      await queryClient.invalidateQueries({ queryKey: ["projects"] });
+      return created.project_id;
     } catch (error) {
-      if (error instanceof ApiError && error.code === "profile_exists") {
-        const existingProfileId = nextProfileId.trim();
+      if (error instanceof ApiError && error.code === "project_exists") {
+        const existingProjectId = nextProjectId.trim();
         toast.info(
-          t("Profile {profileId} already exists. Refreshing catalog.", {
-            profileId: existingProfileId,
+          t("Project {projectId} already exists. Refreshing catalog.", {
+            projectId: existingProjectId,
           }),
         );
-        await queryClient.invalidateQueries({ queryKey: ["profiles"] });
+        await queryClient.invalidateQueries({ queryKey: ["projects"] });
       }
       toast.error(formatApiErrorMessage(error, t));
       throw error;
@@ -93,28 +93,28 @@ export function RootRoute() {
     <AppShell
       currentUser={currentUser}
       healthStatus={healthQuery.data?.status ?? "checking"}
-      onCreateProfile={handleCreateProfile}
-      onProfileIdChange={setProfileId}
-      onRetryProfiles={() => {
-        void profilesQuery.refetch();
+      onCreateProject={handleCreateProject}
+      onProjectIdChange={setProjectId}
+      onRetryProjects={() => {
+        void projectsQuery.refetch();
       }}
-      profiles={profiles}
-      profilesCreating={createProfileMutation.isPending}
-      profilesError={
-        profilesQuery.isError && !profilesQuery.data
-          ? formatApiErrorMessage(profilesQuery.error, t)
+      projects={projects}
+      projectsCreating={createProjectMutation.isPending}
+      projectsError={
+        projectsQuery.isError && !projectsQuery.data
+          ? formatApiErrorMessage(projectsQuery.error, t)
           : null
       }
-      profilesLoading={profilesQuery.isLoading}
-      profileId={profileId}
+      projectsLoading={projectsQuery.isLoading}
+      projectId={projectId}
     >
       <Outlet
         context={
           {
-            profileId,
-            activeProfileId,
-            isGlobalConfig,
-            profiles,
+            projectId,
+            activeProjectId,
+            isGlobalProject,
+            projects,
             authMe: authMeQuery.data ?? null,
             currentUser,
           } satisfies RootOutletContext

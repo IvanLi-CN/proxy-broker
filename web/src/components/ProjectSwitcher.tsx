@@ -22,30 +22,30 @@ import {
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useI18n } from "@/i18n";
-import { GLOBAL_PROFILE_ID, isGlobalProfileId } from "@/lib/profile-selection";
+import { GLOBAL_PROJECT_ID, isGlobalProjectId } from "@/lib/project-selection";
 import { cn } from "@/lib/utils";
 
-interface ProfileSwitcherProps {
-  profileId: string;
-  profiles: string[];
+interface ProjectSwitcherProps {
+  projectId: string;
+  projects: string[];
   isLoading?: boolean;
   isCreating?: boolean;
   loadError?: string | null;
-  onProfileIdChange: (value: string) => void;
-  onCreateProfile: (value: string) => Promise<string>;
-  onRetryProfiles?: () => void;
+  onProjectIdChange: (value: string) => void;
+  onCreateProject: (value: string) => Promise<string>;
+  onRetryProjects?: () => void;
 }
 
-export function ProfileSwitcher({
-  profileId,
-  profiles,
+export function ProjectSwitcher({
+  projectId,
+  projects,
   isLoading = false,
   isCreating = false,
   loadError = null,
-  onProfileIdChange,
-  onCreateProfile,
-  onRetryProfiles,
-}: ProfileSwitcherProps) {
+  onProjectIdChange,
+  onCreateProject,
+  onRetryProjects,
+}: ProjectSwitcherProps) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -57,15 +57,15 @@ export function ProfileSwitcher({
     normalizedQuery.length === 0 ||
     globalLabel.toLowerCase().includes(normalizedQuery) ||
     "global".includes(normalizedQuery);
-  const filteredProfiles = profiles.filter((candidate) =>
+  const filteredProjects = projects.filter((candidate) =>
     candidate.toLowerCase().includes(normalizedQuery),
   );
-  const exactProfileExists =
-    trimmedQuery === GLOBAL_PROFILE_ID ||
+  const exactProjectExists =
+    trimmedQuery === GLOBAL_PROJECT_ID ||
     trimmedQuery.toLowerCase() === "global" ||
     trimmedQuery === globalLabel ||
-    profiles.some((candidate) => candidate === trimmedQuery);
-  const canCreate = trimmedQuery.length > 0 && !exactProfileExists;
+    projects.some((candidate) => candidate === trimmedQuery);
+  const canCreate = trimmedQuery.length > 0 && !exactProjectExists;
 
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen);
@@ -75,7 +75,7 @@ export function ProfileSwitcher({
   };
 
   const handleSelect = (value: string) => {
-    onProfileIdChange(value);
+    onProjectIdChange(value);
     handleOpenChange(false);
   };
 
@@ -83,39 +83,39 @@ export function ProfileSwitcher({
     if (!canCreate || isCreating) {
       return;
     }
-    await onCreateProfile(trimmedQuery);
+    await onCreateProject(trimmedQuery);
     handleOpenChange(false);
   };
 
-  const renderLabel = (value: string) => (isGlobalProfileId(value) ? globalLabel : value);
+  const renderLabel = (value: string) => (isGlobalProjectId(value) ? globalLabel : value);
 
   return (
     <div className="rounded-[26px] border border-sidebar-border/80 bg-sidebar-accent/45 p-4 shadow-sm">
       <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.28em] text-sidebar-foreground/68">
         <FolderSearchIcon className="size-3.5" />
-        {t("Current config")}
+        {t("Current project")}
       </div>
       <div className="mt-3 space-y-2">
-        <Label className="text-sidebar-foreground/76" htmlFor="profile-id">
-          {t("Config ID")}
+        <Label className="text-sidebar-foreground/76" htmlFor="project-id">
+          {t("Project ID")}
         </Label>
         <Popover open={open} onOpenChange={handleOpenChange}>
           <PopoverTrigger asChild>
             <Button
-              id="profile-id"
+              id="project-id"
               variant="outline"
               role="combobox"
               aria-expanded={open}
               className="h-auto w-full justify-between rounded-2xl border-sidebar-border bg-background/78 px-3 py-3 font-mono text-sm text-sidebar-foreground hover:bg-background"
             >
-              <span className="truncate text-left">{renderLabel(profileId)}</span>
+              <span className="truncate text-left">{renderLabel(projectId)}</span>
               <ChevronsUpDownIcon className="size-4 shrink-0 text-sidebar-foreground/45" />
             </Button>
           </PopoverTrigger>
           <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-72 overflow-hidden border-sidebar-border bg-background/96 p-0 backdrop-blur-xl">
             <Command shouldFilter={false}>
               <CommandInput
-                placeholder={t("Search configs or type a new ID")}
+                placeholder={t("Search projects or type a new ID")}
                 value={query}
                 onValueChange={setQuery}
               />
@@ -125,12 +125,12 @@ export function ProfileSwitcher({
                     <div className="rounded-2xl border border-destructive/15 bg-destructive/8 px-3 py-2.5 text-destructive">
                       {loadError}
                     </div>
-                    {onRetryProfiles ? (
+                    {onRetryProjects ? (
                       <Button
                         variant="outline"
                         size="sm"
                         className="w-full justify-center"
-                        onClick={onRetryProfiles}
+                        onClick={onRetryProjects}
                       >
                         <RefreshCwIcon className="size-3.5" />
                         {t("Retry catalog")}
@@ -138,40 +138,40 @@ export function ProfileSwitcher({
                     ) : null}
                   </div>
                 ) : null}
-                {!loadError && isLoading && profiles.length === 0 ? (
+                {!loadError && isLoading && projects.length === 0 ? (
                   <div className="flex items-center justify-center gap-2 px-3 py-6 text-sm text-muted-foreground">
                     <LoaderCircleIcon className="size-4 animate-spin" />
-                    {t("Loading configs...")}
+                    {t("Loading projects...")}
                   </div>
                 ) : null}
                 {!loadError && globalMatchesQuery ? (
                   <CommandGroup heading={t("Contexts")}>
                     <CommandItem
-                      key={GLOBAL_PROFILE_ID}
-                      value={GLOBAL_PROFILE_ID}
-                      onSelect={() => handleSelect(GLOBAL_PROFILE_ID)}
+                      key={GLOBAL_PROJECT_ID}
+                      value={GLOBAL_PROJECT_ID}
+                      onSelect={() => handleSelect(GLOBAL_PROJECT_ID)}
                     >
                       <CheckIcon
                         className={cn(
                           "size-4 text-primary transition-opacity",
-                          isGlobalProfileId(profileId) ? "opacity-100" : "opacity-0",
+                          isGlobalProjectId(projectId) ? "opacity-100" : "opacity-0",
                         )}
                       />
                       <div className="min-w-0 flex-1">
                         <div className="truncate font-medium">{globalLabel}</div>
                         <div className="truncate text-xs text-muted-foreground">
-                          {t("Shared pool and allocation control across every profile.")}
+                          {t("Shared pool and allocation control across every project.")}
                         </div>
                       </div>
-                      {isGlobalProfileId(profileId) ? (
+                      {isGlobalProjectId(projectId) ? (
                         <CommandShortcut>{t("Active")}</CommandShortcut>
                       ) : null}
                     </CommandItem>
                   </CommandGroup>
                 ) : null}
-                {!loadError && filteredProfiles.length > 0 ? (
-                  <CommandGroup heading={t("Known configs")}>
-                    {filteredProfiles.map((candidate) => (
+                {!loadError && filteredProjects.length > 0 ? (
+                  <CommandGroup heading={t("Known projects")}>
+                    {filteredProjects.map((candidate) => (
                       <CommandItem
                         key={candidate}
                         value={candidate}
@@ -180,13 +180,13 @@ export function ProfileSwitcher({
                         <CheckIcon
                           className={cn(
                             "size-4 text-primary transition-opacity",
-                            candidate === profileId ? "opacity-100" : "opacity-0",
+                            candidate === projectId ? "opacity-100" : "opacity-0",
                           )}
                         />
                         <div className="min-w-0 flex-1">
                           <div className="truncate font-mono text-sm">{candidate}</div>
                         </div>
-                        {candidate === profileId ? (
+                        {candidate === projectId ? (
                           <CommandShortcut>{t("Active")}</CommandShortcut>
                         ) : null}
                       </CommandItem>
@@ -210,15 +210,15 @@ export function ProfileSwitcher({
                           {t('Create "{value}"', { value: trimmedQuery })}
                         </div>
                         <div className="truncate text-xs text-muted-foreground">
-                          {t("Start an empty config catalog entry and switch to it immediately.")}
+                          {t("Start an empty project catalog entry and switch to it immediately.")}
                         </div>
                       </div>
                     </CommandItem>
                   </CommandGroup>
                 ) : null}
-                {!loadError && !isLoading && filteredProfiles.length === 0 && !canCreate ? (
+                {!loadError && !isLoading && filteredProjects.length === 0 && !canCreate ? (
                   <CommandEmpty>
-                    {t("No matching configs. Type a new ID to create one.")}
+                    {t("No matching projects. Type a new ID to create one.")}
                   </CommandEmpty>
                 ) : null}
               </CommandList>
@@ -226,7 +226,7 @@ export function ProfileSwitcher({
           </PopoverContent>
         </Popover>
         <p className="text-xs leading-5 text-sidebar-foreground/60">
-          {t("Search the catalog or create a new empty config before loading any feed.")}
+          {t("Search the catalog or create a new empty project before loading any feed.")}
         </p>
       </div>
     </div>

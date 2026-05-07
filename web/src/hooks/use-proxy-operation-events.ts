@@ -23,7 +23,7 @@ export interface ProxyNodeLiveState {
 }
 
 interface UseProxyOperationEventsOptions {
-  profileId?: string | null;
+  projectId?: string | null;
   enabled?: boolean;
 }
 
@@ -36,7 +36,7 @@ function isTerminal(status: TaskRunSummary["status"]) {
 }
 
 export function useProxyOperationEvents({
-  profileId,
+  projectId,
   enabled = true,
 }: UseProxyOperationEventsOptions) {
   const [connectionState, setConnectionState] = useState<ProxyOperationStreamState>("connecting");
@@ -49,7 +49,7 @@ export function useProxyOperationEvents({
   }, [runsById]);
 
   useEffect(() => {
-    if (!enabled || !profileId) {
+    if (!enabled || !projectId) {
       setRunsById({});
       setNodeStateById({});
       return undefined;
@@ -60,7 +60,7 @@ export function useProxyOperationEvents({
       return undefined;
     }
 
-    const source = new EventSource(api.getTaskEventsUrl({ profile_id: profileId, limit: 50 }));
+    const source = new EventSource(api.getTaskEventsUrl({ project_id: projectId, limit: 50 }));
 
     const handleOpen = () => setConnectionState("live");
     const handleError = () => setConnectionState("reconnecting");
@@ -151,7 +151,7 @@ export function useProxyOperationEvents({
       source.removeEventListener("run-event", handleRunEvent as EventListener);
       source.close();
     };
-  }, [enabled, profileId]);
+  }, [enabled, projectId]);
 
   const activeRunByNodeId = useMemo(() => {
     const active: Record<string, ProxyNodeLiveState> = {};

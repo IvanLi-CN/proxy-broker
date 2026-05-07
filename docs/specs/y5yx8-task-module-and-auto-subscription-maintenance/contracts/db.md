@@ -1,8 +1,8 @@
 # DB Contracts
 
-## profile_sync_configs
+## project_sync_configs
 
-- `profile_id TEXT PRIMARY KEY`
+- `project_id TEXT PRIMARY KEY`
 - `source_type TEXT NOT NULL`
 - `source_value TEXT NOT NULL`
 - `enabled INTEGER NOT NULL`
@@ -18,7 +18,7 @@
 ## task_runs
 
 - `run_id TEXT PRIMARY KEY`
-- `profile_id TEXT NOT NULL`
+- `project_id TEXT NOT NULL`
 - `kind TEXT NOT NULL`
 - `trigger TEXT NOT NULL`
 - `status TEXT NOT NULL`

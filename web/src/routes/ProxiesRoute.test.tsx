@@ -76,10 +76,10 @@ describe("ProxiesRoute", () => {
 
   it("shows access denied when the current user is anonymous", () => {
     mockOutletContext.mockReturnValue({
-      profileId: "__global__",
-      activeProfileId: null,
-      isGlobalConfig: true,
-      profiles: ["default"],
+      projectId: "__global__",
+      activeProjectId: null,
+      isGlobalProject: true,
+      projects: ["default"],
       authMe: null,
       currentUser: { status: "anonymous" },
     });
@@ -95,10 +95,10 @@ describe("ProxiesRoute", () => {
 
   it("surfaces auth failures without mislabeling them as access denied", () => {
     mockOutletContext.mockReturnValue({
-      profileId: "__global__",
-      activeProfileId: null,
-      isGlobalConfig: true,
-      profiles: ["default"],
+      projectId: "__global__",
+      activeProjectId: null,
+      isGlobalProject: true,
+      projects: ["default"],
       authMe: null,
       currentUser: { status: "error", message: "auth_unavailable: upstream timeout" },
     });
@@ -113,12 +113,12 @@ describe("ProxiesRoute", () => {
     expect(latestProxiesPageProps.authError).toBe("auth_unavailable: upstream timeout");
   });
 
-  it("passes the current profile list through to the global page", () => {
+  it("passes the current project list through to the global page", () => {
     mockOutletContext.mockReturnValue({
-      profileId: "__global__",
-      activeProfileId: null,
-      isGlobalConfig: true,
-      profiles: ["default", "edge-jp", "lab-us"],
+      projectId: "__global__",
+      activeProjectId: null,
+      isGlobalProject: true,
+      projects: ["default", "edge-jp", "lab-us"],
       authMe: { is_admin: true },
       currentUser: { status: "resolved", identity: { is_admin: true } },
     });
@@ -129,34 +129,34 @@ describe("ProxiesRoute", () => {
     if (latestProxiesPageProps?.mode !== "global") {
       throw new Error("expected global proxies page");
     }
-    expect(latestProxiesPageProps.profiles).toEqual(["default", "edge-jp", "lab-us"]);
+    expect(latestProxiesPageProps.projects).toEqual(["default", "edge-jp", "lab-us"]);
   });
 
-  it("switches the proxies page into profile mode for a normal config", () => {
+  it("switches the proxies page into project mode for a normal project", () => {
     mockOutletContext.mockReturnValue({
-      profileId: "edge-jp",
-      activeProfileId: "edge-jp",
-      isGlobalConfig: false,
-      profiles: ["default", "edge-jp", "lab-us"],
+      projectId: "edge-jp",
+      activeProjectId: "edge-jp",
+      isGlobalProject: false,
+      projects: ["default", "edge-jp", "lab-us"],
       authMe: { is_admin: true },
       currentUser: { status: "resolved", identity: { is_admin: true } },
     });
 
     render(<ProxiesRoute />);
 
-    expect(latestProxiesPageProps?.mode).toBe("profile");
+    expect(latestProxiesPageProps?.mode).toBe("project");
     expect(latestProxiesPageProps).toMatchObject({
-      profileId: "edge-jp",
+      projectId: "edge-jp",
       showProxyPolicy: true,
     });
   });
 
-  it("loads the profile catalog for non-admin users on profile configs", () => {
+  it("loads the project catalog for non-admin users on project projects", () => {
     mockOutletContext.mockReturnValue({
-      profileId: "edge-jp",
-      activeProfileId: "edge-jp",
-      isGlobalConfig: false,
-      profiles: ["default", "edge-jp"],
+      projectId: "edge-jp",
+      activeProjectId: "edge-jp",
+      isGlobalProject: false,
+      projects: ["default", "edge-jp"],
       authMe: { is_admin: false },
       currentUser: {
         status: "resolved",
@@ -169,7 +169,7 @@ describe("ProxiesRoute", () => {
     expect(observedQueryOptions).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          queryKey: ["proxy-catalog", "profile", "edge-jp"],
+          queryKey: ["proxy-catalog", "project", "edge-jp"],
           enabled: true,
         }),
         expect.objectContaining({

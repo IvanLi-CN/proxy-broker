@@ -9,8 +9,8 @@ import type {
 export function buildTaskSearchParams(query: TaskListQuery) {
   const params = new URLSearchParams();
 
-  if (query.profile_id) {
-    params.set("profile_id", query.profile_id);
+  if (query.project_id) {
+    params.set("project_id", query.project_id);
   }
   if (query.kind) {
     params.set("kind", query.kind);
@@ -38,7 +38,7 @@ export function buildTaskSearchParams(query: TaskListQuery) {
 }
 
 export function matchesTaskQuery(run: TaskRunSummary, query: TaskListQuery) {
-  if (query.profile_id && run.profile_id !== query.profile_id) {
+  if (query.project_id && run.project_id !== query.project_id) {
     return false;
   }
   if (query.kind && run.kind !== query.kind) {

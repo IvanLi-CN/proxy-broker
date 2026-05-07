@@ -19,16 +19,16 @@ const meta = {
     docs: {
       description: {
         component:
-          "Searchable command surface used inside anchored menus such as the profile combobox.",
+          "Searchable command surface used inside anchored menus such as the project combobox.",
       },
     },
   },
   render: () => (
     <div className="max-w-sm rounded-2xl border border-border bg-card">
       <Command shouldFilter={false}>
-        <CommandInput placeholder="Search profiles..." />
+        <CommandInput placeholder="Search projects..." />
         <CommandList>
-          <CommandGroup heading="Known profiles">
+          <CommandGroup heading="Known projects">
             <CommandItem value="default">
               <CheckIcon className="size-4 text-primary" />
               <span className="font-mono">default</span>

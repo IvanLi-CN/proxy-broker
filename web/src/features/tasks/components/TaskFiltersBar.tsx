@@ -66,8 +66,8 @@ export function TaskFiltersBar({
               <SelectValue placeholder={t("View scope")} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="current">{t("Current profile")}</SelectItem>
-              <SelectItem value="all">{t("All profiles")}</SelectItem>
+              <SelectItem value="current">{t("Current project")}</SelectItem>
+              <SelectItem value="all">{t("All projects")}</SelectItem>
             </SelectContent>
           </Select>
 

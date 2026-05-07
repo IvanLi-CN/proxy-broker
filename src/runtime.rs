@@ -42,14 +42,14 @@ impl Default for MihomoRuntimeOptions {
 
 #[async_trait]
 pub trait MihomoRuntime: Send + Sync {
-    async fn ensure_started(&self, profile_id: &str) -> anyhow::Result<()>;
-    async fn shutdown_profile(&self, profile_id: &str) -> anyhow::Result<()>;
-    async fn controller_meta(&self, profile_id: &str) -> anyhow::Result<(String, Option<String>)>;
-    async fn controller_addr(&self, profile_id: &str) -> anyhow::Result<String>;
-    async fn apply_config(&self, profile_id: &str, payload: &str) -> anyhow::Result<()>;
+    async fn ensure_started(&self, project_id: &str) -> anyhow::Result<()>;
+    async fn shutdown_project(&self, project_id: &str) -> anyhow::Result<()>;
+    async fn controller_meta(&self, project_id: &str) -> anyhow::Result<(String, Option<String>)>;
+    async fn controller_addr(&self, project_id: &str) -> anyhow::Result<String>;
+    async fn apply_config(&self, project_id: &str, payload: &str) -> anyhow::Result<()>;
     async fn measure_proxy_delay(
         &self,
-        profile_id: &str,
+        project_id: &str,
         proxy_name: &str,
         url: &str,
         timeout_ms: u64,
@@ -339,16 +339,16 @@ impl ManagedMihomoRuntime {
         serde_yaml::to_string(&root).map_err(|e| anyhow!(e))
     }
 
-    async fn start_profile(&self, _profile_id: &str) -> anyhow::Result<RuntimeInstance> {
+    async fn start_project(&self, _project_id: &str) -> anyhow::Result<RuntimeInstance> {
         let binary = self.resolve_binary().await?;
 
-        let safe_profile = "shared-runtime";
-        let home_dir = self.options.work_dir.join("profiles").join(safe_profile);
+        let safe_project = "shared-runtime";
+        let home_dir = self.options.work_dir.join("projects").join(safe_project);
         tokio::fs::create_dir_all(&home_dir)
             .await
             .with_context(|| {
                 format!(
-                    "failed to create profile runtime dir: {}",
+                    "failed to create project runtime dir: {}",
                     home_dir.display()
                 )
             })?;
@@ -449,7 +449,7 @@ impl ManagedMihomoRuntime {
         }
     }
 
-    async fn ensure_instance(&self, profile_id: &str) -> anyhow::Result<()> {
+    async fn ensure_instance(&self, project_id: &str) -> anyhow::Result<()> {
         let _ensure_guard = self.ensure_lock.lock().await;
 
         {
@@ -467,14 +467,14 @@ impl ManagedMihomoRuntime {
             }
         }
 
-        let instance = self.start_profile(profile_id).await?;
+        let instance = self.start_project(project_id).await?;
         let mut guard = self.instance.lock().await;
         *guard = Some(instance);
         Ok(())
     }
 
-    async fn instance_meta(&self, profile_id: &str) -> anyhow::Result<(String, Option<String>)> {
-        self.ensure_instance(profile_id).await?;
+    async fn instance_meta(&self, project_id: &str) -> anyhow::Result<(String, Option<String>)> {
+        self.ensure_instance(project_id).await?;
         let guard = self.instance.lock().await;
         let instance = guard
             .as_ref()
@@ -482,7 +482,7 @@ impl ManagedMihomoRuntime {
         Ok((instance.controller_addr.clone(), instance.secret.clone()))
     }
 
-    async fn shutdown_instance(&self, _profile_id: &str) -> anyhow::Result<()> {
+    async fn shutdown_instance(&self, _project_id: &str) -> anyhow::Result<()> {
         let removed = { self.instance.lock().await.take() };
         if let Some(mut instance) = removed {
             let _ = instance.child.start_kill();
@@ -494,25 +494,25 @@ impl ManagedMihomoRuntime {
 
 #[async_trait]
 impl MihomoRuntime for ManagedMihomoRuntime {
-    async fn ensure_started(&self, profile_id: &str) -> anyhow::Result<()> {
-        self.ensure_instance(profile_id).await
+    async fn ensure_started(&self, project_id: &str) -> anyhow::Result<()> {
+        self.ensure_instance(project_id).await
     }
 
-    async fn shutdown_profile(&self, profile_id: &str) -> anyhow::Result<()> {
-        self.shutdown_instance(profile_id).await
+    async fn shutdown_project(&self, project_id: &str) -> anyhow::Result<()> {
+        self.shutdown_instance(project_id).await
     }
 
-    async fn controller_meta(&self, profile_id: &str) -> anyhow::Result<(String, Option<String>)> {
-        self.instance_meta(profile_id).await
+    async fn controller_meta(&self, project_id: &str) -> anyhow::Result<(String, Option<String>)> {
+        self.instance_meta(project_id).await
     }
 
-    async fn controller_addr(&self, profile_id: &str) -> anyhow::Result<String> {
-        let (addr, _secret) = self.controller_meta(profile_id).await?;
+    async fn controller_addr(&self, project_id: &str) -> anyhow::Result<String> {
+        let (addr, _secret) = self.controller_meta(project_id).await?;
         Ok(addr)
     }
 
-    async fn apply_config(&self, profile_id: &str, payload: &str) -> anyhow::Result<()> {
-        let (controller_addr, secret) = self.controller_meta(profile_id).await?;
+    async fn apply_config(&self, project_id: &str, payload: &str) -> anyhow::Result<()> {
+        let (controller_addr, secret) = self.controller_meta(project_id).await?;
         let endpoint = format!("http://{}/configs?force=true", controller_addr);
         let mut req = self
             .http
@@ -533,7 +533,7 @@ impl MihomoRuntime for ManagedMihomoRuntime {
 
     async fn measure_proxy_delay(
         &self,
-        profile_id: &str,
+        project_id: &str,
         proxy_name: &str,
         url: &str,
         timeout_ms: u64,
@@ -543,7 +543,7 @@ impl MihomoRuntime for ManagedMihomoRuntime {
             delay: Option<u64>,
         }
 
-        let (controller_addr, secret) = self.controller_meta(profile_id).await?;
+        let (controller_addr, secret) = self.controller_meta(project_id).await?;
         let encoded = urlencoding::encode(proxy_name);
         let endpoint = format!(
             "http://{}/proxies/{}/delay?url={}&timeout={}",

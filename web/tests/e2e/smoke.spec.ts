@@ -17,8 +17,8 @@ const CREATED_API_KEY_ID = "key-Q4w8Er2Ty6Ui1Op5";
 const CREATED_API_KEY_SECRET = `pbk_${CREATED_API_KEY_ID}_A1b2C3d4E5f6G7h8J9kLm2No`;
 const FRESH_LAB_NODE_IDS = ["node-fresh-lab-01", "node-fresh-lab-02"] as const;
 
-const importIdForProfile = (profileId: string) =>
-  PROFILE_IMPORT_IDS[profileId] ?? "imp-T8p4Ls2Dw7Hy1Ku6";
+const importIdForProject = (projectId: string) =>
+  PROFILE_IMPORT_IDS[projectId] ?? "imp-T8p4Ls2Dw7Hy1Ku6";
 
 const sessionIdFor = (index: 0 | 1) => (index === 0 ? SESSION_ID_PRIMARY : SESSION_ID_SECONDARY);
 
@@ -36,21 +36,21 @@ test.beforeEach(async ({ page }) => {
     });
   });
   const recentTaskBaseSec = Math.floor(Date.now() / 1000) - 120;
-  let profiles = ["default", "edge-jp"];
-  const profileSettingsByProfile: Record<
+  let projects = ["default", "edge-jp"];
+  const projectSettingsByProject: Record<
     string,
-    { profile_id: string; use_global_proxies: boolean }
+    { project_id: string; use_global_proxies: boolean }
   > = {
-    default: { profile_id: "default", use_global_proxies: true },
-    "edge-jp": { profile_id: "edge-jp", use_global_proxies: true },
+    default: { project_id: "default", use_global_proxies: true },
+    "edge-jp": { project_id: "edge-jp", use_global_proxies: true },
   };
   let proxyImports: Array<{
     import_id: string;
     name?: string;
     import_kind: "subscription" | "single_node";
-    source_scope: { type: "global" } | { type: "profile"; profile_id: string };
+    source_scope: { type: "global" } | { type: "project"; project_id: string };
     source_identity: { source_type: string; source_value: string };
-    allocation_scope: { type: "global" } | { type: "profile"; profile_id: string };
+    allocation_scope: { type: "global" } | { type: "project"; project_id: string };
     proxy_count: number;
     distinct_ip_count: number;
     created_at: number;
@@ -69,7 +69,7 @@ test.beforeEach(async ({ page }) => {
     runs: [
       {
         run_id: RUN_ID_LIVE_SYNC,
-        profile_id: "fresh-lab",
+        project_id: "fresh-lab",
         kind: "subscription_sync",
         trigger: "schedule",
         status: "running",
@@ -85,7 +85,7 @@ test.beforeEach(async ({ page }) => {
       },
       {
         run_id: RUN_ID_POST_LOAD,
-        profile_id: "fresh-lab",
+        project_id: "fresh-lab",
         kind: "metadata_refresh_incremental",
         trigger: "post_load",
         status: "queued",
@@ -101,7 +101,7 @@ test.beforeEach(async ({ page }) => {
       },
       {
         run_id: RUN_ID_FULL_OK,
-        profile_id: "edge-jp",
+        project_id: "edge-jp",
         kind: "metadata_refresh_full",
         trigger: "schedule",
         status: "succeeded",
@@ -132,7 +132,7 @@ test.beforeEach(async ({ page }) => {
         at: recentTaskBaseSec - 9,
         level: "info",
         stage: "loading_subscription",
-        message: "Refreshing subscription feed for profile.",
+        message: "Refreshing subscription feed for project.",
         payload_json: null,
       },
       {
@@ -146,7 +146,7 @@ test.beforeEach(async ({ page }) => {
       },
     ],
   };
-  const sessionsByProfile: Record<
+  const sessionsByProject: Record<
     string,
     Array<{
       session_id: string;
@@ -177,7 +177,7 @@ test.beforeEach(async ({ page }) => {
     "edge-jp": [],
   };
 
-  const extractProfileId = (url: string) => {
+  const extractProjectId = (url: string) => {
     const pathname = new URL(url).pathname;
     const parts = pathname.split("/");
     return decodeURIComponent(parts[4] ?? "default");
@@ -233,23 +233,23 @@ test.beforeEach(async ({ page }) => {
     node_id: session.node_id,
   });
 
-  const effectiveProfileIdsFor = (item: (typeof proxyImports)[number]) => {
+  const effectiveProjectIdsFor = (item: (typeof proxyImports)[number]) => {
     if (item.allocation_scope.type === "global") {
-      return profiles.filter(
-        (profileId) => profileSettingsByProfile[profileId]?.use_global_proxies ?? true,
+      return projects.filter(
+        (projectId) => projectSettingsByProject[projectId]?.use_global_proxies ?? true,
       );
     }
-    return [item.allocation_scope.profile_id];
+    return [item.allocation_scope.project_id];
   };
 
   const proxyImportsResponse = () => ({
     items: proxyImports.map((item) => ({
       ...item,
-      effective_profile_ids: effectiveProfileIdsFor(item),
+      effective_project_ids: effectiveProjectIdsFor(item),
     })),
   });
 
-  const localNodesByProfile: Record<
+  const localNodesByProject: Record<
     string,
     Array<{
       node_id: string;
@@ -344,7 +344,7 @@ test.beforeEach(async ({ page }) => {
   };
 
   const globalNodes = (
-    allocationScope: { type: "global" } | { type: "profile"; profile_id: string },
+    allocationScope: { type: "global" } | { type: "project"; project_id: string },
   ) => [
     {
       node_id: "node-global-jp-tokyo",
@@ -402,22 +402,22 @@ test.beforeEach(async ({ page }) => {
     },
   ];
 
-  const proxyCatalogResponse = (view: "global" | "profile", requestedProfileId?: string) => {
+  const proxyCatalogResponse = (view: "global" | "project", requestedProjectId?: string) => {
     const imports = proxyImportsResponse().items.filter((item) =>
       view === "global"
         ? true
-        : Boolean(requestedProfileId && item.effective_profile_ids.includes(requestedProfileId)),
+        : Boolean(requestedProjectId && item.effective_project_ids.includes(requestedProjectId)),
     );
 
     return {
       view,
-      profile_id: view === "profile" ? (requestedProfileId ?? null) : null,
+      project_id: view === "project" ? (requestedProjectId ?? null) : null,
       groups: imports.map((item) => {
         const baseNodes =
           item.import_id === GLOBAL_IMPORT_ID
             ? globalNodes(item.allocation_scope)
-            : (localNodesByProfile[
-                item.source_scope.type === "profile" ? item.source_scope.profile_id : ""
+            : (localNodesByProject[
+                item.source_scope.type === "project" ? item.source_scope.project_id : ""
               ] ?? []);
 
         return {
@@ -432,10 +432,10 @@ test.beforeEach(async ({ page }) => {
             source_scope: item.source_scope,
             allocation_scope:
               "allocation_scope" in node ? node.allocation_scope : item.allocation_scope,
-            effective_profile_ids: item.effective_profile_ids,
+            effective_project_ids: item.effective_project_ids,
             primary_ip: node.primary_ip,
             ip_metadata: node.ip_metadata,
-            can_open_session: view === "profile",
+            can_open_session: view === "project",
           })),
         };
       }),
@@ -465,52 +465,52 @@ test.beforeEach(async ({ page }) => {
     });
   });
 
-  await page.route("**/api/v1/profiles", async (route) => {
+  await page.route("**/api/v1/projects", async (route) => {
     if (route.request().method() === "GET") {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ profiles }),
+        body: JSON.stringify({ projects }),
       });
       return;
     }
 
     if (route.request().method() === "POST") {
-      const payload = JSON.parse(route.request().postData() ?? "{}") as { profile_id?: string };
-      const profileId = (payload.profile_id ?? "").trim();
-      if (!profileId) {
+      const payload = JSON.parse(route.request().postData() ?? "{}") as { project_id?: string };
+      const projectId = (payload.project_id ?? "").trim();
+      if (!projectId) {
         await route.fulfill({
           status: 400,
           contentType: "application/json",
           body: JSON.stringify({
             code: "invalid_request",
-            message: "invalid request: profile_id must not be empty",
+            message: "invalid request: project_id must not be empty",
           }),
         });
         return;
       }
-      if (profiles.includes(profileId)) {
+      if (projects.includes(projectId)) {
         await route.fulfill({
           status: 409,
           contentType: "application/json",
           body: JSON.stringify({
-            code: "profile_exists",
-            message: "profile already exists",
+            code: "project_exists",
+            message: "project already exists",
           }),
         });
         return;
       }
 
-      profiles = [...profiles, profileId].sort((left, right) => left.localeCompare(right));
-      sessionsByProfile[profileId] = [];
-      profileSettingsByProfile[profileId] = {
-        profile_id: profileId,
+      projects = [...projects, projectId].sort((left, right) => left.localeCompare(right));
+      sessionsByProject[projectId] = [];
+      projectSettingsByProject[projectId] = {
+        project_id: projectId,
         use_global_proxies: true,
       };
       await route.fulfill({
         status: 201,
         contentType: "application/json",
-        body: JSON.stringify({ profile_id: profileId }),
+        body: JSON.stringify({ project_id: projectId }),
       });
       return;
     }
@@ -519,10 +519,10 @@ test.beforeEach(async ({ page }) => {
   });
 
   await page.route("**/api/v1/tasks/events*", async (route) => {
-    const profileId = new URL(route.request().url()).searchParams.get("profile_id");
+    const projectId = new URL(route.request().url()).searchParams.get("project_id");
     const proxyProbeRun = {
       run_id: RUN_ID_PROXY_PROBE,
-      profile_id: "fresh-lab",
+      project_id: "fresh-lab",
       kind: "proxy_latency_probe",
       trigger: "operator",
       status: "running",
@@ -537,7 +537,7 @@ test.beforeEach(async ({ page }) => {
       error_message: null,
     };
     const scopedTaskList =
-      profileId === "fresh-lab"
+      projectId === "fresh-lab"
         ? {
             ...taskList,
             summary: {
@@ -552,7 +552,7 @@ test.beforeEach(async ({ page }) => {
       `event: snapshot\ndata: ${JSON.stringify({ type: "snapshot", data: scopedTaskList })}\n\n`,
       `event: summary\ndata: ${JSON.stringify({ type: "summary", data: scopedTaskList.summary })}\n\n`,
     ];
-    if (profileId === "fresh-lab") {
+    if (projectId === "fresh-lab") {
       envelopes.push(
         `event: run-upsert\ndata: ${JSON.stringify({ type: "run-upsert", data: proxyProbeRun })}\n\n`,
       );
@@ -649,7 +649,7 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/api/v1/proxy-imports/*/allocation", async (route) => {
     const importId = route.request().url().split("/").slice(-2, -1)[0] ?? "";
     const payload = JSON.parse(route.request().postData() ?? "{}") as {
-      allocation_scope?: { type: "global" } | { type: "profile"; profile_id: string };
+      allocation_scope?: { type: "global" } | { type: "project"; project_id: string };
     };
     proxyImports = proxyImports.map((item) =>
       item.import_id === importId && payload.allocation_scope
@@ -669,15 +669,15 @@ test.beforeEach(async ({ page }) => {
     await route.fallback();
   });
 
-  await page.route("**/api/v1/profiles/*/proxy-settings", async (route) => {
-    const profileId = extractProfileId(route.request().url());
+  await page.route("**/api/v1/projects/*/proxy-settings", async (route) => {
+    const projectId = extractProjectId(route.request().url());
     if (route.request().method() === "GET") {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify(
-          profileSettingsByProfile[profileId] ?? {
-            profile_id: profileId,
+          projectSettingsByProject[projectId] ?? {
+            project_id: projectId,
             use_global_proxies: true,
           },
         ),
@@ -689,14 +689,14 @@ test.beforeEach(async ({ page }) => {
       const payload = JSON.parse(route.request().postData() ?? "{}") as {
         use_global_proxies?: boolean;
       };
-      profileSettingsByProfile[profileId] = {
-        profile_id: profileId,
+      projectSettingsByProject[projectId] = {
+        project_id: projectId,
         use_global_proxies: payload.use_global_proxies ?? true,
       };
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify(profileSettingsByProfile[profileId]),
+        body: JSON.stringify(projectSettingsByProject[projectId]),
       });
       return;
     }
@@ -704,8 +704,8 @@ test.beforeEach(async ({ page }) => {
     await route.fallback();
   });
 
-  await page.route("**/api/v1/profiles/*/subscriptions/load", async (route) => {
-    const profileId = extractProfileId(route.request().url());
+  await page.route("**/api/v1/projects/*/subscriptions/load", async (route) => {
+    const projectId = extractProjectId(route.request().url());
     const payload = JSON.parse(route.request().postData() ?? "{}") as {
       name?: string;
       source?: { type?: string; value?: string };
@@ -714,18 +714,18 @@ test.beforeEach(async ({ page }) => {
     proxyImports = [
       ...proxyImports.filter((item) => item.source_scope.type === "global"),
       {
-        import_id: importIdForProfile(profileId),
-        name: payload.content ? `${profileId}-entry` : `${profileId}-local`,
+        import_id: importIdForProject(projectId),
+        name: payload.content ? `${projectId}-entry` : `${projectId}-local`,
         import_kind: payload.content ? "single_node" : "subscription",
-        source_scope: { type: "profile", profile_id: profileId },
+        source_scope: { type: "project", project_id: projectId },
         source_identity: payload.content
-          ? { source_type: "manual", source_value: importIdForProfile(profileId) }
+          ? { source_type: "manual", source_value: importIdForProject(projectId) }
           : {
               source_type: payload.source?.type ?? "url",
               source_value:
-                payload.source?.value ?? "https://example.com/profile-subscription.yaml",
+                payload.source?.value ?? "https://example.com/project-subscription.yaml",
             },
-        allocation_scope: { type: "profile", profile_id: profileId },
+        allocation_scope: { type: "project", project_id: projectId },
         proxy_count: 48,
         distinct_ip_count: 26,
         created_at: recentTaskBaseSec,
@@ -745,12 +745,12 @@ test.beforeEach(async ({ page }) => {
 
   await page.route("**/api/v1/proxy-catalog?*", async (route) => {
     const url = new URL(route.request().url());
-    const view = (url.searchParams.get("view") ?? "global") as "global" | "profile";
-    const profileId = url.searchParams.get("profile_id") ?? undefined;
+    const view = (url.searchParams.get("view") ?? "global") as "global" | "project";
+    const projectId = url.searchParams.get("project_id") ?? undefined;
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(proxyCatalogResponse(view, profileId)),
+      body: JSON.stringify(proxyCatalogResponse(view, projectId)),
     });
   });
 
@@ -793,11 +793,11 @@ test.beforeEach(async ({ page }) => {
             prefix: CREATED_API_KEY_SECRET.slice(0, 18),
             created_by: "dev-admin",
             owner_subject: "dev-admin",
-            profile_scope: {
-              kind: "selected_profiles",
-              profile_ids: ["default"],
+            project_scope: {
+              kind: "selected_projects",
+              project_ids: ["default"],
             },
-            profile_id: "default",
+            project_id: "default",
             created_at: 1741748460,
             last_used_at: null,
             revoked_at: null,
@@ -816,7 +816,7 @@ test.beforeEach(async ({ page }) => {
     await route.fallback();
   });
 
-  await page.route("**/api/v1/profiles/*/refresh", async (route) => {
+  await page.route("**/api/v1/projects/*/refresh", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -824,7 +824,7 @@ test.beforeEach(async ({ page }) => {
     });
   });
 
-  await page.route("**/api/v1/profiles/*/ips/extract", async (route) => {
+  await page.route("**/api/v1/projects/*/ips/extract", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -845,7 +845,7 @@ test.beforeEach(async ({ page }) => {
     });
   });
 
-  await page.route("**/api/v1/profiles/*/ips/options/search", async (route) => {
+  await page.route("**/api/v1/projects/*/ips/options/search", async (route) => {
     const payload = JSON.parse(route.request().postData() ?? "{}") as {
       kind?: "country" | "city" | "ip";
     };
@@ -863,7 +863,7 @@ test.beforeEach(async ({ page }) => {
     });
   });
 
-  await page.route("**/api/v1/profiles/*/sessions/suggested-port", async (route) => {
+  await page.route("**/api/v1/projects/*/sessions/suggested-port", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -871,8 +871,8 @@ test.beforeEach(async ({ page }) => {
     });
   });
 
-  await page.route("**/api/v1/profiles/*/sessions/open-by-node", async (route) => {
-    const profileId = extractProfileId(route.request().url());
+  await page.route("**/api/v1/projects/*/sessions/open-by-node", async (route) => {
+    const projectId = extractProjectId(route.request().url());
     const payload = JSON.parse(route.request().postData() ?? "{}") as {
       node_id?: string;
       desired_port?: number;
@@ -904,7 +904,7 @@ test.beforeEach(async ({ page }) => {
       node_id: nodeId,
       created_at: 1741748460,
     });
-    sessionsByProfile[profileId] = [session];
+    sessionsByProject[projectId] = [session];
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -912,8 +912,8 @@ test.beforeEach(async ({ page }) => {
     });
   });
 
-  await page.route("**/api/v1/profiles/*/sessions/open-batch-by-node", async (route) => {
-    const profileId = extractProfileId(route.request().url());
+  await page.route("**/api/v1/projects/*/sessions/open-batch-by-node", async (route) => {
+    const projectId = extractProjectId(route.request().url());
     const payload = JSON.parse(route.request().postData() ?? "{}") as {
       node_ids?: string[];
       requests?: Array<{ node_id: string; desired_port?: number }>;
@@ -932,7 +932,7 @@ test.beforeEach(async ({ page }) => {
         created_at: 1741748460 + index,
       }),
     );
-    sessionsByProfile[profileId] = sessions;
+    sessionsByProject[projectId] = sessions;
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -944,8 +944,8 @@ test.beforeEach(async ({ page }) => {
     });
   });
 
-  await page.route("**/api/v1/profiles/*/sessions/open", async (route) => {
-    const profileId = extractProfileId(route.request().url());
+  await page.route("**/api/v1/projects/*/sessions/open", async (route) => {
+    const projectId = extractProjectId(route.request().url());
     const session = withDisplayAddress(route, {
       session_id: sessionIdFor(0),
       listen: "127.0.0.1",
@@ -955,7 +955,7 @@ test.beforeEach(async ({ page }) => {
       node_id: "node-global-jp-tokyo",
       created_at: 1741748460,
     });
-    sessionsByProfile[profileId] = [session];
+    sessionsByProject[projectId] = [session];
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -963,8 +963,8 @@ test.beforeEach(async ({ page }) => {
     });
   });
 
-  await page.route("**/api/v1/profiles/*/sessions/open-batch", async (route) => {
-    const profileId = extractProfileId(route.request().url());
+  await page.route("**/api/v1/projects/*/sessions/open-batch", async (route) => {
+    const projectId = extractProjectId(route.request().url());
     const sessions = [
       withDisplayAddress(route, {
         session_id: sessionIdFor(0),
@@ -985,7 +985,7 @@ test.beforeEach(async ({ page }) => {
         created_at: 1741748461,
       }),
     ];
-    sessionsByProfile[profileId] = sessions;
+    sessionsByProject[projectId] = sessions;
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -997,14 +997,14 @@ test.beforeEach(async ({ page }) => {
     });
   });
 
-  await page.route("**/api/v1/profiles/*/sessions", async (route) => {
+  await page.route("**/api/v1/projects/*/sessions", async (route) => {
     if (route.request().method() === "GET") {
-      const profileId = extractProfileId(route.request().url());
+      const projectId = extractProjectId(route.request().url());
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
-          sessions: (sessionsByProfile[profileId] ?? []).map((session) => ({
+          sessions: (sessionsByProject[projectId] ?? []).map((session) => ({
             ...session,
             listen: bindEndpoint(session),
           })),
@@ -1015,10 +1015,10 @@ test.beforeEach(async ({ page }) => {
     await route.fallback();
   });
 
-  await page.route("**/api/v1/profiles/*/sessions/*", async (route) => {
+  await page.route("**/api/v1/projects/*/sessions/*", async (route) => {
     if (route.request().method() === "DELETE") {
-      const profileId = extractProfileId(route.request().url());
-      sessionsByProfile[profileId] = [];
+      const projectId = extractProjectId(route.request().url());
+      sessionsByProject[projectId] = [];
       await route.fulfill({ status: 204, body: "" });
       return;
     }
@@ -1032,17 +1032,17 @@ test("operator can drive the main workflows", async ({ page }) => {
   await expect(page.getByText("Local API heartbeat")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Overview", level: 1 })).toBeVisible();
 
-  await page.getByRole("combobox", { name: /config id/i }).click();
-  await page.getByPlaceholder("Search configs or type a new ID").fill("edge");
+  await page.getByRole("combobox", { name: /project id/i }).click();
+  await page.getByPlaceholder("Search projects or type a new ID").fill("edge");
   await page.getByRole("option", { name: /^edge-jp$/i }).click();
-  await expect(page.getByRole("combobox", { name: /config id/i })).toContainText("edge-jp");
+  await expect(page.getByRole("combobox", { name: /project id/i })).toContainText("edge-jp");
 
-  await page.getByRole("combobox", { name: /config id/i }).click();
-  await page.getByPlaceholder("Search configs or type a new ID").fill("fresh-lab");
+  await page.getByRole("combobox", { name: /project id/i }).click();
+  await page.getByPlaceholder("Search projects or type a new ID").fill("fresh-lab");
   await page.getByText('Create "fresh-lab"').click();
-  await expect(page.getByRole("combobox", { name: /config id/i })).toContainText("fresh-lab");
+  await expect(page.getByRole("combobox", { name: /project id/i })).toContainText("fresh-lab");
 
-  await page.getByRole("combobox", { name: /config id/i }).click();
+  await page.getByRole("combobox", { name: /project id/i }).click();
   await page.getByText(/^Global$/i).click();
   await page.getByRole("button", { name: /import global pool/i }).click();
   await expect(
@@ -1051,16 +1051,16 @@ test("operator can drive the main workflows", async ({ page }) => {
 
   await expect(page.getByText("example.com", { exact: true })).toBeVisible();
 
-  await page.getByRole("combobox", { name: /config id/i }).click();
+  await page.getByRole("combobox", { name: /project id/i }).click();
   await page.getByRole("option", { name: /^fresh-lab$/i }).click();
   await page.getByRole("button", { name: /import local pool/i }).click();
   await expect(
-    page.getByText("Imported 48 proxies across 26 distinct IPs into profile fresh-lab."),
+    page.getByText("Imported 48 proxies across 26 distinct IPs into project fresh-lab."),
   ).toBeVisible();
 
   await page.getByRole("checkbox", { name: /use global pool for fresh-lab/i }).click();
   await expect(page.getByText("local-only").first()).toBeVisible();
-  await expect(page.getByText("Current profile grouped nodes", { exact: true })).toBeVisible();
+  await expect(page.getByText("Current project grouped nodes", { exact: true })).toBeVisible();
   await expect(page.getByText("Fresh-Lab-01")).toBeVisible();
   await expect(page.getByText(/Live stream:/i)).toBeVisible();
   await page.getByRole("checkbox", { name: /select import group fresh-lab-local/i }).click();

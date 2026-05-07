@@ -40,7 +40,7 @@ separate Vite and Storybook workflow for local development.
 
 - `/`
   - service health card
-  - profile selector
+  - project selector
   - subscription load form (`url` or server-side file path)
   - refresh card and latest refresh summary
 - `/ips`
@@ -54,7 +54,7 @@ separate Vite and Storybook workflow for local development.
 ### Persistence
 
 - The browser stores only UI-local preferences:
-  - last used `profile_id`
+  - last used `project_id`
   - last selected source type
   - last used extract presets if implemented as convenience state
 - No client-side authoritative data cache beyond TanStack Query.
@@ -215,7 +215,7 @@ separate Vite and Storybook workflow for local development.
 
 - A local operator can use the browser UI to:
   - load a subscription from URL or server-side file path
-  - refresh profile metadata
+  - refresh project metadata
   - extract IPs with the existing filters
   - open single or batch sessions
   - list and close sessions

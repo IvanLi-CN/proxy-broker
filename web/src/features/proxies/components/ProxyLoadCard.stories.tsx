@@ -8,10 +8,10 @@ const meta = {
   component: ProxyLoadCard,
   tags: ["autodocs"],
   args: {
-    eyebrow: "Current profile",
+    eyebrow: "Current project",
     title: "Import local pool for edge-jp",
     description:
-      "Import nodes for the current profile only. These nodes stay local unless you later reassign them from the global inventory.",
+      "Import nodes for the current project only. These nodes stay local unless you later reassign them from the global inventory.",
     scopeChip: "allocation defaults to edge-jp",
     pending: false,
     response: {
@@ -29,10 +29,10 @@ const meta = {
       warnings: [],
     },
     error: null,
-    defaultValue: "https://example.com/profile-subscription.yaml",
-    submitLabel: "Import profile pool",
-    successTitle: "Profile pool updated",
-    successDescription: "Imported 6 proxies across 4 distinct IPs into profile edge-jp.",
+    defaultValue: "https://example.com/project-subscription.yaml",
+    submitLabel: "Import project pool",
+    successTitle: "Project pool updated",
+    successDescription: "Imported 6 proxies across 4 distinct IPs into project edge-jp.",
     onSubmit: fn(),
   },
   parameters: {
@@ -40,7 +40,7 @@ const meta = {
     docs: {
       description: {
         component:
-          "Compact subscription import card used by both the global proxies workspace and profile-scoped local import surfaces.",
+          "Compact subscription import card used by both the global proxies workspace and project-scoped local import surfaces.",
       },
     },
   },
@@ -117,7 +117,7 @@ export const Interaction: Story = {
     await userEvent.clear(canvas.getByLabelText("Name"));
     await userEvent.clear(canvas.getByLabelText("Value"));
     await userEvent.type(canvas.getByLabelText("Value"), "https://example.com/feed.yaml");
-    await userEvent.click(canvas.getByRole("button", { name: /import profile pool/i }));
+    await userEvent.click(canvas.getByRole("button", { name: /import project pool/i }));
     expect(args.onSubmit).toHaveBeenCalledWith({
       source: {
         type: "url",

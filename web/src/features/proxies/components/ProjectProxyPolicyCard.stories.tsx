@@ -1,14 +1,14 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, fn, userEvent, within } from "storybook/test";
 
-import { ProfileProxyPolicyCard } from "@/features/proxies/components/ProfileProxyPolicyCard";
+import { ProjectProxyPolicyCard } from "@/features/proxies/components/ProjectProxyPolicyCard";
 
 const meta = {
-  title: "Features/Proxies/ProfileProxyPolicyCard",
-  component: ProfileProxyPolicyCard,
+  title: "Features/Proxies/ProjectProxyPolicyCard",
+  component: ProjectProxyPolicyCard,
   tags: ["autodocs"],
   args: {
-    profileId: "edge-jp",
+    projectId: "edge-jp",
     useGlobalProxies: true,
     proxySettingsLoading: false,
     updatingSettings: false,
@@ -20,11 +20,11 @@ const meta = {
     docs: {
       description: {
         component:
-          "Profile-scoped policy card that only controls whether the current profile inherits the global pool.",
+          "Project-scoped policy card that only controls whether the current project inherits the global pool.",
       },
     },
   },
-} satisfies Meta<typeof ProfileProxyPolicyCard>;
+} satisfies Meta<typeof ProjectProxyPolicyCard>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;

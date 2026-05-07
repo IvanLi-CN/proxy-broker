@@ -16,18 +16,18 @@
 | ID   | Title | Status | Spec | Last | Notes |
 |-----:|-------|--------|------|------|-------|
 | zdmrs | Release 失败 Telegram 告警接入 | 待实现 | `zdmrs-release-failure-telegram-alerts/SPEC.md` | 2026-04-12 | release notifier wrapper、SHA 标记、Telegram smoke test |
-| h2w7p | Forward Auth 身份识别、管理员授权与 Profile API Key | 已完成 | `h2w7p-forward-auth-admin-and-profile-keys/SPEC.md` | 2026-03-20 | 新增 Forward Auth 身份解析、管理员白名单、开发模式与 Profile 级 API Key 管理 |
+| h2w7p | Forward Auth 身份识别、管理员授权与 Project API Key | 已完成 | `h2w7p-forward-auth-admin-and-project-keys/SPEC.md` | 2026-03-20 | 新增 Forward Auth 身份解析、管理员白名单、开发模式与 Project 级 API Key 管理 |
 | r2m7k | PR Label 发版与通配监听 | 已完成 | `r2m7k-pr-label-release-and-wildcard-listen/SPEC.md` | 2026-03-28 | 新增 session 端口池约束与 wildcard listener 的 LAN 暴露契约，避免已创建 session 落到未对外开放的端口 |
 | s3zu5 | 管理台 UI 控制室重构 | 已完成 | `s3zu5-admin-ui-refresh/SPEC.md` | 2026-04-11 | 移除 Overview / Sessions / IP Extract 的冗余辅助说明卡片，并刷新 Storybook 视觉证据 |
 | kgm4c | 安装 UI UX Pro Max Codex 项目技能 | 部分完成（2/3） | `kgm4c-install-ui-ux-pro-max-codex-skill/SPEC.md` | 2026-03-13 | 项目内 Codex skill 已安装，待 PR 收敛 |
-| 6b2xu | Profile catalog 与可新建选择器 | 已完成 | `6b2xu-profile-catalog-combobox/SPEC.md` | 2026-03-19 | 为空 profile 引入持久化 catalog，并把侧栏输入框升级为 searchable combobox |
+| 6b2xu | Project catalog 与可新建选择器 | 已完成 | `6b2xu-project-catalog-combobox/SPEC.md` | 2026-03-19 | 为空 project 引入持久化 catalog，并把侧栏输入框升级为 searchable combobox |
 | y5yx8 | 任务模块与自动订阅维护 | 已完成 | `y5yx8-task-module-and-auto-subscription-maintenance/SPEC.md` | 2026-03-22 | 新增自动订阅调度、任务监控中心与 SSE 实时推送，并补齐 Storybook 视觉证据 |
 | tqs62 | 发布链路去饥饿化与专用 Publisher 身份修复 | 已完成 | `tqs62-release-current-first-publisher/SPEC.md` | 2026-03-24 | 主线改为 current-first 发版；后续由 `#m8z4p` 移除额外 publisher secret 依赖 |
 | m8z4p | 发布锚点与无额外 Secret 的主线发版修复 | 已完成 | `m8z4p-release-anchor-without-extra-secrets/SPEC.md` | 2026-03-24 | 对 workflow 变更目标自动生成 release anchor，继续用默认 `GITHUB_TOKEN` 发布最新版本 |
 | 4jfey | AppShell 工作区卡片间距修复 | 已完成 | `4jfey-appshell-workspace-card-spacing/SPEC.md` | 2026-04-01 | AppShell 工作区入口卡片已恢复垂直间距，并补齐 Storybook zh-CN 视觉证据 |
-| jrhgg | 全局代理池、Profile 分配与 Proxies 工作区 | 已完成 | `jrhgg-global-proxy-pool-and-allocation/SPEC.md` | 2026-04-12 | inventory layer、Proxies 工作区、global/profile 分配、profile 级 use_global_proxies 与 Storybook 视觉证据 |
+| jrhgg | 全局代理池、Project 分配与 Proxies 工作区 | 已完成 | `jrhgg-global-proxy-pool-and-allocation/SPEC.md` | 2026-04-12 | inventory layer、Proxies 工作区、global/project 分配、project 级 use_global_proxies 与 Storybook 视觉证据 |
 | qvbmc | 代理订阅归属与原始导入级分配 | 已完成 | `qvbmc-proxy-import-allocation/SPEC.md` | 2026-04-19 | import-level allocation、multi-import coexistence、import sync config；补齐旧 SQLite 升级顺序热修复 |
-| wfy5z | 用户拥有的多 Profile / All Profiles API Key | 已实现（本地已验证） | `wfy5z-user-owned-api-key-scopes/SPEC.md` | 2026-04-12 | owner-scoped key model、selected/all profiles scope、全局 key-management API、视觉证据已生成 |
+| wfy5z | 用户拥有的多 Project / All Projects API Key | 已实现（本地已验证） | `wfy5z-user-owned-api-key-scopes/SPEC.md` | 2026-04-12 | owner-scoped key model、selected/all projects scope、全局 key-management API、视觉证据已生成 |
 | 2e86e | 短 ID / NanoID 方案切换并移除主动 UUID 使用 | 已完成 | `2e86e-short-id-without-uuid/SPEC.md` | 2026-04-19 | PR #37 已完成 review、CI 与 spec drift 收口，merge-ready |
 | 98slt | 修复 legacy inventory import 触发的 SQLite 启动迁移崩溃 | 已实现（shared testbox 已验证） | `98slt-fix-legacy-inventory-sync-migration-crash/SPEC.md` | 2026-04-20 | 修复 sync-config 迁移覆写；已用 101 真实 SQLite 资产在共享测试机完成前后对照验证 |
 | s5fwx | 代理页订阅分组节点、共享 Runtime 与实时运营流 | 已实现（本地已验证） | `s5fwx-proxy-node-groups-live-ops/SPEC.md` | 2026-04-21 | grouped node catalog、shared runtime、node-pinned sessions、实时 proxy ops、Storybook 视觉证据已落盘 |

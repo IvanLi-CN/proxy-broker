@@ -117,33 +117,33 @@ mod tests {
 
     #[async_trait]
     impl MihomoRuntime for TestRuntime {
-        async fn ensure_started(&self, _profile_id: &str) -> anyhow::Result<()> {
+        async fn ensure_started(&self, _project_id: &str) -> anyhow::Result<()> {
             Ok(())
         }
 
-        async fn shutdown_profile(&self, _profile_id: &str) -> anyhow::Result<()> {
+        async fn shutdown_project(&self, _project_id: &str) -> anyhow::Result<()> {
             Ok(())
         }
 
         async fn controller_meta(
             &self,
-            _profile_id: &str,
+            _project_id: &str,
         ) -> anyhow::Result<(String, Option<String>)> {
             Ok(("127.0.0.1:9090".to_string(), None))
         }
 
-        async fn controller_addr(&self, profile_id: &str) -> anyhow::Result<String> {
-            let (addr, _) = self.controller_meta(profile_id).await?;
+        async fn controller_addr(&self, project_id: &str) -> anyhow::Result<String> {
+            let (addr, _) = self.controller_meta(project_id).await?;
             Ok(addr)
         }
 
-        async fn apply_config(&self, _profile_id: &str, _payload: &str) -> anyhow::Result<()> {
+        async fn apply_config(&self, _project_id: &str, _payload: &str) -> anyhow::Result<()> {
             Ok(())
         }
 
         async fn measure_proxy_delay(
             &self,
-            _profile_id: &str,
+            _project_id: &str,
             _proxy_name: &str,
             _url: &str,
             _timeout_ms: u64,
@@ -222,7 +222,7 @@ mod tests {
         path.to_string_lossy().into_owned()
     }
 
-    async fn create_selected_profile_api_key(app: axum::Router, profile_id: &str) -> String {
+    async fn create_selected_project_api_key(app: axum::Router, project_id: &str) -> String {
         let created_key = app
             .oneshot(trusted_request(
                 Request::builder()
@@ -231,7 +231,7 @@ mod tests {
                     .header("content-type", "application/json")
                     .header("x-forwarded-user", "admin@example.com")
                     .body(Body::from(format!(
-                        r#"{{"name":"{profile_id}-bot","profile_scope":{{"kind":"selected_profiles","profile_ids":["{profile_id}"]}}}}"#
+                        r#"{{"name":"{project_id}-bot","project_scope":{{"kind":"selected_projects","project_ids":["{project_id}"]}}}}"#
                     )))
                     .unwrap(),
             ))
@@ -329,7 +329,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn profile_routes_create_and_list_profiles() {
+    async fn project_routes_create_and_list_projects() {
         let app = test_router();
 
         let created = app
@@ -337,9 +337,9 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method(Method::POST)
-                    .uri("/api/v1/profiles")
+                    .uri("/api/v1/projects")
                     .header("content-type", "application/json")
-                    .body(Body::from(r#"{"profile_id":"  edge-jp  "}"#))
+                    .body(Body::from(r#"{"project_id":"  edge-jp  "}"#))
                     .unwrap(),
             )
             .await
@@ -350,12 +350,12 @@ mod tests {
             .expect("body should be readable");
         let created_json: serde_json::Value =
             serde_json::from_slice(&created_body).expect("body should be json");
-        assert_eq!(created_json["profile_id"], "edge-jp");
+        assert_eq!(created_json["project_id"], "edge-jp");
 
         let listed = app
             .oneshot(
                 Request::builder()
-                    .uri("/api/v1/profiles")
+                    .uri("/api/v1/projects")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -367,7 +367,7 @@ mod tests {
             .expect("body should be readable");
         let listed_json: serde_json::Value =
             serde_json::from_slice(&listed_body).expect("body should be json");
-        assert_eq!(listed_json["profiles"], serde_json::json!(["edge-jp"]));
+        assert_eq!(listed_json["projects"], serde_json::json!(["edge-jp"]));
     }
 
     #[tokio::test]
@@ -392,11 +392,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn non_admin_human_cannot_access_profiles_api() {
+    async fn non_admin_human_cannot_access_projects_api() {
         let response = enforce_router()
             .oneshot(trusted_request(
                 Request::builder()
-                    .uri("/api/v1/profiles")
+                    .uri("/api/v1/projects")
                     .header("x-forwarded-user", "user@example.com")
                     .body(Body::empty())
                     .unwrap(),
@@ -408,23 +408,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn api_key_is_limited_to_selected_profiles() {
+    async fn api_key_is_limited_to_selected_projects() {
         let app = enforce_router();
 
-        let created_profile = app
+        let created_project = app
             .clone()
             .oneshot(trusted_request(
                 Request::builder()
                     .method(Method::POST)
-                    .uri("/api/v1/profiles")
+                    .uri("/api/v1/projects")
                     .header("content-type", "application/json")
                     .header("x-forwarded-user", "admin@example.com")
-                    .body(Body::from(r#"{"profile_id":"alpha"}"#))
+                    .body(Body::from(r#"{"project_id":"alpha"}"#))
                     .unwrap(),
             ))
             .await
             .expect("create should respond");
-        assert_eq!(created_profile.status(), StatusCode::CREATED);
+        assert_eq!(created_project.status(), StatusCode::CREATED);
 
         let created_key = app
             .clone()
@@ -435,7 +435,7 @@ mod tests {
                     .header("content-type", "application/json")
                     .header("x-forwarded-user", "admin@example.com")
                     .body(Body::from(
-                        r#"{"name":"deploy-bot","profile_scope":{"kind":"selected_profiles","profile_ids":["alpha"]}}"#,
+                        r#"{"name":"deploy-bot","project_scope":{"kind":"selected_projects","project_ids":["alpha"]}}"#,
                     ))
                     .unwrap(),
             ))
@@ -455,7 +455,7 @@ mod tests {
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri("/api/v1/profiles/alpha/sessions")
+                    .uri("/api/v1/projects/alpha/sessions")
                     .header("authorization", format!("Bearer {secret}"))
                     .body(Body::empty())
                     .unwrap(),
@@ -467,7 +467,7 @@ mod tests {
         let denied = app
             .oneshot(
                 Request::builder()
-                    .uri("/api/v1/profiles/beta/sessions")
+                    .uri("/api/v1/projects/beta/sessions")
                     .header("authorization", format!("Bearer {secret}"))
                     .body(Body::empty())
                     .unwrap(),
@@ -478,7 +478,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn api_key_with_all_profiles_scope_can_access_future_profiles() {
+    async fn api_key_with_all_projects_scope_can_access_future_projects() {
         let app = enforce_router();
 
         let created_key = app
@@ -490,7 +490,7 @@ mod tests {
                     .header("content-type", "application/json")
                     .header("x-forwarded-user", "admin@example.com")
                     .body(Body::from(
-                        r#"{"name":"deploy-bot","profile_scope":{"kind":"all_profiles"}}"#,
+                        r#"{"name":"deploy-bot","project_scope":{"kind":"all_projects"}}"#,
                     ))
                     .unwrap(),
             ))
@@ -506,25 +506,25 @@ mod tests {
             .as_str()
             .expect("secret should be present");
 
-        let created_profile = app
+        let created_project = app
             .clone()
             .oneshot(trusted_request(
                 Request::builder()
                     .method(Method::POST)
-                    .uri("/api/v1/profiles")
+                    .uri("/api/v1/projects")
                     .header("content-type", "application/json")
                     .header("x-forwarded-user", "admin@example.com")
-                    .body(Body::from(r#"{"profile_id":"beta"}"#))
+                    .body(Body::from(r#"{"project_id":"beta"}"#))
                     .unwrap(),
             ))
             .await
             .expect("create should respond");
-        assert_eq!(created_profile.status(), StatusCode::CREATED);
+        assert_eq!(created_project.status(), StatusCode::CREATED);
 
         let allowed = app
             .oneshot(
                 Request::builder()
-                    .uri("/api/v1/profiles/beta/sessions")
+                    .uri("/api/v1/projects/beta/sessions")
                     .header("authorization", format!("Bearer {secret}"))
                     .body(Body::empty())
                     .unwrap(),
@@ -535,7 +535,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn api_key_with_all_profiles_scope_still_requires_existing_profile() {
+    async fn api_key_with_all_projects_scope_still_requires_existing_project() {
         let app = enforce_router();
 
         let created_key = app
@@ -547,7 +547,7 @@ mod tests {
                     .header("content-type", "application/json")
                     .header("x-forwarded-user", "admin@example.com")
                     .body(Body::from(
-                        r#"{"name":"deploy-bot","profile_scope":{"kind":"all_profiles"}}"#,
+                        r#"{"name":"deploy-bot","project_scope":{"kind":"all_projects"}}"#,
                     ))
                     .unwrap(),
             ))
@@ -566,7 +566,7 @@ mod tests {
         let missing = app
             .oneshot(
                 Request::builder()
-                    .uri("/api/v1/profiles/typo/sessions")
+                    .uri("/api/v1/projects/typo/sessions")
                     .header("authorization", format!("Bearer {secret}"))
                     .body(Body::empty())
                     .unwrap(),
@@ -577,7 +577,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn api_key_with_all_profiles_scope_cannot_load_subscription_for_missing_profile() {
+    async fn api_key_with_all_projects_scope_cannot_load_subscription_for_missing_project() {
         let app = enforce_router();
 
         let created_key = app
@@ -589,7 +589,7 @@ mod tests {
                     .header("content-type", "application/json")
                     .header("x-forwarded-user", "admin@example.com")
                     .body(Body::from(
-                        r#"{"name":"deploy-bot","profile_scope":{"kind":"all_profiles"}}"#,
+                        r#"{"name":"deploy-bot","project_scope":{"kind":"all_projects"}}"#,
                     ))
                     .unwrap(),
             ))
@@ -609,7 +609,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method(Method::POST)
-                    .uri("/api/v1/profiles/typo/subscriptions/load")
+                    .uri("/api/v1/projects/typo/subscriptions/load")
                     .header("authorization", format!("Bearer {secret}"))
                     .header("content-type", "application/json")
                     .body(Body::from(
@@ -623,7 +623,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn api_key_with_all_profiles_scope_cannot_refresh_missing_profile() {
+    async fn api_key_with_all_projects_scope_cannot_refresh_missing_project() {
         let app = enforce_router();
 
         let created_key = app
@@ -635,7 +635,7 @@ mod tests {
                     .header("content-type", "application/json")
                     .header("x-forwarded-user", "admin@example.com")
                     .body(Body::from(
-                        r#"{"name":"deploy-bot","profile_scope":{"kind":"all_profiles"}}"#,
+                        r#"{"name":"deploy-bot","project_scope":{"kind":"all_projects"}}"#,
                     ))
                     .unwrap(),
             ))
@@ -655,7 +655,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method(Method::POST)
-                    .uri("/api/v1/profiles/typo/refresh")
+                    .uri("/api/v1/projects/typo/refresh")
                     .header("authorization", format!("Bearer {secret}"))
                     .header("content-type", "application/json")
                     .body(Body::from(r#"{"force":true}"#))
@@ -670,20 +670,20 @@ mod tests {
     async fn api_key_cannot_access_admin_proxy_inventory_routes() {
         let app = enforce_router();
 
-        let created_profile = app
+        let created_project = app
             .clone()
             .oneshot(trusted_request(
                 Request::builder()
                     .method(Method::POST)
-                    .uri("/api/v1/profiles")
+                    .uri("/api/v1/projects")
                     .header("content-type", "application/json")
                     .header("x-forwarded-user", "admin@example.com")
-                    .body(Body::from(r#"{"profile_id":"alpha"}"#))
+                    .body(Body::from(r#"{"project_id":"alpha"}"#))
                     .unwrap(),
             ))
             .await
             .expect("create should respond");
-        assert_eq!(created_profile.status(), StatusCode::CREATED);
+        assert_eq!(created_project.status(), StatusCode::CREATED);
 
         let created_key = app
             .clone()
@@ -694,7 +694,7 @@ mod tests {
                     .header("content-type", "application/json")
                     .header("x-forwarded-user", "admin@example.com")
                     .body(Body::from(
-                        r#"{"name":"deploy-bot","profile_scope":{"kind":"selected_profiles","profile_ids":["alpha"]}}"#,
+                        r#"{"name":"deploy-bot","project_scope":{"kind":"selected_projects","project_ids":["alpha"]}}"#,
                     ))
                     .unwrap(),
             ))
@@ -724,23 +724,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn api_key_can_access_profile_proxy_catalog_for_selected_profile() {
+    async fn api_key_can_access_project_proxy_catalog_for_selected_project() {
         let app = enforce_router();
 
-        let created_profile = app
+        let created_project = app
             .clone()
             .oneshot(trusted_request(
                 Request::builder()
                     .method(Method::POST)
-                    .uri("/api/v1/profiles")
+                    .uri("/api/v1/projects")
                     .header("content-type", "application/json")
                     .header("x-forwarded-user", "admin@example.com")
-                    .body(Body::from(r#"{"profile_id":"alpha"}"#))
+                    .body(Body::from(r#"{"project_id":"alpha"}"#))
                     .unwrap(),
             ))
             .await
             .expect("create should respond");
-        assert_eq!(created_profile.status(), StatusCode::CREATED);
+        assert_eq!(created_project.status(), StatusCode::CREATED);
 
         let created_key = app
             .clone()
@@ -751,7 +751,7 @@ mod tests {
                     .header("content-type", "application/json")
                     .header("x-forwarded-user", "admin@example.com")
                     .body(Body::from(
-                        r#"{"name":"profile-bot","profile_scope":{"kind":"selected_profiles","profile_ids":["alpha"]}}"#,
+                        r#"{"name":"project-bot","project_scope":{"kind":"selected_projects","project_ids":["alpha"]}}"#,
                     ))
                     .unwrap(),
             ))
@@ -770,7 +770,7 @@ mod tests {
         let allowed = app
             .oneshot(
                 Request::builder()
-                    .uri("/api/v1/proxy-catalog?view=profile&profile_id=alpha")
+                    .uri("/api/v1/proxy-catalog?view=project&project_id=alpha")
                     .header("authorization", format!("Bearer {secret}"))
                     .body(Body::empty())
                     .unwrap(),
@@ -781,23 +781,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn api_key_can_queue_profile_proxy_ops_for_selected_profile() {
+    async fn api_key_can_queue_project_proxy_ops_for_selected_project() {
         let app = enforce_router();
 
-        let created_profile = app
+        let created_project = app
             .clone()
             .oneshot(trusted_request(
                 Request::builder()
                     .method(Method::POST)
-                    .uri("/api/v1/profiles")
+                    .uri("/api/v1/projects")
                     .header("content-type", "application/json")
                     .header("x-forwarded-user", "admin@example.com")
-                    .body(Body::from(r#"{"profile_id":"alpha"}"#))
+                    .body(Body::from(r#"{"project_id":"alpha"}"#))
                     .unwrap(),
             ))
             .await
             .expect("create should respond");
-        assert_eq!(created_profile.status(), StatusCode::CREATED);
+        assert_eq!(created_project.status(), StatusCode::CREATED);
 
         let created_key = app
             .clone()
@@ -808,7 +808,7 @@ mod tests {
                     .header("content-type", "application/json")
                     .header("x-forwarded-user", "admin@example.com")
                     .body(Body::from(
-                        r#"{"name":"profile-bot","profile_scope":{"kind":"selected_profiles","profile_ids":["alpha"]}}"#,
+                        r#"{"name":"project-bot","project_scope":{"kind":"selected_projects","project_ids":["alpha"]}}"#,
                     ))
                     .unwrap(),
             ))
@@ -832,7 +832,7 @@ mod tests {
                     .header("authorization", format!("Bearer {secret}"))
                     .header("content-type", "application/json")
                     .body(Body::from(
-                        r#"{"view":"profile","profile_id":"alpha","node_ids":[]}"#,
+                        r#"{"view":"project","project_id":"alpha","node_ids":[]}"#,
                     ))
                     .unwrap(),
             )
@@ -842,7 +842,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn api_key_can_stream_selected_profile_task_events() {
+    async fn api_key_can_stream_selected_project_task_events() {
         let store = Arc::new(MemoryStore::new());
         let runtime: Arc<dyn MihomoRuntime> = Arc::new(TestRuntime);
         let service = Arc::new(BrokerService::new(
@@ -851,13 +851,13 @@ mod tests {
             BrokerServiceOptions::default(),
         ));
         service
-            .create_profile("alpha")
+            .create_project("alpha")
             .await
-            .expect("alpha profile should be created");
+            .expect("alpha project should be created");
         store
             .insert_task_run(&TaskRunRecord {
                 run_id: "run-alpha-probe".to_string(),
-                profile_id: "alpha".to_string(),
+                project_id: "alpha".to_string(),
                 kind: TaskRunKind::ProxyLatencyProbe,
                 trigger: TaskRunTrigger::Operator,
                 status: TaskRunStatus::Running,
@@ -878,12 +878,12 @@ mod tests {
             .expect("task run should seed");
 
         let app = enforce_router_with_service(service);
-        let secret = create_selected_profile_api_key(app.clone(), "alpha").await;
+        let secret = create_selected_project_api_key(app.clone(), "alpha").await;
 
         let allowed = app
             .oneshot(
                 Request::builder()
-                    .uri("/api/v1/tasks/events?profile_id=alpha")
+                    .uri("/api/v1/tasks/events?project_id=alpha")
                     .header("authorization", format!("Bearer {secret}"))
                     .body(Body::empty())
                     .unwrap(),
@@ -904,27 +904,27 @@ mod tests {
     async fn api_key_cannot_stream_global_task_events() {
         let app = enforce_router();
 
-        let created_profile = app
+        let created_project = app
             .clone()
             .oneshot(trusted_request(
                 Request::builder()
                     .method(Method::POST)
-                    .uri("/api/v1/profiles")
+                    .uri("/api/v1/projects")
                     .header("content-type", "application/json")
                     .header("x-forwarded-user", "admin@example.com")
-                    .body(Body::from(r#"{"profile_id":"alpha"}"#))
+                    .body(Body::from(r#"{"project_id":"alpha"}"#))
                     .unwrap(),
             ))
             .await
             .expect("create should respond");
-        assert_eq!(created_profile.status(), StatusCode::CREATED);
+        assert_eq!(created_project.status(), StatusCode::CREATED);
 
-        let secret = create_selected_profile_api_key(app.clone(), "alpha").await;
+        let secret = create_selected_project_api_key(app.clone(), "alpha").await;
 
         let denied = app
             .oneshot(
                 Request::builder()
-                    .uri("/api/v1/tasks/events?profile_id=__global__")
+                    .uri("/api/v1/tasks/events?project_id=__global__")
                     .header("authorization", format!("Bearer {secret}"))
                     .body(Body::empty())
                     .unwrap(),
@@ -935,7 +935,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn api_key_can_read_selected_profile_task_run_detail() {
+    async fn api_key_can_read_selected_project_task_run_detail() {
         let store = Arc::new(MemoryStore::new());
         let runtime: Arc<dyn MihomoRuntime> = Arc::new(TestRuntime);
         let service = Arc::new(BrokerService::new(
@@ -944,13 +944,13 @@ mod tests {
             BrokerServiceOptions::default(),
         ));
         service
-            .create_profile("alpha")
+            .create_project("alpha")
             .await
-            .expect("alpha profile should be created");
+            .expect("alpha project should be created");
         store
             .insert_task_run(&TaskRunRecord {
                 run_id: "run-alpha-refresh".to_string(),
-                profile_id: "alpha".to_string(),
+                project_id: "alpha".to_string(),
                 kind: TaskRunKind::ProxyMetadataRefresh,
                 trigger: TaskRunTrigger::Operator,
                 status: TaskRunStatus::Succeeded,
@@ -971,7 +971,7 @@ mod tests {
             .expect("task run should seed");
 
         let app = enforce_router_with_service(service);
-        let secret = create_selected_profile_api_key(app.clone(), "alpha").await;
+        let secret = create_selected_project_api_key(app.clone(), "alpha").await;
 
         let allowed = app
             .oneshot(
@@ -996,9 +996,9 @@ mod tests {
             BrokerServiceOptions::default(),
         ));
         service
-            .create_profile("alpha")
+            .create_project("alpha")
             .await
-            .expect("alpha profile should be created");
+            .expect("alpha project should be created");
 
         let source_path = write_subscription_file(
             r#"
@@ -1038,7 +1038,7 @@ proxies:
                     .header("content-type", "application/json")
                     .header("x-forwarded-user", "admin@example.com")
                     .body(Body::from(
-                        r#"{"name":"alpha-bot","profile_scope":{"kind":"selected_profiles","profile_ids":["alpha"]}}"#,
+                        r#"{"name":"alpha-bot","project_scope":{"kind":"selected_projects","project_ids":["alpha"]}}"#,
                     ))
                     .unwrap(),
             ))
@@ -1069,7 +1069,7 @@ proxies:
     }
 
     #[tokio::test]
-    async fn api_key_cannot_delete_global_import_reallocated_to_profile() {
+    async fn api_key_cannot_delete_global_import_reallocated_to_project() {
         let store = Arc::new(MemoryStore::new());
         let runtime: Arc<dyn MihomoRuntime> = Arc::new(TestRuntime);
         let service = Arc::new(BrokerService::new(
@@ -1078,9 +1078,9 @@ proxies:
             BrokerServiceOptions::default(),
         ));
         service
-            .create_profile("alpha")
+            .create_project("alpha")
             .await
-            .expect("alpha profile should be created");
+            .expect("alpha project should be created");
 
         let source_path = write_subscription_file(
             r#"
@@ -1105,7 +1105,7 @@ proxies:
             .import_id
             .clone();
         service
-            .update_proxy_import_allocation(&import_id, &ProxyScope::profile("alpha"))
+            .update_proxy_import_allocation(&import_id, &ProxyScope::project("alpha"))
             .await
             .expect("import should be reassigned to alpha");
 
@@ -1120,7 +1120,7 @@ proxies:
                     .header("content-type", "application/json")
                     .header("x-forwarded-user", "admin@example.com")
                     .body(Body::from(
-                        r#"{"name":"alpha-bot","profile_scope":{"kind":"selected_profiles","profile_ids":["alpha"]}}"#,
+                        r#"{"name":"alpha-bot","project_scope":{"kind":"selected_projects","project_ids":["alpha"]}}"#,
                     ))
                     .unwrap(),
             ))
@@ -1151,7 +1151,7 @@ proxies:
     }
 
     #[tokio::test]
-    async fn non_admin_human_cannot_access_profile_proxy_settings_route() {
+    async fn non_admin_human_cannot_access_project_proxy_settings_route() {
         let app = enforce_router();
 
         let created = app
@@ -1159,10 +1159,10 @@ proxies:
             .oneshot(trusted_request(
                 Request::builder()
                     .method(Method::POST)
-                    .uri("/api/v1/profiles")
+                    .uri("/api/v1/projects")
                     .header("content-type", "application/json")
                     .header("x-forwarded-user", "admin@example.com")
-                    .body(Body::from(r#"{"profile_id":"alpha"}"#))
+                    .body(Body::from(r#"{"project_id":"alpha"}"#))
                     .unwrap(),
             ))
             .await
@@ -1172,7 +1172,7 @@ proxies:
         let denied = app
             .oneshot(trusted_request(
                 Request::builder()
-                    .uri("/api/v1/profiles/alpha/proxy-settings")
+                    .uri("/api/v1/projects/alpha/proxy-settings")
                     .header("x-forwarded-user", "user@example.com")
                     .body(Body::empty())
                     .unwrap(),

@@ -9,7 +9,7 @@
 ## 背景 / 问题陈述
 
 - 101 上 `proxy-broker` 在升级到短 ID 版本后进入 crash-loop，Traefik 对 `proxy-broker.ivanli.cc` 回落到默认 `404`。
-- 线上容器日志持续报错：`failed to initialize sqlite ... unsupported profile sync source type: inventory`。
+- 线上容器日志持续报错：`failed to initialize sqlite ... unsupported project sync source type: inventory`。
 - 现场 SQLite 数据显示：`proxy_imports` 中仍保留 legacy `source_type=inventory` 的 import 记录，而 `proxy_import_sync_configs` 里的同步来源仍是合法的 `url`；当前短 ID 迁移会把 import 的 `source_type/source_value` 覆盖写回 sync config，导致启动时再次解析 sync source 失败。
 
 ## 目标 / 非目标
@@ -58,7 +58,7 @@
 
 - Given legacy SQLite 中存在 `proxy_imports.source_type=inventory` 且 `proxy_import_sync_configs.source_type=url`
   When 新版本打开数据库执行迁移
-  Then 服务不会再因 `unsupported profile sync source type: inventory` 崩溃，sync config 仍保持可解析订阅源。
+  Then 服务不会再因 `unsupported project sync source type: inventory` 崩溃，sync config 仍保持可解析订阅源。
 
 - Given 101 上的真实 `state.sqlite` 资产被复制到共享测试机
   When 在共享测试机运行修复后的构建/容器启动

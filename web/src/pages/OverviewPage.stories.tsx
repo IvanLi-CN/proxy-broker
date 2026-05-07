@@ -20,23 +20,23 @@ const meta = {
   },
   render: (args) => (
     <AppShell
-      profileId="default"
-      profiles={["default", "edge-jp", "lab-us"]}
-      profilesLoading={false}
-      profilesCreating={false}
-      profilesError={null}
+      projectId="default"
+      projects={["default", "edge-jp", "lab-us"]}
+      projectsLoading={false}
+      projectsCreating={false}
+      projectsError={null}
       healthStatus={args.health.status}
       currentUser={args.currentUser}
-      onProfileIdChange={() => undefined}
-      onCreateProfile={async (value: string) => value}
-      onRetryProfiles={() => undefined}
+      onProjectIdChange={() => undefined}
+      onCreateProject={async (value: string) => value}
+      onRetryProjects={() => undefined}
     >
       <OverviewPage {...args} />
     </AppShell>
   ),
   args: {
-    currentProfileId: "default",
-    availableProfiles: ["default", "edge-jp", "lab-us"],
+    currentProjectId: "default",
+    availableProjects: ["default", "edge-jp", "lab-us"],
     health: healthFixture,
     activeSessions: sessionsFixture.sessions.length,
     refreshResponse: refreshFixture,
@@ -56,14 +56,14 @@ const meta = {
     apiKeys: [
       {
         key_id: "key-Z4x6Cv8Bn1Mq3Rt5",
-        profile_id: "default",
+        project_id: "default",
         name: "deploy-bot",
         prefix: "pbk_key-Z4x6Cv8Bn1",
         created_by: "admin@example.com",
         owner_subject: "admin@example.com",
-        profile_scope: {
-          kind: "selected_profiles",
-          profile_ids: ["default", "edge-jp"],
+        project_scope: {
+          kind: "selected_projects",
+          project_ids: ["default", "edge-jp"],
         },
         created_at: 1_742_447_800,
         last_used_at: 1_742_448_400,
@@ -112,7 +112,7 @@ export const QuietState: Story = {
   },
 };
 
-export const AllProfilesKeyState: Story = {
+export const AllProjectsKeyState: Story = {
   args: {
     currentUser: {
       status: "resolved",
@@ -128,13 +128,13 @@ export const AllProfilesKeyState: Story = {
     apiKeys: [
       {
         key_id: "key-R2p8Ls4Dw7Hy1Ku6",
-        profile_id: null,
+        project_id: null,
         name: "fleet-bot",
         prefix: "pbk_key-R2p8Ls4Dw7",
         created_by: "dev@local",
         owner_subject: "dev@local",
-        profile_scope: {
-          kind: "all_profiles",
+        project_scope: {
+          kind: "all_projects",
         },
         created_at: 1_742_449_800,
         last_used_at: 1_742_450_100,

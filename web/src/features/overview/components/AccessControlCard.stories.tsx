@@ -8,8 +8,8 @@ const meta = {
   component: AccessControlCard,
   tags: ["autodocs"],
   args: {
-    currentProfileId: "edge-jp",
-    availableProfiles: ["default", "edge-jp", "lab-us"],
+    currentProjectId: "edge-jp",
+    availableProjects: ["default", "edge-jp", "lab-us"],
     currentUser: {
       status: "resolved",
       identity: {
@@ -24,14 +24,14 @@ const meta = {
     apiKeys: [
       {
         key_id: "key-Q4w8Er2Ty6Ui1Op5",
-        profile_id: "edge-jp",
+        project_id: "edge-jp",
         name: "deploy-bot",
         prefix: "pbk_key-Q4w8Er2Ty6",
         created_by: "admin@example.com",
         owner_subject: "admin@example.com",
-        profile_scope: {
-          kind: "selected_profiles",
-          profile_ids: ["edge-jp"],
+        project_scope: {
+          kind: "selected_projects",
+          project_ids: ["edge-jp"],
         },
         created_at: 1_742_447_800,
         last_used_at: 1_742_448_400,
@@ -69,39 +69,39 @@ export const MultiSelected: Story = {
   },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
-    await userEvent.click(canvas.getByRole("combobox", { name: /available profiles/i }));
+    await userEvent.click(canvas.getByRole("combobox", { name: /available projects/i }));
 
     const overlay = within(document.body);
     await waitFor(() => expect(overlay.getByText("lab-us")).toBeVisible());
     await userEvent.click(overlay.getByText("lab-us"));
-    await userEvent.click(canvas.getByRole("combobox", { name: /available profiles/i }));
+    await userEvent.click(canvas.getByRole("combobox", { name: /available projects/i }));
     await userEvent.type(canvas.getByLabelText(/api key name/i), "multi-bot");
     await userEvent.click(canvas.getByRole("button", { name: /create key/i }));
 
     await waitFor(() => {
       expect(args.onCreateApiKey).toHaveBeenCalledWith({
         name: "multi-bot",
-        profile_scope: {
-          kind: "selected_profiles",
-          profile_ids: ["edge-jp", "lab-us"],
+        project_scope: {
+          kind: "selected_projects",
+          project_ids: ["edge-jp", "lab-us"],
         },
       });
     });
   },
 };
 
-export const AllProfiles: Story = {
+export const AllProjects: Story = {
   args: {
     apiKeys: [
       {
         key_id: "key-Z4x6Cv8Bn1Mq3Rt5",
-        profile_id: null,
+        project_id: null,
         name: "fleet-bot",
         prefix: "pbk_key-Z4x6Cv8Bn1",
         created_by: "admin@example.com",
         owner_subject: "admin@example.com",
-        profile_scope: {
-          kind: "all_profiles",
+        project_scope: {
+          kind: "all_projects",
         },
         created_at: 1_742_450_000,
         last_used_at: 1_742_450_360,
@@ -113,14 +113,14 @@ export const AllProfiles: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
     await userEvent.type(canvas.getByLabelText(/api key name/i), "fleet-bot");
-    await userEvent.click(canvas.getByLabelText(/allow all profiles/i));
+    await userEvent.click(canvas.getByLabelText(/allow all projects/i));
     await userEvent.click(canvas.getByRole("button", { name: /create key/i }));
 
     await waitFor(() => {
       expect(args.onCreateApiKey).toHaveBeenCalledWith({
         name: "fleet-bot",
-        profile_scope: {
-          kind: "all_profiles",
+        project_scope: {
+          kind: "all_projects",
         },
       });
     });
@@ -132,14 +132,14 @@ export const WithFreshSecret: Story = {
     latestCreatedKey: {
       api_key: {
         key_id: "key-L7k3Nm9Qa2Ws5Ed8",
-        profile_id: "edge-jp",
+        project_id: "edge-jp",
         name: "ci-runner",
         prefix: "pbk_key-L7k3Nm9Qa2",
         created_by: "admin@example.com",
         owner_subject: "admin@example.com",
-        profile_scope: {
-          kind: "selected_profiles",
-          profile_ids: ["edge-jp", "lab-us"],
+        project_scope: {
+          kind: "selected_projects",
+          project_ids: ["edge-jp", "lab-us"],
         },
         created_at: 1_742_449_000,
         last_used_at: null,
@@ -152,8 +152,8 @@ export const WithFreshSecret: Story = {
 
 export const AnonymousOperator: Story = {
   args: {
-    currentProfileId: "edge-jp",
-    availableProfiles: ["default", "edge-jp", "lab-us"],
+    currentProjectId: "edge-jp",
+    availableProjects: ["default", "edge-jp", "lab-us"],
     currentUser: {
       status: "anonymous",
     },

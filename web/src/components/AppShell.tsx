@@ -14,7 +14,7 @@ import { NavLink } from "react-router-dom";
 
 import { CurrentUserSummary } from "@/components/CurrentUserSummary";
 import { LocaleSwitcher } from "@/components/LocaleSwitcher";
-import { ProfileSwitcher } from "@/components/ProfileSwitcher";
+import { ProjectSwitcher } from "@/components/ProjectSwitcher";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,33 +36,33 @@ import {
 } from "@/components/ui/sidebar";
 import { useI18n } from "@/i18n";
 import { formatHealthStatus } from "@/lib/format";
-import { isGlobalProfileId } from "@/lib/profile-selection";
+import { isGlobalProjectId } from "@/lib/project-selection";
 import type { CurrentUserState } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface AppShellProps {
-  profileId: string;
-  profiles: string[];
-  profilesLoading?: boolean;
-  profilesCreating?: boolean;
-  profilesError?: string | null;
-  onProfileIdChange: (value: string) => void;
-  onCreateProfile: (value: string) => Promise<string>;
-  onRetryProfiles?: () => void;
+  projectId: string;
+  projects: string[];
+  projectsLoading?: boolean;
+  projectsCreating?: boolean;
+  projectsError?: string | null;
+  onProjectIdChange: (value: string) => void;
+  onCreateProject: (value: string) => Promise<string>;
+  onRetryProjects?: () => void;
   healthStatus: string;
   currentUser: CurrentUserState;
   children?: ReactNode;
 }
 
 export function AppShell({
-  profileId,
-  profiles,
-  profilesLoading = false,
-  profilesCreating = false,
-  profilesError = null,
-  onProfileIdChange,
-  onCreateProfile,
-  onRetryProfiles,
+  projectId,
+  projects,
+  projectsLoading = false,
+  projectsCreating = false,
+  projectsError = null,
+  onProjectIdChange,
+  onCreateProject,
+  onRetryProjects,
   healthStatus,
   currentUser,
   children,
@@ -70,42 +70,42 @@ export function AppShell({
   const { t } = useI18n();
   const isHealthy = (healthStatus ?? "").toLowerCase() === "ok";
   const healthStatusLabel = formatHealthStatus(healthStatus, t);
-  const isGlobalConfig = isGlobalProfileId(profileId);
+  const isGlobalProject = isGlobalProjectId(projectId);
   const navItems = [
     {
       to: "/",
       label: t("Overview"),
       icon: LayoutDashboardIcon,
       meta: t("Load feeds and refresh pool metadata"),
-      requiresProfile: true,
+      requiresProject: true,
     },
     {
       to: "/tasks",
       label: t("Tasks"),
       icon: ClipboardListIcon,
       meta: t("Watch scheduled sync and metadata refresh runs"),
-      requiresProfile: true,
+      requiresProject: true,
     },
     {
       to: "/proxies",
       label: t("Proxy"),
       icon: CableIcon,
       meta: t("Manage local imports, global pool usage, and allocations"),
-      requiresProfile: false,
+      requiresProject: false,
     },
     {
       to: "/ips",
       label: t("IP Extract"),
       icon: GlobeIcon,
       meta: t("Filter the pool down to candidate edges"),
-      requiresProfile: true,
+      requiresProject: true,
     },
     {
       to: "/sessions",
       label: t("Sessions"),
       icon: RouteIcon,
       meta: t("Create, switch, and close sessions"),
-      requiresProfile: true,
+      requiresProject: true,
     },
   ];
 
@@ -128,15 +128,15 @@ export function AppShell({
               </div>
             </div>
           </div>
-          <ProfileSwitcher
-            profileId={profileId}
-            profiles={profiles}
-            isLoading={profilesLoading}
-            isCreating={profilesCreating}
-            loadError={profilesError}
-            onProfileIdChange={onProfileIdChange}
-            onCreateProfile={onCreateProfile}
-            onRetryProfiles={onRetryProfiles}
+          <ProjectSwitcher
+            projectId={projectId}
+            projects={projects}
+            isLoading={projectsLoading}
+            isCreating={projectsCreating}
+            loadError={projectsError}
+            onProjectIdChange={onProjectIdChange}
+            onCreateProject={onCreateProject}
+            onRetryProjects={onRetryProjects}
           />
         </SidebarHeader>
         <SidebarContent className="px-2 py-4">
@@ -145,7 +145,7 @@ export function AppShell({
             <SidebarGroupContent>
               <SidebarMenu className="gap-3 group-data-[collapsible=icon]:gap-2">
                 {navItems.map((item) => {
-                  const disabled = isGlobalConfig && item.requiresProfile;
+                  const disabled = isGlobalProject && item.requiresProject;
 
                   return (
                     <SidebarMenuItem key={item.to}>
@@ -161,11 +161,11 @@ export function AppShell({
                                 variant="outline"
                                 className="rounded-full px-1.5 py-0 text-[10px] uppercase tracking-[0.14em]"
                               >
-                                {t("Profile only")}
+                                {t("Project only")}
                               </Badge>
                             </div>
                             <div className="text-xs leading-5 text-sidebar-foreground/65">
-                              {t("Select a concrete profile to use this workspace.")}
+                              {t("Select a concrete project to use this workspace.")}
                             </div>
                           </div>
                         </div>
@@ -263,9 +263,9 @@ export function AppShell({
             <SidebarTrigger className="border-border/70 bg-background/80 hover:bg-background" />
             <div>
               <div className="text-[11px] font-semibold uppercase tracking-[0.28em] text-muted-foreground">
-                {isGlobalConfig ? t("Global operator plane") : t("Local operator plane")}
+                {isGlobalProject ? t("Global operator plane") : t("Local operator plane")}
               </div>
-              {isGlobalConfig ? (
+              {isGlobalProject ? (
                 <div className="flex items-center gap-1 text-sm font-medium text-foreground md:text-base">
                   <span>{t("Proxy")}</span>
                   <Badge
@@ -277,8 +277,8 @@ export function AppShell({
                 </div>
               ) : (
                 <div className="flex items-center gap-1 text-sm font-medium text-foreground md:text-base">
-                  <span>{t("Profile")}</span>
-                  <span className="font-mono">{profileId}</span>
+                  <span>{t("Project")}</span>
+                  <span className="font-mono">{projectId}</span>
                 </div>
               )}
             </div>

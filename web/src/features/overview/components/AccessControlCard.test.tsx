@@ -5,15 +5,15 @@ import { describe, expect, it, vi } from "vitest";
 import { AccessControlCard } from "@/features/overview/components/AccessControlCard";
 
 describe("AccessControlCard", () => {
-  it("creates selected-profile keys from the current profile and revokes existing keys", async () => {
+  it("creates selected-project keys from the current project and revokes existing keys", async () => {
     const user = userEvent.setup();
     const onCreateApiKey = vi.fn().mockResolvedValue(undefined);
     const onRevokeApiKey = vi.fn().mockResolvedValue(undefined);
 
     render(
       <AccessControlCard
-        currentProfileId="edge-jp"
-        availableProfiles={["default", "edge-jp", "lab-us"]}
+        currentProjectId="edge-jp"
+        availableProjects={["default", "edge-jp", "lab-us"]}
         currentUser={{
           status: "resolved",
           identity: {
@@ -28,14 +28,14 @@ describe("AccessControlCard", () => {
         apiKeys={[
           {
             key_id: "key-Q4w8Er2Ty6Ui1Op5",
-            profile_id: "edge-jp",
+            project_id: "edge-jp",
             name: "deploy-bot",
             prefix: "pbk_key-Q4w8Er2Ty6",
             created_by: "admin@example.com",
             owner_subject: "admin@example.com",
-            profile_scope: {
-              kind: "selected_profiles",
-              profile_ids: ["edge-jp"],
+            project_scope: {
+              kind: "selected_projects",
+              project_ids: ["edge-jp"],
             },
             created_at: 1_742_447_800,
             last_used_at: null,
@@ -55,9 +55,9 @@ describe("AccessControlCard", () => {
     await waitFor(() => {
       expect(onCreateApiKey).toHaveBeenCalledWith({
         name: "ci-runner",
-        profile_scope: {
-          kind: "selected_profiles",
-          profile_ids: ["edge-jp"],
+        project_scope: {
+          kind: "selected_projects",
+          project_ids: ["edge-jp"],
         },
       });
     });
@@ -66,14 +66,14 @@ describe("AccessControlCard", () => {
     expect(onRevokeApiKey).toHaveBeenCalledWith("key-Q4w8Er2Ty6Ui1Op5");
   });
 
-  it("creates all-profile keys when the checkbox is enabled", async () => {
+  it("creates all-project keys when the checkbox is enabled", async () => {
     const user = userEvent.setup();
     const onCreateApiKey = vi.fn().mockResolvedValue(undefined);
 
     render(
       <AccessControlCard
-        currentProfileId="edge-jp"
-        availableProfiles={["default", "edge-jp", "lab-us"]}
+        currentProjectId="edge-jp"
+        availableProjects={["default", "edge-jp", "lab-us"]}
         currentUser={{
           status: "resolved",
           identity: {
@@ -95,27 +95,27 @@ describe("AccessControlCard", () => {
     await waitFor(() => {
       expect(screen.getByLabelText("API key name")).toHaveValue("fleet-bot");
     });
-    await user.click(screen.getByRole("checkbox", { name: /allow all profiles/i }));
+    await user.click(screen.getByRole("checkbox", { name: /allow all projects/i }));
     await user.click(screen.getByRole("button", { name: /create key/i }));
 
     await waitFor(() => {
       expect(onCreateApiKey).toHaveBeenCalledWith({
         name: "fleet-bot",
-        profile_scope: {
-          kind: "all_profiles",
+        project_scope: {
+          kind: "all_projects",
         },
       });
     });
   });
 
-  it("lets admins extend selected-profile scope beyond the current profile", async () => {
+  it("lets admins extend selected-project scope beyond the current project", async () => {
     const user = userEvent.setup();
     const onCreateApiKey = vi.fn().mockResolvedValue(undefined);
 
     render(
       <AccessControlCard
-        currentProfileId="edge-jp"
-        availableProfiles={["default", "edge-jp", "lab-us"]}
+        currentProjectId="edge-jp"
+        availableProjects={["default", "edge-jp", "lab-us"]}
         currentUser={{
           status: "resolved",
           identity: {
@@ -130,14 +130,14 @@ describe("AccessControlCard", () => {
         apiKeys={[
           {
             key_id: "key-L7k3Nm9Qa2Ws5Ed8",
-            profile_id: null,
+            project_id: null,
             name: "multi-bot",
             prefix: "pbk_key-L7k3Nm9Qa2",
             created_by: "admin@example.com",
             owner_subject: "admin@example.com",
-            profile_scope: {
-              kind: "selected_profiles",
-              profile_ids: ["edge-jp", "lab-us"],
+            project_scope: {
+              kind: "selected_projects",
+              project_ids: ["edge-jp", "lab-us"],
             },
             created_at: 1_742_447_800,
             last_used_at: null,
@@ -151,9 +151,9 @@ describe("AccessControlCard", () => {
 
     expect(screen.getByText("edge-jp / lab-us")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("combobox", { name: /available profiles/i }));
+    await user.click(screen.getByRole("combobox", { name: /available projects/i }));
     await user.click(await screen.findByText("lab-us"));
-    await user.click(screen.getByRole("combobox", { name: /available profiles/i }));
+    await user.click(screen.getByRole("combobox", { name: /available projects/i }));
     await user.type(screen.getByLabelText("API key name"), "multi-bot");
     await waitFor(() => {
       expect(screen.getByLabelText("API key name")).toHaveValue("multi-bot");
@@ -163,9 +163,9 @@ describe("AccessControlCard", () => {
     await waitFor(() => {
       expect(onCreateApiKey).toHaveBeenCalledWith({
         name: "multi-bot",
-        profile_scope: {
-          kind: "selected_profiles",
-          profile_ids: ["edge-jp", "lab-us"],
+        project_scope: {
+          kind: "selected_projects",
+          project_ids: ["edge-jp", "lab-us"],
         },
       });
     });

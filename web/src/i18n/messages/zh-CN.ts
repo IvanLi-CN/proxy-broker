@@ -16,7 +16,7 @@ export const zhCN: MessageCatalog = {
   "Loaded proxies": "已加载代理数",
   "Distinct IPs": "不同 IP 数",
   Reason: "原因",
-  "Refreshing subscription feed for profile.": "正在刷新当前配置的订阅源。",
+  "Refreshing subscription feed for project.": "正在刷新当前项目的订阅源。",
   "Refreshing probe metadata.": "正在刷新探测元数据。",
   "Task run queued.": "任务运行已进入队列。",
   "Task run completed successfully.": "任务运行已成功完成。",
@@ -57,13 +57,13 @@ export const zhCN: MessageCatalog = {
   "HTTP URI": "HTTP URI",
   "Host:port": "主机:端口",
   "Copy proxy address for {sessionId}": "复制 {sessionId} 的代理地址",
-  "Profile {profileId}": "配置 {profileId}",
+  "Project {projectId}": "项目 {projectId}",
   "Health checking": "健康检查中",
   "Unexpected request error": "请求发生意外错误",
-  "Created profile {profileId}": "已创建配置 {profileId}",
-  "Profile {profileId} already exists. Refreshing catalog.":
-    "配置 {profileId} 已存在，正在刷新目录。",
-  "Loaded {count} proxies for {profileId}": "已为 {profileId} 加载 {count} 个代理",
+  "Created project {projectId}": "已创建项目 {projectId}",
+  "Project {projectId} already exists. Refreshing catalog.":
+    "项目 {projectId} 已存在，正在刷新目录。",
+  "Loaded {count} proxies for {projectId}": "已为 {projectId} 加载 {count} 个代理",
   "Refreshed {count} probe entries": "已刷新 {count} 条探测记录",
   "Issued machine key {name}": "已签发机器密钥 {name}",
   "Revoked machine key": "已撤销机器密钥",
@@ -79,20 +79,20 @@ export const zhCN: MessageCatalog = {
   "Copy this secret now. The backend will only reveal it once.":
     "现在就复制这个密钥吧，后端只会展示这一次。",
   "owner {subject}": "归属者 {subject}",
-  "profile {profileId}": "配置 {profileId}",
+  "project {projectId}": "项目 {projectId}",
   "prefix {prefix}": "前缀 {prefix}",
   "Create an owner key": "创建归属密钥",
-  "Allow all profiles": "允许所有配置",
-  "All future profiles remain available to this key until it is revoked.":
-    "即使以后新增配置，这把密钥也会持续可用，直到被撤销。",
+  "Allow all projects": "允许所有项目",
+  "All future projects remain available to this key until it is revoked.":
+    "即使以后新增项目，这把密钥也会持续可用，直到被撤销。",
   "Machine keys can only be issued by an admin human or the development identity.":
     "只有管理员用户或开发模式身份可以签发机器密钥。",
   "API key name": "API 密钥名称",
-  "Available profiles": "可用配置",
-  "The new key may access only the selected profiles.": "新密钥只能访问这里选中的配置。",
-  "Select one or more profiles": "选择一个或多个配置",
-  "Search profiles": "搜索配置",
-  "No matching profiles": "没有匹配的配置",
+  "Available projects": "可用项目",
+  "The new key may access only the selected projects.": "新密钥只能访问这里选中的项目。",
+  "Select one or more projects": "选择一个或多个项目",
+  "Search projects": "搜索项目",
+  "No matching projects": "没有匹配的项目",
   "Create key": "创建密钥",
   "Issued keys": "已签发密钥",
   "{count} total": "共 {count} 个",
@@ -101,8 +101,8 @@ export const zhCN: MessageCatalog = {
   "No machine keys have been issued for this owner yet.": "这个归属者还没有签发任何机器密钥。",
   "Owner {subject}": "归属者 {subject}",
   "Scope {value}": "范围 {value}",
-  "all profiles": "所有配置",
-  "{count} selected profiles": "已选择 {count} 个配置",
+  "all projects": "所有项目",
+  "{count} selected projects": "已选择 {count} 个项目",
   revoked: "已撤销",
   active: "生效中",
   Revoke: "撤销",
@@ -147,24 +147,24 @@ export const zhCN: MessageCatalog = {
   "Forward Auth identified a human user, but the backend did not classify them as admin.":
     "前置认证已识别为普通用户，但后端未将其判定为管理员。",
   "non-admin": "非管理员",
-  "Active profile": "当前配置",
-  "Profile ID": "配置 ID",
-  "Search profiles or type a new ID": "搜索配置，或输入新的 ID",
+  "Active project": "当前项目",
+  "Project ID": "项目 ID",
+  "Search projects or type a new ID": "搜索项目，或输入新的 ID",
   "Retry catalog": "重试刷新目录",
-  "Loading profiles...": "正在加载配置……",
-  "Known profiles": "已有配置",
+  "Loading projects...": "正在加载项目……",
+  "Known projects": "已有项目",
   Active: "当前使用中",
   Create: "创建",
   'Create "{value}"': "创建“{value}”",
-  "Start an empty profile catalog entry and switch to it immediately.":
-    "新建一个空的配置目录项，并立即切换过去。",
-  "No matching profiles. Type a new ID to create one.": "没有匹配的配置。输入新 ID 即可创建。",
-  "Search the catalog or create a new empty profile before loading any feed.":
-    "先搜索目录，或创建一个新的空配置，再去加载订阅。",
+  "Start an empty project catalog entry and switch to it immediately.":
+    "新建一个空的项目目录项，并立即切换过去。",
+  "No matching projects. Type a new ID to create one.": "没有匹配的项目。输入新 ID 即可创建。",
+  "Search the catalog or create a new empty project before loading any feed.":
+    "先搜索目录，或创建一个新的空项目，再去加载订阅。",
   "Primary action": "主操作",
   "Load a fresh subscription feed": "加载新的订阅源",
-  "Reset the working inventory for the current profile before you extract IPs or open any new listeners.":
-    "在提取 IP 或打开新监听前，先为当前配置重置工作库存。",
+  "Reset the working inventory for the current project before you extract IPs or open any new listeners.":
+    "在提取 IP 或打开新监听前，先为当前项目重置工作库存。",
   "source {sourceType}": "来源 {sourceType}",
   "pool reset on success": "成功后重置池子",
   "Source type": "来源类型",
@@ -178,8 +178,8 @@ export const zhCN: MessageCatalog = {
     "填写后端可以直接抓取的上游订阅链接。",
   "Provide a server-local path that the Rust process can read on disk.":
     "填写后端服务在服务器本机可读取的文件路径。",
-  "A successful load replaces the candidate pool for this profile. Review warnings at once if the upstream feed contains skipped or malformed records.":
-    "加载成功后会替换这个配置的候选池；如果上游订阅里有跳过或损坏的记录，请立刻检查警告。",
+  "A successful load replaces the candidate pool for this project. Review warnings at once if the upstream feed contains skipped or malformed records.":
+    "加载成功后会替换这个项目的候选池；如果上游订阅里有跳过或损坏的记录，请立刻检查警告。",
   "Loading subscription...": "正在加载订阅……",
   "Load subscription": "加载订阅",
   "Subscription loaded": "订阅已加载",
@@ -188,8 +188,8 @@ export const zhCN: MessageCatalog = {
   "Load failed": "加载失败",
   "Probe refresh": "探测刷新",
   "Refresh probes and geo hints": "刷新探测与地理提示",
-  "Use this when latency or geo attribution feels stale. The refresh updates operator hints without changing profile identity.":
-    "当延迟或地理归属显得陈旧时就用这个；刷新只会更新运维提示，不会改变配置身份。",
+  "Use this when latency or geo attribution feels stale. The refresh updates operator hints without changing project identity.":
+    "当延迟或地理归属显得陈旧时就用这个；刷新只会更新运维提示，不会改变项目身份。",
   "safe to repeat": "可安全重复执行",
   "Force refresh stale entries": "强制刷新陈旧条目",
   "Ignore cached probe hints and attempt a full refresh for every matching IP when the current metadata looks suspiciously old.":
@@ -210,7 +210,7 @@ export const zhCN: MessageCatalog = {
   "Polled from /healthz every 10 seconds so the shell stays honest.":
     "每 10 秒轮询一次 /healthz，让壳层状态保持可信。",
   "Live listeners": "在线监听",
-  "Sessions currently consuming the active profile.": "当前正在使用活动配置的会话数。",
+  "Sessions currently consuming the active project.": "当前正在使用活动项目的会话数。",
   "Pool inventory": "池库存",
   "Most recent successful subscription load reflected in the runway.":
     "显示最近一次成功订阅加载后的库存状态。",
@@ -261,8 +261,8 @@ export const zhCN: MessageCatalog = {
   "Pick one simple targeting mode, keep the port optional, and let the backend open the listener from the first surviving candidate.":
     "选择一种简单的定位方式，端口可留空，然后让后端从首个可用候选里打开监听。",
   "optional port": "端口可选",
-  "Pin a specific IP when you know exactly what you want, or let the selector pick the next best edge for the active profile.":
-    "当你明确知道目标 IP 时就直接指定；否则让选择器为当前配置选出下一个最优边缘。",
+  "Pin a specific IP when you know exactly what you want, or let the selector pick the next best edge for the active project.":
+    "当你明确知道目标 IP 时就直接指定；否则让选择器为当前项目选出下一个最优边缘。",
   "selector limit 1": "选择器上限 1",
   "Specified IP": "指定 IP",
   "Desired port": "期望端口",
@@ -344,8 +344,8 @@ export const zhCN: MessageCatalog = {
   Advanced: "高级选项",
   optional: "可选",
   "Loading sessions": "正在加载会话",
-  "Polling the backend for active listeners on this profile.":
-    "正在轮询后端，获取这个配置的在线监听。",
+  "Polling the backend for active listeners on this project.":
+    "正在轮询后端，获取这个项目的在线监听。",
   "The live listener inventory will appear here as soon as the first response lands.":
     "第一条响应回来后，在线监听清单就会显示在这里。",
   "No active sessions": "没有活动会话",
@@ -364,7 +364,7 @@ export const zhCN: MessageCatalog = {
   "No task runs match this view": "当前视图下没有匹配的任务运行",
   "Narrow the filters less aggressively or wait for the next scheduled subscription sync.":
     "把筛选条件放宽一点，或者等下一轮定时订阅同步。",
-  Profile: "配置",
+  Project: "项目",
   Task: "任务",
   Status: "状态",
   Stage: "阶段",
@@ -445,7 +445,7 @@ export const zhCN: MessageCatalog = {
     "右侧面板会展示所选运行项的最新摘要负载和事件流。",
   "Loading task run": "正在加载任务运行项",
   "Waiting for the run payload.": "正在等待运行负载。",
-  "{trigger} for {profileId}": "{trigger} · {profileId}",
+  "{trigger} for {projectId}": "{trigger} · {projectId}",
   "Timeline panel": "时间线",
   "Queued {value}": "排队于 {value}",
   "Started {value}": "开始于 {value}",
@@ -467,8 +467,8 @@ export const zhCN: MessageCatalog = {
   "Derived from finish/start/create timestamps": "基于完成/开始/创建时间推导",
   "Task filters": "任务筛选",
   "View scope": "查看范围",
-  "Current profile": "当前配置",
-  "All profiles": "所有配置",
+  "Current project": "当前项目",
+  "All projects": "所有项目",
   "Task kind": "任务类型",
   "All kinds": "全部类型",
   "Task status": "任务状态",
@@ -513,7 +513,7 @@ export const zhCN: MessageCatalog = {
   "close deck idle": "关闭面板空闲",
   "close action idle": "关闭操作空闲",
   "session control": "会话控制",
-  "Polling the backend for sessions on this profile.": "正在轮询后端，获取这个配置的会话列表。",
+  "Polling the backend for sessions on this project.": "正在轮询后端，获取这个项目的会话列表。",
   "The current session list appears here as soon as the first response lands.":
     "第一条响应回来后，当前会话列表就会显示在这里。",
   "No sessions yet": "还没有会话",
@@ -545,7 +545,7 @@ export const zhCN: MessageCatalog = {
   "Group by subscription": "按订阅分组",
   Source: "来源",
   "Current session last used": "当前会话上次使用",
-  "Current profile last used": "当前 profile 上次使用",
+  "Current project last used": "当前 project 上次使用",
   "{available} / {total} available": "{available} / {total} 可用",
   "Unknown region": "未知地区",
   "Unknown source": "未知来源",
@@ -555,7 +555,7 @@ export const zhCN: MessageCatalog = {
   Current: "当前",
   Selected: "已选中",
   "Session last used {time}": "会话上次使用 {time}",
-  "Profile last used {time}": "Profile 上次使用 {time}",
+  "Project last used {time}": "Project 上次使用 {time}",
   "Probe failed": "探测失败",
   "Switching proxy…": "正在切换代理……",
   "Use selected node": "使用所选节点",
@@ -576,8 +576,8 @@ export const zhCN: MessageCatalog = {
   "error.api.ip_conflict_blacklist": "以下 IP 同时出现在包含列表与黑名单中：{conflicts}。",
   "error.api.session_not_found": "找不到指定会话。",
   "error.api.port_in_use": "端口已被占用。",
-  "error.api.profile_exists": "该配置已存在。",
-  "error.api.profile_not_found": "找不到指定配置。",
+  "error.api.project_exists": "该项目已存在。",
+  "error.api.project_not_found": "找不到指定项目。",
   "error.api.invalid_port": "端口无效。",
   "error.api.invalid_request": "请求参数无效。",
   "error.api.authentication_required": "需要先完成身份认证。",
@@ -586,7 +586,7 @@ export const zhCN: MessageCatalog = {
   "error.api.api_key_revoked": "API 密钥已撤销。",
   "error.api.api_key_not_found": "找不到 API 密钥。",
   "error.api.task_run_not_found": "找不到任务运行记录。",
-  "error.api.profile_access_denied": "当前身份无权访问这个配置。",
+  "error.api.project_access_denied": "当前身份无权访问这个项目。",
   "error.api.mihomo_unavailable": "mihomo 运行时当前不可用。",
   "error.api.batch_open_failed": "批量打开失败。",
   "error.api.internal_error": "发生内部错误。",
@@ -596,57 +596,47 @@ export const zhCN: MessageCatalog = {
   "error.task.fallback": "任务运行失败。",
   "error.task.summary_reason_prefix": "摘要原因：{reason}",
   Global: "全局",
-  "Current config": "当前配置",
-  "Config ID": "配置 ID",
-  "Search configs or type a new ID": "搜索配置，或输入新的 ID",
-  "Loading configs...": "正在加载配置……",
   Contexts: "上下文",
-  "Known configs": "已有配置",
-  "Shared pool and allocation control across every profile.": "管理所有配置共享池与节点分配控制。",
-  "Start an empty config catalog entry and switch to it immediately.":
-    "新建一个空的配置目录项，并立即切换过去。",
-  "No matching configs. Type a new ID to create one.": "没有匹配的配置。输入新 ID 即可创建。",
-  "Search the catalog or create a new empty config before loading any feed.":
-    "先搜索目录，或创建一个新的空配置，再去加载订阅。",
-  "Profile workspace": "配置工作区",
+  "Shared pool and allocation control across every project.": "管理所有项目共享池与节点分配控制。",
+  "Project workspace": "项目工作区",
   Proxies: "代理",
   "Global proxies": "全局代理",
-  "Shared pool and cross-profile allocations": "共享池与跨配置分配",
+  "Shared pool and cross-project allocations": "共享池与跨项目分配",
   "Manage local imports, global pool usage, and allocations":
     "管理本地导入、全局池使用方式与节点分配。",
-  "Profile only": "仅配置",
-  "Select a concrete profile to use this workspace.": "先选择一个具体配置，才能使用这个工作区。",
-  "Manage the global pool, profile imports, and allocations": "管理全局池、配置导入与节点分配",
-  "Manage the global pool and cross-profile allocations": "管理全局池与跨配置分配",
+  "Project only": "仅项目",
+  "Select a concrete project to use this workspace.": "先选择一个具体项目，才能使用这个工作区。",
+  "Manage the global pool, project imports, and allocations": "管理全局池、项目导入与节点分配",
+  "Manage the global pool and cross-project allocations": "管理全局池与跨项目分配",
   "The proxies workspace is restricted to the admin operator plane because it can change global pool allocation.":
     "代理工作区可以改动全局池分配，因此目前仅对管理员运维平面开放。",
-  "Manage the global pool, the current profile's local imports, and where each imported node is allocated.":
-    "统一管理全局池、当前配置的本地导入，以及每个导入节点当前被分配到哪里。",
-  "Manage the shared global pool and cross-profile allocations from one place.":
-    "在一个地方管理共享全局池和跨配置分配。",
-  "Manage the shared global pool and cross-profile allocations from one place. Profile-local imports and usage stay inside each profile overview.":
-    "在一个地方管理共享全局池和跨配置分配；每个配置自己的本地导入和是否使用全局，都留在各自的总览页里。",
-  "Keep the global pool in its own workspace, then manage local imports and policy separately for the current profile.":
-    "把全局池放在独立工作区里，再单独管理当前配置的本地导入和策略。",
+  "Manage the global pool, the current project's local imports, and where each imported node is allocated.":
+    "统一管理全局池、当前项目的本地导入，以及每个导入节点当前被分配到哪里。",
+  "Manage the shared global pool and cross-project allocations from one place.":
+    "在一个地方管理共享全局池和跨项目分配。",
+  "Manage the shared global pool and cross-project allocations from one place. Project-local imports and usage stay inside each project overview.":
+    "在一个地方管理共享全局池和跨项目分配；每个项目自己的本地导入和是否使用全局，都留在各自的总览页里。",
+  "Keep the global pool in its own workspace, then manage local imports and policy separately for the current project.":
+    "把全局池放在独立工作区里，再单独管理当前项目的本地导入和策略。",
   "Global workspace": "全局工作区",
   "Global entry": "全局入口",
-  "Current profile workspace": "当前配置工作区",
+  "Current project workspace": "当前项目工作区",
   "Shared proxy administration": "共享代理管理",
-  "Global pool and cross-profile allocations live here.": "这里承载全局池和跨配置分配。",
-  "Enter from the left nav. This page does not follow the current profile.":
-    "从左侧“全局代理”进入；这个页面不跟随当前配置。",
+  "Global pool and cross-project allocations live here.": "这里承载全局池和跨项目分配。",
+  "Enter from the left nav. This page does not follow the current project.":
+    "从左侧“全局代理”进入；这个页面不跟随当前项目。",
   "Global operator plane": "全局运维控制台",
   "Shared global pool": "共享全局池",
   "Global scope": "全局作用域",
-  "Applies to every profile that keeps global pool enabled.": "会作用于所有保持启用全局池的配置。",
-  "Applies across all profiles.": "作用于所有配置。",
+  "Applies to every project that keeps global pool enabled.": "会作用于所有保持启用全局池的项目。",
+  "Applies across all projects.": "作用于所有项目。",
   "allocation defaults to global": "默认分配到全局",
-  "allocation defaults to {profileId}": "默认分配到 {profileId}",
+  "allocation defaults to {projectId}": "默认分配到 {projectId}",
   "remote fetch": "远程拉取",
   "host file": "主机文件",
   "Re-import restores nodes that still exist upstream.": "重新导入会恢复上游仍存在的节点。",
   "Imported {count} global proxies": "已导入 {count} 个全局代理",
-  "Imported {count} profile proxies for {profileId}": "已为 {profileId} 导入 {count} 个本地代理",
+  "Imported {count} project proxies for {projectId}": "已为 {projectId} 导入 {count} 个本地代理",
   "Import global proxy pool": "导入全局代理池",
   "Import type": "导入类型",
   Subscription: "订阅",
@@ -667,68 +657,67 @@ export const zhCN: MessageCatalog = {
     "每次提交都会创建一个原始导入组，之后只能整组改分配或删除。",
   "Batch node imports keep every pasted node inside the same allocation group.":
     "批量导入的节点会始终保留在同一个分配组里。",
-  "Import one source into the shared global pool. Profiles that keep global usage enabled will inherit these nodes immediately.":
-    "把一个源导入共享的全局池；保持“使用全局代理”开启的配置会立刻继承这些节点。",
-  "Import one upstream into the shared pool. Profiles that keep global usage enabled inherit these nodes immediately.":
-    "把一个上游源导入共享池；保持启用全局池的配置会立刻继承这些节点。",
-  "Import one subscription source or one node group into the shared pool. Profiles that keep global usage enabled inherit these nodes immediately.":
-    "向共享池导入一个订阅源或一个节点组；保持启用全局池的配置会立刻继承这些节点。",
+  "Import one source into the shared global pool. Projects that keep global usage enabled will inherit these nodes immediately.":
+    "把一个源导入共享的全局池；保持“使用全局代理”开启的项目会立刻继承这些节点。",
+  "Import one upstream into the shared pool. Projects that keep global usage enabled inherit these nodes immediately.":
+    "把一个上游源导入共享池；保持启用全局池的项目会立刻继承这些节点。",
+  "Import one subscription source or one node group into the shared pool. Projects that keep global usage enabled inherit these nodes immediately.":
+    "向共享池导入一个订阅源或一个节点组；保持启用全局池的项目会立刻继承这些节点。",
   "Import global pool": "导入全局池",
   "Global pool updated": "全局池已更新",
   "Imported {proxyCount} proxies across {ipCount} distinct IPs into the global pool.":
     "已向全局池导入 {proxyCount} 个代理，覆盖 {ipCount} 个不同 IP。",
-  "Manage the shared global pool and every profile allocation from here.":
-    "在这里统一管理共享全局池，以及每个配置当前的节点分配。",
-  "Global pool and configuration allocations": "全局池与配置级分配",
+  "Manage the shared global pool and every project allocation from here.":
+    "在这里统一管理共享全局池，以及每个项目当前的节点分配。",
   "Original imports": "原始导入",
-  "Allocate by original import source. Subscription rows are reassigned or deleted as a whole; profile composition still happens from their member nodes behind the scenes.":
-    "按原始导入源做分配。订阅行只能整批改分配或删除；配置组合仍会在后台基于它包含的节点完成。",
-  "The global config can change the shared pool and profile allocations, so only admins can open it.":
-    "全局配置可以改动共享池和各配置分配，因此只有管理员可以打开。",
-  "Import local pool for {profileId}": "为 {profileId} 导入本地代理池",
-  "Import nodes for the current profile only. These nodes stay local unless you later reassign them from the inventory table.":
-    "仅为当前配置导入节点；除非稍后在库存表里改分配，否则这些节点会保持本地归属。",
-  "Import nodes for the current profile only. These nodes stay local unless you later reassign them from the global inventory.":
-    "仅为当前配置导入节点；除非稍后在全局库存里改分配，否则这些节点会保持本地归属。",
-  "Import nodes for this profile only. They stay local unless you later reassign them from the global config.":
-    "仅为这个配置导入节点；除非之后在全局配置里改分配，否则这些节点会保持本地归属。",
-  "Import one subscription source or one node group for this profile only. They stay local unless you later reassign them from the global config.":
-    "仅为当前配置导入一个订阅源或一个节点组；除非之后在全局配置里改分配，否则它们会保持本地归属。",
-  "Only the local import and policy below are scoped to this profile.":
-    "只有下面的本地导入和策略属于当前配置。",
-  "Scoped to {profileId} only.": "仅作用于 {profileId}。",
-  "Import profile pool": "导入本地池",
+  "Allocate by original import source. Subscription rows are reassigned or deleted as a whole; project composition still happens from their member nodes behind the scenes.":
+    "按原始导入源做分配。订阅行只能整批改分配或删除；项目组合仍会在后台基于它包含的节点完成。",
+  "The global project can change the shared pool and project allocations, so only admins can open it.":
+    "全局项目可以改动共享池和各项目分配，因此只有管理员可以打开。",
+  "Import local pool for {projectId}": "为 {projectId} 导入本地代理池",
+  "Import nodes for the current project only. These nodes stay local unless you later reassign them from the inventory table.":
+    "仅为当前项目导入节点；除非稍后在库存表里改分配，否则这些节点会保持本地归属。",
+  "Import nodes for the current project only. These nodes stay local unless you later reassign them from the global inventory.":
+    "仅为当前项目导入节点；除非稍后在全局库存里改分配，否则这些节点会保持本地归属。",
+  "Import nodes for this project only. They stay local unless you later reassign them from the global project.":
+    "仅为这个项目导入节点；除非之后在全局项目里改分配，否则这些节点会保持本地归属。",
+  "Import one subscription source or one node group for this project only. They stay local unless you later reassign them from the global project.":
+    "仅为当前项目导入一个订阅源或一个节点组；除非之后在全局项目里改分配，否则它们会保持本地归属。",
+  "Only the local import and policy below are scoped to this project.":
+    "只有下面的本地导入和策略属于当前项目。",
+  "Scoped to {projectId} only.": "仅作用于 {projectId}。",
+  "Import project pool": "导入本地池",
   "Import local pool": "导入本地池",
-  "Profile pool updated": "本地池已更新",
+  "Project pool updated": "本地池已更新",
   "Local pool updated": "本地池已更新",
   "Import local proxy pool": "导入本地代理池",
-  "Imported {proxyCount} proxies across {ipCount} distinct IPs into profile {profileId}.":
-    "已向配置 {profileId} 导入 {proxyCount} 个代理，覆盖 {ipCount} 个不同 IP。",
-  "Manage local imports and whether {profileId} also composes the global pool.":
-    "管理本地导入，以及 {profileId} 是否继续组合全局池。",
-  "Profile policy": "配置策略",
-  "Use global pool for {profileId}": "{profileId} 使用全局代理池",
-  "Only changes whether {profileId} inherits the global pool.":
-    "这里只控制 {profileId} 是否继承全局池。",
-  "Toggle whether this profile composes its effective pool from both local imports and the global pool, or only from local imports.":
-    "切换当前配置的有效池是否由“本地导入 + 全局池”共同组成，或仅使用本地导入。",
+  "Imported {proxyCount} proxies across {ipCount} distinct IPs into project {projectId}.":
+    "已向项目 {projectId} 导入 {proxyCount} 个代理，覆盖 {ipCount} 个不同 IP。",
+  "Manage local imports and whether {projectId} also composes the global pool.":
+    "管理本地导入，以及 {projectId} 是否继续组合全局池。",
+  "Project policy": "项目策略",
+  "Use global pool for {projectId}": "{projectId} 使用全局代理池",
+  "Only changes whether {projectId} inherits the global pool.":
+    "这里只控制 {projectId} 是否继承全局池。",
+  "Toggle whether this project composes its effective pool from both local imports and the global pool, or only from local imports.":
+    "切换当前项目的有效池是否由“本地导入 + 全局池”共同组成，或仅使用本地导入。",
   "global enabled": "已启用全局",
   "local-only": "仅本地",
-  "Enabled global pool for {profileId}": "已为 {profileId} 启用全局池",
-  "Disabled global pool for {profileId}": "已为 {profileId} 关闭全局池",
-  "Compose {profileId} from the global pool as well": "{profileId} 同时组合全局池中的节点",
-  "Turning this off immediately rebuilds the profile from local nodes only and removes sessions that depended on global-only nodes.":
-    "关闭后会立刻按“仅本地节点”重建当前配置，并清退依赖纯全局节点的会话。",
-  "Profile proxy settings unavailable": "配置代理设置暂不可用",
+  "Enabled global pool for {projectId}": "已为 {projectId} 启用全局池",
+  "Disabled global pool for {projectId}": "已为 {projectId} 关闭全局池",
+  "Compose {projectId} from the global pool as well": "{projectId} 同时组合全局池中的节点",
+  "Turning this off immediately rebuilds the project from local nodes only and removes sessions that depended on global-only nodes.":
+    "关闭后会立刻按“仅本地节点”重建当前项目，并清退依赖纯全局节点的会话。",
+  "Project proxy settings unavailable": "项目代理设置暂不可用",
   "Unified inventory": "统一库存",
-  "Global pool and profile allocations": "全局池与配置分配",
+  "Global pool and project allocations": "全局池与项目分配",
   "Global inventory and allocations": "全局库存与分配",
   "Track source scope, current allocation, and where each node is effective.":
-    "查看来源作用域、当前分配，以及节点实际生效到哪些配置。",
+    "查看来源作用域、当前分配，以及节点实际生效到哪些项目。",
   "Track source scope, current allocation, and where each imported node is effective.":
-    "查看来源作用域、当前分配，以及每个导入节点实际生效到哪些配置。",
-  "See where each imported node came from, where it is allocated now, and which profiles currently inherit it.":
-    "查看每个导入节点来自哪里、当前分配到哪里，以及哪些配置正在继承它。",
+    "查看来源作用域、当前分配，以及每个导入节点实际生效到哪些项目。",
+  "See where each imported node came from, where it is allocated now, and which projects currently inherit it.":
+    "查看每个导入节点来自哪里、当前分配到哪里，以及哪些项目正在继承它。",
   "Every imported node records both its source scope and its current allocation scope. Re-imports follow the source of truth and restore nodes that upstreams still serve.":
     "每个导入节点都会记录来源作用域和当前分配作用域；重新导入会以源数据为准，恢复上游仍然提供的节点。",
   "{count} nodes": "{count} 个节点",
@@ -753,7 +742,7 @@ export const zhCN: MessageCatalog = {
   Cancel: "取消",
   "{count} import": "{count} 个导入",
   "{count} imports": "{count} 个导入",
-  "current profile {profileId}": "当前配置 {profileId}",
+  "current project {projectId}": "当前项目 {projectId}",
   "loading imports": "导入加载中",
   "imports live": "导入在线",
   "loading inventory": "库存加载中",
@@ -766,7 +755,7 @@ export const zhCN: MessageCatalog = {
   "Node group import": "节点组导入",
   "Source scope": "来源作用域",
   "Allocation scope": "分配作用域",
-  "Effective profiles": "生效配置",
+  "Effective projects": "生效项目",
   Contents: "内容规模",
   Updated: "更新时间",
   "Resolved IPs": "解析到的 IP",
@@ -774,18 +763,18 @@ export const zhCN: MessageCatalog = {
   "Loading proxy imports...": "正在加载导入源……",
   "No imported sources yet. Load the global pool first.": "还没有导入任何源；先加载全局池。",
   "Loading proxy inventory...": "正在加载代理库存……",
-  "No imported nodes yet. Import the shared global pool here, or add local nodes from a profile overview first.":
-    "还没有导入任何节点；先在这里导入共享全局池，或先去某个配置的总览页添加本地节点。",
+  "No imported nodes yet. Import the shared global pool here, or add local nodes from a project overview first.":
+    "还没有导入任何节点；先在这里导入共享全局池，或先去某个项目的总览页添加本地节点。",
   "No imported nodes yet. Load the global pool first.": "还没有导入任何节点；先加载全局池。",
   "Global pool": "全局池",
   "Subscription import": "订阅导入",
   "Single-node import": "单节点导入",
-  "No active profiles": "当前没有生效配置",
+  "No active projects": "当前没有生效项目",
   "+{count} more": "还有 {count} 个",
   "Subscription groups": "订阅分组",
   "Available grouped nodes": "可用分组节点",
   "Grouped proxy catalog": "分组代理目录",
-  "Current profile grouped nodes": "当前配置分组节点",
+  "Current project grouped nodes": "当前项目分组节点",
   "Proxy catalog unavailable": "代理目录暂不可用",
   Details: "详情",
   "Live stream: {state}": "实时流：{state}",
@@ -835,8 +824,8 @@ export const zhCN: MessageCatalog = {
   "Deleted imported node {nodeId}": "已删除导入节点 {nodeId}",
   "Proxy imports unavailable": "导入源暂不可用",
   "Proxy inventory unavailable": "代理库存暂不可用",
-  "Cross-profile allocation and node deletion are only available after switching the current config to Global.":
-    "跨配置分配和节点删除只在切换到“全局”配置后开放。",
+  "Cross-project allocation and node deletion are only available after switching the current project to Global.":
+    "跨项目分配和节点删除只在切换到“全局”项目后开放。",
   "error.api.proxy_inventory_node_not_found": "找不到指定的导入代理节点。",
   "Choose one or more IPs, then keep the candidate nodes that may serve each session.":
     "选择一个或多个 IP，并保留可服务该会话的候选节点。",

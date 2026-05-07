@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { useI18n } from "@/i18n";
 import { api } from "@/lib/api";
 import { formatApiErrorMessage } from "@/lib/error-messages";
-import { isGlobalProfileId } from "@/lib/profile-selection";
+import { isGlobalProjectId } from "@/lib/project-selection";
 import type { CreateApiKeyRequest, CreateApiKeyResponse, RefreshResponse } from "@/lib/types";
 import { OverviewPage } from "@/pages/OverviewPage";
 import type { RootOutletContext } from "@/routes/RootRoute";
@@ -14,14 +14,14 @@ import type { RootOutletContext } from "@/routes/RootRoute";
 export function OverviewRoute() {
   const { t } = useI18n();
   const outlet = useOutletContext<RootOutletContext>();
-  const { profileId, profiles, authMe, currentUser } = outlet;
-  const isGlobalConfig = outlet.isGlobalConfig ?? isGlobalProfileId(profileId);
-  const activeProfileId = outlet.activeProfileId ?? (isGlobalConfig ? null : profileId);
-  const previousProfileId = useRef(profileId);
+  const { projectId, projects, authMe, currentUser } = outlet;
+  const isGlobalProject = outlet.isGlobalProject ?? isGlobalProjectId(projectId);
+  const activeProjectId = outlet.activeProjectId ?? (isGlobalProject ? null : projectId);
+  const previousProjectId = useRef(projectId);
   const previousApiKeyOwnerSubject = useRef<string | null>(null);
   const queryClient = useQueryClient();
   const apiKeyOwnerSubject = authMe?.subject ?? null;
-  const [refreshResponseByProfile, setRefreshResponseByProfile] = useState<
+  const [refreshResponseByProject, setRefreshResponseByProject] = useState<
     Record<string, RefreshResponse | null>
   >({});
   const [latestCreatedApiKey, setLatestCreatedApiKey] = useState<CreateApiKeyResponse | null>(null);
@@ -32,9 +32,9 @@ export function OverviewRoute() {
     refetchInterval: 10_000,
   });
   const sessionsQuery = useQuery({
-    queryKey: ["sessions", activeProfileId],
-    queryFn: () => api.listSessions(activeProfileId ?? ""),
-    enabled: Boolean(activeProfileId),
+    queryKey: ["sessions", activeProjectId],
+    queryFn: () => api.listSessions(activeProjectId ?? ""),
+    enabled: Boolean(activeProjectId),
     refetchInterval: 5_000,
   });
   const apiKeysQuery = useQuery({
@@ -45,14 +45,14 @@ export function OverviewRoute() {
 
   const refreshMutation = useMutation({
     mutationFn: ({
-      profileId: requestedProfileId,
+      projectId: requestedProjectId,
       payload,
     }: {
-      profileId: string;
-      payload: Parameters<typeof api.refreshProfile>[1];
-    }) => api.refreshProfile(requestedProfileId, payload),
-    onSuccess: (data, { profileId: requestedProfileId }) => {
-      setRefreshResponseByProfile((current) => ({ ...current, [requestedProfileId]: data }));
+      projectId: string;
+      payload: Parameters<typeof api.refreshProject>[1];
+    }) => api.refreshProject(requestedProjectId, payload),
+    onSuccess: (data, { projectId: requestedProjectId }) => {
+      setRefreshResponseByProject((current) => ({ ...current, [requestedProjectId]: data }));
       toast.success(t("Refreshed {count} probe entries", { count: data.probed_ips }));
     },
     onError: (error) => toast.error(formatApiErrorMessage(error, t)),
@@ -80,13 +80,13 @@ export function OverviewRoute() {
   const { reset: resetRefreshMutation } = refreshMutation;
 
   useEffect(() => {
-    if (previousProfileId.current === profileId) {
+    if (previousProjectId.current === projectId) {
       return;
     }
-    previousProfileId.current = profileId;
+    previousProjectId.current = projectId;
     resetRefreshMutation();
     setLatestCreatedApiKey(null);
-  }, [profileId, resetRefreshMutation]);
+  }, [projectId, resetRefreshMutation]);
 
   useEffect(() => {
     if (previousApiKeyOwnerSubject.current === apiKeyOwnerSubject) {
@@ -96,7 +96,7 @@ export function OverviewRoute() {
     setLatestCreatedApiKey(null);
   }, [apiKeyOwnerSubject]);
 
-  if (!activeProfileId) {
+  if (!activeProjectId) {
     return <Navigate replace to="/proxies" />;
   }
 
@@ -106,9 +106,9 @@ export function OverviewRoute() {
       apiKeys={apiKeysQuery.data?.api_keys ?? []}
       apiKeysError={apiKeysQuery.isError ? formatApiErrorMessage(apiKeysQuery.error, t) : null}
       apiKeysLoading={apiKeysQuery.isLoading}
-      availableProfiles={profiles}
+      availableProjects={projects}
       creatingApiKey={createApiKeyMutation.isPending}
-      currentProfileId={profileId}
+      currentProjectId={projectId}
       currentUser={currentUser}
       health={healthQuery.data ?? { status: "checking" }}
       latestCreatedApiKey={latestCreatedApiKey}
@@ -116,7 +116,7 @@ export function OverviewRoute() {
         await createApiKeyMutation.mutateAsync(payload);
       }}
       onRefresh={async (payload) => {
-        await refreshMutation.mutateAsync({ profileId: activeProfileId, payload });
+        await refreshMutation.mutateAsync({ projectId: activeProjectId, payload });
       }}
       onRevokeApiKey={async (keyId) => {
         await revokeApiKeyMutation.mutateAsync({ keyId });
@@ -124,7 +124,7 @@ export function OverviewRoute() {
       refreshError={
         refreshMutation.isError ? formatApiErrorMessage(refreshMutation.error, t) : null
       }
-      refreshResponse={refreshResponseByProfile[activeProfileId] ?? null}
+      refreshResponse={refreshResponseByProject[activeProjectId] ?? null}
       refreshing={refreshMutation.isPending}
       revokingApiKeyId={
         revokeApiKeyMutation.isPending ? (revokeApiKeyMutation.variables?.keyId ?? null) : null

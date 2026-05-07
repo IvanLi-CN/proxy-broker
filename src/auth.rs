@@ -14,7 +14,7 @@ use crate::{
     error::BrokerError,
     ids,
     models::{
-        ApiKeyProfileScope, ApiKeyRecord, AuthMeResponse, AuthPrincipalType, CreateApiKeyResponse,
+        ApiKeyProjectScope, ApiKeyRecord, AuthMeResponse, AuthPrincipalType, CreateApiKeyResponse,
         now_epoch_sec,
     },
 };
@@ -125,10 +125,10 @@ impl AuthConfig {
             email: self.dev_email.clone(),
             groups: self.dev_groups.clone(),
             is_admin: true,
-            profile_id: None,
+            project_id: None,
             api_key_id: None,
             api_key_owner_subject: None,
-            api_key_profile_scope: None,
+            api_key_project_scope: None,
         }
     }
 
@@ -245,10 +245,10 @@ impl HumanIdentityCandidate {
             email: self.email,
             groups: self.groups,
             is_admin,
-            profile_id: None,
+            project_id: None,
             api_key_id: None,
             api_key_owner_subject: None,
-            api_key_profile_scope: None,
+            api_key_project_scope: None,
         }
     }
 }
@@ -260,10 +260,10 @@ pub struct Principal {
     pub email: Option<String>,
     pub groups: Vec<String>,
     pub is_admin: bool,
-    pub profile_id: Option<String>,
+    pub project_id: Option<String>,
     pub api_key_id: Option<String>,
     pub api_key_owner_subject: Option<String>,
-    pub api_key_profile_scope: Option<ApiKeyProfileScope>,
+    pub api_key_project_scope: Option<ApiKeyProjectScope>,
 }
 
 impl Principal {
@@ -275,17 +275,17 @@ impl Principal {
             email: self.email.clone(),
             groups: self.groups.clone(),
             is_admin: self.is_admin,
-            profile_id: self.profile_id.clone(),
+            project_id: self.project_id.clone(),
             api_key_id: self.api_key_id.clone(),
             api_key_owner_subject: self.api_key_owner_subject.clone(),
-            api_key_profile_scope: self.api_key_profile_scope.clone(),
+            api_key_project_scope: self.api_key_project_scope.clone(),
         }
     }
 
     pub fn api_key(
         key_id: String,
         owner_subject: String,
-        profile_scope: ApiKeyProfileScope,
+        project_scope: ApiKeyProjectScope,
     ) -> Self {
         Self {
             principal_type: AuthPrincipalType::ApiKey,
@@ -293,10 +293,10 @@ impl Principal {
             email: None,
             groups: Vec::new(),
             is_admin: false,
-            profile_id: profile_scope.single_profile_id(),
+            project_id: project_scope.single_project_id(),
             api_key_id: Some(key_id),
             api_key_owner_subject: Some(owner_subject),
-            api_key_profile_scope: Some(profile_scope),
+            api_key_project_scope: Some(project_scope),
         }
     }
 }
@@ -331,7 +331,7 @@ impl RequestAuthState {
         }
     }
 
-    pub fn require_profile_access(&self, profile_id: &str) -> Result<&Principal, BrokerError> {
+    pub fn require_project_access(&self, project_id: &str) -> Result<&Principal, BrokerError> {
         let principal = self.require_authenticated()?;
         if principal.is_admin {
             return Ok(principal);
@@ -339,13 +339,13 @@ impl RequestAuthState {
 
         if principal.principal_type == AuthPrincipalType::ApiKey {
             if principal
-                .api_key_profile_scope
+                .api_key_project_scope
                 .as_ref()
-                .is_some_and(|scope| scope.allows_profile(profile_id))
+                .is_some_and(|scope| scope.allows_project(project_id))
             {
                 return Ok(principal);
             }
-            return Err(BrokerError::ProfileAccessDenied);
+            return Err(BrokerError::ProjectAccessDenied);
         }
 
         Err(BrokerError::AdminRequired)
@@ -368,8 +368,8 @@ impl AuthContext {
         self.0.require_admin()
     }
 
-    pub fn require_profile_access(&self, profile_id: &str) -> Result<&Principal, BrokerError> {
-        self.0.require_profile_access(profile_id)
+    pub fn require_project_access(&self, project_id: &str) -> Result<&Principal, BrokerError> {
+        self.0.require_project_access(project_id)
     }
 }
 
@@ -438,7 +438,7 @@ impl IssuedApiKey {
 pub fn issue_api_key(
     name: &str,
     created_by_subject: &str,
-    profile_scope: ApiKeyProfileScope,
+    project_scope: ApiKeyProjectScope,
 ) -> IssuedApiKey {
     let key_id = ids::random_key_id();
     let random = ids::random_secret_fragment();
@@ -454,7 +454,7 @@ pub fn issue_api_key(
             secret_salt: salt.clone(),
             secret_hash: hash_secret(&salt, &secret),
             created_by_subject: created_by_subject.to_string(),
-            profile_scope,
+            project_scope,
             created_at,
             last_used_at: None,
             revoked_at: None,
@@ -627,7 +627,7 @@ mod tests {
     use axum::http::{HeaderMap, HeaderValue, header};
     use std::net::{IpAddr, Ipv4Addr};
 
-    use crate::models::ApiKeyProfileScope;
+    use crate::models::ApiKeyProjectScope;
 
     use super::{
         AuthConfig, AuthConfigOptions, AuthMode, constant_time_eq, extract_api_key_secret,
@@ -695,7 +695,7 @@ mod tests {
         let issued = issue_api_key(
             "deploy-bot",
             "admin@example.com",
-            ApiKeyProfileScope::selected(["default".to_string()]),
+            ApiKeyProjectScope::selected(["default".to_string()]),
         );
         let (key_id, full_secret) =
             parse_api_key_secret(&issued.secret).expect("generated secret should parse");

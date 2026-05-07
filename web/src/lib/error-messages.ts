@@ -43,10 +43,10 @@ function formatKnownApiError(t: Translator, error: ApiError) {
       return t("error.api.session_not_found");
     case "port_in_use":
       return t("error.api.port_in_use");
-    case "profile_exists":
-      return t("error.api.profile_exists");
-    case "profile_not_found":
-      return t("error.api.profile_not_found");
+    case "project_exists":
+      return t("error.api.project_exists");
+    case "project_not_found":
+      return t("error.api.project_not_found");
     case "invalid_port":
       return t("error.api.invalid_port");
     case "invalid_request":
@@ -69,8 +69,8 @@ function formatKnownApiError(t: Translator, error: ApiError) {
       return t("error.api.task_run_not_found");
     case "proxy_inventory_node_not_found":
       return t("error.api.proxy_inventory_node_not_found");
-    case "profile_access_denied":
-      return t("error.api.profile_access_denied");
+    case "project_access_denied":
+      return t("error.api.project_access_denied");
     case "mihomo_unavailable":
       return withOptionalReason(
         t,

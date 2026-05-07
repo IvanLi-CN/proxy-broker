@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { type Translator, useI18n } from "@/i18n";
 import { formatTimestamp } from "@/lib/format";
 import type {
-  ApiKeyProfileScope,
+  ApiKeyProjectScope,
   ApiKeySummary,
   CreateApiKeyRequest,
   CreateApiKeyResponse,
@@ -23,8 +23,8 @@ import type {
 
 interface AccessControlCardProps {
   currentUser: CurrentUserState;
-  currentProfileId: string;
-  availableProfiles: string[];
+  currentProjectId: string;
+  availableProjects: string[];
   apiKeys: ApiKeySummary[];
   latestCreatedKey?: CreateApiKeyResponse | null;
   apiKeysLoading?: boolean;
@@ -35,37 +35,37 @@ interface AccessControlCardProps {
   onRevokeApiKey: (keyId: string) => Promise<void> | void;
 }
 
-function profileScopeSummary(scope: ApiKeyProfileScope, t: Translator) {
-  if (scope.kind === "all_profiles") {
-    return t("all profiles");
+function projectScopeSummary(scope: ApiKeyProjectScope, t: Translator) {
+  if (scope.kind === "all_projects") {
+    return t("all projects");
   }
 
-  const profileIds = scope.profile_ids ?? [];
-  if (profileIds.length === 1) {
-    return t("profile {profileId}", { profileId: profileIds[0] });
+  const projectIds = scope.project_ids ?? [];
+  if (projectIds.length === 1) {
+    return t("project {projectId}", { projectId: projectIds[0] });
   }
-  if (profileIds.length === 2) {
-    return profileIds.join(" / ");
+  if (projectIds.length === 2) {
+    return projectIds.join(" / ");
   }
-  return t("{count} selected profiles", { count: profileIds.length });
+  return t("{count} selected projects", { count: projectIds.length });
 }
 
-function profileScopeDetail(scope: ApiKeyProfileScope, t: Translator) {
-  if (scope.kind === "all_profiles") {
-    return t("all profiles");
+function projectScopeDetail(scope: ApiKeyProjectScope, t: Translator) {
+  if (scope.kind === "all_projects") {
+    return t("all projects");
   }
 
-  const profileIds = scope.profile_ids ?? [];
-  if (profileIds.length <= 3) {
-    return profileIds.join(" / ");
+  const projectIds = scope.project_ids ?? [];
+  if (projectIds.length <= 3) {
+    return projectIds.join(" / ");
   }
-  return t("{count} selected profiles", { count: profileIds.length });
+  return t("{count} selected projects", { count: projectIds.length });
 }
 
 export function AccessControlCard({
   currentUser,
-  currentProfileId,
-  availableProfiles,
+  currentProjectId,
+  availableProjects,
   apiKeys,
   latestCreatedKey = null,
   apiKeysLoading = false,
@@ -77,51 +77,51 @@ export function AccessControlCard({
 }: AccessControlCardProps) {
   const { locale, t } = useI18n();
   const [keyName, setKeyName] = useState("");
-  const [allowAllProfiles, setAllowAllProfiles] = useState(false);
-  const [selectedProfiles, setSelectedProfiles] = useState<string[]>(
-    currentProfileId ? [currentProfileId] : [],
+  const [allowAllProjects, setAllowAllProjects] = useState(false);
+  const [selectedProjects, setSelectedProjects] = useState<string[]>(
+    currentProjectId ? [currentProjectId] : [],
   );
   const canManageKeys =
     currentUser.status === "resolved" &&
     (currentUser.identity.is_admin || currentUser.identity.principal_type === "development");
-  const normalizedProfiles = useMemo(
+  const normalizedProjects = useMemo(
     () =>
-      Array.from(new Set(availableProfiles.filter(Boolean))).sort((left, right) =>
+      Array.from(new Set(availableProjects.filter(Boolean))).sort((left, right) =>
         left.localeCompare(right),
       ),
-    [availableProfiles],
+    [availableProjects],
   );
 
   useEffect(() => {
     setKeyName("");
-    setAllowAllProfiles(false);
-    setSelectedProfiles(currentProfileId ? [currentProfileId] : []);
-  }, [currentProfileId]);
+    setAllowAllProjects(false);
+    setSelectedProjects(currentProjectId ? [currentProjectId] : []);
+  }, [currentProjectId]);
 
   const handleCreate = async () => {
     const nextName = keyName.trim();
-    if (!nextName || !canManageKeys || (!allowAllProfiles && selectedProfiles.length === 0)) {
+    if (!nextName || !canManageKeys || (!allowAllProjects && selectedProjects.length === 0)) {
       return;
     }
 
     await onCreateApiKey({
       name: nextName,
-      profile_scope: allowAllProfiles
-        ? { kind: "all_profiles" }
-        : { kind: "selected_profiles", profile_ids: selectedProfiles },
+      project_scope: allowAllProjects
+        ? { kind: "all_projects" }
+        : { kind: "selected_projects", project_ids: selectedProjects },
     });
     setKeyName("");
-    setAllowAllProfiles(false);
-    setSelectedProfiles(currentProfileId ? [currentProfileId] : []);
+    setAllowAllProjects(false);
+    setSelectedProjects(currentProjectId ? [currentProjectId] : []);
   };
 
-  const searchProfiles = async (query: string): Promise<SessionOptionItem[]> => {
+  const searchProjects = async (query: string): Promise<SessionOptionItem[]> => {
     const normalizedQuery = query.trim().toLowerCase();
-    return normalizedProfiles
-      .filter((profileId) => !normalizedQuery || profileId.toLowerCase().includes(normalizedQuery))
-      .map((profileId) => ({
-        value: profileId,
-        label: profileId,
+    return normalizedProjects
+      .filter((projectId) => !normalizedQuery || projectId.toLowerCase().includes(normalizedQuery))
+      .map((projectId) => ({
+        value: projectId,
+        label: projectId,
       }));
   };
 
@@ -149,7 +149,7 @@ export function AccessControlCard({
               bullets={[
                 t("owner {subject}", { subject: latestCreatedKey.api_key.owner_subject }),
                 t("scope {value}", {
-                  value: profileScopeSummary(latestCreatedKey.api_key.profile_scope, t),
+                  value: projectScopeSummary(latestCreatedKey.api_key.project_scope, t),
                 }),
                 t("prefix {prefix}", { prefix: latestCreatedKey.api_key.prefix }),
               ]}
@@ -177,31 +177,31 @@ export function AccessControlCard({
             />
             <div className="flex items-start gap-3 rounded-2xl border border-border/70 bg-background/60 px-4 py-3">
               <Checkbox
-                id="api-key-all-profiles"
-                checked={allowAllProfiles}
+                id="api-key-all-projects"
+                checked={allowAllProjects}
                 disabled={!canManageKeys}
-                onCheckedChange={(checked) => setAllowAllProfiles(checked === true)}
+                onCheckedChange={(checked) => setAllowAllProjects(checked === true)}
               />
               <div className="space-y-1">
-                <Label htmlFor="api-key-all-profiles">{t("Allow all profiles")}</Label>
+                <Label htmlFor="api-key-all-projects">{t("Allow all projects")}</Label>
                 <p className="text-xs leading-5 text-muted-foreground">
-                  {t("All future profiles remain available to this key until it is revoked.")}
+                  {t("All future projects remain available to this key until it is revoked.")}
                 </p>
               </div>
             </div>
-            {!allowAllProfiles ? (
+            {!allowAllProjects ? (
               <SearchableMultiSelect
-                id="api-key-profile-scope"
-                label={t("Available profiles")}
-                helper={t("The new key may access only the selected profiles.")}
-                placeholder={t("Select one or more profiles")}
-                searchPlaceholder={t("Search profiles")}
-                emptyText={t("No matching profiles")}
-                values={selectedProfiles}
+                id="api-key-project-scope"
+                label={t("Available projects")}
+                helper={t("The new key may access only the selected projects.")}
+                placeholder={t("Select one or more projects")}
+                searchPlaceholder={t("Search projects")}
+                emptyText={t("No matching projects")}
+                values={selectedProjects}
                 disabled={!canManageKeys}
-                searchKey={`profiles:${normalizedProfiles.join(",")}`}
-                onChange={setSelectedProfiles}
-                onSearch={searchProfiles}
+                searchKey={`projects:${normalizedProjects.join(",")}`}
+                onChange={setSelectedProjects}
+                onSearch={searchProjects}
               />
             ) : null}
             <Button
@@ -211,7 +211,7 @@ export function AccessControlCard({
                 creatingApiKey ||
                 !keyName.trim() ||
                 !canManageKeys ||
-                (!allowAllProfiles && selectedProfiles.length === 0)
+                (!allowAllProjects && selectedProjects.length === 0)
               }
             >
               {t("Create key")}
@@ -268,7 +268,7 @@ export function AccessControlCard({
                         </Badge>
                       )}
                       <Badge variant="outline" className="rounded-full">
-                        {profileScopeSummary(apiKey.profile_scope, t)}
+                        {projectScopeSummary(apiKey.project_scope, t)}
                       </Badge>
                       <Button
                         variant="outline"
@@ -290,7 +290,7 @@ export function AccessControlCard({
                       {t("Owner {subject}", { subject: apiKey.owner_subject })}
                     </div>
                     <div className="min-w-0 break-words">
-                      {t("Scope {value}", { value: profileScopeDetail(apiKey.profile_scope, t) })}
+                      {t("Scope {value}", { value: projectScopeDetail(apiKey.project_scope, t) })}
                     </div>
                     <div className="min-w-0 break-words">
                       {t("Created {value}", {

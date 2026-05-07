@@ -11,7 +11,7 @@
 - `/sessions` 当前把创建入口与在线列表并排堆在首页，主次倒置，列表扫描效率低。
 - 会话列表仍使用“活动监听 / 在线监听牌组”一类命名，不符合真实的会话运营语义。
 - 当前会话创建后无法直接切换绑定节点，操作员只能关闭后重建，导致端口与监听地址不稳定。
-- 节点选择缺少“当前会话最近使用 / 当前 profile 最近使用”的排序依据，重复运营成本高。
+- 节点选择缺少“当前会话最近使用 / 当前 project 最近使用”的排序依据，重复运营成本高。
 - 会话代理选择需要从“单节点”升级为“一个 IP + 一组候选节点”，由后端在候选集中选择延迟最低且可用的实际节点，避免同一出口 IP 下节点故障时必须人工重建会话。
 
 ## 目标 / 非目标
@@ -21,7 +21,7 @@
 - 把 `/sessions` 重构成“会话列表优先”的页面，首页只保留列表与一个 `创建会话` 入口按钮。
 - 创建弹窗改为宽屏双栏 IP -> 节点候选选择界面，支持多选 IP 批量创建。
 - 为每条会话增加切换代理入口，并允许在不改变 `session_id / listen / port` 的前提下切换 `selected_ip + candidate_node_ids`。
-- 新增节点 usage 持久化与查询接口，支持“当前会话最近使用 / 当前 profile 最近使用”两种排序。
+- 新增节点 usage 持久化与查询接口，支持“当前会话最近使用 / 当前 project 最近使用”两种排序。
 - 会话持久化新增 `candidate_node_ids`，历史会话默认回填当前 `node_id`，避免升级后行为漂移。
 - 为改动补齐 Storybook、交互覆盖与视觉证据，并推进到 PR merge-ready。
 
@@ -51,9 +51,9 @@
 - 会话列表必须支持行多选、表头全选可见会话、鼠标/触摸从选择列按下后拖拽批量勾选/取消，以及 Shift 连续选择。
 - 会话列表必须提供所选数量、批量关闭与批量撤销入口；批量关闭逐条复用现有 10 秒撤销窗口，不新增后端批量关闭 API。
 - 会话关闭入口必须先进入 10 秒撤销窗口：点击后整行置灰、非撤销操作禁用、关闭按钮切换为撤销按钮，倒计时结束后才真正移除会话。
-- `PATCH /api/v1/profiles/{profile_id}/sessions/{session_id}/node` 必须保持 `session_id / listen / port / created_at` 不变，只更新 `selected_ip / candidate_node_ids` 与当前活跃 `node_id / proxy_name`。
-- 创建、切换和重建会话时，后端必须校验候选节点属于当前 profile effective pool 且包含 `selected_ip`，并选择候选中已知可用且中位延迟最低的节点；候选全失败时返回明确错误。
-- 创建会话与切换代理都必须更新 profile-scope 与 session-scope 的 node usage。
+- `PATCH /api/v1/projects/{project_id}/sessions/{session_id}/node` 必须保持 `session_id / listen / port / created_at` 不变，只更新 `selected_ip / candidate_node_ids` 与当前活跃 `node_id / proxy_name`。
+- 创建、切换和重建会话时，后端必须校验候选节点属于当前 project effective pool 且包含 `selected_ip`，并选择候选中已知可用且中位延迟最低的节点；候选全失败时返回明确错误。
+- 创建会话与切换代理都必须更新 project-scope 与 session-scope 的 node usage。
 - `SessionRecord`、列表响应和打开响应必须包含 `candidate_node_ids`；旧会话候选集默认回填为当前 `node_id`。
 - SQLite `sessions` 必须作为启动恢复的真相源；程序重启或更新后，未显式关闭的会话仍需继续出现在 `/sessions` 列表。
 - 启动 reconcile、自动订阅同步、refresh / rebuild 等后台路径不得删除 SQLite `sessions` 行；即使某条会话当前无法映射到 effective pool，也只能跳过 runtime restore 并记录 warning，等待操作员显式关闭或切换节点。
@@ -62,7 +62,7 @@
 ### SHOULD
 
 - IP/节点筛选支持节点名、导入/来源名、IP、国家/地区/城市。
-- IP/节点选择列表只展示当前 profile effective pool 内的可用节点。
+- IP/节点选择列表只展示当前 project effective pool 内的可用节点。
 - 新旧 usage 时间为空时统一排后，并以节点名升序作为稳定兜底。
 
 ## 验收标准（Acceptance Criteria）
@@ -107,7 +107,7 @@
   When 程序重启、升级或启动恢复阶段遇到临时运行时故障
   Then `/sessions` 列表仍显示这些会话，无法恢复到 runtime 的条目只记录 warning，不从 SQLite 删除。
 - Given 已持久化的会话
-  When 自动订阅同步、手动 refresh 或 profile rebuild 后当前 effective pool 不再包含该会话的 `node_id + selected_ip`
+  When 自动订阅同步、手动 refresh 或 project rebuild 后当前 effective pool 不再包含该会话的 `node_id + selected_ip`
   Then 该会话仍保留在 `/sessions`，直到操作员显式关闭或切换节点。
 
 ## 质量门槛（Quality Gates）
@@ -230,7 +230,7 @@
   submission_gate: `approved`
   story_id_or_title: `Features/Sessions/SessionNodeSelectDialog/SourceGrouping`
   state: `source grouping selected`
-  evidence_note: 切换会话代理弹窗改为双栏布局；左栏保留“当前会话上次使用 / 当前 profile 上次使用”两个全量节点入口，并可按订阅来源分组，右栏只展示所选分组节点。
+  evidence_note: 切换会话代理弹窗改为双栏布局；左栏保留“当前会话上次使用 / 当前 project 上次使用”两个全量节点入口，并可按订阅来源分组，右栏只展示所选分组节点。
   image:
   ![切换代理弹窗双栏来源分组](./assets/session-switch-dialog-source-grouping.png)
 

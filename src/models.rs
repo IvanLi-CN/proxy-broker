@@ -33,13 +33,13 @@ pub struct LoadSubscriptionResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateProfileRequest {
-    pub profile_id: String,
+pub struct CreateProjectRequest {
+    pub project_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateProfileResponse {
-    pub profile_id: String,
+pub struct CreateProjectResponse {
+    pub project_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -155,15 +155,15 @@ pub struct ListSessionsResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ListProfilesResponse {
-    pub profiles: Vec<String>,
+pub struct ListProjectsResponse {
+    pub projects: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ProxyScope {
     Global,
-    Profile { profile_id: String },
+    Project { project_id: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -227,7 +227,7 @@ pub struct ProxyImportItem {
     pub allocation_scope: ProxyScope,
     pub proxy_count: usize,
     pub distinct_ip_count: usize,
-    pub effective_profile_ids: Vec<String>,
+    pub effective_project_ids: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subscription_metadata: Option<SubscriptionMetadata>,
     pub created_at: i64,
@@ -244,7 +244,7 @@ pub struct ProxyInventoryItem {
     pub resolved_ips: Vec<String>,
     pub source_scope: ProxyScope,
     pub allocation_scope: ProxyScope,
-    pub effective_profile_ids: Vec<String>,
+    pub effective_project_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -257,7 +257,7 @@ pub struct ProxyCatalogNodeItem {
     pub resolved_ips: Vec<String>,
     pub source_scope: ProxyScope,
     pub allocation_scope: ProxyScope,
-    pub effective_profile_ids: Vec<String>,
+    pub effective_project_ids: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub primary_ip: Option<String>,
     pub ip_metadata: Vec<ProxyNodeMetadataRecord>,
@@ -274,7 +274,7 @@ pub struct ProxyCatalogGroupItem {
 pub struct ProxyCatalogResponse {
     pub view: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub profile_id: Option<String>,
+    pub project_id: Option<String>,
     pub groups: Vec<ProxyCatalogGroupItem>,
 }
 
@@ -292,7 +292,7 @@ pub struct UpdateProxyImportAllocationRequest {
 pub struct ProxyOperationRequest {
     pub view: String,
     #[serde(default)]
-    pub profile_id: Option<String>,
+    pub project_id: Option<String>,
     #[serde(default)]
     pub node_ids: Vec<String>,
 }
@@ -303,13 +303,13 @@ pub struct ProxyOperationAcceptedResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProfileProxySettings {
-    pub profile_id: String,
+pub struct ProjectProxySettings {
+    pub project_id: String,
     pub use_global_proxies: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UpdateProfileProxySettingsRequest {
+pub struct UpdateProjectProxySettingsRequest {
     pub use_global_proxies: bool,
 }
 
@@ -391,7 +391,7 @@ pub struct SearchSessionOptionsResponse {
 pub enum SessionNodeSortMode {
     #[default]
     SessionRecent,
-    ProfileRecent,
+    ProjectRecent,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -430,7 +430,7 @@ pub struct SessionNodeOptionItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_last_used_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub profile_last_used_at: Option<i64>,
+    pub project_last_used_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -480,7 +480,7 @@ pub struct SessionIpNodeOptionNodeItem {
     #[serde(default)]
     pub recent_probe_samples: Vec<ProxyNodeProbeSampleRecord>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub profile_last_used_at: Option<i64>,
+    pub project_last_used_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_last_used_at: Option<i64>,
 }
@@ -571,48 +571,48 @@ pub enum AuthPrincipalType {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ApiKeyProfileScopeKind {
-    SelectedProfiles,
-    AllProfiles,
+pub enum ApiKeyProjectScopeKind {
+    SelectedProjects,
+    AllProjects,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ApiKeyProfileScope {
-    pub kind: ApiKeyProfileScopeKind,
+pub struct ApiKeyProjectScope {
+    pub kind: ApiKeyProjectScopeKind,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub profile_ids: Vec<String>,
+    pub project_ids: Vec<String>,
 }
 
-impl ApiKeyProfileScope {
-    pub fn selected<I>(profile_ids: I) -> Self
+impl ApiKeyProjectScope {
+    pub fn selected<I>(project_ids: I) -> Self
     where
         I: IntoIterator<Item = String>,
     {
         Self {
-            kind: ApiKeyProfileScopeKind::SelectedProfiles,
-            profile_ids: profile_ids.into_iter().collect(),
+            kind: ApiKeyProjectScopeKind::SelectedProjects,
+            project_ids: project_ids.into_iter().collect(),
         }
     }
 
-    pub fn all_profiles() -> Self {
+    pub fn all_projects() -> Self {
         Self {
-            kind: ApiKeyProfileScopeKind::AllProfiles,
-            profile_ids: Vec::new(),
+            kind: ApiKeyProjectScopeKind::AllProjects,
+            project_ids: Vec::new(),
         }
     }
 
-    pub fn single_profile_id(&self) -> Option<String> {
-        if self.kind == ApiKeyProfileScopeKind::SelectedProfiles && self.profile_ids.len() == 1 {
-            return self.profile_ids.first().cloned();
+    pub fn single_project_id(&self) -> Option<String> {
+        if self.kind == ApiKeyProjectScopeKind::SelectedProjects && self.project_ids.len() == 1 {
+            return self.project_ids.first().cloned();
         }
         None
     }
 
-    pub fn allows_profile(&self, profile_id: &str) -> bool {
+    pub fn allows_project(&self, project_id: &str) -> bool {
         match self.kind {
-            ApiKeyProfileScopeKind::AllProfiles => true,
-            ApiKeyProfileScopeKind::SelectedProfiles => {
-                self.profile_ids.iter().any(|item| item == profile_id)
+            ApiKeyProjectScopeKind::AllProjects => true,
+            ApiKeyProjectScopeKind::SelectedProjects => {
+                self.project_ids.iter().any(|item| item == project_id)
             }
         }
     }
@@ -629,19 +629,19 @@ pub struct AuthMeResponse {
     pub groups: Vec<String>,
     pub is_admin: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub profile_id: Option<String>,
+    pub project_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api_key_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api_key_owner_subject: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub api_key_profile_scope: Option<ApiKeyProfileScope>,
+    pub api_key_project_scope: Option<ApiKeyProjectScope>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateApiKeyRequest {
     pub name: String,
-    pub profile_scope: ApiKeyProfileScope,
+    pub project_scope: ApiKeyProjectScope,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -651,9 +651,9 @@ pub struct ApiKeySummary {
     pub prefix: String,
     pub created_by: String,
     pub owner_subject: String,
-    pub profile_scope: ApiKeyProfileScope,
+    pub project_scope: ApiKeyProjectScope,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub profile_id: Option<String>,
+    pub project_id: Option<String>,
     pub created_at: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_used_at: Option<i64>,
@@ -731,7 +731,7 @@ pub enum TaskEventLevel {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyImportSyncConfig {
     pub import_id: String,
-    pub profile_id: String,
+    pub project_id: String,
     pub source: SubscriptionSource,
     pub enabled: bool,
     pub sync_every_sec: u64,
@@ -745,7 +745,7 @@ pub struct ProxyImportSyncConfig {
     pub updated_at: i64,
 }
 
-pub type ProfileSyncConfig = ProxyImportSyncConfig;
+pub type ProjectSyncConfig = ProxyImportSyncConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemSettings {
@@ -774,7 +774,7 @@ pub enum TaskRunScope {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskRunRecord {
     pub run_id: String,
-    pub profile_id: String,
+    pub project_id: String,
     pub kind: TaskRunKind,
     pub trigger: TaskRunTrigger,
     pub status: TaskRunStatus,
@@ -794,7 +794,7 @@ pub struct TaskRunRecord {
 pub struct TaskRunEventRecord {
     pub event_id: String,
     pub run_id: String,
-    pub profile_id: String,
+    pub project_id: String,
     pub at: i64,
     pub level: TaskEventLevel,
     pub stage: TaskRunStage,
@@ -805,7 +805,7 @@ pub struct TaskRunEventRecord {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskRunSummary {
     pub run_id: String,
-    pub profile_id: String,
+    pub project_id: String,
     pub kind: TaskRunKind,
     pub trigger: TaskRunTrigger,
     pub status: TaskRunStatus,
@@ -824,7 +824,7 @@ impl TaskRunRecord {
     pub fn as_summary(&self) -> TaskRunSummary {
         TaskRunSummary {
             run_id: self.run_id.clone(),
-            profile_id: self.profile_id.clone(),
+            project_id: self.project_id.clone(),
             kind: self.kind,
             trigger: self.trigger,
             status: self.status,
@@ -879,7 +879,7 @@ pub struct TaskSummary {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TaskListQuery {
-    pub profile_id: Option<String>,
+    pub project_id: Option<String>,
     pub kind: Option<TaskRunKind>,
     pub status: Option<TaskRunStatus>,
     pub trigger: Option<TaskRunTrigger>,
@@ -901,19 +901,19 @@ pub struct TaskListResponse {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProxyInventoryListQuery {
     pub scope: Option<String>,
-    pub profile_id: Option<String>,
+    pub project_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProxyImportListQuery {
     pub scope: Option<String>,
-    pub profile_id: Option<String>,
+    pub project_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProxyCatalogQuery {
     pub view: Option<String>,
-    pub profile_id: Option<String>,
+    pub project_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1072,7 +1072,7 @@ pub struct ApiKeyRecord {
     pub secret_salt: String,
     pub secret_hash: String,
     pub created_by_subject: String,
-    pub profile_scope: ApiKeyProfileScope,
+    pub project_scope: ApiKeyProjectScope,
     pub created_at: i64,
     pub last_used_at: Option<i64>,
     pub revoked_at: Option<i64>,
@@ -1086,8 +1086,8 @@ impl ApiKeyRecord {
             prefix: self.secret_prefix.clone(),
             created_by: self.created_by_subject.clone(),
             owner_subject: self.created_by_subject.clone(),
-            profile_scope: self.profile_scope.clone(),
-            profile_id: self.profile_scope.single_profile_id(),
+            project_scope: self.project_scope.clone(),
+            project_id: self.project_scope.single_project_id(),
             created_at: self.created_at,
             last_used_at: self.last_used_at,
             revoked_at: self.revoked_at,
@@ -1176,37 +1176,37 @@ impl ProxyScope {
         Self::Global
     }
 
-    pub fn profile(profile_id: impl Into<String>) -> Self {
-        Self::Profile {
-            profile_id: profile_id.into(),
+    pub fn project(project_id: impl Into<String>) -> Self {
+        Self::Project {
+            project_id: project_id.into(),
         }
     }
 
-    pub fn profile_id(&self) -> Option<&str> {
+    pub fn project_id(&self) -> Option<&str> {
         match self {
             Self::Global => None,
-            Self::Profile { profile_id } => Some(profile_id.as_str()),
+            Self::Project { project_id } => Some(project_id.as_str()),
         }
     }
 
     pub fn key(&self) -> String {
         match self {
             Self::Global => "global".to_string(),
-            Self::Profile { profile_id } => format!("profile:{profile_id}"),
+            Self::Project { project_id } => format!("project:{project_id}"),
         }
     }
 
     pub fn kind(&self) -> &'static str {
         match self {
             Self::Global => "global",
-            Self::Profile { .. } => "profile",
+            Self::Project { .. } => "project",
         }
     }
 
-    pub fn from_parts(scope_type: &str, profile_id: Option<String>) -> Option<Self> {
+    pub fn from_parts(scope_type: &str, project_id: Option<String>) -> Option<Self> {
         match scope_type {
             "global" => Some(Self::Global),
-            "profile" => Some(Self::profile(profile_id?)),
+            "project" => Some(Self::project(project_id?)),
             _ => None,
         }
     }
@@ -1269,18 +1269,18 @@ impl_task_enum_codec!(TaskEventLevel {
     Error => "error",
 });
 
-impl_task_enum_codec!(ApiKeyProfileScopeKind {
-    SelectedProfiles => "selected_profiles",
-    AllProfiles => "all_profiles",
+impl_task_enum_codec!(ApiKeyProjectScopeKind {
+    SelectedProjects => "selected_projects",
+    AllProjects => "all_projects",
 });
 
 #[derive(Debug, Clone, Default)]
-pub struct ProfileSnapshot {
+pub struct ProjectSnapshot {
     pub nodes: Vec<ProxyNode>,
     pub ip_records: HashMap<String, IpRecord>,
     pub probe_records: Vec<ProbeRecord>,
     pub sessions: HashMap<String, SessionRecord>,
-    pub profile_node_usages: HashMap<String, i64>,
+    pub project_node_usages: HashMap<String, i64>,
     pub session_node_usages: HashMap<String, HashMap<String, i64>>,
     pub api_keys: HashMap<String, ApiKeyRecord>,
     pub proxy_imports: HashMap<String, ProxyImportRecord>,

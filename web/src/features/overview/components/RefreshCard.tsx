@@ -46,7 +46,7 @@ export function RefreshCard({ isPending, response, error, onSubmit }: RefreshCar
             </CardTitle>
             <CardDescription className="text-sm leading-6 text-muted-foreground md:text-[15px]">
               {t(
-                "Use this when latency or geo attribution feels stale. The refresh updates operator hints without changing profile identity.",
+                "Use this when latency or geo attribution feels stale. The refresh updates operator hints without changing project identity.",
               )}
             </CardDescription>
           </div>

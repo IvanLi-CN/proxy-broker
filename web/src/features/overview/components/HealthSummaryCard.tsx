@@ -44,7 +44,7 @@ export function HealthSummaryCard({
         <TopMetricCard
           title={t("Live listeners")}
           value={formatNumber(activeSessions)}
-          description={t("Sessions currently consuming the active profile.")}
+          description={t("Sessions currently consuming the active project.")}
           icon={RouterIcon}
         />
         <TopMetricCard
