@@ -1,24 +1,28 @@
-import { BinaryIcon, Rows3Icon } from "lucide-react";
+import { LoaderCircleIcon, PlusIcon } from "lucide-react";
+import { useState } from "react";
 
 import { ActionResponsePanel } from "@/components/ActionResponsePanel";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { OpenBatchForm } from "@/features/sessions/components/OpenBatchForm";
-import { OpenSessionForm } from "@/features/sessions/components/OpenSessionForm";
+import {
+  SessionIpNodePicker,
+  type SessionIpNodePickerSelection,
+} from "@/features/sessions/components/SessionIpNodePicker";
 import { useI18n } from "@/i18n";
 import type {
-  OpenBatchRequest,
+  OpenBatchByIpRequest,
   OpenBatchResponse,
-  OpenSessionRequest,
+  OpenSessionByIpRequest,
   OpenSessionResponse,
-  SearchSessionOptionsRequest,
-  SessionOptionItem,
+  SearchSessionIpNodeOptionsRequest,
+  SessionIpNodeOptionGroupItem,
 } from "@/lib/types";
 
 interface SessionCreateDialogProps {
@@ -31,11 +35,11 @@ interface SessionCreateDialogProps {
   opening: boolean;
   batchOpening: boolean;
   suggestedPort?: number | null;
-  onOpenSession: (payload: OpenSessionRequest) => void | Promise<void>;
-  onOpenBatch: (payload: OpenBatchRequest) => void | Promise<void>;
-  searchSessionOptions: (
-    payload: SearchSessionOptionsRequest,
-  ) => Promise<SessionOptionItem[] | undefined>;
+  onOpenSession: (payload: OpenSessionByIpRequest) => void | Promise<void>;
+  onOpenBatch: (payload: OpenBatchByIpRequest) => void | Promise<void>;
+  searchIpNodeOptions: (
+    payload: SearchSessionIpNodeOptionsRequest,
+  ) => Promise<SessionIpNodeOptionGroupItem[] | undefined>;
 }
 
 export function SessionCreateDialog({
@@ -50,63 +54,105 @@ export function SessionCreateDialog({
   suggestedPort,
   onOpenSession,
   onOpenBatch,
-  searchSessionOptions,
+  searchIpNodeOptions,
 }: SessionCreateDialogProps) {
-  const { t } = useI18n();
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl">
-        <DialogHeader>
-          <DialogTitle>{t("Create session")}</DialogTitle>
-          <DialogDescription>
-            {t(
-              "Open a new session from one dialog. Keep single and batch creation together, but leave the list as the default surface.",
-            )}
-          </DialogDescription>
-        </DialogHeader>
-
-        {batchError && !batchResponse ? (
-          <ActionResponsePanel
-            title={t("Batch create failed")}
-            description={batchError}
-            tone="error"
-          />
-        ) : null}
-
-        <Tabs defaultValue="single" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-2 rounded-2xl border border-border/70 bg-card/80 p-1">
-            <TabsTrigger value="single" className="gap-2 rounded-xl">
-              <BinaryIcon className="size-4" />
-              {t("Single session")}
-            </TabsTrigger>
-            <TabsTrigger value="batch" className="gap-2 rounded-xl">
-              <Rows3Icon className="size-4" />
-              {t("Batch open")}
-            </TabsTrigger>
-          </TabsList>
-          <TabsContent value="single" className="mt-0">
-            <OpenSessionForm
-              error={openError}
-              isPending={opening}
-              onSubmit={onOpenSession}
-              response={openResponse}
-              searchOptions={searchSessionOptions}
-              suggestedPort={suggestedPort}
-            />
-          </TabsContent>
-          <TabsContent value="batch" className="mt-0">
-            <OpenBatchForm
-              error={batchError}
-              isPending={batchOpening}
-              onSubmit={onOpenBatch}
-              response={batchResponse}
-              searchOptions={searchSessionOptions}
-              suggestedPort={suggestedPort}
-            />
-          </TabsContent>
-        </Tabs>
-      </DialogContent>
+      {open ? (
+        <SessionCreateDialogContent
+          openError={openError}
+          batchError={batchError}
+          openResponse={openResponse}
+          batchResponse={batchResponse}
+          opening={opening}
+          batchOpening={batchOpening}
+          suggestedPort={suggestedPort}
+          onOpenChange={onOpenChange}
+          onOpenSession={onOpenSession}
+          onOpenBatch={onOpenBatch}
+          searchIpNodeOptions={searchIpNodeOptions}
+        />
+      ) : null}
     </Dialog>
+  );
+}
+
+function SessionCreateDialogContent({
+  openError,
+  batchError,
+  openResponse,
+  batchResponse,
+  opening,
+  batchOpening,
+  suggestedPort,
+  onOpenChange,
+  onOpenSession,
+  onOpenBatch,
+  searchIpNodeOptions,
+}: Omit<SessionCreateDialogProps, "open">) {
+  const { t } = useI18n();
+  const [selections, setSelections] = useState<SessionIpNodePickerSelection[]>([]);
+  const pending = opening || batchOpening;
+  const error = batchError || openError;
+  const canSubmit =
+    selections.length > 0 && selections.every((item) => item.candidateNodeIds.length > 0);
+
+  const submit = () => {
+    const requests = selections.map((selection) => ({
+      selected_ip: selection.selectedIp,
+      candidate_node_ids: selection.candidateNodeIds,
+      desired_port: selections.length === 1 ? suggestedPort : undefined,
+    }));
+    if (requests.length === 1 && requests[0]) {
+      void onOpenSession(requests[0]);
+      return;
+    }
+    void onOpenBatch({ requests });
+  };
+
+  return (
+    <DialogContent className="max-h-[92vh] w-[calc(100vw-2rem)] max-w-[1180px] overflow-y-auto sm:max-w-[1180px]">
+      <DialogHeader>
+        <DialogTitle>{t("Create session")}</DialogTitle>
+        <DialogDescription>
+          {t("Choose one or more IPs, then keep the candidate nodes that may serve each session.")}
+        </DialogDescription>
+      </DialogHeader>
+
+      {error && !openResponse && !batchResponse ? (
+        <ActionResponsePanel title={t("Create session failed")} description={error} tone="error" />
+      ) : null}
+
+      <SessionIpNodePicker
+        mode="multiple"
+        disabled={pending}
+        onSelectionChange={setSelections}
+        onSearch={searchIpNodeOptions}
+      />
+
+      <DialogFooter className="items-center gap-3 sm:justify-between">
+        <div className="text-xs text-muted-foreground">
+          {t("{count} IPs selected", { count: selections.length })}
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
+            {t("Cancel")}
+          </Button>
+          <Button onClick={submit} disabled={!canSubmit || pending}>
+            {pending ? (
+              <>
+                <LoaderCircleIcon className="mr-2 size-4 animate-spin" />
+                {t("Creating sessions...")}
+              </>
+            ) : (
+              <>
+                <PlusIcon className="mr-2 size-4" />
+                {selections.length > 1 ? t("Create sessions") : t("Create session")}
+              </>
+            )}
+          </Button>
+        </div>
+      </DialogFooter>
+    </DialogContent>
   );
 }

@@ -167,6 +167,7 @@ mod tests {
             selected_ip: "1.1.1.1".to_string(),
             proxy_name: "proxy-a".to_string(),
             node_id: "node-a".to_string(),
+            candidate_node_ids: vec!["node-a".to_string()],
             created_at: 0,
         }
     }

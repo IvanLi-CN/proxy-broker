@@ -541,6 +541,7 @@ function SystemProbeSettingsPanel({
   const parsedMinutes = Number.parseInt(value, 10);
   const nextSeconds = Number.isFinite(parsedMinutes) ? parsedMinutes * 60 : 0;
   const invalid = !Number.isFinite(parsedMinutes) || parsedMinutes < 1;
+  const ready = !loading && !error && Boolean(settings);
 
   return (
     <div className="rounded-lg border border-border bg-card px-4 py-3">
@@ -568,12 +569,13 @@ function SystemProbeSettingsPanel({
               min={1}
               className="h-9 w-32"
               value={value}
+              disabled={!ready || updating}
               onChange={(event) => setValue(event.target.value)}
             />
           </div>
           <Button
             size="sm"
-            disabled={loading || updating || invalid}
+            disabled={!ready || updating || invalid}
             onClick={() => void onUpdate(nextSeconds)}
           >
             <SaveIcon className="size-3.5" />

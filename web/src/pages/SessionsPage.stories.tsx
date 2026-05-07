@@ -1,10 +1,10 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, fn, userEvent, within } from "storybook/test";
+import { expect, userEvent, within } from "storybook/test";
 
 import { AppShell } from "@/components/AppShell";
 import { sessionCopyAddressFormatStorageKey } from "@/features/sessions/hooks/use-session-copy-address-format";
 import type { SessionListItem } from "@/lib/types";
-import { sessionNodeOptionsFixture, sessionsFixture } from "@/mocks/fixtures";
+import { sessionIpNodeOptionsFixture, sessionsFixture } from "@/mocks/fixtures";
 import { SessionsPage } from "@/pages/SessionsPage";
 
 const longSessionList: SessionListItem[] = Array.from({ length: 28 }, (_, index) => {
@@ -99,14 +99,13 @@ const meta = {
     suggestedPort: 10080,
     closingSessionId: null,
     switchingSessionId: null,
-    onOpenSession: fn(),
-    onOpenBatch: fn(),
-    onUpdateSessionNode: fn(),
-    searchSessionOptions: fn(async () => []),
-    searchSessionNodeOptions: fn(async () => sessionNodeOptionsFixture.items),
-    onCloseSession: fn(),
-    onResetCreateState: fn(),
-    onResetSwitchState: fn(),
+    onOpenSession: () => undefined,
+    onOpenBatch: () => undefined,
+    onUpdateSessionNode: () => undefined,
+    searchSessionIpNodeOptions: async () => sessionIpNodeOptionsFixture.groups,
+    onCloseSession: () => undefined,
+    onResetCreateState: () => undefined,
+    onResetSwitchState: () => undefined,
   },
 } satisfies Meta<typeof SessionsPage>;
 
@@ -221,10 +220,10 @@ export const CreateDialogFlow: Story = {
       "data-state",
       "open",
     );
-    await expect(await dialog.findByRole("tab", { name: /Single session/i })).toHaveAttribute(
-      "data-state",
-      "active",
-    );
+    const submit = await dialog.findByRole("button", { name: /^Create session$/i });
+    await expect(submit).toBeDisabled();
+    await userEvent.click(await dialog.findByRole("button", { name: /203\.0\.113\.10/i }));
+    await expect(submit).toBeEnabled();
   },
 };
 
@@ -239,8 +238,8 @@ export const SwitchDialogFlow: Story = {
     );
     const dialog = within(canvasElement.ownerDocument.body);
     await dialog.findByRole("dialog", { name: /Switch session proxy/i });
-    await dialog.findByRole("radio", { name: /Group by region/i });
-    await dialog.findByRole("button", { name: /Current session last used/i });
-    await dialog.findByRole("button", { name: /Use selected node/i });
+    await expect(
+      await dialog.findByRole("button", { name: /Use selected candidates/i }),
+    ).toBeEnabled();
   },
 };
