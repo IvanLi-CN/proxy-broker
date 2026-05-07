@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, fn, userEvent, within } from "storybook/test";
+import { expect, userEvent, within } from "storybook/test";
 
 import { AppShell } from "@/components/AppShell";
 import { sessionCopyAddressFormatStorageKey } from "@/features/sessions/hooks/use-session-copy-address-format";
@@ -99,13 +99,13 @@ const meta = {
     suggestedPort: 10080,
     closingSessionId: null,
     switchingSessionId: null,
-    onOpenSession: fn(),
-    onOpenBatch: fn(),
-    onUpdateSessionNode: fn(),
-    searchSessionIpNodeOptions: fn(async () => sessionIpNodeOptionsFixture.groups),
-    onCloseSession: fn(),
-    onResetCreateState: fn(),
-    onResetSwitchState: fn(),
+    onOpenSession: () => undefined,
+    onOpenBatch: () => undefined,
+    onUpdateSessionNode: () => undefined,
+    searchSessionIpNodeOptions: async () => sessionIpNodeOptionsFixture.groups,
+    onCloseSession: () => undefined,
+    onResetCreateState: () => undefined,
+    onResetSwitchState: () => undefined,
   },
 } satisfies Meta<typeof SessionsPage>;
 
