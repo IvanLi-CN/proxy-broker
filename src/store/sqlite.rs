@@ -1620,18 +1620,42 @@ impl SqliteStore {
                 .await?;
         }
 
-        self.rename_column_if_needed(
-            "proxy_inventory_nodes",
-            "source_scope_profile_id",
-            "source_scope_project_id",
-        )
-        .await?;
-        self.rename_column_if_needed(
-            "proxy_inventory_nodes",
-            "allocation_scope_profile_id",
-            "allocation_scope_project_id",
-        )
-        .await?;
+        for table in ["proxy_imports", "proxy_inventory_nodes"] {
+            self.rename_column_if_needed(
+                table,
+                "source_scope_profile_id",
+                "source_scope_project_id",
+            )
+            .await?;
+            self.rename_column_if_needed(
+                table,
+                "allocation_scope_profile_id",
+                "allocation_scope_project_id",
+            )
+            .await?;
+            self.rewrite_scope_kind_if_needed(table, "source_scope_type")
+                .await?;
+            self.rewrite_scope_kind_if_needed(table, "allocation_scope_type")
+                .await?;
+        }
+
+        if self.table_exists("api_keys").await?
+            && self.column_exists("api_keys", "scope_kind").await?
+        {
+            sqlx::query(
+                r#"
+                UPDATE api_keys
+                SET scope_kind = CASE scope_kind
+                  WHEN 'selected_profiles' THEN 'selected_projects'
+                  WHEN 'all_profiles' THEN 'all_projects'
+                  ELSE scope_kind
+                END
+                WHERE scope_kind IN ('selected_profiles', 'all_profiles')
+                "#,
+            )
+            .execute(&self.pool)
+            .await?;
+        }
 
         Ok(())
     }
@@ -1657,6 +1681,23 @@ impl SqliteStore {
         {
             sqlx::query(&format!(
                 "ALTER TABLE {table_name} RENAME COLUMN {old_name} TO {new_name}"
+            ))
+            .execute(&self.pool)
+            .await?;
+        }
+        Ok(())
+    }
+
+    async fn rewrite_scope_kind_if_needed(
+        &self,
+        table_name: &str,
+        column_name: &str,
+    ) -> anyhow::Result<()> {
+        if self.table_exists(table_name).await?
+            && self.column_exists(table_name, column_name).await?
+        {
+            sqlx::query(&format!(
+                "UPDATE {table_name} SET {column_name} = 'project' WHERE {column_name} = 'profile'"
             ))
             .execute(&self.pool)
             .await?;
@@ -4201,6 +4242,128 @@ mod tests {
             .expect("sqlite store should migrate legacy profiles");
         let projects = store.list_projects().await.expect("list should succeed");
         assert_eq!(projects, vec!["legacy-profile"]);
+
+        let _ = tokio::fs::remove_file(path).await;
+    }
+
+    #[tokio::test]
+    async fn open_migrates_legacy_proxy_import_scope_columns_to_projects() {
+        let path = temp_store_path();
+        let options = SqliteConnectOptions::new()
+            .filename(&path)
+            .create_if_missing(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .expect("legacy sqlite should open");
+
+        pool.execute(
+            r#"
+            CREATE TABLE proxy_imports (
+              import_id TEXT PRIMARY KEY,
+              name TEXT,
+              import_kind TEXT NOT NULL,
+              source_scope_type TEXT NOT NULL,
+              source_scope_profile_id TEXT,
+              source_type TEXT NOT NULL,
+              source_value TEXT NOT NULL,
+              allocation_scope_type TEXT NOT NULL,
+              allocation_scope_profile_id TEXT,
+              created_at INTEGER NOT NULL,
+              updated_at INTEGER NOT NULL
+            )
+            "#,
+        )
+        .await
+        .expect("legacy proxy imports table should seed");
+        sqlx::query(
+            r#"
+            INSERT INTO proxy_imports (
+              import_id, name, import_kind, source_scope_type, source_scope_profile_id,
+              source_type, source_value, allocation_scope_type, allocation_scope_profile_id,
+              created_at, updated_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            "#,
+        )
+        .bind("legacy-import")
+        .bind("Legacy import")
+        .bind("subscription")
+        .bind("profile")
+        .bind("legacy-project")
+        .bind("url")
+        .bind("https://example.com/legacy.yaml")
+        .bind("profile")
+        .bind("legacy-project")
+        .bind(7_i64)
+        .bind(8_i64)
+        .execute(&pool)
+        .await
+        .expect("legacy proxy import should seed");
+
+        pool.execute(
+            r#"
+            CREATE TABLE api_keys (
+              key_id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              secret_prefix TEXT NOT NULL,
+              secret_salt TEXT NOT NULL,
+              secret_hash TEXT NOT NULL,
+              created_by_subject TEXT NOT NULL,
+              scope_kind TEXT NOT NULL,
+              created_at INTEGER NOT NULL,
+              last_used_at INTEGER,
+              revoked_at INTEGER
+            )
+            "#,
+        )
+        .await
+        .expect("legacy api keys table should seed");
+        sqlx::query(
+            r#"
+            INSERT INTO api_keys (
+              key_id, name, secret_prefix, secret_salt, secret_hash,
+              created_by_subject, scope_kind, created_at, last_used_at, revoked_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, NULL)
+            "#,
+        )
+        .bind(ids::random_key_id())
+        .bind("Legacy key")
+        .bind("pbk_legacy")
+        .bind("salt")
+        .bind("hash")
+        .bind("legacy-user")
+        .bind("selected_profiles")
+        .bind(7_i64)
+        .execute(&pool)
+        .await
+        .expect("legacy api key should seed");
+        pool.close().await;
+
+        let store = SqliteStore::open(&path)
+            .await
+            .expect("sqlite store should migrate legacy proxy imports");
+        let imports = store
+            .list_proxy_imports()
+            .await
+            .expect("proxy imports should list after migration");
+        assert_eq!(imports.len(), 1);
+        assert_eq!(
+            imports[0].source_scope,
+            ProxyScope::project("legacy-project")
+        );
+        assert_eq!(
+            imports[0].allocation_scope,
+            ProxyScope::project("legacy-project")
+        );
+
+        let scope_kind: String = sqlx::query_scalar("SELECT scope_kind FROM api_keys")
+            .fetch_one(&store.pool)
+            .await
+            .expect("api key scope kind should load");
+        assert_eq!(scope_kind, "selected_projects");
 
         let _ = tokio::fs::remove_file(path).await;
     }
