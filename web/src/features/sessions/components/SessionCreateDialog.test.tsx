@@ -48,7 +48,7 @@ describe("SessionCreateDialog", () => {
     expect(screen.getByText("0 IPs selected")).toBeInTheDocument();
     expect(submit).toBeDisabled();
 
-    await user.click(screen.getByRole("button", { name: /203\.0\.113\.10/i }));
+    await user.click(await screen.findByRole("button", { name: /203\.0\.113\.10/i }));
     expect(screen.getByText("1 IPs selected")).toBeInTheDocument();
     expect(submit).toBeEnabled();
 
@@ -83,7 +83,7 @@ describe("SessionCreateDialog", () => {
       });
     });
 
-    await user.click(screen.getByRole("button", { name: /203\.0\.113\.10/i }));
+    await user.click(await screen.findByRole("button", { name: /203\.0\.113\.10/i }));
     expect(screen.getByText("1 IPs selected")).toBeInTheDocument();
 
     rerender(
