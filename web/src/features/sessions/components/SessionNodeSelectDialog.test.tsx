@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { SessionNodeSelectDialog } from "@/features/sessions/components/SessionNodeSelectDialog";
 import { I18nProvider } from "@/i18n";
-import { sessionIpNodeOptionsFixture, sessionsFixture } from "@/mocks/fixtures";
+import { sessionNodeOptionsFixture, sessionsFixture } from "@/mocks/fixtures";
 
 function renderWithProviders(node: ReactNode) {
   return render(
@@ -17,9 +17,9 @@ function renderWithProviders(node: ReactNode) {
 }
 
 describe("SessionNodeSelectDialog", () => {
-  it("loads IP options and submits the selected IP candidate set", async () => {
+  it("loads all node options, switches groups, and submits the selected node", async () => {
     const user = userEvent.setup();
-    const onSearch = vi.fn().mockResolvedValue(sessionIpNodeOptionsFixture.groups);
+    const onSearch = vi.fn().mockResolvedValue(sessionNodeOptionsFixture.items);
     const onSubmit = vi.fn();
 
     renderWithProviders(
@@ -31,41 +31,51 @@ describe("SessionNodeSelectDialog", () => {
         onOpenChange={vi.fn()}
         onSearch={onSearch}
         onSubmit={onSubmit}
+        onProbeNodes={vi.fn()}
       />,
     );
 
     await waitFor(() => {
-      expect(onSearch).toHaveBeenCalledWith({
+      expect(onSearch).toHaveBeenCalledWith(sessionsFixture.sessions[0]?.session_id, {
         query: undefined,
-        group_by: "subscription",
-        session_id: sessionsFixture.sessions[0]?.session_id,
-        limit: 80,
+        sort_mode: "session_recent",
       });
     });
 
-    await user.click(screen.getByRole("button", { name: /198\.51\.100\.42/i }));
-    await user.click(screen.getByRole("button", { name: /Use selected candidates/i }));
+    expect(screen.getByRole("button", { name: /Current session last used/i })).toHaveClass(
+      "bg-primary",
+    );
+    expect(screen.getAllByText("Japan / Tokyo / Chiyoda").length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: /Japan/i }).length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole("button", { name: /Current project last used/i }));
+    await user.click(screen.getByRole("radio", { name: /Group by subscription/i }));
+    expect(screen.getAllByRole("button", { name: /fallback-lab/i }).length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole("button", { name: /Select node US-SanJose-Edge/i }));
+    await user.click(screen.getByRole("button", { name: /Use selected node/i }));
 
     expect(onSubmit).toHaveBeenCalledWith(sessionsFixture.sessions[0]?.session_id, {
-      selected_ip: "198.51.100.42",
-      candidate_node_ids: ["node-us-sanjose-edge"],
+      node_id: "node-us-sanjose-edge",
     });
-  });
+  }, 25_000);
 
-  it("preserves in-progress selections when the same session refetches", async () => {
+  it("probes the current visible group and single nodes without changing selection", async () => {
     const user = userEvent.setup();
-    const onSearch = vi.fn().mockResolvedValue(sessionIpNodeOptionsFixture.groups);
+    const onSearch = vi.fn().mockResolvedValue(sessionNodeOptionsFixture.items);
     const onSubmit = vi.fn();
-    const session = sessionsFixture.sessions[0] ?? null;
-    const { rerender } = renderWithProviders(
+    const onProbeNodes = vi.fn();
+
+    renderWithProviders(
       <SessionNodeSelectDialog
         open
-        session={session}
+        session={sessionsFixture.sessions[0] ?? null}
         isPending={false}
         error={null}
         onOpenChange={vi.fn()}
         onSearch={onSearch}
         onSubmit={onSubmit}
+        onProbeNodes={onProbeNodes}
       />,
     );
 
@@ -73,82 +83,73 @@ describe("SessionNodeSelectDialog", () => {
       expect(onSearch).toHaveBeenCalled();
     });
 
-    await user.click(screen.getByRole("button", { name: /198\.51\.100\.42/i }));
+    await user.click(screen.getByRole("button", { name: /Probe current node JP-Tokyo-Entry/i }));
+    expect(onProbeNodes).toHaveBeenLastCalledWith(["node-jp-tokyo-entry"]);
 
-    rerender(
+    await user.click(screen.getByRole("button", { name: /Probe current group/i }));
+    expect(onProbeNodes).toHaveBeenLastCalledWith([
+      "node-jp-tokyo-entry",
+      "node-jp-osaka-edge",
+      "node-us-sanjose-edge",
+    ]);
+
+    await user.click(screen.getByRole("radio", { name: /Group by subscription/i }));
+    const fallbackButtons = screen.getAllByRole("button", { name: /fallback-lab/i });
+    await user.click(fallbackButtons[0] as HTMLElement);
+    await user.click(screen.getByRole("button", { name: /Probe current group/i }));
+    expect(onProbeNodes).toHaveBeenLastCalledWith(["node-us-sanjose-edge"]);
+
+    await user.click(screen.getByRole("button", { name: /Probe node US-SanJose-Edge/i }));
+    expect(onProbeNodes).toHaveBeenLastCalledWith(["node-us-sanjose-edge"]);
+
+    await user.click(screen.getByRole("button", { name: /Use selected node/i }));
+    expect(onSubmit).not.toHaveBeenCalled();
+  }, 25_000);
+
+  it("keeps an in-progress node selection when session polling refreshes the same session", async () => {
+    const user = userEvent.setup();
+    const session = sessionsFixture.sessions[0];
+    const onSearch = vi.fn().mockResolvedValue(sessionNodeOptionsFixture.items);
+    const onSubmit = vi.fn();
+    if (!session) {
+      throw new Error("Expected session fixture.");
+    }
+
+    const renderDialog = (nextSession: typeof session) => (
       <I18nProvider initialLocale="en-US">
         <TooltipProvider>
           <SessionNodeSelectDialog
             open
-            session={session ? { ...session, proxy_name: "JP-Tokyo-Entry (refetched)" } : null}
+            session={nextSession}
             isPending={false}
             error={null}
             onOpenChange={vi.fn()}
             onSearch={onSearch}
             onSubmit={onSubmit}
+            onProbeNodes={vi.fn()}
           />
         </TooltipProvider>
-      </I18nProvider>,
+      </I18nProvider>
     );
 
-    await user.click(screen.getByRole("button", { name: /Use selected candidates/i }));
-
-    expect(onSubmit).toHaveBeenCalledWith(session?.session_id, {
-      selected_ip: "198.51.100.42",
-      candidate_node_ids: ["node-us-sanjose-edge"],
-    });
-  });
-
-  it("reinitializes selections when switching to another session while open", async () => {
-    const user = userEvent.setup();
-    const onSearch = vi.fn().mockResolvedValue(sessionIpNodeOptionsFixture.groups);
-    const onSubmit = vi.fn();
-    const firstSession = sessionsFixture.sessions[0] ?? null;
-    const secondSession = sessionsFixture.sessions[1] ?? null;
-    const { rerender } = renderWithProviders(
-      <SessionNodeSelectDialog
-        open
-        session={firstSession}
-        isPending={false}
-        error={null}
-        onOpenChange={vi.fn()}
-        onSearch={onSearch}
-        onSubmit={onSubmit}
-      />,
-    );
+    const { rerender } = render(renderDialog(session));
 
     await waitFor(() => {
       expect(onSearch).toHaveBeenCalled();
     });
-    await user.click(screen.getByRole("button", { name: /198\.51\.100\.42/i }));
 
-    rerender(
-      <I18nProvider initialLocale="en-US">
-        <TooltipProvider>
-          <SessionNodeSelectDialog
-            open
-            session={secondSession}
-            isPending={false}
-            error={null}
-            onOpenChange={vi.fn()}
-            onSearch={onSearch}
-            onSubmit={onSubmit}
-          />
-        </TooltipProvider>
-      </I18nProvider>,
-    );
+    await user.click(screen.getByRole("button", { name: /Select node US-SanJose-Edge/i }));
+    rerender(renderDialog({ ...session, proxy_name: `${session.proxy_name} refreshed` }));
+    await user.click(screen.getByRole("button", { name: /Use selected node/i }));
 
-    await user.click(screen.getByRole("button", { name: /Use selected candidates/i }));
-
-    expect(onSubmit).toHaveBeenCalledWith(secondSession?.session_id, {
-      selected_ip: "203.0.113.88",
-      candidate_node_ids: ["node-jp-osaka-edge"],
+    expect(onSubmit).toHaveBeenCalledWith(session.session_id, {
+      node_id: "node-us-sanjose-edge",
     });
   });
 
-  it("disables submit and unchecks the IP when all candidate nodes are cleared", async () => {
-    const user = userEvent.setup();
-    const onSearch = vi.fn().mockResolvedValue(sessionIpNodeOptionsFixture.groups);
+  it("keeps the latest completed probe result visible without disabling another probe", async () => {
+    const onSearch = vi.fn().mockResolvedValue(sessionNodeOptionsFixture.items);
+
     renderWithProviders(
       <SessionNodeSelectDialog
         open
@@ -158,20 +159,88 @@ describe("SessionNodeSelectDialog", () => {
         onOpenChange={vi.fn()}
         onSearch={onSearch}
         onSubmit={vi.fn()}
+        onProbeNodes={vi.fn()}
+        probeNodeStates={{
+          "node-us-sanjose-edge": {
+            nodeId: "node-us-sanjose-edge",
+            runId: "run-completed",
+            kind: "proxy_latency_probe",
+            latestSampleMs: 88,
+            latestRound: 5,
+            samplesTotal: 5,
+            progressCurrent: 3,
+            progressTotal: 3,
+            message: "probe complete",
+            at: Date.now(),
+          },
+        }}
       />,
     );
 
     await waitFor(() => {
-      expect(onSearch).toHaveBeenCalled();
+      expect(screen.getAllByText("88 ms").length).toBeGreaterThan(0);
     });
 
-    const submit = screen.getByRole("button", { name: /Use selected candidates/i });
-    expect(submit).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Probe node US-SanJose-Edge/i })).toBeEnabled();
+  });
 
-    await user.click(await screen.findByRole("button", { name: /198\.51\.100\.42/i }));
-    await user.click(screen.getByRole("button", { name: /Clear nodes/i }));
+  it("keeps queued probe actions disabled from pending node ids", async () => {
+    const onSearch = vi.fn().mockResolvedValue(sessionNodeOptionsFixture.items);
 
-    expect(submit).toBeDisabled();
-    expect(screen.getByText("0 candidate nodes selected")).toBeInTheDocument();
+    renderWithProviders(
+      <SessionNodeSelectDialog
+        open
+        session={sessionsFixture.sessions[0] ?? null}
+        isPending={false}
+        error={null}
+        onOpenChange={vi.fn()}
+        onSearch={onSearch}
+        onSubmit={vi.fn()}
+        onProbeNodes={vi.fn()}
+        probingNodeIds={["node-jp-tokyo-entry"]}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Probe current group/i })).toBeDisabled();
+    });
+
+    expect(
+      screen.getByRole("button", { name: /Probe current node JP-Tokyo-Entry/i }),
+    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Probe node JP-Tokyo-Entry/i })).toBeDisabled();
+  });
+
+  it("keeps group probe disabled while a visible node has a live probe state", async () => {
+    const onSearch = vi.fn().mockResolvedValue(sessionNodeOptionsFixture.items);
+
+    renderWithProviders(
+      <SessionNodeSelectDialog
+        open
+        session={sessionsFixture.sessions[0] ?? null}
+        isPending={false}
+        error={null}
+        onOpenChange={vi.fn()}
+        onSearch={onSearch}
+        onSubmit={vi.fn()}
+        onProbeNodes={vi.fn()}
+        liveNodeStates={{
+          "node-jp-tokyo-entry": {
+            nodeId: "node-jp-tokyo-entry",
+            runId: "run-live",
+            kind: "proxy_latency_probe",
+            latestSampleMs: 91,
+            progressCurrent: 1,
+            progressTotal: 15,
+            message: "Probe sample finished.",
+            at: Date.now(),
+          },
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Probe current group/i })).toBeDisabled();
+    });
   });
 });

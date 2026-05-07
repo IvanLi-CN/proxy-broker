@@ -1,15 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useOutletContext } from "react-router-dom";
 import { toast } from "sonner";
 
+import { useProxyOperationEvents } from "@/hooks/use-proxy-operation-events";
 import { useI18n } from "@/i18n";
 import { api } from "@/lib/api";
 import { formatApiErrorMessage } from "@/lib/error-messages";
 import { resolveSessionDisplayAddress } from "@/lib/format";
 import { isGlobalProjectId } from "@/lib/project-selection";
+import type { ProxyOperationRequest } from "@/lib/types";
 import { SessionsPage } from "@/pages/SessionsPage";
 import type { RootOutletContext } from "@/routes/RootRoute";
+
+const QUEUED_PROBE_NODE_LOCK_TTL_MS = 30_000;
 
 export function SessionsRoute() {
   const { t } = useI18n();
@@ -18,6 +22,9 @@ export function SessionsRoute() {
   const isGlobalProject = outlet.isGlobalProject ?? isGlobalProjectId(projectId);
   const activeProjectId = outlet.activeProjectId ?? (isGlobalProject ? null : projectId);
   const previousProjectId = useRef(activeProjectId ?? "");
+  const [queuedProbeNodeIdsByRun, setQueuedProbeNodeIdsByRun] = useState<
+    Record<string, { nodeIds: string[]; queuedAt: number }>
+  >({});
   const queryClient = useQueryClient();
   const sessionsQuery = useQuery({
     queryKey: ["sessions", activeProjectId],
@@ -30,6 +37,10 @@ export function SessionsRoute() {
     queryFn: () => api.getSuggestedPort(activeProjectId ?? ""),
     enabled: Boolean(activeProjectId),
     refetchInterval: 5_000,
+  });
+  const proxyOperationEvents = useProxyOperationEvents({
+    projectId: activeProjectId,
+    enabled: Boolean(activeProjectId),
   });
 
   const openMutation = useMutation({
@@ -82,11 +93,25 @@ export function SessionsRoute() {
     },
     onError: (error) => toast.error(formatApiErrorMessage(error, t)),
   });
+  const probeMutation = useMutation({
+    mutationFn: (payload: ProxyOperationRequest) => api.probeProxyCatalogLatency(payload),
+    onSuccess: (response, variables) => {
+      setQueuedProbeNodeIdsByRun((current) => ({
+        ...current,
+        [response.run_id]: { nodeIds: variables.node_ids, queuedAt: Date.now() },
+      }));
+      toast.success(t("Queued latency probe"), {
+        description: t("Run ID: {runId}", { runId: response.run_id }),
+      });
+    },
+    onError: (error) => toast.error(formatApiErrorMessage(error, t)),
+  });
 
   const { reset: resetOpenMutation } = openMutation;
   const { reset: resetBatchMutation } = batchMutation;
   const { reset: resetSwitchMutation } = switchMutation;
   const { reset: resetCloseMutation } = closeMutation;
+  const { reset: resetProbeMutation } = probeMutation;
 
   useEffect(() => {
     if (!activeProjectId) {
@@ -100,13 +125,50 @@ export function SessionsRoute() {
     resetBatchMutation();
     resetSwitchMutation();
     resetCloseMutation();
+    resetProbeMutation();
+    setQueuedProbeNodeIdsByRun({});
   }, [
     activeProjectId,
     resetBatchMutation,
     resetCloseMutation,
     resetOpenMutation,
+    resetProbeMutation,
     resetSwitchMutation,
   ]);
+
+  useEffect(() => {
+    if (Object.keys(queuedProbeNodeIdsByRun).length === 0) {
+      return undefined;
+    }
+    const pruneQueuedProbeNodes = () => {
+      const now = Date.now();
+      setQueuedProbeNodeIdsByRun((current) => {
+        const next = Object.fromEntries(
+          Object.entries(current).filter(([runId, queued]) => {
+            const run = proxyOperationEvents.runsById[runId];
+            if (run) {
+              return !["succeeded", "failed", "skipped"].includes(run.status);
+            }
+            return now - queued.queuedAt < QUEUED_PROBE_NODE_LOCK_TTL_MS;
+          }),
+        );
+        return Object.keys(next).length === Object.keys(current).length ? current : next;
+      });
+    };
+    pruneQueuedProbeNodes();
+    const intervalId = window.setInterval(pruneQueuedProbeNodes, 1_000);
+    return () => window.clearInterval(intervalId);
+  }, [proxyOperationEvents.runsById, queuedProbeNodeIdsByRun]);
+
+  const queuedProbeNodeIds = useMemo(
+    () => [
+      ...new Set([
+        ...(probeMutation.isPending ? (probeMutation.variables?.node_ids ?? []) : []),
+        ...Object.values(queuedProbeNodeIdsByRun).flatMap((queued) => queued.nodeIds),
+      ]),
+    ],
+    [probeMutation.isPending, probeMutation.variables, queuedProbeNodeIdsByRun],
+  );
 
   if (!activeProjectId) {
     return <Navigate replace to="/proxies" />;
@@ -137,17 +199,30 @@ export function SessionsRoute() {
       onUpdateSessionNode={async (sessionId, payload) => {
         await switchMutation.mutateAsync({ sessionId, payload });
       }}
+      onProbeSessionNodes={async (nodeIds) => {
+        await probeMutation.mutateAsync({
+          view: "project",
+          project_id: activeProjectId,
+          node_ids: nodeIds,
+        });
+      }}
       openError={openMutation.isError ? formatApiErrorMessage(openMutation.error, t) : null}
       openResponse={openMutation.data ?? null}
       opening={openMutation.isPending}
       searchSessionIpNodeOptions={async (payload) =>
         (await api.searchSessionIpNodeOptions(activeProjectId, payload)).groups
       }
+      searchSessionNodeOptions={async (sessionId, payload) =>
+        (await api.searchSessionNodeOptions(activeProjectId, sessionId, payload)).items
+      }
       sessions={sessionsQuery.data?.sessions ?? []}
       sessionsLoading={sessionsQuery.isLoading}
       suggestedPort={suggestedPortQuery.data?.port ?? null}
       switchError={switchMutation.isError ? formatApiErrorMessage(switchMutation.error, t) : null}
       switchedSessionId={switchMutation.data?.session_id ?? null}
+      probingNodeIds={queuedProbeNodeIds}
+      liveNodeStates={proxyOperationEvents.activeRunByNodeId}
+      probeNodeStates={proxyOperationEvents.runByNodeId}
       switchingSessionId={
         switchMutation.isPending ? (switchMutation.variables?.sessionId ?? null) : null
       }

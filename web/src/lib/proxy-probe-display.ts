@@ -5,7 +5,7 @@ export function probeLatencyToneClass(
   latencyMs: number | null | undefined,
 ) {
   if (state === "failed") {
-    return "text-destructive";
+    return "text-rose-700 dark:text-rose-300";
   }
 
   if (state === "empty" || latencyMs == null) {
@@ -13,14 +13,14 @@ export function probeLatencyToneClass(
   }
 
   if (latencyMs <= 150) {
-    return "text-chart-5";
+    return "text-emerald-700 dark:text-emerald-300";
   }
 
   if (latencyMs <= 300) {
-    return "text-chart-3";
+    return "text-amber-700 dark:text-amber-300";
   }
 
-  return "text-destructive";
+  return "text-rose-700 dark:text-rose-300";
 }
 
 export function probeLatencyBadgeToneClass(
@@ -28,7 +28,7 @@ export function probeLatencyBadgeToneClass(
   latencyMs: number | null | undefined,
 ) {
   if (state === "failed") {
-    return "border-destructive/20 bg-destructive/10 text-destructive";
+    return "border-rose-700/25 bg-rose-50 text-rose-800 dark:border-rose-300/25 dark:bg-rose-950/40 dark:text-rose-200";
   }
 
   if (state === "empty" || latencyMs == null) {
@@ -36,12 +36,12 @@ export function probeLatencyBadgeToneClass(
   }
 
   if (latencyMs <= 150) {
-    return "border-chart-5/25 bg-chart-5/10 text-chart-5";
+    return "border-emerald-700/25 bg-emerald-50 text-emerald-800 dark:border-emerald-300/25 dark:bg-emerald-950/40 dark:text-emerald-200";
   }
 
   if (latencyMs <= 300) {
-    return "border-chart-3/25 bg-chart-3/10 text-chart-3";
+    return "border-amber-700/25 bg-amber-50 text-amber-800 dark:border-amber-300/25 dark:bg-amber-950/40 dark:text-amber-200";
   }
 
-  return "border-destructive/20 bg-destructive/10 text-destructive";
+  return "border-rose-700/25 bg-rose-50 text-rose-800 dark:border-rose-300/25 dark:bg-rose-950/40 dark:text-rose-200";
 }

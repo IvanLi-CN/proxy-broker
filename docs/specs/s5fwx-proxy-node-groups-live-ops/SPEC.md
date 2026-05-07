@@ -225,6 +225,34 @@ PR: include
 
 - `source_type=storybook_canvas`
 - `target_program=mock-only`
+- `capture_scope=element`
+- `requested_viewport=900x720`
+- `viewport_strategy=storybook-viewport`
+- `sensitive_exclusion=N/A`
+- `submission_gate=approved`
+- `story_id_or_title=Features/Sessions/SessionNodeSelectDialog/ZhCN`
+- `state=session node candidate probe actions`
+- `evidence_note=Shows the session node switch dialog with a current-group latency probe action in the group header and per-node latency probe buttons on each candidate row, without overlapping the selected/current badges or latency history.`
+
+PR: include
+![Session node candidate probe actions](./assets/session-node-select-probe-actions.png)
+
+- `source_type=storybook_canvas`
+- `target_program=mock-only`
+- `capture_scope=browser-viewport`
+- `requested_viewport=1760x1160`
+- `viewport_strategy=storybook-viewport`
+- `sensitive_exclusion=N/A`
+- `submission_gate=approved`
+- `story_id_or_title=Features/Sessions/SessionNodeSelectDialog/ZhCN`
+- `state=current session node probe action`
+- `evidence_note=Shows the current session node summary with geo metadata, latest latency value, and an independent current-node probe action. Candidate node cards remain 94px tall in the same render.`
+
+PR: include
+![Current session node probe action](./assets/session-node-select-current-node-probe.png)
+
+- `source_type=storybook_canvas`
+- `target_program=mock-only`
 - `capture_scope=browser-viewport`
 - `requested_viewport=1440x1040`
 - `viewport_strategy=browser-resize-fallback`

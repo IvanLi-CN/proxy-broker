@@ -5,7 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { sessionCopyAddressFormatStorageKey } from "@/features/sessions/hooks/use-session-copy-address-format";
 import { I18nProvider } from "@/i18n";
-import { sessionIpNodeOptionsFixture, sessionsFixture } from "@/mocks/fixtures";
+import {
+  sessionIpNodeOptionsFixture,
+  sessionNodeOptionsFixture,
+  sessionsFixture,
+} from "@/mocks/fixtures";
 import { SessionsPage } from "@/pages/SessionsPage";
 
 const mockToast = vi.hoisted(() => ({
@@ -74,6 +78,8 @@ describe("SessionsPage", () => {
         onOpenBatch={vi.fn()}
         onUpdateSessionNode={vi.fn()}
         searchSessionIpNodeOptions={vi.fn(async () => sessionIpNodeOptionsFixture.groups)}
+        onProbeSessionNodes={vi.fn()}
+        searchSessionNodeOptions={vi.fn(async () => sessionNodeOptionsFixture.items)}
         onCloseSession={vi.fn()}
         onResetCreateState={vi.fn()}
         onResetSwitchState={vi.fn()}
@@ -115,6 +121,8 @@ describe("SessionsPage", () => {
         onOpenBatch={vi.fn()}
         onUpdateSessionNode={vi.fn()}
         searchSessionIpNodeOptions={vi.fn(async () => sessionIpNodeOptionsFixture.groups)}
+        onProbeSessionNodes={vi.fn()}
+        searchSessionNodeOptions={vi.fn(async () => sessionNodeOptionsFixture.items)}
         onCloseSession={onCloseSession}
         onResetCreateState={vi.fn()}
         onResetSwitchState={vi.fn()}
@@ -171,6 +179,8 @@ describe("SessionsPage", () => {
         onOpenBatch={vi.fn()}
         onUpdateSessionNode={vi.fn()}
         searchSessionIpNodeOptions={vi.fn(async () => sessionIpNodeOptionsFixture.groups)}
+        onProbeSessionNodes={vi.fn()}
+        searchSessionNodeOptions={vi.fn(async () => sessionNodeOptionsFixture.items)}
         onCloseSession={onCloseSession}
         onResetCreateState={vi.fn()}
         onResetSwitchState={vi.fn()}
@@ -222,6 +232,8 @@ describe("SessionsPage", () => {
         onOpenBatch={vi.fn()}
         onUpdateSessionNode={vi.fn()}
         searchSessionIpNodeOptions={vi.fn(async () => sessionIpNodeOptionsFixture.groups)}
+        onProbeSessionNodes={vi.fn()}
+        searchSessionNodeOptions={vi.fn(async () => sessionNodeOptionsFixture.items)}
         onCloseSession={onCloseSession}
         onResetCreateState={vi.fn()}
         onResetSwitchState={vi.fn()}

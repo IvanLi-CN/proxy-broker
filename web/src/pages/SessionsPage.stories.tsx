@@ -1,10 +1,14 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, fn, userEvent, within } from "storybook/test";
 
 import { AppShell } from "@/components/AppShell";
 import { sessionCopyAddressFormatStorageKey } from "@/features/sessions/hooks/use-session-copy-address-format";
 import type { SessionListItem } from "@/lib/types";
-import { sessionIpNodeOptionsFixture, sessionsFixture } from "@/mocks/fixtures";
+import {
+  sessionIpNodeOptionsFixture,
+  sessionNodeOptionsFixture,
+  sessionsFixture,
+} from "@/mocks/fixtures";
 import { SessionsPage } from "@/pages/SessionsPage";
 
 const longSessionList: SessionListItem[] = Array.from({ length: 28 }, (_, index) => {
@@ -99,13 +103,15 @@ const meta = {
     suggestedPort: 10080,
     closingSessionId: null,
     switchingSessionId: null,
-    onOpenSession: () => undefined,
-    onOpenBatch: () => undefined,
-    onUpdateSessionNode: () => undefined,
-    searchSessionIpNodeOptions: async () => sessionIpNodeOptionsFixture.groups,
-    onCloseSession: () => undefined,
-    onResetCreateState: () => undefined,
-    onResetSwitchState: () => undefined,
+    onOpenSession: fn(),
+    onOpenBatch: fn(),
+    onUpdateSessionNode: fn(),
+    onProbeSessionNodes: fn(),
+    searchSessionIpNodeOptions: fn(async () => sessionIpNodeOptionsFixture.groups),
+    searchSessionNodeOptions: fn(async () => sessionNodeOptionsFixture.items),
+    onCloseSession: fn(),
+    onResetCreateState: fn(),
+    onResetSwitchState: fn(),
   },
 } satisfies Meta<typeof SessionsPage>;
 
@@ -238,8 +244,10 @@ export const SwitchDialogFlow: Story = {
     );
     const dialog = within(canvasElement.ownerDocument.body);
     await dialog.findByRole("dialog", { name: /Switch session proxy/i });
-    await expect(
-      await dialog.findByRole("button", { name: /Use selected candidates/i }),
-    ).toBeEnabled();
+    await dialog.findByRole("radio", { name: /Group by region/i });
+    await dialog.findByRole("button", { name: /Current session last used/i });
+    await dialog.findByRole("button", { name: /Probe current group/i });
+    await dialog.findByRole("button", { name: /Probe node JP-Tokyo-Entry/i });
+    await dialog.findByRole("button", { name: /Use selected node/i });
   },
 };

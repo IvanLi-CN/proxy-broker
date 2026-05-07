@@ -170,10 +170,27 @@ export function useProxyOperationEvents({
     return active;
   }, [nodeStateById, runsById]);
 
+  const runByNodeId = useMemo(() => {
+    const latest: Record<string, ProxyNodeLiveState> = {};
+    for (const [nodeId, state] of Object.entries(nodeStateById)) {
+      const run = runsById[state.runId];
+      latest[nodeId] = run
+        ? {
+            ...state,
+            kind: run.kind as ProxyKind,
+            progressCurrent: run.progress_current,
+            progressTotal: run.progress_total,
+          }
+        : state;
+    }
+    return latest;
+  }, [nodeStateById, runsById]);
+
   return {
     connectionState,
     runsById,
     nodeStateById,
+    runByNodeId,
     activeRunByNodeId,
   };
 }
