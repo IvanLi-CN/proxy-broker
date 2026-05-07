@@ -11,6 +11,7 @@ import {
   type SessionCopyAddressFormat,
   useSessionCopyAddressFormat,
 } from "@/features/sessions/hooks/use-session-copy-address-format";
+import type { ProxyNodeLiveState } from "@/hooks/use-proxy-operation-events";
 import { useI18n } from "@/i18n";
 import type {
   OpenBatchByIpRequest,
@@ -18,8 +19,10 @@ import type {
   OpenSessionByIpRequest,
   OpenSessionResponse,
   SearchSessionIpNodeOptionsRequest,
+  SearchSessionNodeOptionsRequest,
   SessionIpNodeOptionGroupItem,
   SessionListItem,
+  SessionNodeOptionItem,
   UpdateSessionNodeRequest,
 } from "@/lib/types";
 
@@ -46,6 +49,14 @@ interface SessionsPageProps {
   searchSessionIpNodeOptions: (
     payload: SearchSessionIpNodeOptionsRequest,
   ) => Promise<SessionIpNodeOptionGroupItem[] | undefined>;
+  onProbeSessionNodes: (nodeIds: string[]) => void | Promise<void>;
+  probingNodeIds?: string[];
+  liveNodeStates?: Record<string, ProxyNodeLiveState>;
+  probeNodeStates?: Record<string, ProxyNodeLiveState>;
+  searchSessionNodeOptions: (
+    sessionId: string,
+    payload: SearchSessionNodeOptionsRequest,
+  ) => Promise<SessionNodeOptionItem[] | undefined>;
   onCloseSession: (sessionId: string) => void | Promise<void>;
   onResetCreateState: () => void;
   onResetSwitchState: () => void;
@@ -69,6 +80,11 @@ export function SessionsPage({
   onOpenBatch,
   onUpdateSessionNode,
   searchSessionIpNodeOptions,
+  onProbeSessionNodes,
+  probingNodeIds = [],
+  liveNodeStates = {},
+  probeNodeStates = {},
+  searchSessionNodeOptions,
   onCloseSession,
   onResetCreateState,
   onResetSwitchState,
@@ -388,14 +404,18 @@ export function SessionsPage({
         session={editingSession}
         isPending={Boolean(editingSession && switchingSessionId === editingSession.session_id)}
         error={switchError}
+        probingNodeIds={probingNodeIds}
+        liveNodeStates={liveNodeStates}
+        probeNodeStates={probeNodeStates}
         onOpenChange={(nextOpen) => {
           if (!nextOpen) {
             setEditingSessionId(null);
             onResetSwitchState();
           }
         }}
-        onSearch={searchSessionIpNodeOptions}
+        onSearch={searchSessionNodeOptions}
         onSubmit={onUpdateSessionNode}
+        onProbeNodes={onProbeSessionNodes}
       />
     </div>
   );
