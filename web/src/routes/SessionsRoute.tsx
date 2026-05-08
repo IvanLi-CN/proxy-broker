@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useOutletContext } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -169,6 +169,57 @@ export function SessionsRoute() {
     ],
     [probeMutation.isPending, probeMutation.variables, queuedProbeNodeIdsByRun],
   );
+  const handleCloseSession = useCallback(
+    async (sessionId: string) => {
+      await closeMutation.mutateAsync(sessionId);
+    },
+    [closeMutation.mutateAsync],
+  );
+  const handleOpenBatch = useCallback(
+    async (payload: Parameters<typeof api.openBatchByIp>[1]) => {
+      await batchMutation.mutateAsync(payload);
+    },
+    [batchMutation.mutateAsync],
+  );
+  const handleOpenSession = useCallback(
+    async (payload: Parameters<typeof api.openSessionByIp>[1]) => {
+      await openMutation.mutateAsync(payload);
+    },
+    [openMutation.mutateAsync],
+  );
+  const handleResetCreateState = useCallback(() => {
+    resetOpenMutation();
+    resetBatchMutation();
+  }, [resetBatchMutation, resetOpenMutation]);
+  const handleResetSwitchState = useCallback(() => {
+    resetSwitchMutation();
+  }, [resetSwitchMutation]);
+  const handleUpdateSessionNode = useCallback(
+    async (sessionId: string, payload: Parameters<typeof api.updateSessionNode>[2]) => {
+      await switchMutation.mutateAsync({ sessionId, payload });
+    },
+    [switchMutation.mutateAsync],
+  );
+  const handleProbeSessionNodes = useCallback(
+    async (nodeIds: string[]) => {
+      await probeMutation.mutateAsync({
+        view: "project",
+        project_id: activeProjectId ?? "",
+        node_ids: nodeIds,
+      });
+    },
+    [activeProjectId, probeMutation.mutateAsync],
+  );
+  const searchSessionIpNodeOptions = useCallback(
+    async (payload: Parameters<typeof api.searchSessionIpNodeOptions>[1]) =>
+      (await api.searchSessionIpNodeOptions(activeProjectId ?? "", payload)).groups,
+    [activeProjectId],
+  );
+  const searchSessionNodeOptions = useCallback(
+    async (sessionId: string, payload: Parameters<typeof api.searchSessionNodeOptions>[2]) =>
+      (await api.searchSessionNodeOptions(activeProjectId ?? "", sessionId, payload)).items,
+    [activeProjectId],
+  );
 
   if (!activeProjectId) {
     return <Navigate replace to="/proxies" />;
@@ -180,41 +231,18 @@ export function SessionsRoute() {
       batchOpening={batchMutation.isPending}
       batchResponse={batchMutation.data ?? null}
       closingSessionId={closeMutation.isPending ? closeMutation.variables : null}
-      onCloseSession={async (sessionId) => {
-        await closeMutation.mutateAsync(sessionId);
-      }}
-      onOpenBatch={async (payload) => {
-        await batchMutation.mutateAsync(payload);
-      }}
-      onOpenSession={async (payload) => {
-        await openMutation.mutateAsync(payload);
-      }}
-      onResetCreateState={() => {
-        resetOpenMutation();
-        resetBatchMutation();
-      }}
-      onResetSwitchState={() => {
-        resetSwitchMutation();
-      }}
-      onUpdateSessionNode={async (sessionId, payload) => {
-        await switchMutation.mutateAsync({ sessionId, payload });
-      }}
-      onProbeSessionNodes={async (nodeIds) => {
-        await probeMutation.mutateAsync({
-          view: "project",
-          project_id: activeProjectId,
-          node_ids: nodeIds,
-        });
-      }}
+      onCloseSession={handleCloseSession}
+      onOpenBatch={handleOpenBatch}
+      onOpenSession={handleOpenSession}
+      onResetCreateState={handleResetCreateState}
+      onResetSwitchState={handleResetSwitchState}
+      onUpdateSessionNode={handleUpdateSessionNode}
+      onProbeSessionNodes={handleProbeSessionNodes}
       openError={openMutation.isError ? formatApiErrorMessage(openMutation.error, t) : null}
       openResponse={openMutation.data ?? null}
       opening={openMutation.isPending}
-      searchSessionIpNodeOptions={async (payload) =>
-        (await api.searchSessionIpNodeOptions(activeProjectId, payload)).groups
-      }
-      searchSessionNodeOptions={async (sessionId, payload) =>
-        (await api.searchSessionNodeOptions(activeProjectId, sessionId, payload)).items
-      }
+      searchSessionIpNodeOptions={searchSessionIpNodeOptions}
+      searchSessionNodeOptions={searchSessionNodeOptions}
       sessions={sessionsQuery.data?.sessions ?? []}
       sessionsLoading={sessionsQuery.isLoading}
       suggestedPort={suggestedPortQuery.data?.port ?? null}
