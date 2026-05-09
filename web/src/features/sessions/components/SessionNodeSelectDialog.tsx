@@ -148,6 +148,7 @@ export function SessionNodeSelectDialog({
 }: SessionNodeSelectDialogProps) {
   const { locale, t } = useI18n();
   const displayAddress = session ? resolveSessionDisplayAddress(session) : null;
+  const sessionId = session?.session_id ?? null;
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
   const [groupingMode, setGroupingMode] = useState<GroupingMode>("geo");
@@ -173,7 +174,7 @@ export function SessionNodeSelectDialog({
   }, [open, session]);
 
   useEffect(() => {
-    if (!open || !session) {
+    if (!open || !sessionId) {
       return;
     }
 
@@ -181,7 +182,7 @@ export function SessionNodeSelectDialog({
     setLoading(true);
     setLoadError(null);
 
-    void onSearch(session.session_id, {
+    void onSearch(sessionId, {
       query: deferredQuery.trim() || undefined,
       sort_mode: "session_recent",
     })
@@ -203,7 +204,7 @@ export function SessionNodeSelectDialog({
           setLoading(false);
         }
       });
-  }, [deferredQuery, onSearch, open, session, t]);
+  }, [deferredQuery, onSearch, open, sessionId, t]);
 
   const selectedItem = useMemo(
     () => items.find((item) => item.node_id === selectedNodeId) ?? null,
@@ -252,7 +253,7 @@ export function SessionNodeSelectDialog({
       },
     ];
     const regularGroups = [...generatedGroups.values()].sort(
-      (left, right) => right.count - left.count || left.label.localeCompare(right.label),
+      (left, right) => left.label.localeCompare(right.label) || right.count - left.count,
     );
     return {
       groups: [...specialGroups, ...regularGroups],
@@ -465,10 +466,10 @@ export function SessionNodeSelectDialog({
           />
         </div>
 
-        <div className="grid min-h-0 flex-1 gap-4 overflow-hidden md:grid-cols-[300px_minmax(0,1fr)]">
-          <div className="flex min-h-0 flex-col gap-2">
-            <div className="flex items-center justify-between gap-3">
-              <Label>{t("Group nodes")}</Label>
+        <div className="grid min-h-0 flex-1 gap-4 overflow-hidden md:grid-cols-[minmax(0,300px)_minmax(0,1fr)]">
+          <div className="flex min-h-0 min-w-0 flex-col gap-2">
+            <div className="flex min-w-0 items-center justify-between gap-3">
+              <Label className="min-w-0 truncate">{t("Group nodes")}</Label>
               <ToggleGroup
                 type="single"
                 value={groupingMode}
@@ -481,7 +482,7 @@ export function SessionNodeSelectDialog({
                 variant="outline"
                 size="sm"
                 aria-label={t("Group nodes")}
-                className="bg-card"
+                className="shrink-0 bg-card"
               >
                 <ToggleGroupItem value="geo" aria-label={t("Group by region")}>
                   <Globe2Icon className="size-4" />
@@ -493,23 +494,30 @@ export function SessionNodeSelectDialog({
                 </ToggleGroupItem>
               </ToggleGroup>
             </div>
-            <ScrollArea className="h-48 rounded-xl border border-border/70 bg-card/70 md:h-full">
-              <div className="space-y-1 p-2">
+            <ScrollArea
+              data-testid="session-node-group-scroll"
+              className="h-48 min-w-0 rounded-xl border border-border/70 bg-card/70 [&_[data-slot=scroll-area-viewport]>div]:!block [&_[data-slot=scroll-area-viewport]>div]:!min-w-0 [&_[data-slot=scroll-area-viewport]>div]:!w-full md:h-full"
+            >
+              <div className="min-w-0 max-w-full space-y-1 overflow-hidden p-2">
                 {grouped.groups.map((group) => {
                   const active = group.key === activeGroupKey;
                   return (
                     <button
                       key={group.key}
                       type="button"
+                      data-testid="session-node-group-option"
                       onClick={() => setActiveGroupKey(group.key)}
                       className={cn(
-                        "flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors",
+                        "flex w-full items-center justify-between gap-3 overflow-hidden rounded-lg px-3 py-2 text-left text-sm transition-colors",
                         active
                           ? "bg-primary text-primary-foreground shadow-sm"
                           : "text-muted-foreground hover:bg-muted hover:text-foreground",
                       )}
                     >
-                      <span className="min-w-0">
+                      <span
+                        data-testid="session-node-group-label-block"
+                        className="min-w-0 flex-1 overflow-hidden"
+                      >
                         <span className="block truncate font-medium">{group.label}</span>
                         <span
                           className={cn(
@@ -525,7 +533,7 @@ export function SessionNodeSelectDialog({
                       </span>
                       <Badge
                         variant={active ? "secondary" : "outline"}
-                        className="shrink-0 tabular-nums"
+                        className="max-w-16 shrink-0 truncate tabular-nums"
                       >
                         {group.count}
                       </Badge>

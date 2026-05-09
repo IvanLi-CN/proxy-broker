@@ -1,11 +1,12 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { SessionNodeSelectDialog } from "@/features/sessions/components/SessionNodeSelectDialog";
 import { I18nProvider } from "@/i18n";
+import type { SessionNodeOptionItem } from "@/lib/types";
 import { sessionNodeOptionsFixture, sessionsFixture } from "@/mocks/fixtures";
 
 function renderWithProviders(node: ReactNode) {
@@ -145,6 +146,180 @@ describe("SessionNodeSelectDialog", () => {
     expect(onSubmit).toHaveBeenCalledWith(session.session_id, {
       node_id: "node-us-sanjose-edge",
     });
+  });
+
+  it("sorts generated node groups by name instead of count", async () => {
+    const session = sessionsFixture.sessions[0];
+    const baseItem = sessionNodeOptionsFixture.items[0];
+    if (!session || !baseItem) {
+      throw new Error("Expected session and node fixtures.");
+    }
+    const makeItem = (
+      nodeId: string,
+      countryName: string,
+      regionName: string,
+      city: string,
+    ): SessionNodeOptionItem => ({
+      ...baseItem,
+      node_id: nodeId,
+      proxy_name: nodeId,
+      country_code: countryName === "Canada" ? "CA" : "US",
+      country_name: countryName,
+      region_name: regionName,
+      city,
+    });
+    const items = [
+      makeItem("node-z-1", "United States", "California", "San Jose"),
+      makeItem("node-z-2", "United States", "California", "San Jose"),
+      makeItem("node-a-1", "Canada", "Ontario", "Toronto"),
+    ];
+    const onSearch = vi.fn().mockResolvedValue(items);
+
+    renderWithProviders(
+      <SessionNodeSelectDialog
+        open
+        session={session}
+        isPending={false}
+        error={null}
+        onOpenChange={vi.fn()}
+        onSearch={onSearch}
+        onSubmit={vi.fn()}
+        onProbeNodes={vi.fn()}
+      />,
+    );
+
+    await screen.findByRole("button", { name: /Canada \/ Ontario \/ Toronto/i });
+
+    const groupLabels = screen
+      .getAllByTestId("session-node-group-label-block")
+      .map((element) => element.textContent ?? "");
+    expect(groupLabels).toEqual([
+      "Current session last used3 / 3 available",
+      "Current project last used3 / 3 available",
+      "Canada / Ontario / Toronto1 / 3 available",
+      "United States / California / San Jose2 / 3 available",
+    ]);
+  });
+
+  it("does not reload node options when the same session object refreshes during probing", async () => {
+    const session = sessionsFixture.sessions[0];
+    const onSearch = vi.fn().mockResolvedValue(sessionNodeOptionsFixture.items);
+    if (!session) {
+      throw new Error("Expected session fixture.");
+    }
+
+    const renderDialog = (
+      nextSession: typeof session,
+      liveNodeStates: ComponentProps<typeof SessionNodeSelectDialog>["liveNodeStates"] = {},
+    ) => (
+      <I18nProvider initialLocale="en-US">
+        <TooltipProvider>
+          <SessionNodeSelectDialog
+            open
+            session={nextSession}
+            isPending={false}
+            error={null}
+            onOpenChange={vi.fn()}
+            onSearch={onSearch}
+            onSubmit={vi.fn()}
+            onProbeNodes={vi.fn()}
+            liveNodeStates={liveNodeStates}
+          />
+        </TooltipProvider>
+      </I18nProvider>
+    );
+
+    const { rerender } = render(renderDialog(session));
+
+    await waitFor(() => {
+      expect(onSearch).toHaveBeenCalledTimes(1);
+    });
+    await screen.findByRole("button", { name: /Select node US-SanJose-Edge/i });
+
+    rerender(
+      renderDialog(
+        { ...session, proxy_name: `${session.proxy_name} refreshed` },
+        {
+          [session.node_id]: {
+            nodeId: session.node_id,
+            runId: "run-live",
+            kind: "proxy_latency_probe",
+            latestSampleMs: 91,
+            progressCurrent: 1,
+            progressTotal: 3,
+            message: "Probe sample finished.",
+            at: Date.now(),
+          },
+        },
+      ),
+    );
+
+    expect(screen.queryByText("Loading node options…")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Select node US-SanJose-Edge/i }),
+    ).toBeInTheDocument();
+    expect(onSearch).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not reload node options when a visible list node probe updates live state", async () => {
+    const session = sessionsFixture.sessions[0];
+    const onSearch = vi.fn().mockResolvedValue(sessionNodeOptionsFixture.items);
+    if (!session) {
+      throw new Error("Expected session fixture.");
+    }
+
+    const renderDialog = (
+      nextSession: typeof session,
+      liveNodeStates: ComponentProps<typeof SessionNodeSelectDialog>["liveNodeStates"] = {},
+    ) => (
+      <I18nProvider initialLocale="en-US">
+        <TooltipProvider>
+          <SessionNodeSelectDialog
+            open
+            session={nextSession}
+            isPending={false}
+            error={null}
+            onOpenChange={vi.fn()}
+            onSearch={onSearch}
+            onSubmit={vi.fn()}
+            onProbeNodes={vi.fn()}
+            liveNodeStates={liveNodeStates}
+          />
+        </TooltipProvider>
+      </I18nProvider>
+    );
+
+    const { rerender } = render(renderDialog(session));
+
+    await waitFor(() => {
+      expect(onSearch).toHaveBeenCalledTimes(1);
+    });
+    await screen.findByRole("button", { name: /Probe node US-SanJose-Edge/i });
+
+    rerender(
+      renderDialog(
+        { ...session, proxy_name: `${session.proxy_name} refreshed` },
+        {
+          "node-us-sanjose-edge": {
+            nodeId: "node-us-sanjose-edge",
+            runId: "run-list-node-live",
+            kind: "proxy_latency_probe",
+            latestSampleMs: 91,
+            progressCurrent: 1,
+            progressTotal: 3,
+            message: "Probe sample finished.",
+            at: Date.now(),
+          },
+        },
+      ),
+    );
+
+    expect(screen.queryByText("Loading node options…")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Select node US-SanJose-Edge/i }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("91 ms").length).toBeGreaterThan(0);
+    expect(onSearch).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the latest completed probe result visible without disabling another probe", async () => {

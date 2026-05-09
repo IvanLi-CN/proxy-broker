@@ -239,6 +239,45 @@
   ![切换代理弹窗双栏来源分组](./assets/session-switch-dialog-source-grouping.png)
 
 - source_type: `storybook_canvas`
+  target_program: `mock-only`
+  capture_scope: `element`
+  requested_viewport: `none`
+  viewport_strategy: `storybook-viewport`
+  sensitive_exclusion: `N/A`
+  submission_gate: `approved`
+  story_id_or_title: `Features/Sessions/SessionNodeSelectDialog/ProbeCurrentNodeWithoutReload`
+  state: `current node probe without list reload`
+  evidence_note: 点击当前节点测速后，父级刷新同一 `session_id` 的会话对象并写入 live probe state；弹窗顶部延迟更新为 91 ms，节点列表仍保留 3 个候选项且未回到 `Loading node options…`。
+  image:
+  ![切换代理弹窗当前节点测速不重载列表](./assets/session-node-select-probe-no-reload.png)
+
+- source_type: `storybook_canvas`
+  target_program: `mock-only`
+  capture_scope: `element`
+  requested_viewport: `none`
+  viewport_strategy: `storybook-viewport`
+  sensitive_exclusion: `N/A`
+  submission_gate: `approved`
+  story_id_or_title: `Features/Sessions/SessionNodeSelectDialog/ProbeListNodeWithoutReload`
+  state: `visible list node probe without list reload`
+  evidence_note: 点击候选节点行内测速按钮后，父级刷新同一 `session_id` 的会话对象并写入该行 live probe state；右侧候选列表仍保留 3 个节点，行内按钮禁用但列表没有回到 `Loading node options…`。
+  image:
+  ![切换代理弹窗行内节点测速不重载列表](./assets/session-node-select-list-probe-no-reload.png)
+
+- source_type: `storybook_canvas`
+  target_program: `mock-only`
+  capture_scope: `element`
+  requested_viewport: `1440x920`
+  viewport_strategy: `storybook-viewport`
+  sensitive_exclusion: `N/A`
+  submission_gate: `approved`
+  story_id_or_title: `Features/Sessions/SessionNodeSelectDialog/GroupListWidthConstrained`
+  state: `long group labels constrained`
+  evidence_note: 使用超长地区名压测左侧节点分组列表；Storybook play 在 Chromium 中断言分组 viewport 与按钮都没有横向溢出，计数 badge 保持在列表项内部且不再被文字推出边界。
+  image:
+  ![切换代理弹窗分组列表宽度受控](./assets/session-node-select-group-list-width-constrained-fixed.png)
+
+- source_type: `storybook_canvas`
   story_id_or_title: `Pages/SessionsPage/ClosingState`
   state: `close pending`
   evidence_note: 关闭动作先进入 10 秒撤销窗口；当前行整体置灰，关闭按钮切换为撤销，复制/编辑入口同步禁用。
