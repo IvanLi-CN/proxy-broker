@@ -9,6 +9,8 @@
   - `open_batch_by_node(project_id, node_ids)`
   - `get_system_settings()`
   - `update_system_settings(proxy_probe_interval_sec)`
+- `BrokerService::refresh(project_id, force)` and automatic metadata refresh persist refreshed project IP/probe results into node-level `(node_id, ip)` metadata for the effective project inventory.
+- Session node option queries read node-level metadata first and fall back to legacy project metadata when the node-level row is absent.
 - `BrokerStore` adds:
   - `insert_proxy_node_probe_samples(records)`
   - `list_recent_proxy_node_probe_samples(limit_per_node_ip)`

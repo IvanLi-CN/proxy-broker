@@ -263,6 +263,7 @@ Key management base path: `http://127.0.0.1:8080/api/v1/api-keys`
 ### Refresh probe and geo metadata
 
 - `POST /refresh`
+- Refresh updates project IP/probe records and backfills effective inventory `(node_id, ip)` metadata so node catalog and session node selectors keep geo/probe summaries after service upgrades.
 - Optional request body:
 
 ```json

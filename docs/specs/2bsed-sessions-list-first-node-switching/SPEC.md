@@ -40,6 +40,7 @@
 - 会话列表代理列必须提供 edit icon，并弹出同一双栏选择器；切换提交 `selected_ip + candidate_node_ids`。
 - 左栏必须支持搜索，并可按订阅或城市分组展示 IP；IP 行展示 IP、另一维摘要、相对最近使用时间、绝对时间 tooltip 与最低延迟。
 - 右栏必须展示当前 IP 下节点，默认全选，支持多选；节点行展示名称、订阅/地理摘要、延迟状态和测速历史 tooltip。
+- IP 与节点候选的地理和测速摘要以节点级 metadata 为主；若升级后 `(node_id, ip)` 记录尚未回填，必须 fallback 到 legacy project `ip_records` / `probe_records`。
 - 会话列表必须展示当前 selected IP 的国家/地区/城市摘要，并移除重复的 port badge。
 - 会话列表上方必须提供一个按 shadcn/ui `ToggleGroup` 实现、带本地记忆的复制格式选择器，固定支持 `SOCKS URI`、`HTTP URI` 与 `主机:端口` 三种输出。
 - 复制格式 `label` 只允许出现在选项左侧；不得再在选择器上方、下方或独立卡片内重复展示。
@@ -103,6 +104,9 @@
 - Given 双栏选择弹窗
   When 在订阅/城市分组间切换、输入关键词或取消部分候选节点
   Then 左栏 IP 和右栏节点状态保持同步，提交 payload 包含 `selected_ip + candidate_node_ids`。
+- Given legacy project `ip_records` 有国家 / 地区 / 城市但节点级 metadata 尚为空
+  When 打开创建或切换会话的 IP -> 节点候选弹窗
+  Then 左栏 IP 与右栏节点仍显示 legacy 地理摘要。
 - Given 已持久化的会话
   When 程序重启、升级或启动恢复阶段遇到临时运行时故障
   Then `/sessions` 列表仍显示这些会话，无法恢复到 runtime 的条目只记录 warning，不从 SQLite 删除。

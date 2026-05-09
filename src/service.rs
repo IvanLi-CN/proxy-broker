@@ -2445,21 +2445,24 @@ impl BrokerService {
                 .map(|record| {
                     let effective_project_ids =
                         self.effective_project_ids_for_record(&record, &projects, &settings);
-                    let mut ip_metadata = metadata_by_node
+                    let existing_ip_metadata = metadata_by_node
                         .get(&record.node_id)
                         .cloned()
                         .unwrap_or_default();
+                    let mut ip_metadata = Vec::new();
                     for ip in &record.resolved_ips {
-                        if ip_metadata.iter().any(|item| item.ip == *ip) {
-                            continue;
-                        }
-                        if let Some(backfilled) = self.backfill_proxy_node_metadata(
+                        let existing = existing_ip_metadata
+                            .iter()
+                            .find(|item| item.ip == *ip)
+                            .cloned();
+                        if let Some(metadata) = self.merge_proxy_node_metadata_with_legacy(
                             &record,
                             ip,
                             &effective_project_ids,
                             &legacy_metadata,
+                            existing,
                         ) {
-                            ip_metadata.push(backfilled);
+                            ip_metadata.push(metadata);
                         }
                     }
                     ip_metadata.sort_by(|left, right| left.ip.cmp(&right.ip));
@@ -2590,7 +2593,7 @@ impl BrokerService {
                 geo_source: ip_record.and_then(|item| item.geo_source.clone()),
                 probe_updated_at,
                 geo_updated_at: ip_record.and_then(|item| item.geo_updated_at),
-                last_probe_ok: (!sorted_probe_records.is_empty()).then_some(!successes.is_empty()),
+                last_probe_ok: sorted_probe_records.last().map(|probe| probe.ok),
                 last_latency_ms: sorted_probe_records
                     .last()
                     .and_then(|probe| probe.latency_ms),
@@ -2601,6 +2604,84 @@ impl BrokerService {
             });
         }
         None
+    }
+
+    fn merge_proxy_node_metadata_with_legacy(
+        &self,
+        record: &ProxyInventoryRecord,
+        ip: &str,
+        effective_project_ids: &[String],
+        legacy_metadata: &HashMap<String, LegacyProjectMetadata>,
+        existing: Option<ProxyNodeMetadataRecord>,
+    ) -> Option<ProxyNodeMetadataRecord> {
+        match (
+            existing,
+            self.backfill_proxy_node_metadata(record, ip, effective_project_ids, legacy_metadata),
+        ) {
+            (Some(existing), Some(backfilled)) => Some(sanitize_proxy_node_metadata_record(
+                merge_backfilled_proxy_node_metadata(backfilled, Some(&existing), None),
+            )),
+            (Some(existing), None) => Some(existing),
+            (None, Some(backfilled)) => Some(sanitize_proxy_node_metadata_record(backfilled)),
+            (None, None) => None,
+        }
+    }
+
+    async fn upsert_project_proxy_node_metadata_from_legacy_records(
+        &self,
+        project_id: &str,
+        target_ips: Option<&HashSet<String>>,
+    ) -> BrokerResult<usize> {
+        let effective_records = self
+            .compose_effective_proxy_inventory_records(project_id)
+            .await?;
+        if effective_records.is_empty() {
+            return Ok(0);
+        }
+
+        let effective_project_ids = vec![project_id.to_string()];
+        let legacy_metadata = self
+            .load_legacy_project_metadata(&effective_project_ids)
+            .await?;
+        let existing_by_pair = self.proxy_node_metadata_by_pair().await?;
+        let recent_samples_by_pair = self.recent_proxy_node_probe_samples_by_pair().await?;
+        let mut updates = Vec::new();
+
+        for record in &effective_records {
+            for ip in &record.resolved_ips {
+                if !ip_in_scope(ip, target_ips) {
+                    continue;
+                }
+                let Some(backfilled) = self.backfill_proxy_node_metadata(
+                    record,
+                    ip,
+                    &effective_project_ids,
+                    &legacy_metadata,
+                ) else {
+                    continue;
+                };
+                let key = (record.node_id.clone(), ip.clone());
+                let existing = existing_by_pair.get(&key);
+                let merged = merge_backfilled_proxy_node_metadata(
+                    backfilled,
+                    existing,
+                    recent_samples_by_pair.get(&key).cloned(),
+                );
+                if proxy_node_metadata_has_observation(&merged) {
+                    updates.push(sanitize_proxy_node_metadata_record(merged));
+                }
+            }
+        }
+
+        if updates.is_empty() {
+            return Ok(0);
+        }
+        let updated = updates.len();
+        self.store
+            .upsert_proxy_node_metadata(&updates)
+            .await
+            .map_err(BrokerError::from)?;
+        Ok(updated)
     }
 
     pub async fn list_proxy_catalog(
@@ -3540,6 +3621,11 @@ impl BrokerService {
             .upsert_ip_records(project_id, &ip_records)
             .await
             .map_err(BrokerError::from)?;
+        self.upsert_project_proxy_node_metadata_from_legacy_records(
+            project_id,
+            Some(&scoped_ip_set),
+        )
+        .await?;
 
         if !should_probe {
             probe_records = filter_probe_records_to_ips(
@@ -4324,21 +4410,22 @@ impl BrokerService {
                 let display_host =
                     self.resolve_session_display_host(&bind_host, request_display_host);
                 let display_address = format_listen_endpoint(&display_host, session.port);
-                let selected_metadata = metadata_by_node
+                let existing_metadata = metadata_by_node
                     .get(&session.node_id)
                     .and_then(|items| items.iter().find(|item| item.ip == session.selected_ip))
-                    .cloned()
-                    .or_else(|| {
-                        effective_nodes.get(&session.node_id).and_then(|record| {
-                            self.backfill_proxy_node_metadata(
-                                record,
-                                &session.selected_ip,
-                                &effective_project_ids,
-                                &legacy_metadata,
-                            )
-                            .map(sanitize_proxy_node_metadata_record)
-                        })
-                    });
+                    .cloned();
+                let selected_metadata = effective_nodes
+                    .get(&session.node_id)
+                    .and_then(|record| {
+                        self.merge_proxy_node_metadata_with_legacy(
+                            record,
+                            &session.selected_ip,
+                            &effective_project_ids,
+                            &legacy_metadata,
+                            existing_metadata.clone(),
+                        )
+                    })
+                    .or(existing_metadata);
 
                 SessionListItem {
                     session_id: session.session_id,
@@ -4939,6 +5026,10 @@ impl BrokerService {
                     acc
                 },
             );
+        let effective_project_ids = vec![project_id.to_string()];
+        let legacy_metadata = self
+            .load_legacy_project_metadata(&effective_project_ids)
+            .await?;
 
         let mut items = self
             .compose_effective_proxy_inventory_records(project_id)
@@ -4955,19 +5046,34 @@ impl BrokerService {
                         });
                 let source_label = import_record.map(format_proxy_import_source_label);
                 let primary_ip = record.resolved_ips.first().cloned();
-                let primary_metadata = metadata_by_node.get(&record.node_id).and_then(|items| {
-                    primary_ip
-                        .as_ref()
-                        .and_then(|ip| items.iter().find(|item| item.ip == *ip))
-                        .or_else(|| items.first())
-                });
+                let node_metadata = metadata_by_node.get(&record.node_id);
+                let primary_metadata = primary_ip
+                    .as_ref()
+                    .and_then(|ip| {
+                        let existing = node_metadata
+                            .and_then(|items| items.iter().find(|item| item.ip == *ip))
+                            .cloned();
+                        self.merge_proxy_node_metadata_with_legacy(
+                            &record,
+                            ip,
+                            &effective_project_ids,
+                            &legacy_metadata,
+                            existing,
+                        )
+                    })
+                    .or_else(|| node_metadata.and_then(|items| items.first().cloned()));
                 let recent_probe_samples = primary_metadata
+                    .as_ref()
                     .and_then(|item| {
                         samples_by_node_ip
                             .get(&(item.node_id.clone(), item.ip.clone()))
                             .cloned()
                     })
-                    .or_else(|| primary_metadata.map(legacy_probe_samples_as_recent))
+                    .or_else(|| {
+                        primary_metadata
+                            .as_ref()
+                            .map(legacy_probe_samples_as_recent)
+                    })
                     .unwrap_or_default();
                 let item = SessionNodeOptionItem {
                     node_id: record.node_id.clone(),
@@ -4975,12 +5081,22 @@ impl BrokerService {
                     import_name,
                     source_label,
                     primary_ip,
-                    country_code: primary_metadata.and_then(|item| item.country_code.clone()),
-                    country_name: primary_metadata.and_then(|item| item.country_name.clone()),
-                    region_name: primary_metadata.and_then(|item| item.region_name.clone()),
-                    city: primary_metadata.and_then(|item| item.city.clone()),
-                    last_probe_ok: primary_metadata.and_then(|item| item.last_probe_ok),
-                    median_latency_ms: primary_metadata.and_then(|item| item.median_latency_ms),
+                    country_code: primary_metadata
+                        .as_ref()
+                        .and_then(|item| item.country_code.clone()),
+                    country_name: primary_metadata
+                        .as_ref()
+                        .and_then(|item| item.country_name.clone()),
+                    region_name: primary_metadata
+                        .as_ref()
+                        .and_then(|item| item.region_name.clone()),
+                    city: primary_metadata.as_ref().and_then(|item| item.city.clone()),
+                    last_probe_ok: primary_metadata
+                        .as_ref()
+                        .and_then(|item| item.last_probe_ok),
+                    median_latency_ms: primary_metadata
+                        .as_ref()
+                        .and_then(|item| item.median_latency_ms),
                     recent_probe_samples,
                     session_last_used_at: session_usage.get(&record.node_id).copied(),
                     project_last_used_at: project_usage.get(&record.node_id).copied(),
@@ -5048,6 +5164,10 @@ impl BrokerService {
             .map(|record| (record.import_id.clone(), record))
             .collect::<HashMap<_, _>>();
         let metadata_by_pair = self.proxy_node_metadata_by_pair().await?;
+        let effective_project_ids = vec![project_id.to_string()];
+        let legacy_metadata = self
+            .load_legacy_project_metadata(&effective_project_ids)
+            .await?;
 
         let mut items_by_group_ip = HashMap::<(String, String), SessionIpNodeOptionIpItem>::new();
         for record in self
@@ -5068,20 +5188,30 @@ impl BrokerService {
                 .unwrap_or_else(|| record.import_id.clone());
 
             for ip in &record.resolved_ips {
-                let metadata = metadata_by_pair.get(&(record.node_id.clone(), ip.clone()));
+                let existing = metadata_by_pair
+                    .get(&(record.node_id.clone(), ip.clone()))
+                    .cloned();
+                let metadata = self.merge_proxy_node_metadata_with_legacy(
+                    &record,
+                    ip,
+                    &effective_project_ids,
+                    &legacy_metadata,
+                    existing,
+                );
                 let node_item = SessionIpNodeOptionNodeItem {
                     node_id: record.node_id.clone(),
                     proxy_name: record.proxy_name.clone(),
                     import_name: import_name.clone(),
                     source_label: source_label.clone(),
-                    country_code: metadata.and_then(|item| item.country_code.clone()),
-                    country_name: metadata.and_then(|item| item.country_name.clone()),
-                    region_name: metadata.and_then(|item| item.region_name.clone()),
-                    city: metadata.and_then(|item| item.city.clone()),
-                    last_probe_ok: metadata.and_then(|item| item.last_probe_ok),
-                    median_latency_ms: metadata.and_then(|item| item.median_latency_ms),
+                    country_code: metadata.as_ref().and_then(|item| item.country_code.clone()),
+                    country_name: metadata.as_ref().and_then(|item| item.country_name.clone()),
+                    region_name: metadata.as_ref().and_then(|item| item.region_name.clone()),
+                    city: metadata.as_ref().and_then(|item| item.city.clone()),
+                    last_probe_ok: metadata.as_ref().and_then(|item| item.last_probe_ok),
+                    median_latency_ms: metadata.as_ref().and_then(|item| item.median_latency_ms),
                     recent_probe_samples: metadata
-                        .map(|item| item.recent_probe_samples.clone())
+                        .as_ref()
+                        .map(recent_probe_samples_from_metadata)
                         .unwrap_or_default(),
                     project_last_used_at: project_usage.get(&record.node_id).copied(),
                     session_last_used_at: session_usage.get(&record.node_id).copied(),
@@ -6029,6 +6159,16 @@ fn attach_recent_probe_samples(
     record
 }
 
+fn recent_probe_samples_from_metadata(
+    record: &ProxyNodeMetadataRecord,
+) -> Vec<ProxyNodeProbeSampleRecord> {
+    if record.recent_probe_samples.is_empty() {
+        legacy_probe_samples_as_recent(record)
+    } else {
+        record.recent_probe_samples.clone()
+    }
+}
+
 fn legacy_probe_samples_as_recent(
     record: &ProxyNodeMetadataRecord,
 ) -> Vec<ProxyNodeProbeSampleRecord> {
@@ -6051,6 +6191,96 @@ fn legacy_probe_samples_as_recent(
             sampled_at: base_at.saturating_sub(index as i64),
         })
         .collect()
+}
+
+fn proxy_node_metadata_has_geo_observation(record: &ProxyNodeMetadataRecord) -> bool {
+    record.country_code.is_some()
+        || record.country_name.is_some()
+        || record.region_name.is_some()
+        || record.city.is_some()
+        || record
+            .geo_source
+            .as_deref()
+            .is_some_and(|source| source != "none")
+}
+
+fn proxy_node_metadata_has_probe_observation(record: &ProxyNodeMetadataRecord) -> bool {
+    record.probe_updated_at.is_some()
+        || record.last_probe_ok.is_some()
+        || record.last_latency_ms.is_some()
+        || record.median_latency_ms.is_some()
+        || !record.last_probe_samples.is_empty()
+        || !record.recent_probe_samples.is_empty()
+}
+
+fn proxy_node_metadata_has_observation(record: &ProxyNodeMetadataRecord) -> bool {
+    proxy_node_metadata_has_geo_observation(record)
+        || proxy_node_metadata_has_probe_observation(record)
+}
+
+fn merge_backfilled_proxy_node_metadata(
+    mut backfilled: ProxyNodeMetadataRecord,
+    existing: Option<&ProxyNodeMetadataRecord>,
+    recent_samples: Option<Vec<ProxyNodeProbeSampleRecord>>,
+) -> ProxyNodeMetadataRecord {
+    if let Some(existing) = existing {
+        if should_preserve_existing_observation(
+            proxy_node_metadata_has_geo_observation(existing),
+            existing.geo_updated_at,
+            proxy_node_metadata_has_geo_observation(&backfilled),
+            backfilled.geo_updated_at,
+        ) {
+            backfilled.country_code = existing.country_code.clone();
+            backfilled.country_name = existing.country_name.clone();
+            backfilled.region_name = existing.region_name.clone();
+            backfilled.city = existing.city.clone();
+            backfilled.geo_source = existing.geo_source.clone();
+            backfilled.geo_updated_at = existing.geo_updated_at;
+        }
+        if should_preserve_existing_observation(
+            proxy_node_metadata_has_probe_observation(existing),
+            existing.probe_updated_at,
+            proxy_node_metadata_has_probe_observation(&backfilled),
+            backfilled.probe_updated_at,
+        ) {
+            backfilled.probe_updated_at = existing.probe_updated_at;
+            backfilled.last_probe_ok = existing.last_probe_ok;
+            backfilled.last_latency_ms = existing.last_latency_ms;
+            backfilled.median_latency_ms = existing.median_latency_ms;
+            backfilled.last_probe_samples = existing.last_probe_samples.clone();
+            backfilled.recent_probe_samples = existing.recent_probe_samples.clone();
+        }
+        backfilled.updated_at = backfilled.updated_at.max(existing.updated_at);
+    }
+
+    if let Some(recent_samples) = recent_samples {
+        backfilled.recent_probe_samples = recent_samples;
+    } else if backfilled.recent_probe_samples.is_empty()
+        && !backfilled.last_probe_samples.is_empty()
+    {
+        backfilled.recent_probe_samples = legacy_probe_samples_as_recent(&backfilled);
+    }
+
+    backfilled
+}
+
+fn should_preserve_existing_observation(
+    existing_has_observation: bool,
+    existing_updated_at: Option<i64>,
+    backfilled_has_observation: bool,
+    backfilled_updated_at: Option<i64>,
+) -> bool {
+    if !existing_has_observation {
+        return false;
+    }
+    if !backfilled_has_observation {
+        return true;
+    }
+    match (existing_updated_at, backfilled_updated_at) {
+        (Some(existing), Some(backfilled)) => existing > backfilled,
+        (Some(_), None) => true,
+        _ => false,
+    }
 }
 
 fn default_system_settings() -> SystemSettings {
@@ -9852,14 +10082,24 @@ proxies:
         store
             .replace_probe_records(
                 project_id,
-                &[ProbeRecord {
-                    proxy_name: "edge-node".to_string(),
-                    ip: "1.1.1.1".to_string(),
-                    target_url: "https://example.test".to_string(),
-                    ok: true,
-                    latency_ms: Some(91),
-                    updated_at: 12,
-                }],
+                &[
+                    ProbeRecord {
+                        proxy_name: "edge-node".to_string(),
+                        ip: "1.1.1.1".to_string(),
+                        target_url: "https://example-a.test".to_string(),
+                        ok: true,
+                        latency_ms: Some(91),
+                        updated_at: 11,
+                    },
+                    ProbeRecord {
+                        proxy_name: "edge-node".to_string(),
+                        ip: "1.1.1.1".to_string(),
+                        target_url: "https://example-b.test".to_string(),
+                        ok: false,
+                        latency_ms: None,
+                        updated_at: 12,
+                    },
+                ],
             )
             .await
             .expect("legacy probe record should seed");
@@ -9874,9 +10114,9 @@ proxies:
         let metadata = &catalog.groups[0].nodes[0].ip_metadata[0];
         assert_eq!(metadata.country_code.as_deref(), Some("JP"));
         assert_eq!(metadata.city.as_deref(), Some("Shibuya"));
-        assert_eq!(metadata.last_probe_ok, Some(true));
+        assert_eq!(metadata.last_probe_ok, Some(false));
         assert_eq!(metadata.median_latency_ms, Some(91));
-        assert_eq!(metadata.last_probe_samples, vec![Some(91)]);
+        assert_eq!(metadata.last_probe_samples, vec![Some(91), None]);
     }
 
     #[tokio::test]
@@ -9934,6 +10174,430 @@ proxies:
         assert_eq!(metadata.country_code, None);
         assert_eq!(metadata.country_name.as_deref(), Some("Japan"));
         assert_eq!(metadata.city.as_deref(), Some("Shibuya"));
+    }
+
+    #[tokio::test]
+    async fn session_ip_node_options_backfill_legacy_project_geo_and_probe_metadata() {
+        let project_id = "edge-jp";
+        let import_id = "imp-edge-jp".to_string();
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
+        service
+            .create_project(project_id)
+            .await
+            .expect("project should be created");
+        store
+            .replace_proxy_inventory_import(
+                &ProxyImportRecord {
+                    import_id: import_id.clone(),
+                    name: Some("edge".to_string()),
+                    import_kind: ProxyImportKind::Subscription,
+                    source_scope: ProxyScope::global(),
+                    source_identity: ProxyImportSourceIdentity::manual(&import_id),
+                    allocation_scope: ProxyScope::global(),
+                    subscription_metadata: None,
+                    created_at: 1,
+                    updated_at: 1,
+                },
+                &[ProxyInventoryRecord {
+                    import_id: import_id.clone(),
+                    node_id: "node-edge".to_string(),
+                    source_scope: ProxyScope::global(),
+                    allocation_scope: ProxyScope::global(),
+                    proxy_name: "edge-node".to_string(),
+                    proxy_type: "socks5".to_string(),
+                    server: "1.1.1.1".to_string(),
+                    resolved_ips: vec!["1.1.1.1".to_string()],
+                    raw_proxy: serde_json::json!({
+                        "name": "edge-node",
+                        "type": "socks5",
+                        "server": "1.1.1.1",
+                    }),
+                    created_at: 1,
+                    updated_at: 1,
+                }],
+            )
+            .await
+            .expect("inventory should seed");
+
+        store
+            .replace_ip_records(
+                project_id,
+                &[IpRecord {
+                    ip: "1.1.1.1".to_string(),
+                    country_code: Some("JP".to_string()),
+                    country_name: Some("Japan".to_string()),
+                    region_name: Some("Tokyo".to_string()),
+                    city: Some("Shibuya".to_string()),
+                    geo_source: Some("legacy".to_string()),
+                    probe_updated_at: Some(12),
+                    geo_updated_at: Some(10),
+                    last_used_at: None,
+                }],
+            )
+            .await
+            .expect("legacy ip record should seed");
+        store
+            .replace_probe_records(
+                project_id,
+                &[
+                    ProbeRecord {
+                        proxy_name: "edge-node".to_string(),
+                        ip: "1.1.1.1".to_string(),
+                        target_url: "https://example-a.test".to_string(),
+                        ok: true,
+                        latency_ms: Some(91),
+                        updated_at: 11,
+                    },
+                    ProbeRecord {
+                        proxy_name: "edge-node".to_string(),
+                        ip: "1.1.1.1".to_string(),
+                        target_url: "https://example-b.test".to_string(),
+                        ok: false,
+                        latency_ms: None,
+                        updated_at: 12,
+                    },
+                ],
+            )
+            .await
+            .expect("legacy probe record should seed");
+        store
+            .upsert_proxy_node_metadata(&[ProxyNodeMetadataRecord {
+                node_id: "node-edge".to_string(),
+                ip: "1.1.1.1".to_string(),
+                country_code: None,
+                country_name: None,
+                region_name: None,
+                city: None,
+                geo_source: None,
+                probe_updated_at: Some(30),
+                geo_updated_at: None,
+                last_probe_ok: Some(true),
+                last_latency_ms: Some(40),
+                median_latency_ms: Some(40),
+                last_probe_samples: vec![Some(40)],
+                recent_probe_samples: Vec::new(),
+                updated_at: 30,
+            }])
+            .await
+            .expect("partial node metadata should seed");
+        let legacy_metadata = service
+            .load_legacy_project_metadata(&[project_id.to_string()])
+            .await
+            .expect("legacy metadata should load");
+        let effective_records = service
+            .compose_effective_proxy_inventory_records(project_id)
+            .await
+            .expect("effective records should load");
+        let backfilled = service
+            .backfill_proxy_node_metadata(
+                &effective_records[0],
+                "1.1.1.1",
+                &[project_id.to_string()],
+                &legacy_metadata,
+            )
+            .expect("legacy metadata should backfill");
+        assert_eq!(backfilled.last_probe_ok, Some(false));
+
+        let options = service
+            .search_session_ip_node_options(
+                project_id,
+                &SearchSessionIpNodeOptionsRequest::default(),
+            )
+            .await
+            .expect("ip node options should load");
+        let item = options
+            .groups
+            .iter()
+            .flat_map(|group| group.items.iter())
+            .find(|item| item.ip == "1.1.1.1")
+            .expect("ip option should exist");
+        assert_eq!(item.country_code.as_deref(), Some("JP"));
+        assert_eq!(item.city.as_deref(), Some("Shibuya"));
+        assert_eq!(item.nodes[0].country_code.as_deref(), Some("JP"));
+        assert_eq!(item.nodes[0].city.as_deref(), Some("Shibuya"));
+        assert_eq!(item.best_latency_ms, Some(40));
+        assert_eq!(item.nodes[0].last_probe_ok, Some(true));
+        assert_eq!(item.nodes[0].median_latency_ms, Some(40));
+        assert_eq!(item.nodes[0].recent_probe_samples.len(), 1);
+        assert_eq!(item.nodes[0].recent_probe_samples[0].latency_ms, Some(40));
+    }
+
+    #[tokio::test]
+    async fn session_node_options_prefer_primary_ip_legacy_metadata_over_other_ip_node_metadata() {
+        let project_id = "edge-jp";
+        let import_id = "imp-multi-ip".to_string();
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
+        service
+            .create_project(project_id)
+            .await
+            .expect("project should be created");
+        store
+            .replace_proxy_inventory_import(
+                &ProxyImportRecord {
+                    import_id: import_id.clone(),
+                    name: Some("multi-ip".to_string()),
+                    import_kind: ProxyImportKind::Subscription,
+                    source_scope: ProxyScope::global(),
+                    source_identity: ProxyImportSourceIdentity::manual(&import_id),
+                    allocation_scope: ProxyScope::global(),
+                    subscription_metadata: None,
+                    created_at: 1,
+                    updated_at: 1,
+                },
+                &[ProxyInventoryRecord {
+                    import_id: import_id.clone(),
+                    node_id: "node-multi".to_string(),
+                    source_scope: ProxyScope::global(),
+                    allocation_scope: ProxyScope::global(),
+                    proxy_name: "multi-node".to_string(),
+                    proxy_type: "socks5".to_string(),
+                    server: "1.1.1.1".to_string(),
+                    resolved_ips: vec!["1.1.1.1".to_string(), "2.2.2.2".to_string()],
+                    raw_proxy: serde_json::json!({
+                        "name": "multi-node",
+                        "type": "socks5",
+                        "server": "1.1.1.1",
+                    }),
+                    created_at: 1,
+                    updated_at: 1,
+                }],
+            )
+            .await
+            .expect("inventory should seed");
+        store
+            .upsert_proxy_node_metadata(&[ProxyNodeMetadataRecord {
+                node_id: "node-multi".to_string(),
+                ip: "2.2.2.2".to_string(),
+                country_code: Some("US".to_string()),
+                country_name: Some("United States".to_string()),
+                region_name: Some("California".to_string()),
+                city: Some("Los Angeles".to_string()),
+                geo_source: Some("node".to_string()),
+                probe_updated_at: None,
+                geo_updated_at: Some(1),
+                last_probe_ok: None,
+                last_latency_ms: None,
+                median_latency_ms: None,
+                last_probe_samples: Vec::new(),
+                recent_probe_samples: Vec::new(),
+                updated_at: 1,
+            }])
+            .await
+            .expect("secondary node metadata should seed");
+        store
+            .replace_ip_records(
+                project_id,
+                &[IpRecord {
+                    ip: "1.1.1.1".to_string(),
+                    country_code: Some("JP".to_string()),
+                    country_name: Some("Japan".to_string()),
+                    region_name: Some("Tokyo".to_string()),
+                    city: Some("Shibuya".to_string()),
+                    geo_source: Some("legacy".to_string()),
+                    probe_updated_at: None,
+                    geo_updated_at: Some(2),
+                    last_used_at: None,
+                }],
+            )
+            .await
+            .expect("primary legacy metadata should seed");
+        store
+            .insert_session(
+                project_id,
+                &SessionRecord {
+                    session_id: "sess-primary".to_string(),
+                    listen: "127.0.0.1".to_string(),
+                    port: 10080,
+                    selected_ip: "1.1.1.1".to_string(),
+                    proxy_name: "multi-node".to_string(),
+                    node_id: "node-multi".to_string(),
+                    candidate_node_ids: vec!["node-multi".to_string()],
+                    created_at: 3,
+                },
+            )
+            .await
+            .expect("session should seed");
+
+        let options = service
+            .search_session_node_options(
+                project_id,
+                "sess-primary",
+                &SearchSessionNodeOptionsRequest::default(),
+            )
+            .await
+            .expect("node options should load");
+        let item = options
+            .items
+            .iter()
+            .find(|item| item.node_id == "node-multi")
+            .expect("node option should exist");
+        assert_eq!(item.primary_ip.as_deref(), Some("1.1.1.1"));
+        assert_eq!(item.country_code.as_deref(), Some("JP"));
+        assert_eq!(item.city.as_deref(), Some("Shibuya"));
+    }
+
+    #[test]
+    fn merge_backfilled_proxy_node_metadata_preserves_existing_geo_on_empty_legacy_geo() {
+        let backfilled = ProxyNodeMetadataRecord {
+            node_id: "node-edge".to_string(),
+            ip: "1.1.1.1".to_string(),
+            country_code: None,
+            country_name: None,
+            region_name: None,
+            city: None,
+            geo_source: Some("none".to_string()),
+            probe_updated_at: None,
+            geo_updated_at: Some(20),
+            last_probe_ok: None,
+            last_latency_ms: None,
+            median_latency_ms: None,
+            last_probe_samples: Vec::new(),
+            recent_probe_samples: Vec::new(),
+            updated_at: 20,
+        };
+        let existing = ProxyNodeMetadataRecord {
+            node_id: "node-edge".to_string(),
+            ip: "1.1.1.1".to_string(),
+            country_code: Some("JP".to_string()),
+            country_name: Some("Japan".to_string()),
+            region_name: Some("Tokyo".to_string()),
+            city: Some("Shibuya".to_string()),
+            geo_source: Some("online".to_string()),
+            probe_updated_at: None,
+            geo_updated_at: Some(10),
+            last_probe_ok: None,
+            last_latency_ms: None,
+            median_latency_ms: None,
+            last_probe_samples: Vec::new(),
+            recent_probe_samples: Vec::new(),
+            updated_at: 10,
+        };
+
+        let merged = merge_backfilled_proxy_node_metadata(backfilled, Some(&existing), None);
+        assert_eq!(merged.country_code.as_deref(), Some("JP"));
+        assert_eq!(merged.country_name.as_deref(), Some("Japan"));
+        assert_eq!(merged.region_name.as_deref(), Some("Tokyo"));
+        assert_eq!(merged.city.as_deref(), Some("Shibuya"));
+        assert_eq!(merged.geo_source.as_deref(), Some("online"));
+        assert_eq!(merged.geo_updated_at, Some(10));
+    }
+
+    #[test]
+    fn merge_backfilled_proxy_node_metadata_preserves_newer_existing_observations() {
+        let backfilled = ProxyNodeMetadataRecord {
+            node_id: "node-edge".to_string(),
+            ip: "1.1.1.1".to_string(),
+            country_code: Some("US".to_string()),
+            country_name: Some("United States".to_string()),
+            region_name: Some("California".to_string()),
+            city: Some("Los Angeles".to_string()),
+            geo_source: Some("legacy".to_string()),
+            probe_updated_at: Some(20),
+            geo_updated_at: Some(20),
+            last_probe_ok: Some(true),
+            last_latency_ms: Some(120),
+            median_latency_ms: Some(120),
+            last_probe_samples: vec![Some(120)],
+            recent_probe_samples: Vec::new(),
+            updated_at: 20,
+        };
+        let existing = ProxyNodeMetadataRecord {
+            node_id: "node-edge".to_string(),
+            ip: "1.1.1.1".to_string(),
+            country_code: Some("JP".to_string()),
+            country_name: Some("Japan".to_string()),
+            region_name: Some("Tokyo".to_string()),
+            city: Some("Shibuya".to_string()),
+            geo_source: Some("online".to_string()),
+            probe_updated_at: Some(30),
+            geo_updated_at: Some(30),
+            last_probe_ok: Some(true),
+            last_latency_ms: Some(50),
+            median_latency_ms: Some(50),
+            last_probe_samples: vec![Some(50)],
+            recent_probe_samples: Vec::new(),
+            updated_at: 30,
+        };
+
+        let merged = merge_backfilled_proxy_node_metadata(backfilled, Some(&existing), None);
+        assert_eq!(merged.country_code.as_deref(), Some("JP"));
+        assert_eq!(merged.city.as_deref(), Some("Shibuya"));
+        assert_eq!(merged.geo_source.as_deref(), Some("online"));
+        assert_eq!(merged.geo_updated_at, Some(30));
+        assert_eq!(merged.probe_updated_at, Some(30));
+        assert_eq!(merged.last_latency_ms, Some(50));
+        assert_eq!(merged.median_latency_ms, Some(50));
+        assert_eq!(merged.last_probe_samples, vec![Some(50)]);
+    }
+
+    #[tokio::test]
+    async fn refresh_persists_project_inventory_node_geo_metadata() {
+        let (online_geo_base, mmdb_url, server) = spawn_online_geo_server(
+            r#"{"success":true,"country_code":"JP","country":"Japan","region":"Tokyo","city":"Shibuya"}"#,
+        )
+        .await;
+        let data_dir = std::env::temp_dir().join(format!(
+            "proxy-broker-online-geo-test-{}",
+            crate::ids::random_temp_suffix()
+        ));
+        tokio::fs::create_dir_all(&data_dir)
+            .await
+            .expect("temp data dir should be created");
+        let project_id = "edge-jp";
+        let options = BrokerServiceOptions {
+            online_geo_base,
+            mmdb_url,
+            data_dir: data_dir.clone(),
+            ..BrokerServiceOptions::default()
+        };
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store.clone(), runtime, options);
+        service
+            .create_project(project_id)
+            .await
+            .expect("project should be created");
+
+        let source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: edge-node
+    type: socks5
+    server: 1.1.1.1
+"#,
+        )
+        .await;
+        service
+            .load_subscription(project_id, &SubscriptionSource::File(source_path.clone()))
+            .await
+            .expect("subscription should load");
+        let _ = tokio::fs::remove_file(&source_path).await;
+
+        service
+            .refresh(project_id, &RefreshRequest { force: true })
+            .await
+            .expect("refresh should succeed");
+
+        server.abort();
+        let _ = tokio::fs::remove_dir_all(&data_dir).await;
+
+        let metadata = store
+            .list_proxy_node_metadata()
+            .await
+            .expect("metadata should list");
+        let record = metadata
+            .iter()
+            .find(|item| item.ip == "1.1.1.1")
+            .expect("node metadata should be persisted");
+        assert_eq!(record.country_code.as_deref(), Some("JP"));
+        assert_eq!(record.country_name.as_deref(), Some("Japan"));
+        assert_eq!(record.region_name.as_deref(), Some("Tokyo"));
+        assert_eq!(record.city.as_deref(), Some("Shibuya"));
+        assert_eq!(record.geo_source.as_deref(), Some("online"));
     }
 
     #[tokio::test]

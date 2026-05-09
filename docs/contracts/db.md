@@ -153,4 +153,5 @@
 - `proxy_import_sync_configs` 以 `import_id` 为键保存 project-local 订阅的自动同步状态，取代“每个 project 只有一个 source”的旧模型；旧数据会在迁移时回填成 import 级记录。
 - `proxy_inventory_nodes` 保留 `source_type/source_value` 兼容列，用于从历史库存回填 import 记录与跨版本迁移。
 - `subscription_nodes` / `ip_records` / `probe_records` / `sessions` 继续作为按 project 物化后的 effective snapshot。
+- 元信息刷新与自动维护任务会把 legacy project `ip_records` / `probe_records` 投影到 effective inventory 的 `(node_id, ip)` 级 `proxy_node_metadata`；节点级记录缺失时，服务端查询仍可读取 legacy 表做 best-effort fallback。
 - `project_proxy_settings` 让 existing / new projects 都能持久化 `use_global_proxies`，默认值为启用。

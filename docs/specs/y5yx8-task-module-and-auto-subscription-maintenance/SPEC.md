@@ -86,8 +86,10 @@
   - 若存在新增 IP，继续触发同一轮后续增量元数据刷新。
 - `metadata_refresh_incremental`
   - 只针对“新引入的 IP 记录”做 probe 与 geo 更新。
+  - 更新 project `ip_records` / `probe_records` 后，同步回填 effective inventory 的 `(node_id, ip)` 级 `proxy_node_metadata`。
 - `metadata_refresh_full`
   - 对当前 project 全量 IP 强制刷新 probe 与 geo，忽略缓存 TTL。
+  - 更新 project `ip_records` / `probe_records` 后，同步回填 effective inventory 的 `(node_id, ip)` 级 `proxy_node_metadata`。
 
 ### 前端任务中心
 
@@ -127,6 +129,9 @@
 - Given 服务已启动且 project 到达 24 小时全量刷新周期
   When 调度器扫描到期
   Then 会自动生成 `metadata_refresh_full` 并对所有 IP 强制刷新元数据。
+- Given 自动订阅同步引入新 IP 或全量刷新完成
+  When 会话候选面读取 effective inventory 节点
+  Then 新增或刷新的 IP 在节点级 metadata 中保留 geo / probe 摘要，升级后不会因缺少节点级记录而显示为空。
 - Given 管理员打开 `/tasks`
   When SSE 连接建立
   Then 页面先收到完整 snapshot，后续随着任务状态变化实时更新摘要、列表行与事件时间线。

@@ -65,6 +65,9 @@
   - `list_sessions(project_id)`
   - `close_session(project_id, session_id)`
 
+- `BrokerService::refresh(project_id, request)` updates legacy project IP/probe records and backfills effective inventory `(node_id, ip)` metadata so node catalog and session candidate queries keep geo/probe summaries after upgrades.
+- Session candidate queries use node-level metadata first and fall back to legacy project `ip_records` / `probe_records` when node-level metadata is absent.
+
 
 - `BrokerService`
   - `load_global_subscription(source)`

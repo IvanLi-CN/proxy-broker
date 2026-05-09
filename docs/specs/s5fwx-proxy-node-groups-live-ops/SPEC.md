@@ -61,6 +61,8 @@
 - 节点测速每个节点执行 5 次，采用 breadth-first 顺序，最终返回成功样本的中位数。
 - 节点状态列主显示必须使用最近一次样本：成功显示 `xx ms`，失败显示“失败”，无样本显示 `-- ms`；不得以 `x/x` 或 median 作为主状态。
 - 节点测速样本必须持久化到节点/IP 层历史，按 `(node_id, ip)` 保留最新 10 条；`proxy_node_metadata.last_probe_samples` 继续兼容保留，并额外输出 `recent_probe_samples`。
+- Project 元信息刷新与自动维护任务必须把 legacy project `ip_records` / `probe_records` 投影到 effective inventory 的 `(node_id, ip)` 级 `proxy_node_metadata`，避免升级到节点级元信息读面后丢失地理与测速摘要。
+- 投影节点级 metadata 时，若 legacy source 缺少 geo 或 probe 观测，必须保留既有节点级 geo / probe 字段；不得用空 legacy 记录覆盖已有节点级观测。
 - 批量测速必须按 `probe_concurrency` 并发执行每轮节点测速，并在单个样本完成后立即写入历史和 metadata。
 - queued/running 测速任务已覆盖的节点必须从新请求中忽略；若请求节点全部重复，则创建 `skipped` task run 而不是排空任务。
 - 系统设置必须提供 admin-only 的自动测速间隔读写 API，`proxy_probe_interval_sec` 默认 `3600`，最小值 `60`。
@@ -90,6 +92,7 @@
 - Global `/proxies` admin 视图提供自动测速间隔设置；保存后调度器使用新间隔安排下一次全局订阅节点自动测速。
 - 会话节点候选项中的“Current session/project last used”和时间保持同一行，窄宽时只截断时间文本，不撑高候选卡片。
 - `proxy-ops/refresh` 刷新目标节点 IP 的 geo / metadata，并把结果写回节点级元信息存储。
+- 会话节点候选与 IP -> 节点候选查询以 `proxy_node_metadata` 为主读面；若节点级记录缺失，必须从 legacy project `ip_records` / `probe_records` 做 best-effort fallback，保证升级后的候选面仍显示国家、地区、城市与测速摘要。
 - `sessions/open-by-node` 与 `sessions/open-batch-by-node` 直接按指定 `node_id` 打开会话，并保持 project 级会话归属不变。
 
 ### Edge cases / errors
@@ -148,6 +151,12 @@
 - Given runtime 中存在跨 import 同名节点
   When 应用共享 runtime 配置并创建会话
   Then 会话监听仍能稳定绑定目标节点，不因 `proxy_name` 重名而串线。
+- Given legacy project `ip_records` 已有地理信息但对应 `(node_id, ip)` 尚无 `proxy_node_metadata`
+  When 打开会话节点候选或 IP -> 节点候选面
+  Then 候选项仍显示国家 / 地区 / 城市摘要。
+- Given project 执行一次元信息 refresh
+  When 有效库存节点包含已刷新的 IP
+  Then 服务端把 geo / probe 摘要持久化到对应 `(node_id, ip)` 的 `proxy_node_metadata`。
 
 ## 实现前置条件（Definition of Ready / Preconditions）
 
@@ -161,6 +170,7 @@
 ### Testing
 
 - Unit tests: Rust service/store/runtime tests 覆盖 shared runtime config、node metadata backfill、node-pinned open、5 轮 median probe、样本保留、重复测速过滤、自动测速间隔与系统设置
+- Unit tests: Rust service tests 覆盖 legacy project geo fallback 与 refresh 后节点级 metadata 持久化
 - Integration tests: HTTP/API tests 覆盖 `proxy-catalog` / `proxy-ops/*` / `open-by-node*`
 - E2E tests (if applicable): browser smoke 覆盖 grouped list + live probe + project batch create-session
 
