@@ -32,6 +32,12 @@ def main() -> int:
         "release_html_url" in workflow and "RELEASE_URL: ${{ steps.ensure-release.outputs.release_html_url }}" in workflow,
         "release PR comments must link to the published GitHub Release",
     )
+    comment_index = workflow.index("name: Comment on source PR")
+    mark_released_index = workflow.index("name: Mark snapshot as released")
+    require(
+        comment_index < mark_released_index,
+        "release PR comment must run before marking the snapshot released",
+    )
     return 0
 
 

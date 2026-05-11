@@ -1087,18 +1087,6 @@ jobs:
               core.notice(`Uploaded release asset ${assetName}`)
             }
 
-      - name: Mark snapshot as released
-        shell: bash
-        env:
-          PUBLISHED_TAGS: ${{ needs.release-meta.outputs.tags_csv }}
-          TARGET_SHA: ${{ needs.release-meta.outputs.target_sha }}
-        run: |
-          set -euo pipefail
-          python3 .github/scripts/release_snapshot.py mark-released \
-            --target-sha "${TARGET_SHA}" \
-            --notes-ref "${RELEASE_SNAPSHOT_NOTES_REF}" \
-            --published-tags "${PUBLISHED_TAGS}"
-
       - name: Comment on source PR
         if: needs.release-meta.outputs.pr_number != ''
         uses: actions/github-script@v7
@@ -1170,3 +1158,15 @@ jobs:
               })
               core.notice(`Created release comment ${created.data.id} on PR #${prNumber}.`)
             }
+
+      - name: Mark snapshot as released
+        shell: bash
+        env:
+          PUBLISHED_TAGS: ${{ needs.release-meta.outputs.tags_csv }}
+          TARGET_SHA: ${{ needs.release-meta.outputs.target_sha }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/release_snapshot.py mark-released \
+            --target-sha "${TARGET_SHA}" \
+            --notes-ref "${RELEASE_SNAPSHOT_NOTES_REF}" \
+            --published-tags "${PUBLISHED_TAGS}"
