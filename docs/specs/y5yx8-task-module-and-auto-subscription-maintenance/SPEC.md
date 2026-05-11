@@ -51,6 +51,7 @@
 
 - `load subscription` 成功后必须记录 project 的订阅源，并自动触发首轮新增 IP 元数据刷新。
 - 自动同步不得清空现有可用订阅快照；失败时只记录任务失败。
+- 自动同步拉取订阅失败时，任务失败事件必须保留可诊断的错误明细；URL 订阅源至少包含 import id、兼容请求 attempt 标签、响应形态摘要与上游错误文本片段。
 - 同一 project 同时最多运行一个自动任务；重叠到期信号必须折叠，不得并发执行。
 - `Tasks` 页面默认聚焦当前 project，管理员可切换为 `all projects` 汇总。
 - 任务页面数据必须通过 `SSE` 实时推送更新，而不是退回轮询。
@@ -138,6 +139,12 @@
 - Given 某次自动同步失败
   When 任务结束
   Then 既有订阅快照仍保留，任务记录带 `failed` 状态与错误摘要。
+- Given 某个 URL 订阅源在默认请求或部分兼容 UA 下返回非代理 payload 或 `error code: 1102`
+  When 后续兼容 UA 可返回合法 `proxies:` payload
+  Then 自动同步继续 fallback 并成功导入，同时在 warning 中记录使用的 fallback UA。
+- Given 所有兼容请求 attempt 都无法得到可用代理 payload
+  When 自动同步失败并写入 task completion event
+  Then `task_run_events.payload_json.error.details.reason` 包含失败 import id、attempt label、响应形态摘要和上游错误片段，且既有 `proxy_inventory_nodes` 不被清空。
 
 ## 实现前置条件（Definition of Ready / Preconditions）
 
