@@ -11,6 +11,7 @@
 - 101 上 `proxy-broker` 当前服务健康，但创建节点定向会话会被共享 Mihomo runtime 的 `/configs` 阶段拒绝。
 - 已确认根因是上游订阅返回了 `hysteria` 节点空 `up/down` 速率字段；当前导入链路会把该节点原样写入 `proxy_inventory_nodes` / `subscription_nodes`，shared runtime 渲染时又把脏节点直接带进 Mihomo payload。
 - shared runtime 以“全量 inventory 节点 + 全量活动 session”建模，所以单个 project 的坏节点会污染其他 project 的会话创建与任务运行。
+- 同类线上失败也会来自 parser-hostile Clash YAML、无 fresh probe 的候选节点、或 runtime apply 阶段失败；这些错误若被调用方泛化为 `proxy_broker_request_failed`，会掩盖真实恢复动作。
 
 ## 目标 / 非目标
 
@@ -19,6 +20,7 @@
 - 在订阅导入、手工节点组导入与后续 refresh 中统一拦截 malformed hysteria / hysteria2 速率节点，并按“整节点丢弃”处理。
 - 在 shared runtime payload 组装阶段再加一道兜底，确保历史库存中的坏节点不会继续导致 `/configs` 400。
 - 在 SQLite 打开阶段自愈已持久化的坏节点，清理 `subscription_nodes` 与 `proxy_inventory_nodes` 中命中的脏记录。
+- 将 fresh successful probe metadata 作为会话创建准入门禁；无健康节点或 runtime apply 失败必须返回结构化错误，调用方不得继续尝试异常节点。
 - 按快车道完成 PR、CI、release、101 更新与维护记录收尾。
 
 ### Non-goals
@@ -70,6 +72,9 @@
 - 若导入 payload 过滤 malformed 节点后已无任何可用节点或无任何可用 IP，则继续返回现有 `subscription_invalid`。
 - 若某个 import 清理后节点数变为 `0`，保留 `proxy_imports` 行，等待后续 refresh 或重新导入恢复。
 - 历史 session 若引用被清理的坏节点，由现有 startup reconcile / rebuild 规则收敛，不新增专用 session 迁移。
+- Clash-compatible 订阅若仅因未加引号的 IPv6-mapped `server` 标量无法被标准 YAML parser 接受，应先做窄范围兼容归一化再解析，不应直接让本轮 sync 失败。
+- 会话候选若没有 fresh successful probe metadata，`proxy-catalog` 必须标记为不可开会话，`open_session` 必须返回 `no_healthy_proxy_nodes`，不得继续落到 Mihomo runtime apply。
+- runtime apply 失败时，本次候选不能持久化为 session；在可重试请求中应排除该候选并尝试下一个 fresh healthy IP，全部失败后返回 `proxy_runtime_apply_failed`。
 
 ## 接口契约（Interfaces & Contracts）
 
@@ -80,6 +85,8 @@
 | LoadSubscriptionResponse.warnings | HTTP | external | Modify | None | proxy-broker | web load cards / callers | 仅新增 malformed 节点 warning 文案，不增删字段 |
 | Shared runtime node sanitation | Rust API | internal | Modify | None | proxy-broker | service/runtime | 过滤历史 inventory 坏节点 |
 | SQLite malformed-node self-heal | DB | internal | Modify | None | proxy-broker | store/service | 打开数据库时删除命中的坏节点行 |
+| `ProxyCatalogNodeItem.can_open_session` | HTTP | external | Modify | `docs/specs/s5fwx-proxy-node-groups-live-ops/contracts/http-apis.md` | proxy-broker | tavreg-hikari / web callers | 现在同时要求 fresh successful probe metadata |
+| Session open errors | HTTP | external | Modify | None | proxy-broker | tavreg-hikari / API callers | 新增 `no_healthy_proxy_nodes` 与 `proxy_runtime_apply_failed` 语义化失败 |
 
 ### 契约文档（按 Kind 拆分）
 
@@ -99,11 +106,23 @@
   When 合并、release 并在 101 更新到修复版
   Then `browser` 节点定向会话成功创建，`Tavily` 不再出现 `invalid upload speed` 同类日志，容器保持 `Up (healthy)`。
 
+- Given 订阅源对 Clash UA 返回包含 `server: ::ffff:...` 的 flow mapping
+  When 自动同步执行
+  Then 兼容归一化后成功解析，仍保留 UA attempt 明细与 bounded payload 摘要。
+
+- Given project catalog 中节点没有 fresh successful probe metadata
+  When tavreg-hikari 或其他调用方请求开会话
+  Then Broker 不选择该节点，并在无候选时返回 `no_healthy_proxy_nodes`。
+
+- Given runtime apply 在某个 fresh healthy 候选上失败
+  When 请求允许自动选择候选
+  Then Broker 不持久化失败 session，并排除该 IP 后尝试下一个 fresh healthy 候选。
+
 ## 非功能性验收 / 质量门槛（Quality Gates）
 
 ### Testing
 
-- Rust unit/integration tests：订阅导入过滤、shared runtime 兜底、SQLite 打开自愈。
+- Rust unit/integration tests：订阅导入过滤、Clash YAML 兼容归一化、fresh-probe 会话准入、runtime apply 失败换候选、shared runtime 兜底、SQLite 打开自愈。
 - Fast-flow PR gates：review proof + CI PR + release workflow + 101 production smoke。
 
 ### Quality checks

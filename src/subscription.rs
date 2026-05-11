@@ -62,6 +62,91 @@ fn extract_proxies_from_yaml(content: &str) -> anyhow::Result<Vec<Value>> {
     Err(anyhow!("subscription yaml does not contain `proxies`"))
 }
 
+fn quote_yaml_scalar(value: &str) -> String {
+    let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("\"{escaped}\"")
+}
+
+fn normalize_unquoted_server_scalars(line: &str) -> (String, bool) {
+    let mut normalized = String::with_capacity(line.len());
+    let mut cursor = 0usize;
+    let mut changed = false;
+
+    while let Some(relative_start) = line[cursor..].find("server:") {
+        let key_start = cursor + relative_start;
+        let key_end = key_start + "server:".len();
+        let key_boundary = key_start == 0
+            || line[..key_start]
+                .chars()
+                .next_back()
+                .is_some_and(|ch| ch.is_whitespace() || ch == '{' || ch == ',');
+        if !key_boundary {
+            normalized.push_str(&line[cursor..key_end]);
+            cursor = key_end;
+            continue;
+        }
+
+        normalized.push_str(&line[cursor..key_end]);
+
+        let value_padding_end = line[key_end..]
+            .char_indices()
+            .find_map(|(index, ch)| (!ch.is_whitespace()).then_some(key_end + index))
+            .unwrap_or(line.len());
+        normalized.push_str(&line[key_end..value_padding_end]);
+
+        if value_padding_end >= line.len() {
+            cursor = value_padding_end;
+            continue;
+        }
+
+        let first_value_char = line[value_padding_end..].chars().next().unwrap_or_default();
+        if matches!(first_value_char, '"' | '\'' | '[' | '{') {
+            cursor = value_padding_end;
+            continue;
+        }
+
+        let value_end = line[value_padding_end..]
+            .char_indices()
+            .find_map(|(index, ch)| {
+                matches!(ch, ',' | '}' | '#').then_some(value_padding_end + index)
+            })
+            .unwrap_or(line.len());
+        let raw_value = &line[value_padding_end..value_end];
+        let trimmed_value = raw_value.trim_end();
+        let trailing = &raw_value[trimmed_value.len()..];
+
+        if trimmed_value.contains(':') {
+            normalized.push_str(&quote_yaml_scalar(trimmed_value));
+            normalized.push_str(trailing);
+            changed = true;
+        } else {
+            normalized.push_str(raw_value);
+        }
+        cursor = value_end;
+    }
+
+    normalized.push_str(&line[cursor..]);
+    (normalized, changed)
+}
+
+fn normalize_clash_compat_yaml(content: &str) -> Option<String> {
+    let mut normalized = String::with_capacity(content.len());
+    let mut changed = false;
+
+    for segment in content.split_inclusive('\n') {
+        let (line, newline) = segment
+            .strip_suffix('\n')
+            .map(|line| (line, "\n"))
+            .unwrap_or((segment, ""));
+        let (line, line_changed) = normalize_unquoted_server_scalars(line);
+        changed |= line_changed;
+        normalized.push_str(&line);
+        normalized.push_str(newline);
+    }
+
+    changed.then_some(normalized)
+}
+
 #[derive(Debug, Error)]
 pub enum SubscriptionLoadError {
     #[error("subscription source read failed: {0}")]
@@ -129,6 +214,11 @@ fn parse_subscription_payload(raw: &str) -> Result<Vec<Value>, SubscriptionLoadE
     match extract_proxies_from_yaml(raw) {
         Ok(proxies) => Ok(proxies),
         Err(yaml_err) => {
+            if let Some(normalized) = normalize_clash_compat_yaml(raw) {
+                if let Ok(proxies) = extract_proxies_from_yaml(&normalized) {
+                    return Ok(proxies);
+                }
+            }
             let decoded = decode_base64_yaml(raw).map_err(|base64_err| {
                 SubscriptionLoadError::InvalidPayload(format!(
                     "yaml parse failed: {yaml_err}; base64 fallback failed: {base64_err}"
@@ -794,7 +884,7 @@ mod tests {
     use super::{
         SUBSCRIPTION_FETCH_USER_AGENTS, SubscriptionLoadError, derive_title_from_url,
         load_from_source, parse_content_disposition_filename, parse_response_metadata,
-        percent_decode_lossy,
+        parse_subscription_payload, percent_decode_lossy, to_json_value,
     };
     use crate::models::SubscriptionSource;
     use axum::{
@@ -1533,6 +1623,25 @@ proxies:
                 .iter()
                 .any(|warning| warning.contains("ignored invalid `subscription-userinfo` header"))
         );
+    }
+
+    #[test]
+    fn payload_normalizes_unquoted_ipv6_mapped_server_in_flow_mapping() {
+        let proxies = parse_subscription_payload(
+            r#"
+port: 7890
+socks-port: 7891
+proxies:
+  - {name: at-vmess, server: ::ffff:bc72:6200, port: 443, type: vmess, uuid: 00000000-0000-0000-0000-000000000000, alterId: 0, cipher: auto, tls: true}
+  - {name: normal-domain, server: example.com, port: 443, type: trojan, password: secret}
+"#,
+        )
+        .expect("clash-compatible flow mapping should parse");
+
+        assert_eq!(proxies.len(), 2);
+        let first = to_json_value(&proxies[0]).expect("proxy should convert to json");
+        assert_eq!(first["name"], "at-vmess");
+        assert_eq!(first["server"], "::ffff:bc72:6200");
     }
 
     #[tokio::test]
