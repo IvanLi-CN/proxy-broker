@@ -12,8 +12,12 @@ use crate::{
     proxy_node_validation::{malformed_proxy_reason, malformed_proxy_warning},
 };
 
-pub const SUBSCRIPTION_FETCH_USER_AGENTS: &[&str] =
-    &["Clash.Meta/1.18.3", "mihomo/1.18.3", "Clash Verge/1.7.7"];
+pub const SUBSCRIPTION_FETCH_USER_AGENTS: &[&str] = &[
+    "Clash.Meta/1.18.3",
+    "mihomo/1.18.3",
+    "clash.meta",
+    "Clash Verge/1.7.7",
+];
 const INFO_PROXY_KEYWORDS_EN: &[&str] = &["traffic", "expire", "expired", "notice"];
 const INFO_PROXY_KEYWORDS_EN_WEAK: &[&str] = &["subscription", "official", "support"];
 const INFO_PROXY_KEYWORDS_ZH: &[&str] = &["流量", "剩余", "过期", "到期", "公告", "说明"];
@@ -134,6 +138,51 @@ fn parse_subscription_payload(raw: &str) -> Result<Vec<Value>, SubscriptionLoadE
                 .map_err(|err| SubscriptionLoadError::InvalidPayload(err.to_string()))
         }
     }
+}
+
+fn summarize_payload_shape(raw: &str) -> String {
+    let mut preview = String::new();
+    let mut previous_was_space = false;
+    for ch in raw.chars() {
+        let ch = if ch.is_whitespace() { ' ' } else { ch };
+        if ch == ' ' {
+            if previous_was_space {
+                continue;
+            }
+            previous_was_space = true;
+        } else {
+            previous_was_space = false;
+        }
+        preview.push(ch);
+        if preview.len() >= 120 {
+            break;
+        }
+    }
+
+    let preview = preview
+        .split(' ')
+        .map(|token| {
+            if token.len() >= 32 && token.chars().all(|ch| ch.is_ascii_graphic()) {
+                "[redacted]"
+            } else {
+                token
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let suffix = if raw.chars().count() > preview.chars().count() {
+        "..."
+    } else {
+        ""
+    };
+
+    format!(
+        "shape: bytes={}, contains_proxies={}, preview=\"{}{}\"",
+        raw.len(),
+        raw.contains("proxies:"),
+        preview,
+        suffix
+    )
 }
 
 fn payload_has_usable_proxy_entries(proxies: &[Value]) -> bool {
@@ -532,30 +581,22 @@ async fn fetch_url_source(
             None => client.get(url),
         };
         let response = match request.send().await {
-            Ok(response) => match response.error_for_status() {
-                Ok(response) => Ok(response),
-                Err(err) => Err(SubscriptionLoadError::SourceRead(format!(
-                    "subscription url `{url}` returned non-2xx with {}: {}",
-                    attempt_label, err
-                ))),
-            },
+            Ok(response) => Ok(response),
             Err(err) => Err(SubscriptionLoadError::SourceRead(format!(
-                "failed to fetch subscription url `{url}` with {}: {}",
+                "failed to fetch subscription url source with {}: {}",
                 attempt_label, err
             ))),
         };
 
         let response = match response {
-            Ok(response) => {
-                received_success_body = true;
-                response
-            }
+            Ok(response) => response,
             Err(SubscriptionLoadError::SourceRead(message)) => {
                 fetch_errors.push(message);
                 continue;
             }
             Err(err) => return Err(err),
         };
+        let status = response.status();
         let headers = response.headers().clone();
         let raw = response.text().await.map_err(|err| {
             SubscriptionLoadError::SourceRead(format!(
@@ -563,6 +604,16 @@ async fn fetch_url_source(
                 attempt_label, err
             ))
         })?;
+        if !status.is_success() {
+            fetch_errors.push(format!(
+                "subscription url source returned non-2xx status {} with {} ({})",
+                status,
+                attempt_label,
+                summarize_payload_shape(&raw)
+            ));
+            continue;
+        }
+        received_success_body = true;
 
         match parse_subscription_payload(&raw) {
             Ok(proxies) if payload_has_usable_proxy_entries(&proxies) => {
@@ -573,8 +624,9 @@ async fn fetch_url_source(
                 );
                 if !payload_has_usable_proxy_entries(&filtered_proxies) {
                     parse_errors.push(format!(
-                        "{}: payload only contained filtered or malformed entries after filtering",
-                        attempt_label
+                        "{}: payload only contained filtered or malformed entries after filtering ({})",
+                        attempt_label,
+                        summarize_payload_shape(&raw)
                     ));
                     continue;
                 }
@@ -595,18 +647,27 @@ async fn fetch_url_source(
             }
             Ok(_) => {
                 parse_errors.push(format!(
-                    "{}: payload parsed but did not contain any usable proxy entries",
-                    attempt_label
+                    "{}: payload parsed but did not contain any usable proxy entries ({})",
+                    attempt_label,
+                    summarize_payload_shape(&raw)
                 ));
             }
             Err(SubscriptionLoadError::InvalidPayload(message)) => {
-                parse_errors.push(format!("{}: {}", attempt_label, message));
+                parse_errors.push(format!(
+                    "{}: {} ({})",
+                    attempt_label,
+                    message,
+                    summarize_payload_shape(&raw)
+                ));
             }
             Err(err) => return Err(err),
         }
     }
 
     if received_success_body {
+        if !fetch_errors.is_empty() {
+            parse_errors.push(format!("fetch failures: {}", fetch_errors.join(" | ")));
+        }
         return Err(SubscriptionLoadError::InvalidPayload(format!(
             "subscription payload was not parseable with any compatibility user agent: {}",
             parse_errors.join(" | ")
@@ -614,7 +675,7 @@ async fn fetch_url_source(
     }
 
     Err(SubscriptionLoadError::SourceRead(format!(
-        "failed to fetch subscription url `{url}` with all compatibility attempts: {}",
+        "failed to fetch subscription url source with all compatibility attempts: {}",
         fetch_errors.join(" | ")
     )))
 }
@@ -1006,6 +1067,110 @@ proxies:
     }
 
     #[tokio::test]
+    async fn url_source_retries_after_1102_until_later_user_agent_succeeds() {
+        #[derive(Clone)]
+        struct Ua1102State {
+            accepted_user_agent: Arc<str>,
+        }
+
+        async fn ua_1102_handler(
+            State(state): State<Ua1102State>,
+            headers: HeaderMap,
+        ) -> (StatusCode, HeaderMap, String) {
+            let user_agent = headers
+                .get(reqwest::header::USER_AGENT)
+                .and_then(|value| value.to_str().ok());
+            if user_agent == Some(state.accepted_user_agent.as_ref()) {
+                return (
+                    StatusCode::OK,
+                    HeaderMap::new(),
+                    r#"
+proxies:
+  - name: recovered-after-1102
+    type: socks5
+    server: 7.7.7.7
+"#
+                    .to_string(),
+                );
+            }
+
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                HeaderMap::new(),
+                "error code: 1102".to_string(),
+            )
+        }
+
+        let client = reqwest::Client::new();
+        let app = Router::new()
+            .route("/subscription", get(ua_1102_handler))
+            .with_state(Ua1102State {
+                accepted_user_agent: Arc::<str>::from("clash.meta"),
+            });
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("test listener should bind");
+        let addr = listener.local_addr().expect("listener addr should exist");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("test server should serve requests");
+        });
+        let source = SubscriptionSource::Url(format!("http://{addr}/subscription"));
+
+        let result = load_from_source(&client, &source)
+            .await
+            .expect("later compatibility ua should recover after 1102 responses");
+
+        server.abort();
+
+        assert_eq!(result.nodes.len(), 1);
+        assert_eq!(result.nodes[0].proxy_name, "recovered-after-1102");
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("clash.meta"))
+        );
+    }
+
+    #[tokio::test]
+    async fn url_source_all_1102_failures_report_attempt_shapes() {
+        async fn all_1102_handler() -> (StatusCode, HeaderMap, &'static str) {
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                HeaderMap::new(),
+                "error code: 1102",
+            )
+        }
+
+        let client = reqwest::Client::new();
+        let app = Router::new().route("/subscription", get(all_1102_handler));
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("test listener should bind");
+        let addr = listener.local_addr().expect("listener addr should exist");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("test server should serve requests");
+        });
+        let source = SubscriptionSource::Url(format!("http://{addr}/subscription"));
+
+        let err = load_from_source(&client, &source)
+            .await
+            .expect_err("all 1102 attempts should fail with attempt detail");
+
+        server.abort();
+
+        assert!(matches!(err, SubscriptionLoadError::SourceRead(message)
+                if message.contains("default request project")
+                    && message.contains("User-Agent `mihomo/1.18.3`")
+                    && message.contains("error code: 1102")
+                    && message.contains("shape: bytes=")));
+    }
+
+    #[tokio::test]
     async fn url_source_reports_fetch_error_on_non_2xx_response() {
         let client = reqwest::Client::new();
         let (base_url, server) = spawn_test_server().await;
@@ -1143,6 +1308,42 @@ proxies:
         assert!(
             matches!(err, SubscriptionLoadError::InvalidPayload(message) if message.contains("default request project"))
         );
+    }
+
+    #[tokio::test]
+    async fn url_source_invalid_payload_reports_attempt_shapes_and_fetch_bodies() {
+        let client = reqwest::Client::new();
+        let app = Router::new()
+            .route("/subscription", get(test_subscription_handler))
+            .with_state(TestSubscriptionServerState {
+                accepted_user_agent: Some(Arc::<str>::from("unmatched-user-agent")),
+                success_payload: Arc::<str>::from("unused"),
+                fallback_status: Some(StatusCode::SERVICE_UNAVAILABLE),
+                response_headers: HeaderMap::new(),
+            });
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("test listener should bind");
+        let addr = listener.local_addr().expect("listener addr should exist");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("test server should serve requests");
+        });
+        let source = SubscriptionSource::Url(format!("http://{addr}/subscription"));
+
+        let err = load_from_source(&client, &source)
+            .await
+            .expect_err("all invalid attempts should preserve attempt detail");
+
+        server.abort();
+
+        assert!(matches!(err, SubscriptionLoadError::InvalidPayload(message)
+                if message.contains("default request project")
+                    && message.contains("fetch failures:")
+                    && message.contains("returned non-2xx status 503")
+                    && message.contains("shape: bytes=")
+                    && message.contains("not-a-clash-subscription")));
     }
 
     #[tokio::test]

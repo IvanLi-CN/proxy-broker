@@ -1133,7 +1133,7 @@ impl BrokerService {
                         failed_at,
                     )
                     .await?;
-                    return Err(err);
+                    return Err(Self::with_subscription_sync_context(err, &config.import_id));
                 }
             };
             total_loaded_proxies += outcome.response.loaded_proxies;
@@ -1541,12 +1541,28 @@ impl BrokerService {
                 | TaskRunKind::ProxyLatencyProbe => {}
             }
         }
+        let error_code = error.code().to_string();
+        let error_message = error.to_string();
+        let error_details = error.details();
         self.complete_task_run(
             run,
             TaskRunStatus::Failed,
-            None,
-            Some(error.code().to_string()),
-            Some(error.to_string()),
+            Some(serde_json::json!({
+                "error": {
+                    "code": error_code,
+                    "message": error_message,
+                    "details": error_details,
+                },
+                "task": {
+                    "run_id": run.run_id.clone(),
+                    "project_id": run.project_id.clone(),
+                    "kind": run.kind,
+                    "trigger": run.trigger,
+                    "scope": run.scope.clone(),
+                },
+            })),
+            Some(error_code),
+            Some(error_message),
         )
         .await
     }
@@ -1999,8 +2015,8 @@ impl BrokerService {
                 subscription::SubscriptionLoadError::SourceRead(message) => {
                     BrokerError::SubscriptionFetch(message)
                 }
-                subscription::SubscriptionLoadError::InvalidPayload(_) => {
-                    BrokerError::SubscriptionInvalid
+                subscription::SubscriptionLoadError::InvalidPayload(message) => {
+                    BrokerError::SubscriptionInvalidDetail(message)
                 }
             })?;
 
@@ -2046,6 +2062,20 @@ impl BrokerService {
             loaded.warnings,
         )
         .await
+    }
+
+    fn with_subscription_sync_context(error: BrokerError, import_id: &str) -> BrokerError {
+        match error {
+            BrokerError::SubscriptionInvalidDetail(message) => {
+                BrokerError::SubscriptionInvalidDetail(format!(
+                    "import_id `{import_id}` failed: {message}"
+                ))
+            }
+            BrokerError::SubscriptionFetch(message) => {
+                BrokerError::SubscriptionFetch(format!("import_id `{import_id}` failed: {message}"))
+            }
+            other => other,
+        }
     }
 
     async fn compose_effective_proxy_nodes(
@@ -9386,7 +9416,11 @@ proxies:
 
         server.abort();
 
-        assert!(matches!(result, Err(BrokerError::SubscriptionInvalid)));
+        assert!(
+            matches!(result, Err(BrokerError::SubscriptionInvalidDetail(message))
+                if message.contains("default request project")
+                    && message.contains("shape: bytes="))
+        );
     }
 
     #[tokio::test]
@@ -13607,6 +13641,100 @@ proxies:
             config.last_sync_due_at.expect("sync due at")
                 >= now + DEFAULT_AUTO_SYNC_EVERY_SEC as i64
         );
+    }
+
+    #[tokio::test]
+    async fn failed_subscription_sync_event_includes_subscription_attempt_detail() {
+        let project_id = "p-tasks-sync-invalid-detail";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
+        let source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: first
+    type: socks5
+    server: 4.4.4.4
+"#,
+        )
+        .await;
+        let now = now_epoch_sec();
+
+        service
+            .load_subscription(project_id, &SubscriptionSource::File(source_path.clone()))
+            .await
+            .expect("initial load should succeed");
+
+        let config = store
+            .get_project_sync_config(project_id)
+            .await
+            .expect("sync config query should succeed")
+            .expect("sync config should exist");
+        let (url, server) =
+            spawn_subscription_server("error code: 1102", StatusCode::OK, None, None).await;
+        let mut due_config = config.clone();
+        due_config.source = SubscriptionSource::Url(url);
+        due_config.last_sync_due_at = Some(now - 1);
+        store
+            .upsert_project_sync_config(&due_config)
+            .await
+            .expect("sync config update should succeed");
+
+        let mut run = service
+            .enqueue_task_run(
+                project_id,
+                TaskRunKind::SubscriptionSync,
+                TaskRunTrigger::Schedule,
+                TaskRunScope::All,
+            )
+            .await
+            .expect("subscription sync queue should succeed");
+
+        let err = service
+            .execute_subscription_sync_task(&mut run)
+            .await
+            .expect_err("subscription sync should fail on invalid source");
+        assert!(
+            matches!(&err, BrokerError::SubscriptionInvalidDetail(message)
+                if message.contains(&config.import_id)
+                    && message.contains("error code: 1102")
+                    && message.contains("shape: bytes="))
+        );
+        service
+            .fail_task_run(&mut run, err)
+            .await
+            .expect("failure closeout should succeed");
+
+        server.abort();
+        let _ = tokio::fs::remove_file(&source_path).await;
+
+        let inventory = store
+            .list_proxy_inventory_for_import(&config.import_id)
+            .await
+            .expect("inventory should list");
+        assert_eq!(inventory.len(), 1, "failed sync should keep old inventory");
+        assert_eq!(inventory[0].proxy_name, "first");
+
+        let events = store
+            .list_task_run_events(&run.run_id)
+            .await
+            .expect("events should list");
+        let failed_event = events
+            .iter()
+            .rev()
+            .find(|event| event.stage == TaskRunStage::Completed)
+            .expect("failed completion event should exist");
+        let payload = failed_event
+            .payload_json
+            .as_ref()
+            .expect("failed event should include payload");
+        assert_eq!(payload["error"]["code"], "subscription_invalid");
+        let reason = payload["error"]["details"]["reason"]
+            .as_str()
+            .expect("subscription invalid reason should be recorded");
+        assert!(reason.contains(&config.import_id));
+        assert!(reason.contains("error code: 1102"));
+        assert!(reason.contains("shape: bytes="));
     }
 
     #[tokio::test]

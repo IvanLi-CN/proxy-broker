@@ -11,6 +11,8 @@ use crate::models::ErrorResponse;
 pub enum BrokerError {
     #[error("invalid subscription payload")]
     SubscriptionInvalid,
+    #[error("invalid subscription payload: {0}")]
+    SubscriptionInvalidDetail(String),
     #[error("subscription source not reachable: {0}")]
     SubscriptionFetch(String),
     #[error("no candidate ip found")]
@@ -56,7 +58,9 @@ pub enum BrokerError {
 impl BrokerError {
     pub fn code(&self) -> &'static str {
         match self {
-            Self::SubscriptionInvalid => "subscription_invalid",
+            Self::SubscriptionInvalid | Self::SubscriptionInvalidDetail(_) => {
+                "subscription_invalid"
+            }
             Self::SubscriptionFetch(_) => "subscription_fetch_failed",
             Self::IpNotFound => "ip_not_found",
             Self::IpConflictBlacklist(_) => "ip_conflict_blacklist",
@@ -82,7 +86,9 @@ impl BrokerError {
 
     pub fn status_code(&self) -> StatusCode {
         match self {
-            Self::SubscriptionInvalid => StatusCode::BAD_REQUEST,
+            Self::SubscriptionInvalid | Self::SubscriptionInvalidDetail(_) => {
+                StatusCode::BAD_REQUEST
+            }
             Self::SubscriptionFetch(_) => StatusCode::BAD_GATEWAY,
             Self::IpNotFound => StatusCode::NOT_FOUND,
             Self::IpConflictBlacklist(_) => StatusCode::BAD_REQUEST,
@@ -108,6 +114,10 @@ impl BrokerError {
 
     pub fn details(&self) -> Option<serde_json::Value> {
         match self {
+            Self::SubscriptionInvalidDetail(reason) => {
+                Some(serde_json::json!({ "reason": reason }))
+            }
+            Self::SubscriptionFetch(reason) => Some(serde_json::json!({ "reason": reason })),
             Self::IpConflictBlacklist(items) => Some(serde_json::json!({ "conflicts": items })),
             _ => None,
         }
