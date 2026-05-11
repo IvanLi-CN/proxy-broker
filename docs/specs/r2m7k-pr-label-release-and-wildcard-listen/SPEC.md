@@ -51,6 +51,9 @@ deployments.
   PR with the release tag, GitHub Release link, image tags, target SHA, and
   workflow run link, so maintainers do not need to infer success from Actions
   history alone.
+- The release publisher job declares both `issues: write` and
+  `pull-requests: write` for that comment path, while the rest of the workflow
+  keeps narrower permissions.
 - The GitHub Release also carries exactly four native binary tarballs and one
   aggregated `proxy-broker-<tag>-sha256.txt` asset, and rerunning the same tag
   replaces same-name hosted assets instead of failing with upload conflicts.
@@ -117,4 +120,4 @@ deployments.
 - 2026-03-24: 后续规格 `#tqs62` 将主线自动发布语义收敛为 current-first。
 - 2026-03-24: 后续规格 `#m8z4p` 进一步收敛为“默认 `GITHUB_TOKEN` + release anchor”发布路径，不再要求额外 publisher secrets。
 - 2026-03-28: 补充 session 端口池约束与 wildcard listener 的 `allow-lan` 契约，修复“UI 显示 session 已创建但实际对外不可用”的部署陷阱。
-- 2026-05-11: 补充 release 成功后回写 source PR 的幂等评论契约，避免发布事实只存在于 Actions summary / GitHub Release 中。
+- 2026-05-11: 补充 release 成功后回写 source PR 的幂等评论契约，并为该路径显式声明 `issues: write` 与 `pull-requests: write`，避免发布事实只存在于 Actions summary / GitHub Release 中。
