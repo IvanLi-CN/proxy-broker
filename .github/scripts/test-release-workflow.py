@@ -15,6 +15,10 @@ def require(condition: bool, message: str) -> None:
 def main() -> int:
     workflow = WORKFLOW.read_text(encoding="utf-8")
     require("issues: write" in workflow, "release publisher must be allowed to comment on PRs")
+    require(
+        "pull-requests: write" in workflow,
+        "release publisher must request pull request write permission for PR comments",
+    )
     require("name: Comment on source PR" in workflow, "release workflow must comment on the source PR")
     require(
         "if: needs.release-meta.outputs.pr_number != ''" in workflow,
