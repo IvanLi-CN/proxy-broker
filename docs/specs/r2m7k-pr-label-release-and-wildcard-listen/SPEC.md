@@ -47,6 +47,10 @@ deployments.
 - Release publishing creates an idempotent Git tag, a GitHub Release, and GHCR
   image tags that follow the PR label policy, reusing an existing tag when the
   same commit is retried.
+- Successful release publishing writes an idempotent comment back to the source
+  PR with the release tag, GitHub Release link, image tags, target SHA, and
+  workflow run link, so maintainers do not need to infer success from Actions
+  history alone.
 - The GitHub Release also carries exactly four native binary tarballs and one
   aggregated `proxy-broker-<tag>-sha256.txt` asset, and rerunning the same tag
   replaces same-name hosted assets instead of failing with upload conflicts.
@@ -74,6 +78,7 @@ deployments.
 - `cd web && bun run build`
 - `APP_EFFECTIVE_VERSION=v0.0.0-ci .github/scripts/package_release_asset.sh --platform linux --arch amd64 --output-dir <tmp>`
 - `bash .github/scripts/test-release-snapshot.sh`
+- `python3 .github/scripts/test-release-workflow.py`
 - Shared testbox smoke: verify wildcard binds with both the native Linux
   release binary and a containerized runtime, load a sample subscription, open
   a session, and confirm the resulting listener binds on `0.0.0.0`.
@@ -92,6 +97,9 @@ deployments.
 - GitHub Releases expose native Linux/macOS binaries and a checksum manifest,
   and historical releases can be backfilled by rerunning the existing release
   workflow against the original `main` commit SHA.
+- Successful release runs leave a durable, idempotent source PR comment for the
+  published tag instead of only writing Actions summaries and GitHub Release
+  records.
 - Container releases publish an externally usable default bind strategy instead
   of a localhost-only deployment trap, with native dual-platform manifest
   publishing instead of a single serial emulated build.
@@ -109,3 +117,4 @@ deployments.
 - 2026-03-24: 后续规格 `#tqs62` 将主线自动发布语义收敛为 current-first。
 - 2026-03-24: 后续规格 `#m8z4p` 进一步收敛为“默认 `GITHUB_TOKEN` + release anchor”发布路径，不再要求额外 publisher secrets。
 - 2026-03-28: 补充 session 端口池约束与 wildcard listener 的 `allow-lan` 契约，修复“UI 显示 session 已创建但实际对外不可用”的部署陷阱。
+- 2026-05-11: 补充 release 成功后回写 source PR 的幂等评论契约，避免发布事实只存在于 Actions summary / GitHub Release 中。

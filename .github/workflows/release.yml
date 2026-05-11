@@ -677,6 +677,7 @@ jobs:
       }}
     permissions:
       contents: write
+      issues: write
       packages: write
     steps:
       - name: Checkout
@@ -976,6 +977,7 @@ jobs:
             }
 
             core.setOutput('release_id', String(release.id))
+            core.setOutput('release_html_url', release.html_url)
 
       - name: Assemble binary release assets
         id: assemble-assets
@@ -1096,3 +1098,75 @@ jobs:
             --target-sha "${TARGET_SHA}" \
             --notes-ref "${RELEASE_SNAPSHOT_NOTES_REF}" \
             --published-tags "${PUBLISHED_TAGS}"
+
+      - name: Comment on source PR
+        if: needs.release-meta.outputs.pr_number != ''
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ needs.release-meta.outputs.pr_number }}
+          RELEASE_TAG: ${{ needs.release-meta.outputs.release_tag }}
+          RELEASE_URL: ${{ steps.ensure-release.outputs.release_html_url }}
+          TARGET_SHA: ${{ needs.release-meta.outputs.target_sha }}
+          PUBLISHED_TAGS: ${{ needs.release-meta.outputs.tags_csv }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { owner, repo } = context.repo
+            const prNumber = Number(process.env.PR_NUMBER)
+            const releaseTag = process.env.RELEASE_TAG
+            const releaseUrl = process.env.RELEASE_URL
+            const targetSha = process.env.TARGET_SHA
+            const publishedTags = (process.env.PUBLISHED_TAGS || '')
+              .split(',')
+              .map(value => value.trim())
+              .filter(Boolean)
+
+            if (!Number.isInteger(prNumber) || prNumber <= 0) {
+              core.setFailed(`Invalid PR_NUMBER: ${process.env.PR_NUMBER}`)
+              return
+            }
+            if (!releaseTag || !releaseUrl) {
+              core.setFailed('Missing release tag or release URL')
+              return
+            }
+
+            const marker = `<!-- proxy-broker:release-success:${releaseTag} -->`
+            const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`
+            const imageTagText = publishedTags.length > 0
+              ? publishedTags.map(value => `\`${value}\``).join(', ')
+              : '`n/a`'
+            const body = [
+              marker,
+              '### Release published',
+              '',
+              `- Version: [${releaseTag}](${releaseUrl})`,
+              `- Target SHA: \`${targetSha}\``,
+              `- Image tags: ${imageTagText}`,
+              `- Workflow run: [${context.workflow} #${context.runNumber}](${runUrl})`,
+            ].join('\n')
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number: prNumber,
+              per_page: 100,
+            })
+            const existing = comments.find(comment => (comment.body || '').includes(marker))
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              })
+              core.notice(`Updated release comment ${existing.id} on PR #${prNumber}.`)
+            } else {
+              const created = await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: prNumber,
+                body,
+              })
+              core.notice(`Created release comment ${created.data.id} on PR #${prNumber}.`)
+            }

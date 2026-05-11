@@ -98,11 +98,14 @@ jobs:
           python3 -m py_compile \
             .github/scripts/metadata_gate.py \
             .github/scripts/release_snapshot.py \
+            .github/scripts/test-release-workflow.py \
             .github/scripts/verify_manifest_platforms.py
           bash -n .github/scripts/package_release_asset.sh
 
       - name: Test release snapshot logic
-        run: bash .github/scripts/test-release-snapshot.sh
+        run: |
+          bash .github/scripts/test-release-snapshot.sh
+          python3 .github/scripts/test-release-workflow.py
 
       - name: Upload Storybook artifact
         uses: actions/upload-artifact@v4
