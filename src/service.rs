@@ -7495,6 +7495,7 @@ fn filter_ip_records(
     Ok(items)
 }
 
+#[cfg(test)]
 fn choose_ip_for_open(
     request: &OpenSessionRequest,
     ip_records: &[IpRecord],
@@ -7699,8 +7700,21 @@ fn prepare_session(
     port_range: Option<(u16, u16)>,
     min_probe_updated_at: Option<i64>,
 ) -> BrokerResult<SessionRecord> {
-    let ip = choose_ip_for_open(request, ip_records, probes, min_probe_updated_at)?;
-    let node = choose_node_for_ip(&ip, nodes, probes, min_probe_updated_at)?;
+    let candidate_ips = candidate_ips_for_open(request, ip_records, probes, min_probe_updated_at)?;
+    let mut last_selection_error = None;
+    let (ip, node) = candidate_ips
+        .into_iter()
+        .find_map(
+            |ip| match choose_node_for_ip(&ip, nodes, probes, min_probe_updated_at) {
+                Ok(node) => Some(Ok((ip, node))),
+                Err(BrokerError::IpNotFound | BrokerError::NoHealthyProxyNodes) => {
+                    last_selection_error = Some(BrokerError::NoHealthyProxyNodes);
+                    None
+                }
+                Err(err) => Some(Err(err)),
+            },
+        )
+        .unwrap_or_else(|| Err(last_selection_error.unwrap_or(BrokerError::IpNotFound)))?;
     let port = allocate_port(existing, request.desired_port, listen_ip, port_range)?;
     let now = now_epoch_sec();
 
@@ -14067,6 +14081,42 @@ proxies:
         let node = choose_node_for_ip(ip, &nodes, &probes, Some(min_updated_at))
             .expect("fresh healthy node should be selected");
         assert_eq!(node.proxy_name, "healthy-node");
+    }
+
+    #[test]
+    fn prepare_session_skips_ip_with_only_stale_node_probe_mapping() {
+        let bad_ip = "1.1.1.1";
+        let good_ip = "2.2.2.2";
+        let request = OpenSessionRequest {
+            selection_mode: SessionSelectionMode::Any,
+            desired_port: None,
+            ..Default::default()
+        };
+        let ips = vec![sample_ip(bad_ip, None), sample_ip(good_ip, None)];
+        let nodes = vec![
+            sample_node("current-bad-node", bad_ip),
+            sample_node("healthy-node", good_ip),
+        ];
+        let min_updated_at = now_epoch_sec().saturating_sub(60);
+        let probes = vec![
+            sample_probe_with_latency("old-bad-node", bad_ip, 1, min_updated_at + 1),
+            sample_probe_with_latency("healthy-node", good_ip, 100, min_updated_at + 1),
+        ];
+
+        let session = prepare_session(
+            &request,
+            &nodes,
+            &ips,
+            &probes,
+            &[],
+            "127.0.0.1".parse().expect("listen ip should parse"),
+            Some((20000, 20010)),
+            Some(min_updated_at),
+        )
+        .expect("healthy later candidate should be selected");
+
+        assert_eq!(session.selected_ip, good_ip);
+        assert_eq!(session.proxy_name, "healthy-node");
     }
 
     #[test]
