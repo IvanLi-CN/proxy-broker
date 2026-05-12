@@ -4143,6 +4143,7 @@ impl BrokerService {
             .list_probe_records(project_id)
             .await
             .map_err(BrokerError::from)?;
+        let metadata_by_pair = self.proxy_node_metadata_by_pair().await?;
         let existing = self.list_sessions_backfilled(project_id).await?;
 
         let retryable = request.desired_port.is_none();
@@ -4154,7 +4155,7 @@ impl BrokerService {
                 .flat_map(|node| {
                     node.resolved_ips
                         .iter()
-                        .map(move |ip| (&node.proxy_name, ip))
+                        .map(move |ip| (runtime_node_id(node), ip))
                 })
                 .collect::<HashSet<_>>()
                 .len()
@@ -4173,6 +4174,7 @@ impl BrokerService {
                 &nodes,
                 &ip_records,
                 &probe_records,
+                &metadata_by_pair,
                 &existing,
                 self.options.session_listen_ip,
                 self.options.session_port_range,
@@ -4316,6 +4318,7 @@ impl BrokerService {
             .list_probe_records(project_id)
             .await
             .map_err(BrokerError::from)?;
+        let metadata_by_pair = self.proxy_node_metadata_by_pair().await?;
         let existing = self.list_sessions_backfilled(project_id).await?;
 
         let retryable = request.requests.iter().all(|r| r.desired_port.is_none());
@@ -4325,7 +4328,13 @@ impl BrokerService {
             .requests
             .iter()
             .map(|request| {
-                candidate_ips_for_open(request, &ip_records, &probe_records, min_probe_updated_at)
+                candidate_ips_for_open(
+                    request,
+                    &ip_records,
+                    &probe_records,
+                    &metadata_by_pair,
+                    min_probe_updated_at,
+                )
             })
             .collect::<BrokerResult<Vec<_>>>()?;
         let mut candidate_indexes = vec![0usize; request.requests.len()];
@@ -4340,6 +4349,7 @@ impl BrokerService {
                 &mut candidate_indexes,
                 &nodes,
                 &probe_records,
+                &metadata_by_pair,
                 &existing,
                 self.options.session_listen_ip,
                 self.options.session_port_range,
@@ -5035,8 +5045,35 @@ impl BrokerService {
                         .await;
                 }
                 if retryable && attempt < max_attempts {
-                    for (request_index, session) in staged.iter().enumerate() {
-                        excluded_node_ids_by_request[request_index].insert(session.node_id.clone());
+                    let multi_candidate_request_indexes = request
+                        .requests
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(request_index, item)| {
+                            let selected_ip = item.selected_ip.trim();
+                            let requested =
+                                normalized_candidate_node_ids("", &item.candidate_node_ids);
+                            let remaining = requested
+                                .iter()
+                                .filter(|node_id| {
+                                    !excluded_node_ids_by_request[request_index].contains(*node_id)
+                                        && nodes.iter().any(|node| {
+                                            node.node_id == **node_id
+                                                && node
+                                                    .resolved_ips
+                                                    .iter()
+                                                    .any(|ip| ip == selected_ip)
+                                        })
+                                })
+                                .count();
+                            (remaining > 1).then_some(request_index)
+                        })
+                        .collect::<Vec<_>>();
+                    for request_index in multi_candidate_request_indexes {
+                        if let Some(session) = staged.get(request_index) {
+                            excluded_node_ids_by_request[request_index]
+                                .insert(session.node_id.clone());
+                        }
                     }
                     continue;
                 }
@@ -7565,24 +7602,37 @@ fn choose_ip_for_open(
     request: &OpenSessionRequest,
     ip_records: &[IpRecord],
     probes: &[ProbeRecord],
+    metadata_by_pair: &HashMap<(String, String), ProxyNodeMetadataRecord>,
     min_probe_updated_at: Option<i64>,
 ) -> BrokerResult<String> {
-    candidate_ips_for_open(request, ip_records, probes, min_probe_updated_at)?
-        .into_iter()
-        .next()
-        .ok_or(BrokerError::IpNotFound)
+    candidate_ips_for_open(
+        request,
+        ip_records,
+        probes,
+        metadata_by_pair,
+        min_probe_updated_at,
+    )?
+    .into_iter()
+    .next()
+    .ok_or(BrokerError::IpNotFound)
 }
 
 fn candidate_ips_for_open(
     request: &OpenSessionRequest,
     ip_records: &[IpRecord],
     probes: &[ProbeRecord],
+    metadata_by_pair: &HashMap<(String, String), ProxyNodeMetadataRecord>,
     min_probe_updated_at: Option<i64>,
 ) -> BrokerResult<Vec<String>> {
     let selector = build_open_selector_request(request)?;
     let mut items = filter_ip_records(ip_records.to_vec(), probes, &selector)?;
     if let Some(min_updated_at) = min_probe_updated_at {
-        items.retain(|item| probe_ip_is_fresh_healthy(probes, &item.ip, min_updated_at));
+        items.retain(|item| {
+            probe_ip_is_fresh_healthy(probes, &item.ip, min_updated_at)
+                || metadata_by_pair.iter().any(|((_, ip), metadata)| {
+                    ip == &item.ip && proxy_node_metadata_is_fresh_healthy(metadata, min_updated_at)
+                })
+        });
         if items.is_empty() {
             return Err(BrokerError::NoHealthyProxyNodes);
         }
@@ -7625,6 +7675,7 @@ fn choose_node_for_ip(
     ip: &str,
     nodes: &[ProxyNode],
     probes: &[ProbeRecord],
+    metadata_by_pair: &HashMap<(String, String), ProxyNodeMetadataRecord>,
     min_probe_updated_at: Option<i64>,
     excluded_node_ids: &HashSet<String>,
 ) -> BrokerResult<ProxyNode> {
@@ -7639,6 +7690,11 @@ fn choose_node_for_ip(
     if let Some(min_updated_at) = min_probe_updated_at {
         candidates.retain(|node| {
             probe_node_ip_is_fresh_healthy(probes, &node.proxy_name, ip, min_updated_at)
+                || metadata_by_pair
+                    .get(&(runtime_node_id(node), ip.to_string()))
+                    .is_some_and(|metadata| {
+                        proxy_node_metadata_is_fresh_healthy(metadata, min_updated_at)
+                    })
         });
         if candidates.is_empty() {
             return Err(BrokerError::NoHealthyProxyNodes);
@@ -7762,18 +7818,32 @@ fn prepare_session(
     nodes: &[ProxyNode],
     ip_records: &[IpRecord],
     probes: &[ProbeRecord],
+    metadata_by_pair: &HashMap<(String, String), ProxyNodeMetadataRecord>,
     existing: &[SessionRecord],
     listen_ip: IpAddr,
     port_range: Option<(u16, u16)>,
     min_probe_updated_at: Option<i64>,
     excluded_node_ids: &HashSet<String>,
 ) -> BrokerResult<SessionRecord> {
-    let candidate_ips = candidate_ips_for_open(request, ip_records, probes, min_probe_updated_at)?;
+    let candidate_ips = candidate_ips_for_open(
+        request,
+        ip_records,
+        probes,
+        metadata_by_pair,
+        min_probe_updated_at,
+    )?;
     let mut last_selection_error = None;
     let (ip, node) = candidate_ips
         .into_iter()
         .find_map(|ip| {
-            match choose_node_for_ip(&ip, nodes, probes, min_probe_updated_at, excluded_node_ids) {
+            match choose_node_for_ip(
+                &ip,
+                nodes,
+                probes,
+                metadata_by_pair,
+                min_probe_updated_at,
+                excluded_node_ids,
+            ) {
                 Ok(node) => Some(Ok((ip, node))),
                 Err(BrokerError::IpNotFound) => {
                     last_selection_error = Some(BrokerError::IpNotFound);
@@ -7809,6 +7879,7 @@ fn stage_batch_sessions(
     candidate_indexes: &mut [usize],
     nodes: &[ProxyNode],
     probe_records: &[ProbeRecord],
+    metadata_by_pair: &HashMap<(String, String), ProxyNodeMetadataRecord>,
     existing: &[SessionRecord],
     listen_ip: IpAddr,
     port_range: Option<(u16, u16)>,
@@ -7832,6 +7903,7 @@ fn stage_batch_sessions(
                 &ip,
                 nodes,
                 probe_records,
+                metadata_by_pair,
                 min_probe_updated_at,
                 &excluded_node_ids,
             ) {
@@ -13314,6 +13386,55 @@ proxies:
     }
 
     #[tokio::test]
+    async fn open_session_accepts_fresh_proxy_node_metadata_without_legacy_probe_records() {
+        let project_id = "p-open-metadata-only";
+        let store = Arc::new(MemoryStore::new());
+        store
+            .create_project(project_id, 1)
+            .await
+            .expect("project should be created");
+        let import_record = ProxyImportRecord {
+            import_id: "imp-open-metadata-only".to_string(),
+            name: Some("metadata-only".to_string()),
+            import_kind: ProxyImportKind::Subscription,
+            source_scope: ProxyScope::global(),
+            source_identity: ProxyImportSourceIdentity::manual("metadata-only"),
+            allocation_scope: ProxyScope::global(),
+            subscription_metadata: None,
+            created_at: 1,
+            updated_at: 1,
+        };
+        let mut node = make_inventory_record("node-open-metadata-only", "node-a", "1.1.1.1");
+        node.import_id = import_record.import_id.clone();
+        store
+            .replace_proxy_inventory_import(&import_record, &[node.clone()])
+            .await
+            .expect("seed inventory should succeed");
+        store
+            .replace_ip_records(project_id, &[sample_ip("1.1.1.1", None)])
+            .await
+            .expect("seed ip records should succeed");
+        store
+            .upsert_proxy_node_metadata(&[sample_proxy_node_metadata(&node.node_id, "1.1.1.1")])
+            .await
+            .expect("seed proxy node metadata should succeed");
+
+        let service = BrokerService::new(
+            store,
+            Arc::new(TestRuntime::default()),
+            BrokerServiceOptions::default(),
+        );
+
+        let opened = service
+            .open_session(project_id, &OpenSessionRequest::default(), None)
+            .await
+            .expect("fresh node metadata should allow automatic open");
+
+        assert_eq!(opened.selected_ip, "1.1.1.1");
+        assert_eq!(opened.node_id, node.node_id);
+    }
+
+    #[tokio::test]
     async fn open_session_exhausts_all_healthy_ips_after_runtime_apply_failures() {
         let project_id = "p-open-runtime-retry-all";
         let store = Arc::new(MemoryStore::new());
@@ -13659,6 +13780,82 @@ proxies:
     }
 
     #[tokio::test]
+    async fn open_batch_by_ip_keeps_single_candidate_entries_while_retrying_alternates() {
+        let project_id = "p-batch-ip-runtime-retry-mixed-candidates";
+        let store = Arc::new(MemoryStore::new());
+        store
+            .create_project(project_id, 1)
+            .await
+            .expect("project should be created");
+        let import_record = ProxyImportRecord {
+            import_id: "imp-batch-ip-runtime-retry-mixed-candidates".to_string(),
+            name: Some("batch-ip-runtime-retry-mixed-candidates".to_string()),
+            import_kind: ProxyImportKind::Subscription,
+            source_scope: ProxyScope::global(),
+            source_identity: ProxyImportSourceIdentity::manual(
+                "batch-ip-runtime-retry-mixed-candidates",
+            ),
+            allocation_scope: ProxyScope::global(),
+            subscription_metadata: None,
+            created_at: 1,
+            updated_at: 1,
+        };
+        let mut first_node = make_inventory_record("node-batch-ip-mixed-a", "node-a", "1.1.1.1");
+        first_node.import_id = import_record.import_id.clone();
+        let mut second_node = make_inventory_record("node-batch-ip-mixed-b", "node-b", "1.1.1.1");
+        second_node.import_id = import_record.import_id.clone();
+        let mut stable_node = make_inventory_record("node-batch-ip-mixed-c", "node-c", "2.2.2.2");
+        stable_node.import_id = import_record.import_id.clone();
+        store
+            .replace_proxy_inventory_import(
+                &import_record,
+                &[first_node.clone(), second_node.clone(), stable_node.clone()],
+            )
+            .await
+            .expect("seed inventory should succeed");
+        store
+            .upsert_proxy_node_metadata(&[
+                sample_proxy_node_metadata(&first_node.node_id, "1.1.1.1"),
+                sample_proxy_node_metadata(&second_node.node_id, "1.1.1.1"),
+                sample_proxy_node_metadata(&stable_node.node_id, "2.2.2.2"),
+            ])
+            .await
+            .expect("seed proxy node metadata should succeed");
+
+        let runtime = Arc::new(ApplyFailOnCallRuntime::new(1));
+        let service = BrokerService::new(store, runtime.clone(), BrokerServiceOptions::default());
+
+        let opened = service
+            .open_batch_by_ip(
+                project_id,
+                &OpenBatchByIpRequest {
+                    requests: vec![
+                        OpenSessionByIpRequest {
+                            selected_ip: "1.1.1.1".to_string(),
+                            candidate_node_ids: vec![
+                                first_node.node_id.clone(),
+                                second_node.node_id.clone(),
+                            ],
+                            desired_port: None,
+                        },
+                        OpenSessionByIpRequest {
+                            selected_ip: "2.2.2.2".to_string(),
+                            candidate_node_ids: vec![stable_node.node_id.clone()],
+                            desired_port: None,
+                        },
+                    ],
+                },
+                None,
+            )
+            .await
+            .expect("alternate first request should retry with unchanged single-candidate peer");
+
+        assert_eq!(opened.sessions[0].node_id, second_node.node_id);
+        assert_eq!(opened.sessions[1].node_id, stable_node.node_id);
+        assert_eq!(runtime.apply_calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
     async fn open_batch_by_node_preserves_unaffected_node_candidate_when_retrying() {
         let project_id = "p-batch-node-combo-retry";
         let store = Arc::new(MemoryStore::new());
@@ -13907,6 +14104,7 @@ proxies:
             &OpenSessionRequest::default(),
             &ips,
             &probes,
+            &HashMap::new(),
             Some(min_updated_at),
         )
         .expect("fresh healthy candidates should rank");
@@ -13926,9 +14124,15 @@ proxies:
             sample_probe_with_latency("node-b", ip, 100, now),
         ];
 
-        let selected =
-            choose_node_for_ip(ip, &nodes, &probes, Some(min_updated_at), &HashSet::new())
-                .expect("fresh healthy node should rank");
+        let selected = choose_node_for_ip(
+            ip,
+            &nodes,
+            &probes,
+            &HashMap::new(),
+            Some(min_updated_at),
+            &HashSet::new(),
+        )
+        .expect("fresh healthy node should rank");
 
         assert_eq!(selected.proxy_name, "node-b");
     }
@@ -14194,6 +14398,7 @@ proxies:
             &mut candidate_indexes,
             &nodes,
             &[],
+            &HashMap::new(),
             &[],
             Ipv4Addr::LOCALHOST.into(),
             None,
@@ -14230,6 +14435,7 @@ proxies:
             &mut candidate_indexes,
             &nodes,
             &probes,
+            &HashMap::new(),
             &[],
             Ipv4Addr::LOCALHOST.into(),
             Some((20000, 20010)),
@@ -14254,7 +14460,8 @@ proxies:
             sample_ip("1.1.1.1", Some(100)),
             sample_ip("2.2.2.2", Some(10)),
         ];
-        let chosen = choose_ip_for_open(&request, &ips, &[], None).expect("should pick with mru");
+        let chosen = choose_ip_for_open(&request, &ips, &[], &HashMap::new(), None)
+            .expect("should pick with mru");
         assert_eq!(chosen, "1.1.1.1");
     }
 
@@ -14272,7 +14479,7 @@ proxies:
         ];
         let probes = vec![sample_probe("proxy-b", "2.2.2.2")];
 
-        let chosen = choose_ip_for_open(&request, &ips, &probes, None)
+        let chosen = choose_ip_for_open(&request, &ips, &probes, &HashMap::new(), None)
             .expect("healthy candidate should win");
         assert_eq!(chosen, "2.2.2.2");
     }
@@ -14300,7 +14507,7 @@ proxies:
             },
         ];
 
-        let chosen = choose_ip_for_open(&request, &ips, &probes, None)
+        let chosen = choose_ip_for_open(&request, &ips, &probes, &HashMap::new(), None)
             .expect("lower latency candidate should win before recency");
         assert_eq!(chosen, "2.2.2.2");
     }
@@ -14327,8 +14534,14 @@ proxies:
             },
         ];
 
-        let err = choose_ip_for_open(&request, &ips, &probes, Some(min_updated_at))
-            .expect_err("stale and failed probes should be rejected");
+        let err = choose_ip_for_open(
+            &request,
+            &ips,
+            &probes,
+            &HashMap::new(),
+            Some(min_updated_at),
+        )
+        .expect_err("stale and failed probes should be rejected");
         assert!(matches!(err, BrokerError::NoHealthyProxyNodes));
     }
 
@@ -14348,8 +14561,15 @@ proxies:
             sample_probe("healthy-node", ip),
         ];
 
-        let node = choose_node_for_ip(ip, &nodes, &probes, Some(min_updated_at), &HashSet::new())
-            .expect("fresh healthy node should be selected");
+        let node = choose_node_for_ip(
+            ip,
+            &nodes,
+            &probes,
+            &HashMap::new(),
+            Some(min_updated_at),
+            &HashSet::new(),
+        )
+        .expect("fresh healthy node should be selected");
         assert_eq!(node.proxy_name, "healthy-node");
     }
 
@@ -14378,6 +14598,7 @@ proxies:
             &nodes,
             &ips,
             &probes,
+            &HashMap::new(),
             &[],
             "127.0.0.1".parse().expect("listen ip should parse"),
             Some((20000, 20010)),
@@ -14658,8 +14879,9 @@ proxies:
             ..Default::default()
         };
 
-        let chosen = choose_ip_for_open(&request, &[fr_paris, us_paris], &[], None)
-            .expect("geo selection should preserve city-country pairings");
+        let chosen =
+            choose_ip_for_open(&request, &[fr_paris, us_paris], &[], &HashMap::new(), None)
+                .expect("geo selection should preserve city-country pairings");
         assert_eq!(chosen, "1.1.1.1");
     }
 
@@ -14671,7 +14893,7 @@ proxies:
             ..Default::default()
         };
         let ips = vec![sample_ip("1.1.1.1", Some(100))];
-        let err = choose_ip_for_open(&request, &ips, &[], None)
+        let err = choose_ip_for_open(&request, &ips, &[], &HashMap::new(), None)
             .expect_err("ip mode without specified_ips should be rejected");
         assert!(matches!(err, BrokerError::InvalidRequest(_)));
     }
@@ -14732,6 +14954,7 @@ proxies:
             &nodes,
             &ips,
             &[],
+            &HashMap::new(),
             &[],
             Ipv4Addr::UNSPECIFIED.into(),
             None,
