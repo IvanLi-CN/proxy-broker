@@ -68,6 +68,7 @@ const DEFAULT_SESSION_OPTIONS_LIMIT: usize = 25;
 const DEFAULT_SESSION_NODE_OPTIONS_LIMIT: usize = 80;
 const GLOBAL_RUNTIME_PROJECT_ID: &str = "__global__";
 const PROXY_PROBE_ROUNDS: usize = 5;
+const AUTO_PORT_BIND_ATTEMPTS: usize = 3;
 
 #[derive(Debug, Clone)]
 pub struct BrokerServiceOptions {
@@ -4295,6 +4296,7 @@ impl BrokerService {
         let mut candidate_indexes = vec![0usize; request.requests.len()];
 
         let mut attempt = 0usize;
+        let mut port_bind_attempts = 0usize;
         loop {
             attempt += 1;
             let staged = match stage_batch_sessions(
@@ -4309,6 +4311,17 @@ impl BrokerService {
                 min_probe_updated_at,
             ) {
                 Ok(staged) => staged,
+                Err(err) if retryable && matches!(err, BrokerError::PortInUse) => {
+                    port_bind_attempts += 1;
+                    if port_bind_attempts < AUTO_PORT_BIND_ATTEMPTS {
+                        continue;
+                    }
+                    if advance_candidate_indexes(&mut candidate_indexes, &candidate_ips) {
+                        port_bind_attempts = 0;
+                        continue;
+                    }
+                    return Err(BrokerError::PortInUse);
+                }
                 Err(err) => return Err(err),
             };
 
@@ -4336,6 +4349,7 @@ impl BrokerService {
                         .await;
                 }
                 if retryable && advance_candidate_indexes(&mut candidate_indexes, &candidate_ips) {
+                    port_bind_attempts = 0;
                     continue;
                 }
                 return Err(BrokerError::BatchOpenFailed);
@@ -4729,7 +4743,8 @@ impl BrokerService {
         let mut candidate_indexes = vec![0usize; requests.len()];
 
         let mut attempt = 0usize;
-        loop {
+        let mut port_bind_attempts = 0usize;
+        'attempts: loop {
             attempt += 1;
             let mut merged = existing.clone();
             let mut staged = Vec::new();
@@ -4749,6 +4764,18 @@ impl BrokerService {
                     self.options.session_port_range,
                 ) {
                     Ok(port) => port,
+                    Err(err) if retryable && matches!(err, BrokerError::PortInUse) => {
+                        port_bind_attempts += 1;
+                        if port_bind_attempts < AUTO_PORT_BIND_ATTEMPTS {
+                            continue 'attempts;
+                        }
+                        if advance_candidate_indexes(&mut candidate_indexes, &fresh_ips_by_request)
+                        {
+                            port_bind_attempts = 0;
+                            continue 'attempts;
+                        }
+                        return Err(BrokerError::PortInUse);
+                    }
                     Err(err) => return Err(err),
                 };
                 let session = SessionRecord {
@@ -4791,6 +4818,7 @@ impl BrokerService {
                 if retryable
                     && advance_candidate_indexes(&mut candidate_indexes, &fresh_ips_by_request)
                 {
+                    port_bind_attempts = 0;
                     continue;
                 }
                 return Err(BrokerError::BatchOpenFailed);
@@ -6948,11 +6976,23 @@ fn choose_best_inventory_node_for_ip(
         let left_metadata = metadata_by_pair.get(&(left.node_id.clone(), selected_ip.to_string()));
         let right_metadata =
             metadata_by_pair.get(&(right.node_id.clone(), selected_ip.to_string()));
+        let left_latency = min_probe_updated_at
+            .and_then(|min_updated_at| {
+                left_metadata
+                    .and_then(|item| proxy_node_metadata_fresh_latency(item, min_updated_at))
+            })
+            .or_else(|| left_metadata.and_then(|item| item.median_latency_ms));
+        let right_latency = min_probe_updated_at
+            .and_then(|min_updated_at| {
+                right_metadata
+                    .and_then(|item| proxy_node_metadata_fresh_latency(item, min_updated_at))
+            })
+            .or_else(|| right_metadata.and_then(|item| item.median_latency_ms));
         compare_candidate_probe(
             left_metadata.and_then(|item| item.last_probe_ok),
-            left_metadata.and_then(|item| item.median_latency_ms),
+            left_latency,
             right_metadata.and_then(|item| item.last_probe_ok),
-            right_metadata.and_then(|item| item.median_latency_ms),
+            right_latency,
         )
         .then_with(|| left.proxy_name.cmp(&right.proxy_name))
         .then_with(|| left.node_id.cmp(&right.node_id))
@@ -7208,6 +7248,18 @@ fn probe_summary(probes: &[ProbeRecord]) -> HashMap<String, (bool, Option<u64>)>
     map
 }
 
+fn fresh_probe_summary(
+    probes: &[ProbeRecord],
+    min_updated_at: i64,
+) -> HashMap<String, (bool, Option<u64>)> {
+    let fresh = probes
+        .iter()
+        .filter(|probe| probe.updated_at >= min_updated_at)
+        .cloned()
+        .collect::<Vec<_>>();
+    probe_summary(&fresh)
+}
+
 fn probe_record_is_fresh_healthy(probe: &ProbeRecord, min_updated_at: i64) -> bool {
     probe.ok && probe.updated_at >= min_updated_at
 }
@@ -7239,6 +7291,27 @@ fn proxy_node_metadata_is_fresh_healthy(
         && metadata
             .probe_updated_at
             .is_some_and(|updated_at| updated_at >= min_updated_at)
+}
+
+fn proxy_node_metadata_fresh_latency(
+    metadata: &ProxyNodeMetadataRecord,
+    min_updated_at: i64,
+) -> Option<u64> {
+    let mut latencies = metadata
+        .recent_probe_samples
+        .iter()
+        .filter(|sample| sample.ok && sample.sampled_at >= min_updated_at)
+        .filter_map(|sample| sample.latency_ms)
+        .collect::<Vec<_>>();
+    if !latencies.is_empty() {
+        latencies.sort_unstable();
+        return Some(latencies[latencies.len() / 2]);
+    }
+    metadata
+        .probe_updated_at
+        .is_some_and(|updated_at| updated_at >= min_updated_at)
+        .then_some(metadata.last_latency_ms)
+        .flatten()
 }
 
 fn fresh_healthy_ips_for_inventory_node_metadata(
@@ -7437,6 +7510,8 @@ fn candidate_ips_for_open(
     }
 
     if matches!(request.selection_mode, SessionSelectionMode::Any) {
+        let fresh_probe_index =
+            min_probe_updated_at.map(|min_updated_at| fresh_probe_summary(probes, min_updated_at));
         // Preserve the legacy auto-pick quality bar for the unrestricted path:
         // healthy, low-latency candidates win before recency breaks ties.
         items.sort_by(|a, b| {
@@ -7444,9 +7519,18 @@ fn candidate_ips_for_open(
                 crate::models::SortMode::Mru => b.last_used_at.cmp(&a.last_used_at),
                 crate::models::SortMode::Lru => a.last_used_at.cmp(&b.last_used_at),
             };
-            b.probe_ok
-                .cmp(&a.probe_ok)
-                .then_with(|| a.best_latency_ms.cmp(&b.best_latency_ms))
+            let a_probe = fresh_probe_index
+                .as_ref()
+                .and_then(|index| index.get(&a.ip).copied())
+                .unwrap_or((a.probe_ok, a.best_latency_ms));
+            let b_probe = fresh_probe_index
+                .as_ref()
+                .and_then(|index| index.get(&b.ip).copied())
+                .unwrap_or((b.probe_ok, b.best_latency_ms));
+            b_probe
+                .0
+                .cmp(&a_probe.0)
+                .then_with(|| a_probe.1.cmp(&b_probe.1))
                 .then_with(|| recency)
                 .then_with(|| a.ip.cmp(&b.ip))
         });
@@ -7486,6 +7570,11 @@ fn choose_node_for_ip(
     let mut probe_by_proxy: HashMap<String, (bool, Option<u64>)> = HashMap::new();
     for probe in probes {
         if probe.ip != ip {
+            continue;
+        }
+        if let Some(min_updated_at) = min_probe_updated_at
+            && probe.updated_at < min_updated_at
+        {
             continue;
         }
         let entry = probe_by_proxy
@@ -13317,6 +13406,22 @@ proxies:
         }
     }
 
+    fn sample_probe_with_latency(
+        proxy_name: &str,
+        ip: &str,
+        latency_ms: u64,
+        updated_at: i64,
+    ) -> ProbeRecord {
+        ProbeRecord {
+            proxy_name: proxy_name.to_string(),
+            ip: ip.to_string(),
+            target_url: "https://www.gstatic.com/generate_204".to_string(),
+            ok: true,
+            latency_ms: Some(latency_ms),
+            updated_at,
+        }
+    }
+
     fn sample_proxy_node_metadata(node_id: &str, ip: &str) -> ProxyNodeMetadataRecord {
         ProxyNodeMetadataRecord {
             node_id: node_id.to_string(),
@@ -13335,6 +13440,100 @@ proxies:
             recent_probe_samples: Vec::new(),
             updated_at: now_epoch_sec(),
         }
+    }
+
+    #[test]
+    fn candidate_ips_for_open_ranks_by_fresh_probe_latency() {
+        let now = now_epoch_sec();
+        let min_updated_at = now - 30;
+        let ips = vec![sample_ip("1.1.1.1", None), sample_ip("2.2.2.2", None)];
+        let probes = vec![
+            sample_probe_with_latency("node-a", "1.1.1.1", 1, min_updated_at - 1),
+            sample_probe_with_latency("node-a", "1.1.1.1", 200, now),
+            sample_probe_with_latency("node-b", "2.2.2.2", 100, now),
+        ];
+
+        let ranked = candidate_ips_for_open(
+            &OpenSessionRequest::default(),
+            &ips,
+            &probes,
+            Some(min_updated_at),
+        )
+        .expect("fresh healthy candidates should rank");
+
+        assert_eq!(ranked, vec!["2.2.2.2", "1.1.1.1"]);
+    }
+
+    #[test]
+    fn choose_node_for_ip_ranks_by_fresh_probe_latency() {
+        let now = now_epoch_sec();
+        let min_updated_at = now - 30;
+        let ip = "1.1.1.1";
+        let nodes = vec![sample_node("node-a", ip), sample_node("node-b", ip)];
+        let probes = vec![
+            sample_probe_with_latency("node-a", ip, 1, min_updated_at - 1),
+            sample_probe_with_latency("node-a", ip, 200, now),
+            sample_probe_with_latency("node-b", ip, 100, now),
+        ];
+
+        let selected = choose_node_for_ip(ip, &nodes, &probes, Some(min_updated_at))
+            .expect("fresh healthy node should rank");
+
+        assert_eq!(selected.proxy_name, "node-b");
+    }
+
+    #[test]
+    fn choose_best_inventory_node_for_ip_ranks_by_fresh_probe_latency() {
+        let now = now_epoch_sec();
+        let min_updated_at = now - 30;
+        let ip = "1.1.1.1";
+        let first = make_inventory_record("node-a", "node-a", ip);
+        let second = make_inventory_record("node-b", "node-b", ip);
+        let mut first_metadata = sample_proxy_node_metadata(&first.node_id, ip);
+        first_metadata.median_latency_ms = Some(1);
+        first_metadata.recent_probe_samples = vec![
+            ProxyNodeProbeSampleRecord {
+                node_id: first.node_id.clone(),
+                ip: ip.to_string(),
+                target_url: "https://www.gstatic.com/generate_204".to_string(),
+                ok: true,
+                latency_ms: Some(1),
+                sampled_at: min_updated_at - 1,
+            },
+            ProxyNodeProbeSampleRecord {
+                node_id: first.node_id.clone(),
+                ip: ip.to_string(),
+                target_url: "https://www.gstatic.com/generate_204".to_string(),
+                ok: true,
+                latency_ms: Some(200),
+                sampled_at: now,
+            },
+        ];
+        let mut second_metadata = sample_proxy_node_metadata(&second.node_id, ip);
+        second_metadata.median_latency_ms = Some(150);
+        second_metadata.recent_probe_samples = vec![ProxyNodeProbeSampleRecord {
+            node_id: second.node_id.clone(),
+            ip: ip.to_string(),
+            target_url: "https://www.gstatic.com/generate_204".to_string(),
+            ok: true,
+            latency_ms: Some(100),
+            sampled_at: now,
+        }];
+        let metadata = HashMap::from([
+            ((first.node_id.clone(), ip.to_string()), first_metadata),
+            ((second.node_id.clone(), ip.to_string()), second_metadata),
+        ]);
+
+        let (selected, _) = choose_best_inventory_node_for_ip(
+            ip,
+            &[first.node_id.clone(), second.node_id.clone()],
+            &[first, second],
+            &metadata,
+            Some(min_updated_at),
+        )
+        .expect("fresh healthy inventory node should rank");
+
+        assert_eq!(selected.node_id, "node-b");
     }
 
     fn sample_node(proxy_name: &str, ip: &str) -> ProxyNode {
