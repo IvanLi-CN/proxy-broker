@@ -4167,18 +4167,24 @@ impl BrokerService {
         let mut excluded_node_ids = HashSet::new();
         let mut excluded_ips = HashSet::new();
         let mut last_runtime_apply_error = None;
+        let candidates = SessionCandidateContext {
+            nodes: &nodes,
+            probes: &probe_records,
+            metadata_by_pair: &metadata_by_pair,
+            min_probe_updated_at,
+        };
+        let ports = SessionPortConfig {
+            listen_ip: self.options.session_listen_ip,
+            port_range: self.options.session_port_range,
+        };
 
         for attempt in 1..=max_attempts {
             let prepared = match prepare_session(
                 &request_with_exclusions,
-                &nodes,
                 &ip_records,
-                &probe_records,
-                &metadata_by_pair,
                 &existing,
-                self.options.session_listen_ip,
-                self.options.session_port_range,
-                min_probe_updated_at,
+                &candidates,
+                &ports,
                 &excluded_node_ids,
             ) {
                 Ok(prepared) => prepared,
@@ -4324,6 +4330,16 @@ impl BrokerService {
         let retryable = request.requests.iter().all(|r| r.desired_port.is_none());
         let min_probe_updated_at =
             Some(now_epoch_sec().saturating_sub(self.options.probe_ttl_sec as i64));
+        let candidates = SessionCandidateContext {
+            nodes: &nodes,
+            probes: &probe_records,
+            metadata_by_pair: &metadata_by_pair,
+            min_probe_updated_at,
+        };
+        let ports = SessionPortConfig {
+            listen_ip: self.options.session_listen_ip,
+            port_range: self.options.session_port_range,
+        };
         let candidate_ips = request
             .requests
             .iter()
@@ -4347,13 +4363,9 @@ impl BrokerService {
                 &request.requests,
                 &candidate_ips,
                 &mut candidate_indexes,
-                &nodes,
-                &probe_records,
-                &metadata_by_pair,
                 &existing,
-                self.options.session_listen_ip,
-                self.options.session_port_range,
-                min_probe_updated_at,
+                &candidates,
+                &ports,
             ) {
                 Ok(staged) => staged,
                 Err(err) if retryable && matches!(err, BrokerError::PortInUse) => {
@@ -7813,24 +7825,32 @@ fn port_range_contains(range: (u16, u16), port: u16) -> bool {
     range.0 <= port && port <= range.1
 }
 
-fn prepare_session(
-    request: &OpenSessionRequest,
-    nodes: &[ProxyNode],
-    ip_records: &[IpRecord],
-    probes: &[ProbeRecord],
-    metadata_by_pair: &HashMap<(String, String), ProxyNodeMetadataRecord>,
-    existing: &[SessionRecord],
+struct SessionCandidateContext<'a> {
+    nodes: &'a [ProxyNode],
+    probes: &'a [ProbeRecord],
+    metadata_by_pair: &'a HashMap<(String, String), ProxyNodeMetadataRecord>,
+    min_probe_updated_at: Option<i64>,
+}
+
+struct SessionPortConfig {
     listen_ip: IpAddr,
     port_range: Option<(u16, u16)>,
-    min_probe_updated_at: Option<i64>,
+}
+
+fn prepare_session(
+    request: &OpenSessionRequest,
+    ip_records: &[IpRecord],
+    existing: &[SessionRecord],
+    candidates: &SessionCandidateContext<'_>,
+    ports: &SessionPortConfig,
     excluded_node_ids: &HashSet<String>,
 ) -> BrokerResult<SessionRecord> {
     let candidate_ips = candidate_ips_for_open(
         request,
         ip_records,
-        probes,
-        metadata_by_pair,
-        min_probe_updated_at,
+        candidates.probes,
+        candidates.metadata_by_pair,
+        candidates.min_probe_updated_at,
     )?;
     let mut last_selection_error = None;
     let (ip, node) = candidate_ips
@@ -7838,10 +7858,10 @@ fn prepare_session(
         .find_map(|ip| {
             match choose_node_for_ip(
                 &ip,
-                nodes,
-                probes,
-                metadata_by_pair,
-                min_probe_updated_at,
+                candidates.nodes,
+                candidates.probes,
+                candidates.metadata_by_pair,
+                candidates.min_probe_updated_at,
                 excluded_node_ids,
             ) {
                 Ok(node) => Some(Ok((ip, node))),
@@ -7857,13 +7877,18 @@ fn prepare_session(
             }
         })
         .unwrap_or_else(|| Err(last_selection_error.unwrap_or(BrokerError::IpNotFound)))?;
-    let port = allocate_port(existing, request.desired_port, listen_ip, port_range)?;
+    let port = allocate_port(
+        existing,
+        request.desired_port,
+        ports.listen_ip,
+        ports.port_range,
+    )?;
     let now = now_epoch_sec();
 
     let node_id = runtime_node_id(&node);
     Ok(SessionRecord {
         session_id: ids::random_session_id(),
-        listen: listen_ip.to_string(),
+        listen: ports.listen_ip.to_string(),
         port,
         selected_ip: ip,
         proxy_name: node.proxy_name.clone(),
@@ -7877,13 +7902,9 @@ fn stage_batch_sessions(
     requests: &[OpenSessionRequest],
     candidate_ips: &[Vec<String>],
     candidate_indexes: &mut [usize],
-    nodes: &[ProxyNode],
-    probe_records: &[ProbeRecord],
-    metadata_by_pair: &HashMap<(String, String), ProxyNodeMetadataRecord>,
     existing: &[SessionRecord],
-    listen_ip: IpAddr,
-    port_range: Option<(u16, u16)>,
-    min_probe_updated_at: Option<i64>,
+    candidates: &SessionCandidateContext<'_>,
+    ports: &SessionPortConfig,
 ) -> BrokerResult<Vec<SessionRecord>> {
     let mut staged = Vec::new();
     let excluded_node_ids = HashSet::new();
@@ -7901,10 +7922,10 @@ fn stage_batch_sessions(
         {
             match choose_node_for_ip(
                 &ip,
-                nodes,
-                probe_records,
-                metadata_by_pair,
-                min_probe_updated_at,
+                candidates.nodes,
+                candidates.probes,
+                candidates.metadata_by_pair,
+                candidates.min_probe_updated_at,
                 &excluded_node_ids,
             ) {
                 Ok(node) => {
@@ -7924,12 +7945,17 @@ fn stage_batch_sessions(
         }
         let (ip, node) = selected
             .ok_or_else(|| last_selection_error.unwrap_or(BrokerError::NoHealthyProxyNodes))?;
-        let port = allocate_port(&all_sessions, request.desired_port, listen_ip, port_range)?;
+        let port = allocate_port(
+            &all_sessions,
+            request.desired_port,
+            ports.listen_ip,
+            ports.port_range,
+        )?;
         let now = now_epoch_sec();
         let node_id = runtime_node_id(&node);
         let prepared = SessionRecord {
             session_id: ids::random_session_id(),
-            listen: listen_ip.to_string(),
+            listen: ports.listen_ip.to_string(),
             port,
             selected_ip: ip,
             proxy_name: node.proxy_name.clone(),
@@ -14392,17 +14418,24 @@ proxies:
         let nodes = vec![sample_node("proxy-a", "1.1.1.1")];
         let candidate_ips = vec![vec!["9.9.9.9".to_string()]];
         let mut candidate_indexes = vec![0usize];
+        let metadata_by_pair = HashMap::new();
+        let candidates = SessionCandidateContext {
+            nodes: &nodes,
+            probes: &[],
+            metadata_by_pair: &metadata_by_pair,
+            min_probe_updated_at: None,
+        };
+        let ports = SessionPortConfig {
+            listen_ip: Ipv4Addr::LOCALHOST.into(),
+            port_range: None,
+        };
         let err = stage_batch_sessions(
             &requests,
             &candidate_ips,
             &mut candidate_indexes,
-            &nodes,
             &[],
-            &HashMap::new(),
-            &[],
-            Ipv4Addr::LOCALHOST.into(),
-            None,
-            None,
+            &candidates,
+            &ports,
         )
         .expect_err("non-existent specified ip should fail");
         assert!(matches!(err, BrokerError::IpNotFound));
@@ -14428,18 +14461,25 @@ proxies:
             sample_probe_with_latency("old-bad-node", bad_ip, 1, min_updated_at + 1),
             sample_probe_with_latency("healthy-node", good_ip, 100, min_updated_at + 1),
         ];
+        let metadata_by_pair = HashMap::new();
+        let candidates = SessionCandidateContext {
+            nodes: &nodes,
+            probes: &probes,
+            metadata_by_pair: &metadata_by_pair,
+            min_probe_updated_at: Some(min_updated_at),
+        };
+        let ports = SessionPortConfig {
+            listen_ip: Ipv4Addr::LOCALHOST.into(),
+            port_range: Some((20000, 20010)),
+        };
 
         let sessions = stage_batch_sessions(
             &requests,
             &candidate_ips,
             &mut candidate_indexes,
-            &nodes,
-            &probes,
-            &HashMap::new(),
             &[],
-            Ipv4Addr::LOCALHOST.into(),
-            Some((20000, 20010)),
-            Some(min_updated_at),
+            &candidates,
+            &ports,
         )
         .expect("healthy later batch candidate should be selected");
 
@@ -14592,20 +14632,20 @@ proxies:
             sample_probe_with_latency("old-bad-node", bad_ip, 1, min_updated_at + 1),
             sample_probe_with_latency("healthy-node", good_ip, 100, min_updated_at + 1),
         ];
+        let metadata_by_pair = HashMap::new();
+        let candidates = SessionCandidateContext {
+            nodes: &nodes,
+            probes: &probes,
+            metadata_by_pair: &metadata_by_pair,
+            min_probe_updated_at: Some(min_updated_at),
+        };
+        let ports = SessionPortConfig {
+            listen_ip: "127.0.0.1".parse().expect("listen ip should parse"),
+            port_range: Some((20000, 20010)),
+        };
 
-        let session = prepare_session(
-            &request,
-            &nodes,
-            &ips,
-            &probes,
-            &HashMap::new(),
-            &[],
-            "127.0.0.1".parse().expect("listen ip should parse"),
-            Some((20000, 20010)),
-            Some(min_updated_at),
-            &HashSet::new(),
-        )
-        .expect("healthy later candidate should be selected");
+        let session = prepare_session(&request, &ips, &[], &candidates, &ports, &HashSet::new())
+            .expect("healthy later candidate should be selected");
 
         assert_eq!(session.selected_ip, good_ip);
         assert_eq!(session.proxy_name, "healthy-node");
@@ -14948,20 +14988,20 @@ proxies:
         };
         let nodes = vec![sample_node("proxy-a", "1.1.1.1")];
         let ips = vec![sample_ip("1.1.1.1", None)];
+        let metadata_by_pair = HashMap::new();
+        let candidates = SessionCandidateContext {
+            nodes: &nodes,
+            probes: &[],
+            metadata_by_pair: &metadata_by_pair,
+            min_probe_updated_at: None,
+        };
+        let ports = SessionPortConfig {
+            listen_ip: Ipv4Addr::UNSPECIFIED.into(),
+            port_range: None,
+        };
 
-        let session = prepare_session(
-            &request,
-            &nodes,
-            &ips,
-            &[],
-            &HashMap::new(),
-            &[],
-            Ipv4Addr::UNSPECIFIED.into(),
-            None,
-            None,
-            &HashSet::new(),
-        )
-        .expect("session should be prepared");
+        let session = prepare_session(&request, &ips, &[], &candidates, &ports, &HashSet::new())
+            .expect("session should be prepared");
 
         assert_eq!(session.listen, "0.0.0.0");
     }
