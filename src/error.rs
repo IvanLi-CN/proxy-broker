@@ -17,6 +17,8 @@ pub enum BrokerError {
     SubscriptionFetch(String),
     #[error("no candidate ip found")]
     IpNotFound,
+    #[error("no healthy proxy nodes available")]
+    NoHealthyProxyNodes,
     #[error("specified_ips intersects blacklist_ips")]
     IpConflictBlacklist(Vec<String>),
     #[error("session not found")]
@@ -49,6 +51,8 @@ pub enum BrokerError {
     ProxyInventoryNodeNotFound,
     #[error("mihomo runtime unavailable: {0}")]
     MihomoUnavailable(String),
+    #[error("proxy runtime apply failed: {0}")]
+    ProxyRuntimeApplyFailed(String),
     #[error("batch open failed")]
     BatchOpenFailed,
     #[error("internal error: {0}")]
@@ -63,6 +67,7 @@ impl BrokerError {
             }
             Self::SubscriptionFetch(_) => "subscription_fetch_failed",
             Self::IpNotFound => "ip_not_found",
+            Self::NoHealthyProxyNodes => "no_healthy_proxy_nodes",
             Self::IpConflictBlacklist(_) => "ip_conflict_blacklist",
             Self::SessionNotFound => "session_not_found",
             Self::PortInUse => "port_in_use",
@@ -79,6 +84,7 @@ impl BrokerError {
             Self::ProjectAccessDenied => "project_access_denied",
             Self::ProxyInventoryNodeNotFound => "proxy_inventory_node_not_found",
             Self::MihomoUnavailable(_) => "mihomo_unavailable",
+            Self::ProxyRuntimeApplyFailed(_) => "proxy_runtime_apply_failed",
             Self::BatchOpenFailed => "batch_open_failed",
             Self::Internal(_) => "internal_error",
         }
@@ -91,6 +97,7 @@ impl BrokerError {
             }
             Self::SubscriptionFetch(_) => StatusCode::BAD_GATEWAY,
             Self::IpNotFound => StatusCode::NOT_FOUND,
+            Self::NoHealthyProxyNodes => StatusCode::SERVICE_UNAVAILABLE,
             Self::IpConflictBlacklist(_) => StatusCode::BAD_REQUEST,
             Self::SessionNotFound => StatusCode::NOT_FOUND,
             Self::PortInUse => StatusCode::CONFLICT,
@@ -107,6 +114,7 @@ impl BrokerError {
             Self::ProjectAccessDenied => StatusCode::FORBIDDEN,
             Self::ProxyInventoryNodeNotFound => StatusCode::NOT_FOUND,
             Self::MihomoUnavailable(_) => StatusCode::BAD_GATEWAY,
+            Self::ProxyRuntimeApplyFailed(_) => StatusCode::BAD_GATEWAY,
             Self::BatchOpenFailed => StatusCode::CONFLICT,
             Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
@@ -118,6 +126,7 @@ impl BrokerError {
                 Some(serde_json::json!({ "reason": reason }))
             }
             Self::SubscriptionFetch(reason) => Some(serde_json::json!({ "reason": reason })),
+            Self::ProxyRuntimeApplyFailed(reason) => Some(serde_json::json!({ "reason": reason })),
             Self::IpConflictBlacklist(items) => Some(serde_json::json!({ "conflicts": items })),
             _ => None,
         }
