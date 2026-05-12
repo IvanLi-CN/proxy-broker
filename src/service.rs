@@ -4210,11 +4210,18 @@ impl BrokerService {
                 }
                 let apply_error = BrokerError::ProxyRuntimeApplyFailed(err.to_string());
                 if retryable && attempt < max_attempts {
-                    request_with_exclusions
-                        .excluded_ips
-                        .push(prepared.selected_ip.clone());
-                    request_with_exclusions.excluded_ips.sort();
-                    request_with_exclusions.excluded_ips.dedup();
+                    if request_with_exclusions.selection_mode == SessionSelectionMode::Ip {
+                        let failed_ip = normalize_ip_text(&prepared.selected_ip);
+                        request_with_exclusions
+                            .specified_ips
+                            .retain(|ip| normalize_ip_text(ip) != failed_ip);
+                    } else {
+                        request_with_exclusions
+                            .excluded_ips
+                            .push(prepared.selected_ip.clone());
+                        request_with_exclusions.excluded_ips.sort();
+                        request_with_exclusions.excluded_ips.dedup();
+                    }
                     last_runtime_apply_error = Some(apply_error);
                     continue;
                 }
@@ -13057,6 +13064,72 @@ proxies:
             .open_session(project_id, &OpenSessionRequest::default(), None)
             .await
             .expect("second healthy candidate should open after first apply failure");
+
+        assert_eq!(opened.selected_ip, "2.2.2.2");
+        assert_eq!(runtime.apply_calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn open_session_retries_next_explicit_ip_after_runtime_apply_failure() {
+        let project_id = "p-open-runtime-retry-explicit-ip";
+        let store = Arc::new(MemoryStore::new());
+        store
+            .create_project(project_id, 1)
+            .await
+            .expect("project should be created");
+        let import_record = ProxyImportRecord {
+            import_id: "imp-open-runtime-retry-explicit-ip".to_string(),
+            name: Some("runtime-retry-explicit-ip".to_string()),
+            import_kind: ProxyImportKind::Subscription,
+            source_scope: ProxyScope::global(),
+            source_identity: ProxyImportSourceIdentity::manual("runtime-retry-explicit-ip"),
+            allocation_scope: ProxyScope::global(),
+            subscription_metadata: None,
+            created_at: 1,
+            updated_at: 1,
+        };
+        let mut first_node = make_inventory_record("node-open-explicit-a", "node-a", "1.1.1.1");
+        first_node.import_id = import_record.import_id.clone();
+        let mut second_node = make_inventory_record("node-open-explicit-b", "node-b", "2.2.2.2");
+        second_node.import_id = import_record.import_id.clone();
+        store
+            .replace_proxy_inventory_import(&import_record, &[first_node, second_node])
+            .await
+            .expect("seed inventory should succeed");
+        store
+            .replace_ip_records(
+                project_id,
+                &[sample_ip("1.1.1.1", None), sample_ip("2.2.2.2", None)],
+            )
+            .await
+            .expect("seed ip records should succeed");
+        store
+            .replace_probe_records(
+                project_id,
+                &[
+                    sample_probe("node-a", "1.1.1.1"),
+                    sample_probe("node-b", "2.2.2.2"),
+                ],
+            )
+            .await
+            .expect("seed probe records should succeed");
+
+        let runtime = Arc::new(ApplyFailOnCallRuntime::new(1));
+        let service = BrokerService::new(store, runtime.clone(), BrokerServiceOptions::default());
+
+        let opened = service
+            .open_session(
+                project_id,
+                &OpenSessionRequest {
+                    selection_mode: SessionSelectionMode::Ip,
+                    specified_ips: vec!["1.1.1.1".to_string(), "2.2.2.2".to_string()],
+                    desired_port: None,
+                    ..OpenSessionRequest::default()
+                },
+                None,
+            )
+            .await
+            .expect("second explicit healthy candidate should open after first apply failure");
 
         assert_eq!(opened.selected_ip, "2.2.2.2");
         assert_eq!(runtime.apply_calls.load(Ordering::SeqCst), 2);
