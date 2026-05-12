@@ -4557,6 +4557,7 @@ impl BrokerService {
         else {
             return Err(BrokerError::ProxyInventoryNodeNotFound);
         };
+        let metadata_by_pair = self.proxy_node_metadata_by_pair().await?;
         let probe_records = self
             .store
             .list_probe_records(project_id)
@@ -4564,8 +4565,12 @@ impl BrokerService {
             .map_err(BrokerError::from)?;
         let min_probe_updated_at =
             now_epoch_sec().saturating_sub(self.options.probe_ttl_sec as i64);
-        let fresh_ips =
-            fresh_healthy_ips_for_inventory_node(&node, &probe_records, min_probe_updated_at)?;
+        let fresh_ips = fresh_healthy_ips_for_inventory_node_health(
+            &node,
+            &metadata_by_pair,
+            &probe_records,
+            min_probe_updated_at,
+        )?;
         let candidate_node_ids = vec![node.node_id.clone()];
         let existing = self.list_sessions_backfilled(project_id).await?;
         let retryable = request.desired_port.is_none();
@@ -4697,6 +4702,7 @@ impl BrokerService {
             .into_iter()
             .map(|record| (record.node_id.clone(), record))
             .collect::<HashMap<_, _>>();
+        let metadata_by_pair = self.proxy_node_metadata_by_pair().await?;
         let probe_records = self
             .store
             .list_probe_records(project_id)
@@ -4706,7 +4712,25 @@ impl BrokerService {
             now_epoch_sec().saturating_sub(self.options.probe_ttl_sec as i64);
         let existing = self.list_sessions_backfilled(project_id).await?;
         let retryable = requests.iter().all(|item| item.desired_port.is_none());
-        let max_attempts = if retryable { 3usize } else { 1usize };
+        let mut fresh_ips_by_node = HashMap::new();
+        for request in &requests {
+            let Some(node) = node_map.get(&request.node_id) else {
+                return Err(BrokerError::ProxyInventoryNodeNotFound);
+            };
+            let fresh_ips = fresh_healthy_ips_for_inventory_node_health(
+                node,
+                &metadata_by_pair,
+                &probe_records,
+                min_probe_updated_at,
+            )?;
+            fresh_ips_by_node.insert(request.node_id.clone(), fresh_ips);
+        }
+        let max_attempts = if retryable {
+            fresh_ips_by_node.values().map(Vec::len).max().unwrap_or(1)
+        } else {
+            1usize
+        };
+        let mut excluded_ips_by_node: HashMap<String, HashSet<String>> = HashMap::new();
 
         for attempt in 1..=max_attempts {
             let mut merged = existing.clone();
@@ -4715,14 +4739,17 @@ impl BrokerService {
                 let Some(node) = node_map.get(&request.node_id) else {
                     return Err(BrokerError::ProxyInventoryNodeNotFound);
                 };
-                let selected_ip = fresh_healthy_ips_for_inventory_node(
-                    node,
-                    &probe_records,
-                    min_probe_updated_at,
-                )?
-                .into_iter()
-                .next()
-                .ok_or(BrokerError::NoHealthyProxyNodes)?;
+                let excluded_ips = excluded_ips_by_node
+                    .get(&request.node_id)
+                    .cloned()
+                    .unwrap_or_default();
+                let selected_ip = fresh_ips_by_node
+                    .get(&request.node_id)
+                    .into_iter()
+                    .flatten()
+                    .find(|ip| !excluded_ips.contains(*ip))
+                    .cloned()
+                    .ok_or(BrokerError::NoHealthyProxyNodes)?;
                 let port = match allocate_port(
                     &merged,
                     request.desired_port,
@@ -4779,6 +4806,12 @@ impl BrokerService {
                         .await;
                 }
                 if retryable && attempt < max_attempts {
+                    for session in &staged {
+                        excluded_ips_by_node
+                            .entry(session.node_id.clone())
+                            .or_default()
+                            .insert(session.selected_ip.clone());
+                    }
                     continue;
                 }
                 return Err(BrokerError::BatchOpenFailed);
@@ -7231,26 +7264,6 @@ fn proxy_node_metadata_is_fresh_healthy(
             .is_some_and(|updated_at| updated_at >= min_updated_at)
 }
 
-fn fresh_healthy_ips_for_inventory_node(
-    node: &ProxyInventoryRecord,
-    probes: &[ProbeRecord],
-    min_updated_at: i64,
-) -> BrokerResult<Vec<String>> {
-    if node.resolved_ips.is_empty() {
-        return Err(BrokerError::SubscriptionInvalid);
-    }
-    let ips = node
-        .resolved_ips
-        .iter()
-        .filter(|ip| probe_node_ip_is_fresh_healthy(probes, &node.proxy_name, ip, min_updated_at))
-        .cloned()
-        .collect::<Vec<_>>();
-    if ips.is_empty() {
-        return Err(BrokerError::NoHealthyProxyNodes);
-    }
-    Ok(ips)
-}
-
 fn fresh_healthy_ips_for_inventory_node_metadata(
     node: &ProxyInventoryRecord,
     metadata_by_pair: &HashMap<(String, String), ProxyNodeMetadataRecord>,
@@ -7268,6 +7281,34 @@ fn fresh_healthy_ips_for_inventory_node_metadata(
                 .is_some_and(|metadata| {
                     proxy_node_metadata_is_fresh_healthy(metadata, min_updated_at)
                 })
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if ips.is_empty() {
+        return Err(BrokerError::NoHealthyProxyNodes);
+    }
+    Ok(ips)
+}
+
+fn fresh_healthy_ips_for_inventory_node_health(
+    node: &ProxyInventoryRecord,
+    metadata_by_pair: &HashMap<(String, String), ProxyNodeMetadataRecord>,
+    probes: &[ProbeRecord],
+    min_updated_at: i64,
+) -> BrokerResult<Vec<String>> {
+    if node.resolved_ips.is_empty() {
+        return Err(BrokerError::SubscriptionInvalid);
+    }
+    let ips = node
+        .resolved_ips
+        .iter()
+        .filter(|ip| {
+            metadata_by_pair
+                .get(&(node.node_id.clone(), (*ip).clone()))
+                .is_some_and(|metadata| {
+                    proxy_node_metadata_is_fresh_healthy(metadata, min_updated_at)
+                })
+                || probe_node_ip_is_fresh_healthy(probes, &node.proxy_name, ip, min_updated_at)
         })
         .cloned()
         .collect::<Vec<_>>();
@@ -12856,6 +12897,121 @@ proxies:
     }
 
     #[tokio::test]
+    async fn open_session_by_node_uses_fresh_proxy_node_metadata_health() {
+        let project_id = "p-node-open-metadata";
+        let store = Arc::new(MemoryStore::new());
+        store
+            .create_project(project_id, 1)
+            .await
+            .expect("project should be created");
+        let import_record = ProxyImportRecord {
+            import_id: "imp-node-open-metadata".to_string(),
+            name: Some("node-open-metadata".to_string()),
+            import_kind: ProxyImportKind::Subscription,
+            source_scope: ProxyScope::global(),
+            source_identity: ProxyImportSourceIdentity::manual("node-open-metadata"),
+            allocation_scope: ProxyScope::global(),
+            subscription_metadata: None,
+            created_at: 1,
+            updated_at: 1,
+        };
+        let mut node = make_inventory_record("node-open-metadata-a", "node-a", "1.1.1.1");
+        node.import_id = import_record.import_id.clone();
+        store
+            .replace_proxy_inventory_import(&import_record, &[node.clone()])
+            .await
+            .expect("seed inventory should succeed");
+        store
+            .replace_ip_records(project_id, &[sample_ip("1.1.1.1", None)])
+            .await
+            .expect("seed ip records should succeed");
+        store
+            .upsert_proxy_node_metadata(&[sample_proxy_node_metadata(&node.node_id, "1.1.1.1")])
+            .await
+            .expect("seed proxy node metadata should succeed");
+
+        let service = BrokerService::new(
+            store,
+            Arc::new(TestRuntime::default()),
+            BrokerServiceOptions::default(),
+        );
+
+        let opened = service
+            .open_session_by_node(
+                project_id,
+                &OpenSessionByNodeRequest {
+                    node_id: node.node_id.clone(),
+                    desired_port: None,
+                },
+                None,
+            )
+            .await
+            .expect("fresh proxy node metadata should allow node-pinned open");
+
+        assert_eq!(opened.selected_ip, "1.1.1.1");
+    }
+
+    #[tokio::test]
+    async fn open_batch_by_node_retries_next_healthy_ip_after_runtime_apply_failure() {
+        let project_id = "p-batch-node-runtime-retry";
+        let store = Arc::new(MemoryStore::new());
+        store
+            .create_project(project_id, 1)
+            .await
+            .expect("project should be created");
+        let import_record = ProxyImportRecord {
+            import_id: "imp-batch-node-runtime-retry".to_string(),
+            name: Some("batch-node-runtime-retry".to_string()),
+            import_kind: ProxyImportKind::Subscription,
+            source_scope: ProxyScope::global(),
+            source_identity: ProxyImportSourceIdentity::manual("batch-node-runtime-retry"),
+            allocation_scope: ProxyScope::global(),
+            subscription_metadata: None,
+            created_at: 1,
+            updated_at: 1,
+        };
+        let mut node = make_inventory_record("node-batch-retry-a", "node-a", "1.1.1.1");
+        node.import_id = import_record.import_id.clone();
+        node.resolved_ips = vec!["1.1.1.1".to_string(), "2.2.2.2".to_string()];
+        store
+            .replace_proxy_inventory_import(&import_record, &[node.clone()])
+            .await
+            .expect("seed inventory should succeed");
+        store
+            .replace_ip_records(
+                project_id,
+                &[sample_ip("1.1.1.1", None), sample_ip("2.2.2.2", None)],
+            )
+            .await
+            .expect("seed ip records should succeed");
+        store
+            .upsert_proxy_node_metadata(&[
+                sample_proxy_node_metadata(&node.node_id, "1.1.1.1"),
+                sample_proxy_node_metadata(&node.node_id, "2.2.2.2"),
+            ])
+            .await
+            .expect("seed proxy node metadata should succeed");
+
+        let runtime = Arc::new(ApplyFailOnCallRuntime::new(1));
+        let service = BrokerService::new(store, runtime.clone(), BrokerServiceOptions::default());
+
+        let opened = service
+            .open_batch_by_node(
+                project_id,
+                &OpenBatchByNodeRequest {
+                    node_ids: vec![node.node_id.clone()],
+                    requests: Vec::new(),
+                },
+                None,
+            )
+            .await
+            .expect("batch node open should retry the next healthy ip");
+
+        assert_eq!(opened.sessions[0].selected_ip, "2.2.2.2");
+        assert_eq!(runtime.apply_calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
     async fn open_session_preserves_runtime_apply_error_when_retries_exhaust_healthy_ips() {
         let project_id = "p-open-runtime-exhausted";
         let store = Arc::new(MemoryStore::new());
@@ -12974,6 +13130,26 @@ proxies:
             target_url: "https://www.gstatic.com/generate_204".to_string(),
             ok: true,
             latency_ms: Some(100),
+            updated_at: now_epoch_sec(),
+        }
+    }
+
+    fn sample_proxy_node_metadata(node_id: &str, ip: &str) -> ProxyNodeMetadataRecord {
+        ProxyNodeMetadataRecord {
+            node_id: node_id.to_string(),
+            ip: ip.to_string(),
+            country_code: None,
+            country_name: None,
+            region_name: None,
+            city: None,
+            geo_source: None,
+            probe_updated_at: Some(now_epoch_sec()),
+            geo_updated_at: None,
+            last_probe_ok: Some(true),
+            last_latency_ms: Some(100),
+            median_latency_ms: Some(100),
+            last_probe_samples: vec![Some(100)],
+            recent_probe_samples: Vec::new(),
             updated_at: now_epoch_sec(),
         }
     }
