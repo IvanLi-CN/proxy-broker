@@ -4146,9 +4146,15 @@ impl BrokerService {
         let existing = self.list_sessions_backfilled(project_id).await?;
 
         let retryable = request.desired_port.is_none();
-        let max_attempts = if retryable { 3usize } else { 1usize };
         let min_probe_updated_at =
             Some(now_epoch_sec().saturating_sub(self.options.probe_ttl_sec as i64));
+        let max_attempts = if retryable {
+            candidate_ips_for_open(request, &ip_records, &probe_records, min_probe_updated_at)?
+                .len()
+                .max(1)
+        } else {
+            1usize
+        };
         let mut request_with_exclusions = request.clone();
         let mut last_runtime_apply_error = None;
 
@@ -8000,6 +8006,22 @@ mod tests {
         }
     }
 
+    struct ApplyFailThroughCallRuntime {
+        fail_through_call: usize,
+        apply_calls: AtomicUsize,
+        payloads: TokioMutex<Vec<String>>,
+    }
+
+    impl ApplyFailThroughCallRuntime {
+        fn new(fail_through_call: usize) -> Self {
+            Self {
+                fail_through_call,
+                apply_calls: AtomicUsize::new(0),
+                payloads: TokioMutex::new(Vec::new()),
+            }
+        }
+    }
+
     #[derive(Default)]
     struct CoordinatedRuntime {
         first_apply_started: Notify,
@@ -8492,6 +8514,48 @@ mod tests {
             let call = self.apply_calls.fetch_add(1, Ordering::SeqCst) + 1;
             self.payloads.lock().await.push(payload.to_string());
             if call == self.fail_on_call {
+                return Err(anyhow!("apply failed on call {call}"));
+            }
+            Ok(())
+        }
+
+        async fn measure_proxy_delay(
+            &self,
+            _project_id: &str,
+            _proxy_name: &str,
+            _url: &str,
+            _timeout_ms: u64,
+        ) -> anyhow::Result<Option<u64>> {
+            Ok(Some(1))
+        }
+    }
+
+    #[async_trait]
+    impl MihomoRuntime for ApplyFailThroughCallRuntime {
+        async fn ensure_started(&self, _project_id: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn shutdown_project(&self, _project_id: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn controller_meta(
+            &self,
+            _project_id: &str,
+        ) -> anyhow::Result<(String, Option<String>)> {
+            Ok(("127.0.0.1:9090".to_string(), None))
+        }
+
+        async fn controller_addr(&self, project_id: &str) -> anyhow::Result<String> {
+            let (addr, _) = self.controller_meta(project_id).await?;
+            Ok(addr)
+        }
+
+        async fn apply_config(&self, _project_id: &str, payload: &str) -> anyhow::Result<()> {
+            let call = self.apply_calls.fetch_add(1, Ordering::SeqCst) + 1;
+            self.payloads.lock().await.push(payload.to_string());
+            if call <= self.fail_through_call {
                 return Err(anyhow!("apply failed on call {call}"));
             }
             Ok(())
@@ -12996,6 +13060,75 @@ proxies:
 
         assert_eq!(opened.selected_ip, "2.2.2.2");
         assert_eq!(runtime.apply_calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn open_session_exhausts_all_healthy_ips_after_runtime_apply_failures() {
+        let project_id = "p-open-runtime-retry-all";
+        let store = Arc::new(MemoryStore::new());
+        store
+            .create_project(project_id, 1)
+            .await
+            .expect("project should be created");
+        let import_record = ProxyImportRecord {
+            import_id: "imp-open-runtime-retry-all".to_string(),
+            name: Some("runtime-retry-all".to_string()),
+            import_kind: ProxyImportKind::Subscription,
+            source_scope: ProxyScope::global(),
+            source_identity: ProxyImportSourceIdentity::manual("runtime-retry-all"),
+            allocation_scope: ProxyScope::global(),
+            subscription_metadata: None,
+            created_at: 1,
+            updated_at: 1,
+        };
+        let mut nodes = vec![
+            make_inventory_record("node-open-retry-all-a", "node-a", "1.1.1.1"),
+            make_inventory_record("node-open-retry-all-b", "node-b", "2.2.2.2"),
+            make_inventory_record("node-open-retry-all-c", "node-c", "3.3.3.3"),
+            make_inventory_record("node-open-retry-all-d", "node-d", "4.4.4.4"),
+        ];
+        for node in &mut nodes {
+            node.import_id = import_record.import_id.clone();
+        }
+        store
+            .replace_proxy_inventory_import(&import_record, &nodes)
+            .await
+            .expect("seed inventory should succeed");
+        store
+            .replace_ip_records(
+                project_id,
+                &[
+                    sample_ip("1.1.1.1", None),
+                    sample_ip("2.2.2.2", None),
+                    sample_ip("3.3.3.3", None),
+                    sample_ip("4.4.4.4", None),
+                ],
+            )
+            .await
+            .expect("seed ip records should succeed");
+        store
+            .replace_probe_records(
+                project_id,
+                &[
+                    sample_probe("node-a", "1.1.1.1"),
+                    sample_probe("node-b", "2.2.2.2"),
+                    sample_probe("node-c", "3.3.3.3"),
+                    sample_probe("node-d", "4.4.4.4"),
+                ],
+            )
+            .await
+            .expect("seed probe records should succeed");
+
+        let runtime = Arc::new(ApplyFailThroughCallRuntime::new(3));
+        let service = BrokerService::new(store, runtime.clone(), BrokerServiceOptions::default());
+
+        let opened = service
+            .open_session(project_id, &OpenSessionRequest::default(), None)
+            .await
+            .expect("fourth healthy candidate should open after three apply failures");
+
+        assert_eq!(opened.selected_ip, "4.4.4.4");
+        assert_eq!(runtime.apply_calls.load(Ordering::SeqCst), 4);
     }
 
     #[tokio::test]

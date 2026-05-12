@@ -211,21 +211,30 @@ async fn resolve_server_ips(server: &str) -> anyhow::Result<Vec<String>> {
 }
 
 fn parse_subscription_payload(raw: &str) -> Result<Vec<Value>, SubscriptionLoadError> {
-    match extract_proxies_from_yaml(raw) {
+    match extract_proxies_from_yaml_with_clash_compat(raw) {
         Ok(proxies) => Ok(proxies),
         Err(yaml_err) => {
-            if let Some(normalized) = normalize_clash_compat_yaml(raw) {
-                if let Ok(proxies) = extract_proxies_from_yaml(&normalized) {
-                    return Ok(proxies);
-                }
-            }
             let decoded = decode_base64_yaml(raw).map_err(|base64_err| {
                 SubscriptionLoadError::InvalidPayload(format!(
                     "yaml parse failed: {yaml_err}; base64 fallback failed: {base64_err}"
                 ))
             })?;
-            extract_proxies_from_yaml(&decoded)
+            extract_proxies_from_yaml_with_clash_compat(&decoded)
                 .map_err(|err| SubscriptionLoadError::InvalidPayload(err.to_string()))
+        }
+    }
+}
+
+fn extract_proxies_from_yaml_with_clash_compat(content: &str) -> anyhow::Result<Vec<Value>> {
+    match extract_proxies_from_yaml(content) {
+        Ok(proxies) => Ok(proxies),
+        Err(yaml_err) => {
+            if let Some(normalized) = normalize_clash_compat_yaml(content)
+                && let Ok(proxies) = extract_proxies_from_yaml(&normalized)
+            {
+                return Ok(proxies);
+            }
+            Err(yaml_err)
         }
     }
 }
@@ -893,6 +902,7 @@ mod tests {
         http::{HeaderMap, HeaderValue, StatusCode},
         routing::get,
     };
+    use base64::Engine;
     use std::sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -1641,6 +1651,23 @@ proxies:
         assert_eq!(proxies.len(), 2);
         let first = to_json_value(&proxies[0]).expect("proxy should convert to json");
         assert_eq!(first["name"], "at-vmess");
+        assert_eq!(first["server"], "::ffff:bc72:6200");
+    }
+
+    #[test]
+    fn payload_normalizes_base64_wrapped_unquoted_ipv6_mapped_server() {
+        let raw = r#"
+port: 7890
+proxies:
+  - {name: at-vmess, server: ::ffff:bc72:6200, port: 443, type: vmess, uuid: 00000000-0000-0000-0000-000000000000, alterId: 0, cipher: auto, tls: true}
+"#;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(raw);
+
+        let proxies = parse_subscription_payload(&encoded)
+            .expect("base64 clash-compatible flow mapping should parse");
+
+        assert_eq!(proxies.len(), 1);
+        let first = to_json_value(&proxies[0]).expect("proxy should convert to json");
         assert_eq!(first["server"], "::ffff:bc72:6200");
     }
 
