@@ -4279,6 +4279,8 @@ impl BrokerService {
 
         let retryable = request.requests.iter().all(|r| r.desired_port.is_none());
         let max_attempts = if retryable { 3usize } else { 1usize };
+        let min_probe_updated_at =
+            Some(now_epoch_sec().saturating_sub(self.options.probe_ttl_sec as i64));
 
         for attempt in 1..=max_attempts {
             let staged = match stage_batch_sessions(
@@ -4289,6 +4291,7 @@ impl BrokerService {
                 &existing,
                 self.options.session_listen_ip,
                 self.options.session_port_range,
+                min_probe_updated_at,
             ) {
                 Ok(staged) => staged,
                 Err(err)
@@ -4549,17 +4552,23 @@ impl BrokerService {
         else {
             return Err(BrokerError::ProxyInventoryNodeNotFound);
         };
-        let selected_ip = node
-            .resolved_ips
-            .first()
-            .cloned()
-            .ok_or(BrokerError::SubscriptionInvalid)?;
+        let probe_records = self
+            .store
+            .list_probe_records(project_id)
+            .await
+            .map_err(BrokerError::from)?;
+        let min_probe_updated_at =
+            now_epoch_sec().saturating_sub(self.options.probe_ttl_sec as i64);
+        let fresh_ips =
+            fresh_healthy_ips_for_inventory_node(&node, &probe_records, min_probe_updated_at)?;
         let candidate_node_ids = vec![node.node_id.clone()];
         let existing = self.list_sessions_backfilled(project_id).await?;
         let retryable = request.desired_port.is_none();
-        let max_attempts = if retryable { 3usize } else { 1usize };
+        let max_attempts = if retryable { fresh_ips.len() } else { 1usize };
+        let mut last_runtime_apply_error = None;
 
-        for attempt in 1..=max_attempts {
+        for (attempt_index, selected_ip) in fresh_ips.into_iter().take(max_attempts).enumerate() {
+            let attempt = attempt_index + 1;
             let port = match allocate_port(
                 &existing,
                 request.desired_port,
@@ -4609,10 +4618,12 @@ impl BrokerService {
                     self.recover_runtime_desync_locked(project_id, &existing)
                         .await;
                 }
+                let apply_error = BrokerError::ProxyRuntimeApplyFailed(err.to_string());
                 if retryable && attempt < max_attempts {
+                    last_runtime_apply_error = Some(apply_error);
                     continue;
                 }
-                return Err(err);
+                return Err(apply_error);
             }
 
             let now = now_epoch_sec();
@@ -4646,7 +4657,7 @@ impl BrokerService {
             return Ok(self.build_open_session_response(prepared, request_display_host));
         }
 
-        Err(BrokerError::PortInUse)
+        Err(last_runtime_apply_error.unwrap_or(BrokerError::PortInUse))
     }
 
     pub async fn open_batch_by_node(
@@ -4681,6 +4692,13 @@ impl BrokerService {
             .into_iter()
             .map(|record| (record.node_id.clone(), record))
             .collect::<HashMap<_, _>>();
+        let probe_records = self
+            .store
+            .list_probe_records(project_id)
+            .await
+            .map_err(BrokerError::from)?;
+        let min_probe_updated_at =
+            now_epoch_sec().saturating_sub(self.options.probe_ttl_sec as i64);
         let existing = self.list_sessions_backfilled(project_id).await?;
         let retryable = requests.iter().all(|item| item.desired_port.is_none());
         let max_attempts = if retryable { 3usize } else { 1usize };
@@ -4692,11 +4710,14 @@ impl BrokerService {
                 let Some(node) = node_map.get(&request.node_id) else {
                     return Err(BrokerError::ProxyInventoryNodeNotFound);
                 };
-                let selected_ip = node
-                    .resolved_ips
-                    .first()
-                    .cloned()
-                    .ok_or(BrokerError::SubscriptionInvalid)?;
+                let selected_ip = fresh_healthy_ips_for_inventory_node(
+                    node,
+                    &probe_records,
+                    min_probe_updated_at,
+                )?
+                .into_iter()
+                .next()
+                .ok_or(BrokerError::NoHealthyProxyNodes)?;
                 let port = match allocate_port(
                     &merged,
                     request.desired_port,
@@ -4837,6 +4858,8 @@ impl BrokerService {
             .compose_effective_proxy_inventory_records(project_id)
             .await?;
         let metadata_by_pair = self.proxy_node_metadata_by_pair().await?;
+        let min_probe_updated_at =
+            now_epoch_sec().saturating_sub(self.options.probe_ttl_sec as i64);
         let existing = self.list_sessions_backfilled(project_id).await?;
         let retryable = request
             .requests
@@ -4861,6 +4884,7 @@ impl BrokerService {
                     &candidate_node_ids,
                     &nodes,
                     &metadata_by_pair,
+                    Some(min_probe_updated_at),
                 )?;
                 let port = match allocate_port(
                     &merged,
@@ -5386,6 +5410,8 @@ impl BrokerService {
             .compose_effective_proxy_inventory_records(project_id)
             .await?;
         let metadata_by_pair = self.proxy_node_metadata_by_pair().await?;
+        let min_probe_updated_at =
+            now_epoch_sec().saturating_sub(self.options.probe_ttl_sec as i64);
         let requested_candidates =
             normalized_candidate_node_ids(&request.node_id, &request.candidate_node_ids);
         let (node, selected_ip, candidate_node_ids) = if let Some(selected_ip) = request
@@ -5399,6 +5425,7 @@ impl BrokerService {
                 &requested_candidates,
                 &nodes,
                 &metadata_by_pair,
+                Some(min_probe_updated_at),
             )?;
             (node, selected_ip.to_string(), candidate_node_ids)
         } else {
@@ -5408,11 +5435,14 @@ impl BrokerService {
             else {
                 return Err(BrokerError::ProxyInventoryNodeNotFound);
             };
-            let selected_ip = node
-                .resolved_ips
-                .first()
-                .cloned()
-                .ok_or(BrokerError::SubscriptionInvalid)?;
+            let selected_ip = fresh_healthy_ips_for_inventory_node_metadata(
+                &node,
+                &metadata_by_pair,
+                min_probe_updated_at,
+            )?
+            .into_iter()
+            .next()
+            .ok_or(BrokerError::NoHealthyProxyNodes)?;
             let candidate_node_ids = vec![node.node_id.clone()];
             (node, selected_ip, candidate_node_ids)
         };
@@ -6852,6 +6882,7 @@ fn choose_best_inventory_node_for_ip(
     candidate_node_ids: &[String],
     nodes: &[ProxyInventoryRecord],
     metadata_by_pair: &HashMap<(String, String), ProxyNodeMetadataRecord>,
+    min_probe_updated_at: Option<i64>,
 ) -> BrokerResult<(ProxyInventoryRecord, Vec<String>)> {
     let requested = normalized_candidate_node_ids("", candidate_node_ids);
     if requested.is_empty() {
@@ -6884,6 +6915,18 @@ fn choose_best_inventory_node_for_ip(
         return Err(BrokerError::InvalidRequest(
             "selected_ip must belong to at least one candidate node".to_string(),
         ));
+    }
+    if let Some(min_updated_at) = min_probe_updated_at {
+        candidates.retain(|node| {
+            metadata_by_pair
+                .get(&(node.node_id.clone(), selected_ip.to_string()))
+                .is_some_and(|metadata| {
+                    proxy_node_metadata_is_fresh_healthy(metadata, min_updated_at)
+                })
+        });
+        if candidates.is_empty() {
+            return Err(BrokerError::NoHealthyProxyNodes);
+        }
     }
 
     candidates.sort_by(|left, right| {
@@ -6952,6 +6995,7 @@ fn reselect_session_from_inventory(
         &valid_candidate_node_ids,
         nodes,
         metadata_by_pair,
+        None,
     )
     .ok()?;
 
@@ -7180,6 +7224,52 @@ fn proxy_node_metadata_is_fresh_healthy(
         && metadata
             .probe_updated_at
             .is_some_and(|updated_at| updated_at >= min_updated_at)
+}
+
+fn fresh_healthy_ips_for_inventory_node(
+    node: &ProxyInventoryRecord,
+    probes: &[ProbeRecord],
+    min_updated_at: i64,
+) -> BrokerResult<Vec<String>> {
+    if node.resolved_ips.is_empty() {
+        return Err(BrokerError::SubscriptionInvalid);
+    }
+    let ips = node
+        .resolved_ips
+        .iter()
+        .filter(|ip| probe_node_ip_is_fresh_healthy(probes, &node.proxy_name, ip, min_updated_at))
+        .cloned()
+        .collect::<Vec<_>>();
+    if ips.is_empty() {
+        return Err(BrokerError::NoHealthyProxyNodes);
+    }
+    Ok(ips)
+}
+
+fn fresh_healthy_ips_for_inventory_node_metadata(
+    node: &ProxyInventoryRecord,
+    metadata_by_pair: &HashMap<(String, String), ProxyNodeMetadataRecord>,
+    min_updated_at: i64,
+) -> BrokerResult<Vec<String>> {
+    if node.resolved_ips.is_empty() {
+        return Err(BrokerError::SubscriptionInvalid);
+    }
+    let ips = node
+        .resolved_ips
+        .iter()
+        .filter(|ip| {
+            metadata_by_pair
+                .get(&(node.node_id.clone(), (*ip).clone()))
+                .is_some_and(|metadata| {
+                    proxy_node_metadata_is_fresh_healthy(metadata, min_updated_at)
+                })
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if ips.is_empty() {
+        return Err(BrokerError::NoHealthyProxyNodes);
+    }
+    Ok(ips)
 }
 
 fn filter_ip_records(
@@ -7498,6 +7588,7 @@ fn stage_batch_sessions(
     existing: &[SessionRecord],
     listen_ip: IpAddr,
     port_range: Option<(u16, u16)>,
+    min_probe_updated_at: Option<i64>,
 ) -> BrokerResult<Vec<SessionRecord>> {
     let mut staged = Vec::new();
     for request in requests {
@@ -7511,7 +7602,7 @@ fn stage_batch_sessions(
             &all_sessions,
             listen_ip,
             port_range,
-            None,
+            min_probe_updated_at,
         )?;
         staged.push(prepared);
     }
@@ -8720,6 +8811,13 @@ proxies:
             )
             .await
             .expect("seed active inventory should succeed");
+        store
+            .replace_probe_records(
+                active_project_id,
+                &[sample_probe(&active_node.proxy_name, "3.3.3.3")],
+            )
+            .await
+            .expect("seed active probe should succeed");
 
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(
@@ -8789,6 +8887,13 @@ proxies:
             )
             .await
             .expect("seed active inventory should succeed");
+        store
+            .replace_probe_records(
+                project_id,
+                &[sample_probe(&active_node.proxy_name, "3.3.3.4")],
+            )
+            .await
+            .expect("seed active probe should succeed");
 
         let runtime = Arc::new(TestRuntime::default());
         let service = BrokerService::new(
@@ -10878,6 +10983,10 @@ proxies:
             .load_subscription("edge-jp", &SubscriptionSource::File(source_path.clone()))
             .await
             .expect("local import should succeed");
+        service
+            .refresh("edge-jp", &RefreshRequest { force: true })
+            .await
+            .expect("edge probes should refresh");
         let _ = tokio::fs::remove_file(&source_path).await;
 
         let catalog = service
@@ -11064,6 +11173,10 @@ proxies:
             .load_subscription("browser", &SubscriptionSource::File(source_path.clone()))
             .await
             .expect("seed subscription should succeed");
+        service
+            .refresh("browser", &RefreshRequest { force: true })
+            .await
+            .expect("subscription probes should refresh");
         let _ = tokio::fs::remove_file(&source_path).await;
 
         let catalog = service
@@ -11545,6 +11658,10 @@ proxies:
             .load_subscription("browser", &SubscriptionSource::File(source_path.clone()))
             .await
             .expect("subscription should load");
+        service
+            .refresh("browser", &RefreshRequest { force: true })
+            .await
+            .expect("subscription probes should refresh");
         let _ = tokio::fs::remove_file(&source_path).await;
 
         let catalog = service
@@ -11702,7 +11819,7 @@ proxies:
     #[tokio::test]
     async fn update_session_node_rolls_back_runtime_and_persistence_on_apply_failure() {
         let store = Arc::new(MemoryStore::new());
-        let runtime = Arc::new(ApplyFailOnCallRuntime::new(2));
+        let runtime = Arc::new(ApplyFailOnCallRuntime::new(3));
         let service = BrokerService::new(
             store.clone(),
             runtime.clone(),
@@ -11729,6 +11846,10 @@ proxies:
             .load_subscription("browser", &SubscriptionSource::File(source_path.clone()))
             .await
             .expect("subscription should load");
+        service
+            .refresh("browser", &RefreshRequest { force: true })
+            .await
+            .expect("subscription probes should refresh");
         let _ = tokio::fs::remove_file(&source_path).await;
 
         let catalog = service
@@ -11806,7 +11927,7 @@ proxies:
             .find(|item| item.node_id == next_node.node_id)
             .expect("next node should still be present");
         assert!(next_item.session_last_used_at.is_none());
-        assert_eq!(runtime.apply_calls.load(Ordering::SeqCst), 3);
+        assert_eq!(runtime.apply_calls.load(Ordering::SeqCst), 4);
     }
 
     #[tokio::test]
@@ -11873,6 +11994,10 @@ proxies:
             .load_subscription("browser", &SubscriptionSource::File(source_path.clone()))
             .await
             .expect("browser subscription should load");
+        service
+            .refresh("browser", &RefreshRequest { force: true })
+            .await
+            .expect("browser probes should refresh");
         let _ = tokio::fs::remove_file(&source_path).await;
 
         let catalog = service
@@ -11994,7 +12119,7 @@ proxies:
         let store = Arc::new(MemoryStore::new());
         let runtime = Arc::new(CoordinatedRuntime::default());
         let service = Arc::new(BrokerService::new(
-            store,
+            store.clone(),
             runtime.clone(),
             BrokerServiceOptions::default(),
         ));
@@ -12021,6 +12146,20 @@ proxies:
                 .load_subscription(project_id, &SubscriptionSource::File(source_path.clone()))
                 .await
                 .expect("subscription should load");
+            store
+                .replace_probe_records(
+                    project_id,
+                    &[sample_probe(
+                        &format!("{project_id}-node"),
+                        if project_id == "alpha" {
+                            "1.1.1.1"
+                        } else {
+                            "2.2.2.2"
+                        },
+                    )],
+                )
+                .await
+                .expect("probe records should seed");
             let _ = tokio::fs::remove_file(&source_path).await;
         }
 
@@ -12597,6 +12736,10 @@ proxies:
             .replace_ip_records(project_id, &[sample_ip("1.1.1.1", None)])
             .await
             .expect("seed ip records should succeed");
+        store
+            .replace_probe_records(project_id, &[sample_probe("node-a", "1.1.1.1")])
+            .await
+            .expect("seed probe records should succeed");
 
         let runtime = Arc::new(TestRuntime::with_failures(true, true));
         let service = BrokerService::new(store, runtime.clone(), BrokerServiceOptions::default());
@@ -12972,6 +13115,7 @@ proxies:
             &[],
             &[],
             Ipv4Addr::LOCALHOST.into(),
+            None,
             None,
         )
         .expect_err("non-existent specified ip should fail");
