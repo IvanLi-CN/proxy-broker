@@ -4315,7 +4315,7 @@ impl BrokerService {
             let staged = match stage_batch_sessions(
                 &request.requests,
                 &candidate_ips,
-                &candidate_indexes,
+                &mut candidate_indexes,
                 &nodes,
                 &probe_records,
                 &existing,
@@ -7707,7 +7707,11 @@ fn prepare_session(
         .find_map(
             |ip| match choose_node_for_ip(&ip, nodes, probes, min_probe_updated_at) {
                 Ok(node) => Some(Ok((ip, node))),
-                Err(BrokerError::IpNotFound | BrokerError::NoHealthyProxyNodes) => {
+                Err(BrokerError::IpNotFound) => {
+                    last_selection_error = Some(BrokerError::IpNotFound);
+                    None
+                }
+                Err(BrokerError::NoHealthyProxyNodes) => {
                     last_selection_error = Some(BrokerError::NoHealthyProxyNodes);
                     None
                 }
@@ -7734,7 +7738,7 @@ fn prepare_session(
 fn stage_batch_sessions(
     requests: &[OpenSessionRequest],
     candidate_ips: &[Vec<String>],
-    candidate_indexes: &[usize],
+    candidate_indexes: &mut [usize],
     nodes: &[ProxyNode],
     probe_records: &[ProbeRecord],
     existing: &[SessionRecord],
@@ -7746,12 +7750,33 @@ fn stage_batch_sessions(
     for (request_index, request) in requests.iter().enumerate() {
         let mut all_sessions = existing.to_vec();
         all_sessions.extend(staged.clone());
-        let ip = candidate_ips
+        let request_candidate_ips = candidate_ips
             .get(request_index)
-            .and_then(|items| items.get(candidate_indexes[request_index]))
-            .cloned()
             .ok_or(BrokerError::NoHealthyProxyNodes)?;
-        let node = choose_node_for_ip(&ip, nodes, probe_records, min_probe_updated_at)?;
+        let mut selected = None;
+        let mut last_selection_error = None;
+        while let Some(ip) = request_candidate_ips
+            .get(candidate_indexes[request_index])
+            .cloned()
+        {
+            match choose_node_for_ip(&ip, nodes, probe_records, min_probe_updated_at) {
+                Ok(node) => {
+                    selected = Some((ip, node));
+                    break;
+                }
+                Err(BrokerError::IpNotFound) => {
+                    last_selection_error = Some(BrokerError::IpNotFound);
+                    candidate_indexes[request_index] += 1;
+                }
+                Err(BrokerError::NoHealthyProxyNodes) => {
+                    last_selection_error = Some(BrokerError::NoHealthyProxyNodes);
+                    candidate_indexes[request_index] += 1;
+                }
+                Err(err) => return Err(err),
+            }
+        }
+        let (ip, node) = selected
+            .ok_or_else(|| last_selection_error.unwrap_or(BrokerError::NoHealthyProxyNodes))?;
         let port = allocate_port(&all_sessions, request.desired_port, listen_ip, port_range)?;
         let now = now_epoch_sec();
         let node_id = runtime_node_id(&node);
@@ -13956,11 +13981,11 @@ proxies:
         }];
         let nodes = vec![sample_node("proxy-a", "1.1.1.1")];
         let candidate_ips = vec![vec!["9.9.9.9".to_string()]];
-        let candidate_indexes = vec![0usize];
+        let mut candidate_indexes = vec![0usize];
         let err = stage_batch_sessions(
             &requests,
             &candidate_ips,
-            &candidate_indexes,
+            &mut candidate_indexes,
             &nodes,
             &[],
             &[],
@@ -13970,6 +13995,45 @@ proxies:
         )
         .expect_err("non-existent specified ip should fail");
         assert!(matches!(err, BrokerError::IpNotFound));
+    }
+
+    #[test]
+    fn stage_batch_sessions_skips_ip_with_only_stale_node_probe_mapping() {
+        let bad_ip = "1.1.1.1";
+        let good_ip = "2.2.2.2";
+        let requests = vec![OpenSessionRequest {
+            selection_mode: SessionSelectionMode::Any,
+            desired_port: None,
+            ..Default::default()
+        }];
+        let candidate_ips = vec![vec![bad_ip.to_string(), good_ip.to_string()]];
+        let mut candidate_indexes = vec![0usize];
+        let nodes = vec![
+            sample_node("current-bad-node", bad_ip),
+            sample_node("healthy-node", good_ip),
+        ];
+        let min_updated_at = now_epoch_sec().saturating_sub(60);
+        let probes = vec![
+            sample_probe_with_latency("old-bad-node", bad_ip, 1, min_updated_at + 1),
+            sample_probe_with_latency("healthy-node", good_ip, 100, min_updated_at + 1),
+        ];
+
+        let sessions = stage_batch_sessions(
+            &requests,
+            &candidate_ips,
+            &mut candidate_indexes,
+            &nodes,
+            &probes,
+            &[],
+            Ipv4Addr::LOCALHOST.into(),
+            Some((20000, 20010)),
+            Some(min_updated_at),
+        )
+        .expect("healthy later batch candidate should be selected");
+
+        assert_eq!(sessions[0].selected_ip, good_ip);
+        assert_eq!(sessions[0].proxy_name, "healthy-node");
+        assert_eq!(candidate_indexes[0], 1);
     }
 
     #[test]
