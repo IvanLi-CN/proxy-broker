@@ -3173,7 +3173,7 @@ impl BrokerService {
                     let probe_target = probe_target.clone();
                     async move {
                         let runtime_alias = dedicated_ip_proxy_name(&node.node_id, &ip);
-                        let sample = self
+                        let sample = match self
                             .runtime
                             .measure_proxy_delay(
                                 GLOBAL_RUNTIME_PROJECT_ID,
@@ -3182,7 +3182,19 @@ impl BrokerService {
                                 timeout_ms,
                             )
                             .await
-                            .map_err(|e| BrokerError::MihomoUnavailable(e.to_string()))?;
+                        {
+                            Ok(sample) => sample,
+                            Err(err) => {
+                                tracing::warn!(
+                                    proxy_name = %node.proxy_name,
+                                    node_id = %node.node_id,
+                                    ip = %ip,
+                                    error = %err,
+                                    "proxy latency probe sample failed"
+                                );
+                                None
+                            }
+                        };
                         Ok::<_, BrokerError>((node, ip, sample))
                     }
                 })
@@ -8191,6 +8203,7 @@ mod tests {
     #[derive(Default)]
     struct TestRuntime {
         fail_controller_meta: bool,
+        fail_measure_delay: bool,
         fail_shutdown: bool,
         apply_calls: AtomicUsize,
         shutdown_calls: AtomicUsize,
@@ -8201,6 +8214,7 @@ mod tests {
         fn with_failures(fail_controller_meta: bool, fail_shutdown: bool) -> Self {
             Self {
                 fail_controller_meta,
+                fail_measure_delay: false,
                 fail_shutdown,
                 apply_calls: AtomicUsize::new(0),
                 shutdown_calls: AtomicUsize::new(0),
@@ -8703,6 +8717,9 @@ mod tests {
             _url: &str,
             _timeout_ms: u64,
         ) -> anyhow::Result<Option<u64>> {
+            if self.fail_measure_delay {
+                return Err(anyhow!("delay api unavailable"));
+            }
             Ok(Some(1))
         }
     }
@@ -9461,7 +9478,10 @@ proxies:
     async fn load_subscription_rejects_when_no_resolved_ips() {
         let project_id = "p-no-ip";
         let store = Arc::new(MemoryStore::new());
-        let runtime = Arc::new(TestRuntime::default());
+        let runtime = Arc::new(TestRuntime {
+            fail_measure_delay: true,
+            ..TestRuntime::default()
+        });
         let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
         let source_path = write_subscription_file(
             r#"
@@ -9731,6 +9751,92 @@ proxies:
                 .all(|record| record.node_id != "node-unresolved"),
             "all-node probe should skip unresolved inventory records"
         );
+    }
+
+    #[tokio::test]
+    async fn proxy_latency_probe_records_runtime_delay_errors_as_failed_samples() {
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime {
+            fail_measure_delay: true,
+            ..TestRuntime::default()
+        });
+        let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
+        let import_id = "imp-runtime-error-probe".to_string();
+        store
+            .replace_proxy_inventory_import(
+                &ProxyImportRecord {
+                    import_id: import_id.clone(),
+                    name: Some("runtime-error-probe".to_string()),
+                    import_kind: ProxyImportKind::Subscription,
+                    source_scope: ProxyScope::global(),
+                    source_identity: ProxyImportSourceIdentity::manual(&import_id),
+                    allocation_scope: ProxyScope::global(),
+                    subscription_metadata: None,
+                    created_at: 1,
+                    updated_at: 1,
+                },
+                &[ProxyInventoryRecord {
+                    import_id: import_id.clone(),
+                    node_id: "node-runtime-error".to_string(),
+                    source_scope: ProxyScope::global(),
+                    allocation_scope: ProxyScope::global(),
+                    proxy_name: "runtime-error-node".to_string(),
+                    proxy_type: "socks5".to_string(),
+                    server: "203.0.113.10".to_string(),
+                    resolved_ips: vec!["203.0.113.10".to_string()],
+                    raw_proxy: serde_json::json!({
+                        "name": "runtime-error-node",
+                        "type": "socks5",
+                        "server": "203.0.113.10",
+                    }),
+                    created_at: 1,
+                    updated_at: 1,
+                }],
+            )
+            .await
+            .expect("inventory should seed");
+
+        let mut run = TaskRunRecord {
+            run_id: "run-runtime-error-probe".to_string(),
+            project_id: GLOBAL_RUNTIME_PROJECT_ID.to_string(),
+            kind: TaskRunKind::ProxyLatencyProbe,
+            trigger: TaskRunTrigger::Operator,
+            status: TaskRunStatus::Queued,
+            stage: TaskRunStage::Queued,
+            progress_current: Some(0),
+            progress_total: None,
+            created_at: 1,
+            started_at: None,
+            finished_at: None,
+            summary_json: None,
+            error_code: None,
+            error_message: None,
+            scope: TaskRunScope::All,
+        };
+
+        service
+            .execute_proxy_latency_probe_task(&mut run)
+            .await
+            .expect("probe should complete with failed samples");
+
+        assert_eq!(run.status, TaskRunStatus::Succeeded);
+        assert_eq!(run.progress_current, Some(PROXY_PROBE_ROUNDS as u64));
+        let summary = run.summary_json.expect("summary should exist");
+        assert_eq!(
+            summary["failed_samples"].as_u64(),
+            Some(PROXY_PROBE_ROUNDS as u64)
+        );
+        assert_eq!(summary["failed_nodes"].as_u64(), Some(1));
+        let metadata = store
+            .list_proxy_node_metadata()
+            .await
+            .expect("metadata should list");
+        let record = metadata
+            .iter()
+            .find(|record| record.node_id == "node-runtime-error")
+            .expect("failed metadata should persist");
+        assert_eq!(record.last_probe_ok, Some(false));
+        assert_eq!(record.last_latency_ms, None);
     }
 
     #[tokio::test]

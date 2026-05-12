@@ -110,7 +110,7 @@
   - `proxy_probe_interval_sec`
   - `updated_at`
 - Notes:
-  - default response uses `proxy_probe_interval_sec=3600` before a persisted setting exists
+  - default response uses `proxy_probe_interval_sec=900` before a persisted setting exists
 
 ## PATCH /api/v1/system-settings
 

@@ -65,7 +65,7 @@
 - 投影节点级 metadata 时，若 legacy source 缺少 geo 或 probe 观测，必须保留既有节点级 geo / probe 字段；不得用空 legacy 记录覆盖已有节点级观测。
 - 批量测速必须按 `probe_concurrency` 并发执行每轮节点测速，并在单个样本完成后立即写入历史和 metadata。
 - queued/running 测速任务已覆盖的节点必须从新请求中忽略；若请求节点全部重复，则创建 `skipped` task run 而不是排空任务。
-- 系统设置必须提供 admin-only 的自动测速间隔读写 API，`proxy_probe_interval_sec` 默认 `3600`，最小值 `60`。
+- 系统设置必须提供 admin-only 的自动测速间隔读写 API，`proxy_probe_interval_sec` 默认 `900`，最小值 `60`。
 - 自动测速调度必须按配置间隔覆盖所有订阅导入节点，不覆盖纯手工 node group，并使用 checked arithmetic 避免时间溢出。
 - 运行中的测速/刷新结果必须通过实时推送增量显示。
 - `SessionRecord` / open 响应必须包含 `node_id`，并对旧数据做 best-effort backfill。
