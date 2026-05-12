@@ -12347,7 +12347,7 @@ proxies:
                 project_id,
                 &OpenSessionByNodeRequest {
                     node_id,
-                    desired_port: Some(10080),
+                    desired_port: None,
                 },
                 None,
             )
