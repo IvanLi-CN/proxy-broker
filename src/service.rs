@@ -4170,6 +4170,11 @@ impl BrokerService {
                 {
                     continue;
                 }
+                Err(BrokerError::IpNotFound | BrokerError::NoHealthyProxyNodes)
+                    if last_runtime_apply_error.is_some() =>
+                {
+                    return Err(last_runtime_apply_error.expect("checked above"));
+                }
                 Err(err) => return Err(err),
             };
 
@@ -12796,6 +12801,10 @@ proxies:
     async fn open_session_retries_next_healthy_ip_after_runtime_apply_failure() {
         let project_id = "p-open-runtime-retry";
         let store = Arc::new(MemoryStore::new());
+        store
+            .create_project(project_id, 1)
+            .await
+            .expect("project should be created");
         let import_record = ProxyImportRecord {
             import_id: "imp-open-runtime-retry".to_string(),
             name: Some("runtime-retry".to_string()),
@@ -12844,6 +12853,67 @@ proxies:
 
         assert_eq!(opened.selected_ip, "2.2.2.2");
         assert_eq!(runtime.apply_calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn open_session_preserves_runtime_apply_error_when_retries_exhaust_healthy_ips() {
+        let project_id = "p-open-runtime-exhausted";
+        let store = Arc::new(MemoryStore::new());
+        store
+            .create_project(project_id, 1)
+            .await
+            .expect("project should be created");
+        let import_record = ProxyImportRecord {
+            import_id: "imp-open-runtime-exhausted".to_string(),
+            name: Some("runtime-exhausted".to_string()),
+            import_kind: ProxyImportKind::Subscription,
+            source_scope: ProxyScope::global(),
+            source_identity: ProxyImportSourceIdentity::manual("runtime-exhausted"),
+            allocation_scope: ProxyScope::global(),
+            subscription_metadata: None,
+            created_at: 1,
+            updated_at: 1,
+        };
+        let mut node = make_inventory_record("node-open-exhausted-a", "node-a", "1.1.1.1");
+        node.import_id = import_record.import_id.clone();
+        store
+            .replace_proxy_inventory_import(&import_record, &[node])
+            .await
+            .expect("seed inventory should succeed");
+        store
+            .replace_ip_records(project_id, &[sample_ip("1.1.1.1", None)])
+            .await
+            .expect("seed ip records should succeed");
+        store
+            .replace_probe_records(project_id, &[sample_probe("node-a", "1.1.1.1")])
+            .await
+            .expect("seed probe records should succeed");
+
+        let runtime = Arc::new(ApplyFailOnCallRuntime::new(1));
+        let service = BrokerService::new(
+            store.clone(),
+            runtime.clone(),
+            BrokerServiceOptions::default(),
+        );
+
+        let err = service
+            .open_session(project_id, &OpenSessionRequest::default(), None)
+            .await
+            .expect_err("runtime apply failure should not be masked as no healthy nodes");
+
+        assert!(
+            matches!(err, BrokerError::ProxyRuntimeApplyFailed(_)),
+            "unexpected error: {err:?}"
+        );
+        assert_eq!(runtime.apply_calls.load(Ordering::SeqCst), 1);
+        assert!(
+            store
+                .list_sessions(project_id)
+                .await
+                .expect("sessions should list")
+                .is_empty(),
+            "failed runtime apply must not persist a session"
+        );
     }
 
     #[tokio::test]
