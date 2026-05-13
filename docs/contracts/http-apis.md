@@ -474,6 +474,52 @@
   - `ip_conflict_blacklist` (400)
   - `batch_open_failed` (409), strict rollback for runtime/persist stage failures
 
+## POST /api/v1/projects/{project_id}/sessions/open-by-node
+
+- Change: New
+- Auth:
+  - admin human or development principal
+  - API key whose scope allows `{project_id}`
+- Body:
+  - `node_id`: opaque node id from the project catalog
+  - `desired_port`: `u16?`
+- Constraints:
+  - `node_id` must belong to the effective proxy inventory for `{project_id}`
+  - omitting `desired_port` lets the backend auto-allocate a free listener port
+  - when `PROXY_BROKER_SESSION_PORT_RANGE` is configured, both auto-allocation
+    and explicit `desired_port` must stay inside that inclusive range
+- Success:
+  - `session_id`, `listen`, `bind_host`, `display_host`, `display_address`,
+    `port`, `selected_ip`, `proxy_name`, `node_id`, `candidate_node_ids`
+  - `candidate_node_ids` contains the requested `node_id`
+- Error:
+  - `authentication_required` (401)
+  - `admin_required` (403) for non-admin human callers
+  - `api_key_invalid` (401)
+  - `api_key_revoked` (401)
+  - `project_access_denied` (403)
+  - `invalid_request` (400) when JSON body is malformed
+  - `invalid_port` (400)
+  - `port_in_use` (409)
+  - `proxy_inventory_node_not_found` (404)
+  - `no_healthy_proxy_nodes` (503) when the node has no fresh healthy IP
+
+## POST /api/v1/projects/{project_id}/sessions/open-batch-by-node
+
+- Change: New
+- Auth:
+  - admin human or development principal
+  - API key whose scope allows `{project_id}`
+- Body:
+  - either `node_ids[]`: node ids from the project catalog, opened with auto-assigned ports
+  - or `requests[]`: objects with the same shape as `POST /sessions/open-by-node`
+  - when `requests[]` is non-empty it takes precedence over `node_ids[]`
+- Success:
+  - `sessions[]` with the same shape as single open-by-node
+- Error:
+  - same auth, validation, inventory, port, and health errors as single open-by-node
+  - `batch_open_failed` (409), strict rollback for runtime/persist stage failures
+
 ## GET /api/v1/projects/{project_id}/sessions/suggested-port
 
 - Change: New
