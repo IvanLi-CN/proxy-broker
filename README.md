@@ -260,6 +260,19 @@ Key management base path: `http://127.0.0.1:8080/api/v1/api-keys`
 }
 ```
 
+### Sync imported subscriptions
+
+- `POST /api/v1/proxy-imports/sync`
+- Queues immediate `subscription_sync` task runs for source-backed subscription imports.
+- Manual node-group imports are rejected because they have no upstream source.
+- Request body:
+
+```json
+{
+  "import_ids": ["imp-ALW6Hr9kCeJSS1MF"]
+}
+```
+
 ### Refresh probe and geo metadata
 
 - `POST /refresh`

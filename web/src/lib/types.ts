@@ -383,6 +383,14 @@ export interface ProxyOperationAcceptedResponse {
   run_id: string;
 }
 
+export interface SyncProxyImportsRequest {
+  import_ids: string[];
+}
+
+export interface SyncProxyImportsResponse {
+  run_ids: string[];
+}
+
 export interface UpdateProxyAllocationRequest {
   allocation_scope: ProxyScope;
 }

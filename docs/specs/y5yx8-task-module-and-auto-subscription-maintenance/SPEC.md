@@ -17,6 +17,7 @@
 ### Goals
 
 - 为 project 引入可持久化的自动订阅维护配置。
+- 为 project 与 global source-backed 订阅 import 提供操作员手动立即同步入口。
 - 在服务启动后自动执行：
   - 每 10 分钟订阅同步，并仅对新增 IP 做元数据刷新。
   - 每 24 小时对全部 IP 强制刷新 probe 与 geo。
@@ -26,7 +27,7 @@
 ### Non-goals
 
 - 不把现有手动 `refresh` / `extract` / `session open` 改造成异步任务 API。
-- 不做任务暂停、恢复、取消或手动重跑。
+- 不做任务暂停、恢复、取消或通用任务手动重跑；手动能力仅覆盖 source-backed 订阅 import 同步。
 - 不为 project API key 提供任务中心或任务 SSE 消费。
 
 ## 范围（Scope）
@@ -37,6 +38,7 @@
 - 成功 `load subscription` 后，持久化当前 source 配置，并自动排入一条 `post_load` 的增量元数据任务。
 - 引入后台 supervisor / scheduler，在服务启动时扫描已启用 project 并自动调度。
 - 新增任务查询、详情、SSE 流接口。
+- 新增 import 级手动订阅同步接口，并在代理页暴露单组与批量更新入口。
 - 新增 `/tasks` 页面、侧栏入口、任务筛选条、摘要卡、任务表与事件详情抽屉。
 
 ### Out of scope
@@ -52,6 +54,8 @@
 - `load subscription` 成功后必须记录 project 的订阅源，并自动触发首轮新增 IP 元数据刷新。
 - 自动同步不得清空现有可用订阅快照；失败时只记录任务失败。
 - 自动同步拉取订阅失败时，任务失败事件必须保留可诊断的错误明细；URL 订阅源至少包含 import id、兼容请求 attempt 标签、响应形态摘要与上游错误文本片段。
+- 手动订阅同步必须只接受 `url|file` source-backed `subscription` import；manual node-group import 必须被拒绝且不显示更新入口。
+- 手动同步 project import 时必须复用 project 任务域并更新已有 import-level sync bookkeeping；手动同步 global import 时必须复用 global 任务域且不得创建自动调度配置。
 - 同一 project 同时最多运行一个自动任务；重叠到期信号必须折叠，不得并发执行。
 - `Tasks` 页面默认聚焦当前 project，管理员可切换为 `all projects` 汇总。
 - 任务页面数据必须通过 `SSE` 实时推送更新，而不是退回轮询。
@@ -85,6 +89,7 @@
   - 拉取上游订阅，完成 diff。
   - 持久化新的节点/IP 快照。
   - 若存在新增 IP，继续触发同一轮后续增量元数据刷新。
+  - 当由 operator 手动触发且 scope 为 import ids 时，不要求 import 到达 `last_sync_due_at`；project import 仍更新已有 sync config 的 started/finished/due 字段，global import 只更新全局库存与继承项目 effective pool。
 - `metadata_refresh_incremental`
   - 只针对“新引入的 IP 记录”做 probe 与 geo 更新。
   - 更新 project `ip_records` / `probe_records` 后，同步回填 effective inventory 的 `(node_id, ip)` 级 `proxy_node_metadata`。
@@ -139,6 +144,12 @@
 - Given 某次自动同步失败
   When 任务结束
   Then 既有订阅快照仍保留，任务记录带 `failed` 状态与错误摘要。
+- Given 管理员在代理页点击 source-backed 订阅 import 的“更新订阅”
+  When 请求被接受
+  Then 服务端创建 `subscription_sync` operator 任务，页面显示队列反馈并刷新 import/catalog/tasks 数据。
+- Given 管理员查看 manual node-group import
+  When import 没有 `url|file` source identity
+  Then 页面不显示“更新订阅”，API 直接请求也返回 `invalid_request`。
 - Given 某个 URL 订阅源在默认请求或部分兼容 UA 下返回非代理 payload 或 `error code: 1102`
   When 后续兼容 UA 可返回合法 `proxies:` payload
   Then 自动同步继续 fallback 并成功导入，同时在 warning 中记录使用的 fallback UA。
@@ -211,6 +222,16 @@
   evidence_note: 验证任务中心已取消顶部 RouteHero，页面首屏直接呈现摘要卡、筛选条、运行表和右侧事件详情流。
   image:
   ![Tasks page live board](./assets/tasks-page-live.png)
+- source_type: storybook_canvas
+  target_program: mock-only
+  capture_scope: browser-viewport
+  sensitive_exclusion: N/A
+  submission_gate: pending-owner-approval
+  story_id_or_title: Pages/ProxiesPage/GlobalProject
+  state: proxy import manual subscription update controls
+  evidence_note: 验证代理页在 source-backed 订阅 import 上展示单组“Update subscription”和批量“Update selected subscriptions”入口，同时 manual node-group import 不展示订阅更新入口。
+  image:
+  ![Proxy subscription update controls](./assets/proxies-subscription-update.png)
 
 ## 实现里程碑（Milestones / Delivery checklist）
 

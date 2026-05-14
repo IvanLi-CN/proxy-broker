@@ -48,10 +48,10 @@ use crate::{
         SessionIpNodeOptionGroupItem, SessionIpNodeOptionIpItem, SessionIpNodeOptionNodeItem,
         SessionListItem, SessionNodeOptionItem, SessionNodeSortMode, SessionOptionItem,
         SessionOptionKind, SessionRecord, SessionSelectionMode, SubscriptionMetadata,
-        SubscriptionSource, SuggestedPortResponse, SystemSettings, TaskEventLevel, TaskListQuery,
-        TaskListResponse, TaskRunDetail, TaskRunEventRecord, TaskRunKind, TaskRunRecord,
-        TaskRunScope, TaskRunStage, TaskRunStatus, TaskRunSummary, TaskRunTrigger,
-        UpdateSessionNodeRequest, now_epoch_sec,
+        SubscriptionSource, SuggestedPortResponse, SyncProxyImportsResponse, SystemSettings,
+        TaskEventLevel, TaskListQuery, TaskListResponse, TaskRunDetail, TaskRunEventRecord,
+        TaskRunKind, TaskRunRecord, TaskRunScope, TaskRunStage, TaskRunStatus, TaskRunSummary,
+        TaskRunTrigger, UpdateSessionNodeRequest, now_epoch_sec,
     },
     proxy_node_validation::{filter_malformed_proxy_nodes, malformed_proxy_reason},
     runtime::MihomoRuntime,
@@ -126,6 +126,14 @@ struct LoadSubscriptionOutcome {
     response: LoadSubscriptionResponse,
     new_ips: Vec<String>,
     import_id: String,
+}
+
+#[derive(Debug, Clone)]
+struct SubscriptionSyncTarget {
+    import_id: String,
+    project_id: String,
+    source_scope: ProxyScope,
+    source: SubscriptionSource,
 }
 
 #[derive(Debug, Clone)]
@@ -1077,7 +1085,108 @@ impl BrokerService {
         self.release_task_project(&run.project_id).await;
     }
 
+    async fn subscription_sync_targets_for_run(
+        &self,
+        run: &TaskRunRecord,
+        now: i64,
+    ) -> BrokerResult<Vec<SubscriptionSyncTarget>> {
+        if let TaskRunScope::Imports { import_ids } = &run.scope {
+            return self
+                .subscription_sync_targets_for_imports(&run.project_id, import_ids)
+                .await;
+        }
+
+        let configs = self
+            .store
+            .list_proxy_import_sync_configs_for_project(&run.project_id)
+            .await
+            .map_err(BrokerError::from)?
+            .into_iter()
+            .filter(|config| {
+                config.enabled && config.last_sync_due_at.map(|ts| ts <= now).unwrap_or(false)
+            })
+            .map(|config| SubscriptionSyncTarget {
+                import_id: config.import_id,
+                project_id: config.project_id,
+                source_scope: ProxyScope::project(run.project_id.clone()),
+                source: config.source,
+            })
+            .collect::<Vec<_>>();
+        if configs.is_empty() {
+            return Err(BrokerError::InvalidRequest(format!(
+                "project `{}` has no due persisted subscription source",
+                run.project_id
+            )));
+        }
+        Ok(configs)
+    }
+
+    async fn subscription_sync_targets_for_imports(
+        &self,
+        run_project_id: &str,
+        import_ids: &[String],
+    ) -> BrokerResult<Vec<SubscriptionSyncTarget>> {
+        if import_ids.is_empty() {
+            return Err(BrokerError::InvalidRequest(
+                "import_ids must include at least one import id".to_string(),
+            ));
+        }
+
+        let mut targets = Vec::new();
+        let mut seen = HashSet::new();
+        for import_id in import_ids {
+            if !seen.insert(import_id.clone()) {
+                continue;
+            }
+            let import = self.get_proxy_import(import_id).await?;
+            if import.import_kind != ProxyImportKind::Subscription {
+                return Err(BrokerError::InvalidRequest(format!(
+                    "import `{}` is not a subscription import",
+                    import.import_id
+                )));
+            }
+            let Some(source) = SubscriptionSource::from_parts(
+                &import.source_identity.source_type,
+                import.source_identity.source_value.clone(),
+            ) else {
+                return Err(BrokerError::InvalidRequest(format!(
+                    "import `{}` cannot be synchronized because it has no source subscription",
+                    import.import_id
+                )));
+            };
+            match (&import.source_scope, run_project_id) {
+                (ProxyScope::Global, GLOBAL_RUNTIME_PROJECT_ID) => {}
+                (ProxyScope::Project { project_id }, _) if project_id == run_project_id => {}
+                _ => {
+                    return Err(BrokerError::InvalidRequest(format!(
+                        "import `{}` does not belong to task project `{}`",
+                        import.import_id, run_project_id
+                    )));
+                }
+            }
+            let project_id = match &import.source_scope {
+                ProxyScope::Global => GLOBAL_RUNTIME_PROJECT_ID.to_string(),
+                ProxyScope::Project { project_id } => project_id.clone(),
+            };
+            targets.push(SubscriptionSyncTarget {
+                import_id: import.import_id,
+                project_id,
+                source_scope: import.source_scope,
+                source,
+            });
+        }
+        Ok(targets)
+    }
+
     async fn execute_subscription_sync_task(&self, run: &mut TaskRunRecord) -> BrokerResult<()> {
+        if let Some(latest_run) = self
+            .store
+            .get_task_run(&run.run_id)
+            .await
+            .map_err(BrokerError::from)?
+        {
+            run.scope = latest_run.scope;
+        }
         self.mark_task_running(run, TaskRunStage::LoadingSubscription, None, None)
             .await?;
         self.append_task_event(
@@ -1090,25 +1199,10 @@ impl BrokerService {
         .await?;
 
         let now = now_epoch_sec();
-        let configs = self
-            .store
-            .list_proxy_import_sync_configs_for_project(&run.project_id)
-            .await
-            .map_err(BrokerError::from)?
-            .into_iter()
-            .filter(|config| {
-                config.enabled && config.last_sync_due_at.map(|ts| ts <= now).unwrap_or(false)
-            })
-            .collect::<Vec<_>>();
-        if configs.is_empty() {
-            return Err(BrokerError::InvalidRequest(format!(
-                "project `{}` has no due persisted subscription source",
-                run.project_id
-            )));
-        }
-        let due_import_ids = configs
+        let targets = self.subscription_sync_targets_for_run(run, now).await?;
+        let due_import_ids = targets
             .iter()
-            .map(|config| config.import_id.clone())
+            .map(|target| target.import_id.clone())
             .collect::<Vec<_>>();
         self.mark_sync_started_for_imports(&due_import_ids).await?;
 
@@ -1117,11 +1211,8 @@ impl BrokerService {
         let mut new_ips = Vec::<String>::new();
         let mut distinct_ips = HashSet::<String>::new();
         let mut completed_import_ids = Vec::<String>::new();
-        for config in &configs {
-            let outcome = match self
-                .load_subscription_internal(&run.project_id, &config.source, None)
-                .await
-            {
+        for target in &targets {
+            let outcome = match self.load_subscription_sync_target(target).await {
                 Ok(outcome) => outcome,
                 Err(err) => {
                     let failed_at = now_epoch_sec();
@@ -1130,17 +1221,17 @@ impl BrokerService {
                             .await?;
                     }
                     self.mark_sync_failed_for_imports(
-                        std::slice::from_ref(&config.import_id),
+                        std::slice::from_ref(&target.import_id),
                         failed_at,
                     )
                     .await?;
-                    return Err(Self::with_subscription_sync_context(err, &config.import_id));
+                    return Err(Self::with_subscription_sync_context(err, &target.import_id));
                 }
             };
             total_loaded_proxies += outcome.response.loaded_proxies;
             warnings.extend(outcome.response.warnings);
             new_ips.extend(outcome.new_ips);
-            completed_import_ids.push(config.import_id.clone());
+            completed_import_ids.push(target.import_id.clone());
             for node in self
                 .store
                 .list_proxy_inventory_for_import(&outcome.import_id)
@@ -1165,10 +1256,32 @@ impl BrokerService {
                 "distinct_ips": distinct_ips.len(),
                 "warnings": warnings,
                 "new_ips": new_ips,
-                "import_ids": configs.iter().map(|config| config.import_id.clone()).collect::<Vec<_>>(),
+                "import_ids": targets.iter().map(|target| target.import_id.clone()).collect::<Vec<_>>(),
             })),
         )
         .await?;
+
+        if run.project_id == GLOBAL_RUNTIME_PROJECT_ID {
+            self.mark_sync_finished_for_imports(&due_import_ids, now_epoch_sec())
+                .await?;
+            self.complete_task_run(
+                run,
+                TaskRunStatus::Succeeded,
+                Some(serde_json::json!({
+                    "loaded_proxies": total_loaded_proxies,
+                    "distinct_ips": distinct_ips.len(),
+                    "warnings": warnings,
+                    "new_ips": 0,
+                    "probed_ips": 0,
+                    "geo_updated": 0,
+                    "skipped_cached": 0,
+                })),
+                None,
+                None,
+            )
+            .await?;
+            return Ok(());
+        }
 
         if new_ips.is_empty() {
             self.mark_sync_finished_for_imports(&due_import_ids, now_epoch_sec())
@@ -1276,6 +1389,11 @@ impl BrokerService {
             TaskRunScope::Nodes { .. } => {
                 return Err(BrokerError::InvalidRequest(
                     "incremental refresh does not accept node scope".to_string(),
+                ));
+            }
+            TaskRunScope::Imports { .. } => {
+                return Err(BrokerError::InvalidRequest(
+                    "incremental refresh does not accept import scope".to_string(),
                 ));
             }
             TaskRunScope::All => self
@@ -2988,6 +3106,9 @@ impl BrokerService {
             TaskRunScope::Ips { .. } => Err(BrokerError::InvalidRequest(
                 "proxy operation does not accept ip scope".to_string(),
             )),
+            TaskRunScope::Imports { .. } => Err(BrokerError::InvalidRequest(
+                "proxy operation does not accept import scope".to_string(),
+            )),
         }
     }
 
@@ -3439,6 +3560,26 @@ impl BrokerService {
             new_ips,
             import_id: imported.import_id,
         })
+    }
+
+    async fn load_subscription_sync_target(
+        &self,
+        target: &SubscriptionSyncTarget,
+    ) -> BrokerResult<LoadSubscriptionOutcome> {
+        match &target.source_scope {
+            ProxyScope::Global => {
+                self.load_global_subscription_source_internal(&target.source, None)
+                    .await
+            }
+            ProxyScope::Project { project_id } if project_id == &target.project_id => {
+                self.load_subscription_internal(project_id, &target.source, None)
+                    .await
+            }
+            ProxyScope::Project { project_id } => Err(BrokerError::InvalidRequest(format!(
+                "import `{}` belongs to project `{}` but was queued for `{}`",
+                target.import_id, project_id, target.project_id
+            ))),
+        }
     }
 
     async fn load_manual_proxy_group_internal(
@@ -5791,6 +5932,100 @@ impl BrokerService {
         Ok(imported.response)
     }
 
+    async fn load_global_subscription_source_internal(
+        &self,
+        source: &SubscriptionSource,
+        requested_name: Option<&str>,
+    ) -> BrokerResult<LoadSubscriptionOutcome> {
+        let _global_guard = self.lock_project("__global_proxy_scope__").await;
+        let imported = self
+            .import_inventory_scope_from_source(&ProxyScope::global(), source, requested_name)
+            .await?;
+        let (projects, settings) = self.list_project_ids_with_settings().await?;
+        let affected_projects = projects
+            .into_iter()
+            .filter(|project_id| {
+                settings
+                    .get(project_id.as_str())
+                    .map(|item| item.use_global_proxies)
+                    .unwrap_or(true)
+            })
+            .collect::<HashSet<_>>();
+        self.rebuild_projects(&affected_projects).await?;
+        Ok(LoadSubscriptionOutcome {
+            response: imported.response,
+            new_ips: Vec::new(),
+            import_id: imported.import_id,
+        })
+    }
+
+    pub async fn sync_proxy_imports(
+        &self,
+        import_ids: &[String],
+    ) -> BrokerResult<SyncProxyImportsResponse> {
+        if import_ids.is_empty() {
+            return Err(BrokerError::InvalidRequest(
+                "import_ids must include at least one import id".to_string(),
+            ));
+        }
+
+        let mut groups = HashMap::<String, Vec<String>>::new();
+        let mut seen = HashSet::new();
+        for import_id in import_ids {
+            if !seen.insert(import_id.clone()) {
+                continue;
+            }
+            let import = self.get_proxy_import(import_id).await?;
+            if import.import_kind != ProxyImportKind::Subscription {
+                return Err(BrokerError::InvalidRequest(format!(
+                    "import `{}` is not a subscription import",
+                    import.import_id
+                )));
+            }
+            if SubscriptionSource::from_parts(
+                &import.source_identity.source_type,
+                import.source_identity.source_value.clone(),
+            )
+            .is_none()
+            {
+                return Err(BrokerError::InvalidRequest(format!(
+                    "import `{}` cannot be synchronized because it has no source subscription",
+                    import.import_id
+                )));
+            }
+
+            let task_project_id = match &import.source_scope {
+                ProxyScope::Global => GLOBAL_RUNTIME_PROJECT_ID.to_string(),
+                ProxyScope::Project { project_id } => project_id.clone(),
+            };
+            groups
+                .entry(task_project_id)
+                .or_default()
+                .push(import.import_id);
+        }
+
+        let mut run_ids = Vec::new();
+        let mut group_keys = groups.keys().cloned().collect::<Vec<_>>();
+        group_keys.sort();
+        for project_id in group_keys {
+            let mut grouped_import_ids = groups.remove(&project_id).unwrap_or_default();
+            grouped_import_ids.sort();
+            let run = self
+                .enqueue_task_run(
+                    &project_id,
+                    TaskRunKind::SubscriptionSync,
+                    TaskRunTrigger::Operator,
+                    TaskRunScope::Imports {
+                        import_ids: grouped_import_ids,
+                    },
+                )
+                .await?;
+            run_ids.push(run.run_id);
+        }
+
+        Ok(SyncProxyImportsResponse { run_ids })
+    }
+
     pub async fn list_proxy_imports(
         &self,
         scope: Option<&str>,
@@ -7346,6 +7581,7 @@ fn expand_incremental_task_scope(run: &mut TaskRunRecord, new_ips: &[String]) ->
             (ips.len() != previous_len).then_some(ips.len())
         }
         TaskRunScope::Nodes { .. } => None,
+        TaskRunScope::Imports { .. } => None,
     }
 }
 
@@ -15167,6 +15403,208 @@ proxies:
     }
 
     #[tokio::test]
+    async fn manual_sync_updates_project_subscription_import_and_sync_config() {
+        let project_id = "p-manual-sync-project";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
+        let source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: first
+    type: socks5
+    server: 8.8.8.8
+"#,
+        )
+        .await;
+
+        service
+            .load_subscription_request(
+                project_id,
+                &LoadSubscriptionRequest {
+                    name: None,
+                    source: Some(SubscriptionSource::File(source_path.clone())),
+                    content: None,
+                },
+            )
+            .await
+            .expect("initial project import should succeed");
+        tokio::fs::write(
+            &source_path,
+            r#"
+proxies:
+  - name: first
+    type: socks5
+    server: 8.8.8.8
+  - name: second
+    type: socks5
+    server: 1.1.1.1
+"#,
+        )
+        .await
+        .expect("subscription source should update");
+
+        let import_id = service
+            .list_proxy_imports(Some("project"), Some(project_id))
+            .await
+            .expect("imports should list")
+            .items
+            .first()
+            .expect("project import should exist")
+            .import_id
+            .clone();
+        let response = service
+            .sync_proxy_imports(std::slice::from_ref(&import_id))
+            .await
+            .expect("manual sync should queue");
+        assert_eq!(response.run_ids.len(), 1);
+
+        let mut run = store
+            .get_task_run(&response.run_ids[0])
+            .await
+            .expect("run lookup should succeed")
+            .expect("queued run should exist");
+        service
+            .execute_subscription_sync_task(&mut run)
+            .await
+            .expect("manual project sync should execute");
+
+        let imports = service
+            .list_proxy_imports(Some("project"), Some(project_id))
+            .await
+            .expect("imports should list after sync");
+        assert_eq!(imports.items[0].proxy_count, 2);
+        let config = store
+            .get_proxy_import_sync_config(&import_id)
+            .await
+            .expect("sync config lookup should succeed")
+            .expect("sync config should remain registered");
+        assert!(config.last_sync_finished_at.is_some());
+        assert!(config.last_sync_due_at >= config.last_sync_finished_at);
+
+        let _ = tokio::fs::remove_file(&source_path).await;
+    }
+
+    #[tokio::test]
+    async fn manual_sync_updates_global_subscription_without_auto_sync_config() {
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store.clone(), runtime, BrokerServiceOptions::default());
+        service
+            .create_project("p-global-sync-consumer")
+            .await
+            .expect("project should be created");
+        let source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: global-first
+    type: socks5
+    server: 8.8.4.4
+"#,
+        )
+        .await;
+
+        service
+            .load_global_subscription(&SubscriptionSource::File(source_path.clone()))
+            .await
+            .expect("initial global import should succeed");
+        tokio::fs::write(
+            &source_path,
+            r#"
+proxies:
+  - name: global-first
+    type: socks5
+    server: 8.8.4.4
+  - name: global-second
+    type: socks5
+    server: 1.0.0.1
+"#,
+        )
+        .await
+        .expect("global subscription source should update");
+
+        let import_id = service
+            .list_proxy_imports(Some("global"), None)
+            .await
+            .expect("global imports should list")
+            .items
+            .first()
+            .expect("global import should exist")
+            .import_id
+            .clone();
+        let response = service
+            .sync_proxy_imports(std::slice::from_ref(&import_id))
+            .await
+            .expect("manual global sync should queue");
+        let mut run = store
+            .get_task_run(&response.run_ids[0])
+            .await
+            .expect("run lookup should succeed")
+            .expect("queued run should exist");
+        assert_eq!(run.project_id, GLOBAL_RUNTIME_PROJECT_ID);
+        service
+            .execute_subscription_sync_task(&mut run)
+            .await
+            .expect("manual global sync should execute");
+
+        let imports = service
+            .list_proxy_imports(Some("global"), None)
+            .await
+            .expect("global imports should list after sync");
+        assert_eq!(imports.items[0].proxy_count, 2);
+        assert!(
+            store
+                .get_proxy_import_sync_config(&import_id)
+                .await
+                .expect("sync config lookup should succeed")
+                .is_none()
+        );
+
+        let _ = tokio::fs::remove_file(&source_path).await;
+    }
+
+    #[tokio::test]
+    async fn manual_sync_rejects_manual_node_group_import() {
+        let project_id = "p-manual-sync-reject";
+        let store = Arc::new(MemoryStore::new());
+        let runtime = Arc::new(TestRuntime::default());
+        let service = BrokerService::new(store, runtime, BrokerServiceOptions::default());
+
+        service
+            .load_subscription_request(
+                project_id,
+                &LoadSubscriptionRequest {
+                    name: Some("manual-group".to_string()),
+                    source: None,
+                    content: Some(
+                        r#"
+proxies:
+  - name: manual
+    type: socks5
+    server: 8.8.8.8
+"#
+                        .to_string(),
+                    ),
+                },
+            )
+            .await
+            .expect("manual import should succeed");
+        let import_id = service
+            .list_proxy_imports(Some("project"), Some(project_id))
+            .await
+            .expect("imports should list")
+            .items[0]
+            .import_id
+            .clone();
+
+        let err = service
+            .sync_proxy_imports(&[import_id])
+            .await
+            .expect_err("manual import should be rejected");
+        assert!(matches!(err, BrokerError::InvalidRequest(_)));
+    }
+
+    #[tokio::test]
     async fn load_subscription_skips_post_load_task_when_full_refresh_is_pending() {
         let project_id = "p-tasks-with-full-refresh";
         let store = Arc::new(MemoryStore::new());
@@ -15821,6 +16259,7 @@ proxies:
             }
             TaskRunScope::All => panic!("post-load task should stay scoped to explicit IPs"),
             TaskRunScope::Nodes { .. } => panic!("post-load task should not use node scope"),
+            TaskRunScope::Imports { .. } => panic!("post-load task should not use import scope"),
         }
     }
 
@@ -15912,6 +16351,7 @@ proxies:
             }
             TaskRunScope::All => panic!("follow-up task should stay scoped to explicit IPs"),
             TaskRunScope::Nodes { .. } => panic!("follow-up task should not use node scope"),
+            TaskRunScope::Imports { .. } => panic!("follow-up task should not use import scope"),
         }
     }
 

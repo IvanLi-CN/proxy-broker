@@ -108,6 +108,7 @@
   - `updated_at INTEGER NOT NULL`
   - index on `(project_id)`
   - `import_id` follows the same short-ID contract as `proxy_imports.import_id`
+  - manual subscription sync updates these fields only for project-local imports that already have a sync config; global imports do not create rows here
 
 - `project_proxy_settings`
   - `project_id TEXT PRIMARY KEY`

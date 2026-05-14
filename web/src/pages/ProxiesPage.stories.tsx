@@ -324,6 +324,7 @@ function InteractiveProjectStory(args: Extract<ProxiesPageProps, { mode: "projec
   const [openingSessionNodeId, setOpeningSessionNodeId] = useState<string | null>(null);
   const [openingBatch, setOpeningBatch] = useState(false);
   const [deletingImportId, setDeletingImportId] = useState<string | null>(null);
+  const [syncingImportIds, setSyncingImportIds] = useState<string[]>([]);
   const [feedback, setFeedback] = useState<{
     title: string;
     description: string;
@@ -420,6 +421,7 @@ function InteractiveProjectStory(args: Extract<ProxiesPageProps, { mode: "projec
           liveNodeStates={liveState}
           queueingOperation={queueingOperation}
           deletingImportId={deletingImportId}
+          syncingImportIds={syncingImportIds}
           openingSessionNodeId={openingSessionNodeId}
           openingBatch={openingBatch}
           suggestedPort={10080}
@@ -553,6 +555,40 @@ function InteractiveProjectStory(args: Extract<ProxiesPageProps, { mode: "projec
               title: "Local import removed",
               description:
                 "The local node-group import was deleted from this project view. Inherited global imports remain protected here.",
+              tone: "success",
+            });
+          }}
+          onSyncImports={async (importIds) => {
+            setSyncingImportIds(importIds);
+            toast.loading("Updating subscription…", {
+              description: `Queued mock subscription update for ${importIds.join(", ")}.`,
+              id: "sync-imports",
+            });
+            await sleep(220);
+            setProxyCatalog((current) => ({
+              ...current,
+              groups: current.groups.map((group) =>
+                importIds.includes(group.import.import_id)
+                  ? {
+                      ...group,
+                      import: {
+                        ...group.import,
+                        proxy_count: group.import.proxy_count + 1,
+                        updated_at: 1_713_310_000,
+                      },
+                    }
+                  : group,
+              ),
+            }));
+            setSyncingImportIds([]);
+            toast.success("Subscription update queued", {
+              description: "The grouped import now reflects a refreshed mock timestamp.",
+              id: "sync-imports",
+            });
+            setFeedback({
+              title: "Subscription update queued",
+              description:
+                "The selected source-based subscription import refreshed its mock catalog timestamp. Manual node groups do not expose this action.",
               tone: "success",
             });
           }}
@@ -707,6 +743,7 @@ export const GlobalProject: Story = {
     onDeleteImport: fn(),
     onRefreshNodes: fn(),
     onProbeNodes: fn(),
+    onSyncImports: fn(),
   },
   render: renderInShell,
   async play({ canvasElement }) {
@@ -769,6 +806,7 @@ export const ConcreteProject: Story = {
     onToggleUseGlobalProxies: fn(),
     onRefreshNodes: fn(),
     onProbeNodes: fn(),
+    onSyncImports: fn(),
     onDeleteImport: fn(),
     onOpenSessionByNode: fn(),
     onOpenBatchByNode: fn(),
@@ -980,6 +1018,7 @@ export const AccessDenied: Story = {
     onDeleteImport: fn(),
     onRefreshNodes: fn(),
     onProbeNodes: fn(),
+    onSyncImports: fn(),
   },
   render: renderInShell,
   async play({ canvasElement }) {
