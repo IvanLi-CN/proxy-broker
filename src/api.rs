@@ -20,7 +20,7 @@ use crate::{
         ProjectProxySettings, ProxyCatalogQuery, ProxyImportListQuery, ProxyInventoryListQuery,
         ProxyOperationRequest, ProxyScope, RefreshRequest, SearchSessionIpNodeOptionsRequest,
         SearchSessionNodeOptionsRequest, SearchSessionOptionsRequest, SuggestedPortResponse,
-        TaskListQuery, TaskRunDetail, TaskRunSummary, TaskStreamEnvelope,
+        SyncProxyImportsRequest, TaskListQuery, TaskRunDetail, TaskRunSummary, TaskStreamEnvelope,
         UpdateProjectProxySettingsRequest, UpdateProxyAllocationRequest,
         UpdateProxyImportAllocationRequest, UpdateSessionNodeRequest, UpdateSystemSettingsRequest,
     },
@@ -50,6 +50,7 @@ pub fn build_router(state: AppState) -> Router {
             post(load_global_subscription),
         )
         .route("/api/v1/proxy-imports", get(list_proxy_imports))
+        .route("/api/v1/proxy-imports/sync", post(sync_proxy_imports))
         .route("/api/v1/proxy-catalog", get(list_proxy_catalog))
         .route(
             "/api/v1/proxy-ops/refresh",
@@ -220,6 +221,20 @@ async fn list_proxy_imports(
     let resp = state
         .service
         .list_proxy_imports(query.scope.as_deref(), query.project_id.as_deref())
+        .await?;
+    Ok(Json(resp))
+}
+
+async fn sync_proxy_imports(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    payload: Result<Json<SyncProxyImportsRequest>, JsonRejection>,
+) -> Result<Json<crate::models::SyncProxyImportsResponse>, BrokerError> {
+    let request = parse_json_payload(payload, "sync_proxy_imports")?;
+    authorize_proxy_import_sync_access(&auth, &state.service, &request.import_ids).await?;
+    let resp = state
+        .service
+        .sync_proxy_imports(&request.import_ids)
         .await?;
     Ok(Json(resp))
 }
@@ -613,6 +628,29 @@ fn authorize_proxy_operation_access(
             return Err(BrokerError::InvalidRequest(format!(
                 "unsupported proxy catalog view `{other}`"
             )));
+        }
+    }
+    Ok(())
+}
+
+async fn authorize_proxy_import_sync_access(
+    auth: &AuthContext,
+    service: &Arc<BrokerService>,
+    import_ids: &[String],
+) -> Result<(), BrokerError> {
+    let mut seen = HashSet::new();
+    for import_id in import_ids {
+        if !seen.insert(import_id) {
+            continue;
+        }
+        let record = service.get_proxy_import(import_id).await?;
+        match &record.source_scope {
+            ProxyScope::Global => {
+                auth.require_admin()?;
+            }
+            ProxyScope::Project { project_id } => {
+                auth.require_project_access(project_id)?;
+            }
         }
     }
     Ok(())

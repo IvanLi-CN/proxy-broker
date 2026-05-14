@@ -289,6 +289,16 @@ pub struct UpdateProxyImportAllocationRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncProxyImportsRequest {
+    pub import_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncProxyImportsResponse {
+    pub run_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyOperationRequest {
     pub view: String,
     #[serde(default)]
@@ -768,6 +778,9 @@ pub enum TaskRunScope {
     },
     Nodes {
         node_ids: Vec<String>,
+    },
+    Imports {
+        import_ids: Vec<String>,
     },
 }
 

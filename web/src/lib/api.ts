@@ -40,6 +40,8 @@ import type {
   SearchSessionOptionsRequest,
   SearchSessionOptionsResponse,
   SuggestedPortResponse,
+  SyncProxyImportsRequest,
+  SyncProxyImportsResponse,
   SystemSettings,
   TaskListQuery,
   TaskListResponse,
@@ -211,6 +213,11 @@ export const api = {
     }),
   listProxyImports: (query?: ProxyImportListQuery) =>
     request<ListProxyImportResponse>(withProxyImportSearch("/api/v1/proxy-imports", query)),
+  syncProxyImports: (payload: SyncProxyImportsRequest) =>
+    request<SyncProxyImportsResponse>("/api/v1/proxy-imports/sync", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
   listProxyCatalog: (query?: ProxyCatalogQuery) =>
     request<ProxyCatalogResponse>(withProxyCatalogSearch("/api/v1/proxy-catalog", query)),
   refreshProxyCatalogMetadata: (payload: ProxyOperationRequest) =>

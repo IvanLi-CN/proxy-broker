@@ -103,6 +103,13 @@ function formatImportLabel(item: ProxyImportItem) {
   return item.name?.trim() || item.import_id;
 }
 
+function canSyncImport(item: ProxyImportItem) {
+  return (
+    item.import_kind === "subscription" &&
+    (item.source_identity.source_type === "url" || item.source_identity.source_type === "file")
+  );
+}
+
 function formatImportSourceTitle(item: ProxyImportItem) {
   const sourceTitle = item.subscription_metadata?.source_title?.trim();
   const displayName = item.name?.trim();
@@ -596,6 +603,8 @@ interface SharedCatalogProps {
   queueingOperation: boolean;
   onRefreshNodes: (nodeIds: string[]) => void | Promise<void>;
   onProbeNodes: (nodeIds: string[]) => void | Promise<void>;
+  onSyncImports: (importIds: string[]) => void | Promise<void>;
+  syncingImportIds?: string[];
 }
 
 interface GlobalProxiesPageProps extends SharedCatalogProps {
@@ -657,6 +666,7 @@ export function ProxiesPage(props: ProxiesPageProps) {
 
 function GlobalProxiesView({
   projects,
+  currentUser,
   accessDenied = false,
   authError = null,
   globalLoadResponse,
@@ -681,8 +691,11 @@ function GlobalProxiesView({
   queueingOperation,
   onRefreshNodes,
   onProbeNodes,
+  onSyncImports,
+  syncingImportIds = [],
 }: GlobalProxiesPageProps) {
   const { t } = useI18n();
+  const canSyncImports = currentUser.status === "resolved" && currentUser.identity.is_admin;
 
   if (authError) {
     return (
@@ -778,6 +791,9 @@ function GlobalProxiesView({
         queueingOperation={queueingOperation}
         onRefreshNodes={onRefreshNodes}
         onProbeNodes={onProbeNodes}
+        onSyncImports={onSyncImports}
+        canSyncImports={canSyncImports}
+        syncingImportIds={syncingImportIds}
         reallocatingImportId={reallocatingImportId}
         deletingImportId={deletingImportId}
         onReassignImport={onReassignImport}
@@ -789,6 +805,7 @@ function GlobalProxiesView({
 
 function ProjectProxiesView({
   projectId,
+  currentUser,
   suggestedPort,
   projectLoadResponse,
   projectLoadError,
@@ -809,13 +826,16 @@ function ProjectProxiesView({
   queueingOperation,
   onRefreshNodes,
   onProbeNodes,
+  onSyncImports,
   onOpenSessionByNode,
   onOpenBatchByNode,
   deletingImportId = null,
   openingSessionNodeId = null,
   openingBatch = false,
+  syncingImportIds = [],
 }: ProjectProxiesPageProps) {
   const { t } = useI18n();
+  const canSyncImports = currentUser.status !== "anonymous";
 
   return (
     <div className="space-y-5">
@@ -876,6 +896,9 @@ function ProjectProxiesView({
         queueingOperation={queueingOperation}
         onRefreshNodes={onRefreshNodes}
         onProbeNodes={onProbeNodes}
+        onSyncImports={onSyncImports}
+        canSyncImports={canSyncImports}
+        syncingImportIds={syncingImportIds}
         currentProjectId={projectId}
         deletingImportId={deletingImportId}
         onDeleteImport={onDeleteImport}
@@ -901,6 +924,8 @@ function GroupedProxyCatalogPanel({
   queueingOperation,
   onRefreshNodes,
   onProbeNodes,
+  onSyncImports,
+  canSyncImports,
   onReassignImport,
   onDeleteImport,
   suggestedPort,
@@ -910,6 +935,7 @@ function GroupedProxyCatalogPanel({
   onOpenBatchByNode,
   openingSessionNodeId = null,
   openingBatch = false,
+  syncingImportIds = [],
 }: {
   mode: "global" | "project";
   projects?: string[];
@@ -922,6 +948,9 @@ function GroupedProxyCatalogPanel({
   queueingOperation: boolean;
   onRefreshNodes: (nodeIds: string[]) => void | Promise<void>;
   onProbeNodes: (nodeIds: string[]) => void | Promise<void>;
+  onSyncImports: (importIds: string[]) => void | Promise<void>;
+  canSyncImports: boolean;
+  syncingImportIds?: string[];
   onReassignImport?: (importId: string, scope: ProxyScope) => void | Promise<void>;
   onDeleteImport?: (importId: string) => void | Promise<void>;
   suggestedPort?: number | null;
@@ -991,6 +1020,12 @@ function GroupedProxyCatalogPanel({
   const selectedNodes = selectedNodeIds
     .map((nodeId) => nodeMap.get(nodeId))
     .filter((node): node is ProxyCatalogNodeItem => Boolean(node));
+  const selectedSyncableImportIds = canSyncImports
+    ? groups
+        .filter((group) => canSyncImport(group.import))
+        .filter((group) => group.nodes.some((node) => selectedNodeIds.includes(node.node_id)))
+        .map((group) => group.import.import_id)
+    : [];
   const singleDialogNode = singleDialogNodeId ? (nodeMap.get(singleDialogNodeId) ?? null) : null;
   const pendingDeleteImport = pendingDeleteImportId
     ? (groups.find((group) => group.import.import_id === pendingDeleteImportId)?.import ?? null)
@@ -1062,6 +1097,20 @@ function GroupedProxyCatalogPanel({
                 <ActivityIcon className="size-3.5" />
                 {t("Probe selected")}
               </Button>
+              {canSyncImports ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  aria-label={t("Sync selected subscriptions")}
+                  disabled={selectedSyncableImportIds.length === 0 || syncingImportIds.length > 0}
+                  onClick={() => void onSyncImports(selectedSyncableImportIds)}
+                >
+                  <RefreshCcwIcon className="size-3.5" />
+                  {syncingImportIds.length > 0
+                    ? t("Updating subscriptions...")
+                    : t("Update selected subscriptions")}
+                </Button>
+              ) : null}
               {mode === "project" ? (
                 <Button
                   size="sm"
@@ -1134,6 +1183,20 @@ function GroupedProxyCatalogPanel({
                     mode === "project" &&
                     group.import.source_scope.type === "project" &&
                     group.import.source_scope.project_id === currentProjectId;
+                  const syncableImport = canSyncImports && canSyncImport(group.import);
+                  const syncingImport = syncingImportIds.includes(group.import.import_id);
+                  const syncButton = syncableImport ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      aria-label={t("Sync subscription")}
+                      disabled={syncingImport || syncingImportIds.length > 0}
+                      onClick={() => void onSyncImports([group.import.import_id])}
+                    >
+                      <RefreshCcwIcon className="size-3.5" />
+                      {syncingImport ? t("Updating...") : t("Update subscription")}
+                    </Button>
+                  ) : null;
 
                   return (
                     <Fragment key={group.import.import_id}>
@@ -1223,6 +1286,7 @@ function GroupedProxyCatalogPanel({
                         <TableCell className="px-3 py-3 align-top text-right">
                           {mode === "global" ? (
                             <div className="flex flex-wrap justify-end gap-2">
+                              {syncButton}
                               <Select
                                 disabled={
                                   !onReassignImport ||
@@ -1269,6 +1333,7 @@ function GroupedProxyCatalogPanel({
                             </div>
                           ) : canDeleteProjectImport ? (
                             <div className="flex flex-wrap justify-end gap-2">
+                              {syncButton}
                               <Button
                                 variant="destructive"
                                 size="sm"
@@ -1281,6 +1346,8 @@ function GroupedProxyCatalogPanel({
                                 {t("Delete")}
                               </Button>
                             </div>
+                          ) : syncButton ? (
+                            <div className="flex flex-wrap justify-end gap-2">{syncButton}</div>
                           ) : (
                             <span className="text-xs text-muted-foreground">—</span>
                           )}

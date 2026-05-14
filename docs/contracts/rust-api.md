@@ -74,6 +74,7 @@
   - `load_global_subscription_request(request)`
   - `list_proxy_imports(scope, project_id)`
   - `list_proxy_inventory(scope, project_id)`
+  - `sync_proxy_imports(import_ids)`
   - `update_proxy_import_allocation(import_id, allocation_scope)`
   - `update_proxy_allocation(node_id, allocation_scope)`
   - `delete_proxy_import(import_id)`
@@ -101,6 +102,11 @@
 - `ProxyImportSyncConfig`
   - import-level auto-sync state for project-local subscription imports
   - keyed by `import_id`
+
+- `SyncProxyImportsRequest` / `SyncProxyImportsResponse`
+  - request carries `import_ids[]`
+  - response returns queued `subscription_sync` task `run_ids[]`
+  - manual sync accepts only source-backed subscription imports
 
 - `LoadSubscriptionRequest`
   - fields: `name?`, `source?`, `content?`

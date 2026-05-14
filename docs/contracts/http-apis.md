@@ -247,6 +247,26 @@
   - `admin_required` (403)
   - `proxy_inventory_node_not_found` (404)
 
+## POST /api/v1/proxy-imports/sync
+
+- Change: New
+- Auth: admin for global imports; project access for project-local imports
+- Body:
+  - `import_ids`: non-empty list of import ids
+- Success:
+  - `run_ids`: queued `subscription_sync` task run ids
+- Notes:
+  - accepts only source-backed subscription imports where `source_type` is `url` or `file`
+  - groups requested imports by source scope before queueing work
+  - project-local imports run in their owning project task domain and update existing import-level sync bookkeeping when present
+  - global imports run in the global task domain and do not create automatic sync configuration
+  - manual node-group imports are rejected because they have no upstream source to refresh
+- Error:
+  - `authentication_required` (401)
+  - `admin_required` (403)
+  - `invalid_request` (400)
+  - `proxy_inventory_node_not_found` (404)
+
 ## DELETE /api/v1/proxies/{node_id}
 
 - Change: Compatibility
