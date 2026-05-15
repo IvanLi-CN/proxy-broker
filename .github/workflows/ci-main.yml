@@ -38,6 +38,8 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: "false"
 
       - name: Install web dependencies
         run: bun install --frozen-lockfile

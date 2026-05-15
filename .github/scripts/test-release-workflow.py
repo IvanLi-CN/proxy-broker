@@ -5,11 +5,29 @@ from pathlib import Path
 
 
 WORKFLOW = Path(".github/workflows/release.yml")
+WORKFLOW_DIR = Path(".github/workflows")
 
 
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise SystemExit(message)
+
+
+def require_rust_cache_does_not_restore_bins() -> None:
+    for workflow in sorted(WORKFLOW_DIR.glob("*.yml")):
+        lines = workflow.read_text(encoding="utf-8").splitlines()
+        for index, line in enumerate(lines):
+            if "uses: Swatinem/rust-cache@v2" not in line:
+                continue
+
+            window = lines[index + 1 : index + 8]
+            has_cache_bin_disabled = any(
+                "cache-bin:" in candidate and '"false"' in candidate for candidate in window
+            )
+            require(
+                has_cache_bin_disabled,
+                f'{workflow}:{index + 1}: rust-cache must set cache-bin: "false"',
+            )
 
 
 def main() -> int:
@@ -42,6 +60,7 @@ def main() -> int:
         comment_index < mark_released_index,
         "release PR comment must run before marking the snapshot released",
     )
+    require_rust_cache_does_not_restore_bins()
     return 0
 
 
