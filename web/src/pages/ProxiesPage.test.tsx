@@ -107,7 +107,7 @@ const globalCatalogWithInvalidCountryCode: ProxyCatalogResponse = {
 
 describe("ProxiesPage", () => {
   it("renders global catalog rows even when geo metadata contains an invalid country code", () => {
-    const onSyncImports = vi.fn();
+    const onRefreshImports = vi.fn();
     render(
       <I18nProvider initialLocale="en-US">
         <TooltipProvider>
@@ -134,9 +134,9 @@ describe("ProxiesPage", () => {
             onLoadGlobal={vi.fn()}
             onReassignImport={vi.fn()}
             onDeleteImport={vi.fn()}
+            onRefreshImports={onRefreshImports}
             onRefreshNodes={vi.fn()}
             onProbeNodes={vi.fn()}
-            onSyncImports={onSyncImports}
           />
         </TooltipProvider>
       </I18nProvider>,
@@ -145,12 +145,12 @@ describe("ProxiesPage", () => {
     expect(screen.getByText("Grouped proxy catalog")).toBeInTheDocument();
     expect(screen.getByText("JP-Tokyo-Entry")).toBeInTheDocument();
     expect(screen.getByText("Japan / Chiyoda")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Sync subscription" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Update$/i })).toBeInTheDocument();
   });
 
-  it("queues a subscription sync from a syncable import group", async () => {
+  it("refreshes a subscription import from a refreshable import group", async () => {
     const user = userEvent.setup();
-    const onSyncImports = vi.fn();
+    const onRefreshImports = vi.fn();
     render(
       <I18nProvider initialLocale="en-US">
         <TooltipProvider>
@@ -177,20 +177,20 @@ describe("ProxiesPage", () => {
             onLoadGlobal={vi.fn()}
             onReassignImport={vi.fn()}
             onDeleteImport={vi.fn()}
+            onRefreshImports={onRefreshImports}
             onRefreshNodes={vi.fn()}
             onProbeNodes={vi.fn()}
-            onSyncImports={onSyncImports}
           />
         </TooltipProvider>
       </I18nProvider>,
     );
 
-    await user.click(screen.getByRole("button", { name: "Sync subscription" }));
+    await user.click(screen.getByRole("button", { name: /^Update$/i }));
 
-    expect(onSyncImports).toHaveBeenCalledWith(["imp-test"]);
+    expect(onRefreshImports).toHaveBeenCalledWith(["imp-test"]);
   });
 
-  it("hides subscription sync controls for non-admin users", () => {
+  it("hides subscription refresh controls for non-admin users", () => {
     render(
       <I18nProvider initialLocale="en-US">
         <TooltipProvider>
@@ -217,14 +217,14 @@ describe("ProxiesPage", () => {
             onLoadGlobal={vi.fn()}
             onReassignImport={vi.fn()}
             onDeleteImport={vi.fn()}
+            onRefreshImports={vi.fn()}
             onRefreshNodes={vi.fn()}
             onProbeNodes={vi.fn()}
-            onSyncImports={vi.fn()}
           />
         </TooltipProvider>
       </I18nProvider>,
     );
 
-    expect(screen.queryByRole("button", { name: "Sync subscription" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Update$/i })).not.toBeInTheDocument();
   });
 });

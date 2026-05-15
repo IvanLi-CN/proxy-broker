@@ -93,8 +93,8 @@ mod tests {
         auth::AuthContext,
         build_router,
         models::{
-            ProxyScope, SubscriptionSource, TaskRunKind, TaskRunRecord, TaskRunScope, TaskRunStage,
-            TaskRunStatus, TaskRunTrigger,
+            ProxyImportSyncConfig, ProxyScope, SubscriptionSource, TaskRunKind, TaskRunRecord,
+            TaskRunScope, TaskRunStage, TaskRunStatus, TaskRunTrigger,
         },
         store::BrokerStore,
     };
@@ -1148,6 +1148,233 @@ proxies:
             .await
             .expect("router should respond");
         assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn admin_can_refresh_global_subscription_import() {
+        let store = Arc::new(MemoryStore::new());
+        let runtime: Arc<dyn MihomoRuntime> = Arc::new(TestRuntime);
+        let service = Arc::new(BrokerService::new(
+            store,
+            runtime,
+            BrokerServiceOptions::default(),
+        ));
+        service
+            .create_project("alpha")
+            .await
+            .expect("alpha project should be created");
+
+        let source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: global-node-a
+    type: socks5
+    server: 5.5.5.5
+"#,
+        )
+        .await;
+        service
+            .load_global_subscription(&SubscriptionSource::File(source_path.clone()))
+            .await
+            .expect("global import should succeed");
+        tokio::fs::write(
+            &source_path,
+            r#"
+proxies:
+  - name: global-node-a
+    type: socks5
+    server: 5.5.5.5
+  - name: global-node-b
+    type: socks5
+    server: 6.6.6.6
+"#,
+        )
+        .await
+        .expect("subscription fixture should be updated");
+        let import_id = service
+            .list_proxy_imports(Some("all"), None)
+            .await
+            .expect("imports should list")
+            .items[0]
+            .import_id
+            .clone();
+        let app = enforce_router_with_service(service.clone());
+
+        let response = app
+            .oneshot(trusted_request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!("/api/v1/proxy-imports/{import_id}/refresh"))
+                    .header("x-forwarded-user", "admin@example.com")
+                    .body(Body::empty())
+                    .unwrap(),
+            ))
+            .await
+            .expect("router should respond");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should be readable");
+        let json: serde_json::Value = serde_json::from_slice(&body).expect("body should be json");
+        assert_eq!(json["loaded_proxies"], 2);
+
+        let project_catalog = service
+            .list_proxy_catalog(&crate::models::ProxyCatalogQuery {
+                view: Some("project".to_string()),
+                project_id: Some("alpha".to_string()),
+            })
+            .await
+            .expect("project catalog should rebuild");
+        assert_eq!(project_catalog.groups[0].nodes.len(), 2);
+        let _ = tokio::fs::remove_file(&source_path).await;
+    }
+
+    #[tokio::test]
+    async fn project_api_key_can_refresh_own_subscription_import_and_keeps_sync_config() {
+        let store = Arc::new(MemoryStore::new());
+        let runtime: Arc<dyn MihomoRuntime> = Arc::new(TestRuntime);
+        let service = Arc::new(BrokerService::new(
+            store.clone(),
+            runtime,
+            BrokerServiceOptions::default(),
+        ));
+        service
+            .create_project("alpha")
+            .await
+            .expect("alpha project should be created");
+        let source_path = write_subscription_file(
+            r#"
+proxies:
+  - name: alpha-node-a
+    type: socks5
+    server: 4.4.4.4
+"#,
+        )
+        .await;
+        service
+            .load_subscription("alpha", &SubscriptionSource::File(source_path.clone()))
+            .await
+            .expect("alpha import should succeed");
+        tokio::fs::write(
+            &source_path,
+            r#"
+proxies:
+  - name: alpha-node-a
+    type: socks5
+    server: 4.4.4.4
+  - name: alpha-node-b
+    type: socks5
+    server: 4.4.4.5
+"#,
+        )
+        .await
+        .expect("subscription fixture should be updated");
+        let import_id = service
+            .list_proxy_imports(Some("all"), None)
+            .await
+            .expect("imports should list")
+            .items[0]
+            .import_id
+            .clone();
+        store
+            .upsert_proxy_import_sync_config(&ProxyImportSyncConfig {
+                import_id: import_id.clone(),
+                project_id: "alpha".to_string(),
+                source: SubscriptionSource::File(source_path.clone()),
+                enabled: false,
+                sync_every_sec: 123,
+                full_refresh_every_sec: 456,
+                last_sync_due_at: Some(10),
+                last_sync_started_at: Some(11),
+                last_sync_finished_at: Some(12),
+                last_full_refresh_due_at: Some(20),
+                last_full_refresh_started_at: Some(21),
+                last_full_refresh_finished_at: Some(22),
+                updated_at: 1,
+            })
+            .await
+            .expect("custom sync config should be seeded");
+        let app = enforce_router_with_service(service);
+        let secret = create_selected_project_api_key(app.clone(), "alpha").await;
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!("/api/v1/proxy-imports/{import_id}/refresh"))
+                    .header("authorization", format!("Bearer {secret}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("router should respond");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should be readable");
+        let json: serde_json::Value = serde_json::from_slice(&body).expect("body should be json");
+        assert_eq!(json["loaded_proxies"], 2);
+
+        let sync_config = store
+            .get_proxy_import_sync_config(&import_id)
+            .await
+            .expect("sync config query should succeed")
+            .expect("sync config should be retained");
+        assert_eq!(sync_config.project_id, "alpha");
+        assert!(!sync_config.enabled);
+        assert_eq!(sync_config.sync_every_sec, 123);
+        assert_eq!(sync_config.full_refresh_every_sec, 456);
+        assert_eq!(sync_config.last_sync_due_at, Some(10));
+        assert_eq!(sync_config.last_full_refresh_due_at, Some(20));
+        let _ = tokio::fs::remove_file(&source_path).await;
+    }
+
+    #[tokio::test]
+    async fn refresh_import_rejects_manual_node_group_import() {
+        let store = Arc::new(MemoryStore::new());
+        let runtime: Arc<dyn MihomoRuntime> = Arc::new(TestRuntime);
+        let service = Arc::new(BrokerService::new(
+            store,
+            runtime,
+            BrokerServiceOptions::default(),
+        ));
+        service
+            .load_global_subscription_request(&crate::models::LoadSubscriptionRequest {
+                name: Some("manual group".to_string()),
+                source: None,
+                content: Some(
+                    r#"
+proxies:
+  - name: manual-node
+    type: socks5
+    server: 7.7.7.7
+"#
+                    .to_string(),
+                ),
+            })
+            .await
+            .expect("manual import should succeed");
+        let import_id = service
+            .list_proxy_imports(Some("all"), None)
+            .await
+            .expect("imports should list")
+            .items[0]
+            .import_id
+            .clone();
+        let app = enforce_router_with_service(service);
+
+        let response = app
+            .oneshot(trusted_request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!("/api/v1/proxy-imports/{import_id}/refresh"))
+                    .header("x-forwarded-user", "admin@example.com")
+                    .body(Body::empty())
+                    .unwrap(),
+            ))
+            .await
+            .expect("router should respond");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

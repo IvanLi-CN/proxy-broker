@@ -218,6 +218,13 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  refreshProxyImport: (importId: string) =>
+    request<LoadSubscriptionResponse>(
+      `/api/v1/proxy-imports/${encodeURIComponent(importId)}/refresh`,
+      {
+        method: "POST",
+      },
+    ),
   listProxyCatalog: (query?: ProxyCatalogQuery) =>
     request<ProxyCatalogResponse>(withProxyCatalogSearch("/api/v1/proxy-catalog", query)),
   refreshProxyCatalogMetadata: (payload: ProxyOperationRequest) =>

@@ -62,6 +62,10 @@ pub fn build_router(state: AppState) -> Router {
             patch(update_proxy_import_allocation),
         )
         .route(
+            "/api/v1/proxy-imports/{import_id}/refresh",
+            post(refresh_proxy_import),
+        )
+        .route(
             "/api/v1/proxy-imports/{import_id}",
             delete(delete_proxy_import),
         )
@@ -286,6 +290,30 @@ async fn update_proxy_import_allocation(
         .service
         .update_proxy_import_allocation(&import_id, &request.allocation_scope)
         .await?;
+    Ok(Json(resp))
+}
+
+async fn refresh_proxy_import(
+    auth: AuthContext,
+    State(state): State<AppState>,
+    Path(import_id): Path<String>,
+) -> Result<Json<crate::models::LoadSubscriptionResponse>, BrokerError> {
+    let record = state.service.get_proxy_import(&import_id).await?;
+    match (&record.source_scope, &record.allocation_scope) {
+        (ProxyScope::Global, _) => auth.require_admin()?,
+        (
+            ProxyScope::Project {
+                project_id: source_project_id,
+            },
+            ProxyScope::Project {
+                project_id: allocation_project_id,
+            },
+        ) if source_project_id == allocation_project_id => {
+            auth.require_project_access(source_project_id)?
+        }
+        _ => auth.require_admin()?,
+    };
+    let resp = state.service.refresh_proxy_import(&import_id).await?;
     Ok(Json(resp))
 }
 

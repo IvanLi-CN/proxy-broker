@@ -281,6 +281,27 @@ impl BrokerService {
         }
     }
 
+    fn affected_project_ids_for_scope(
+        &self,
+        scope: &ProxyScope,
+        projects: &[String],
+        settings: &HashMap<String, ProjectProxySettings>,
+    ) -> HashSet<String> {
+        match scope {
+            ProxyScope::Global => projects
+                .iter()
+                .filter(|project_id| {
+                    settings
+                        .get(project_id.as_str())
+                        .map(|item| item.use_global_proxies)
+                        .unwrap_or(true)
+                })
+                .cloned()
+                .collect(),
+            ProxyScope::Project { project_id } => std::iter::once(project_id.clone()).collect(),
+        }
+    }
+
     async fn normalize_api_key_scope(
         &self,
         scope: &ApiKeyProjectScope,
@@ -1713,42 +1734,77 @@ impl BrokerService {
         project_id: &str,
         source: &SubscriptionSource,
     ) -> BrokerResult<()> {
+        self.register_project_sync_source_with_policy(import_id, project_id, source, true)
+            .await
+    }
+
+    async fn register_project_sync_source_preserving_schedule(
+        &self,
+        import_id: &str,
+        project_id: &str,
+        source: &SubscriptionSource,
+    ) -> BrokerResult<()> {
+        self.register_project_sync_source_with_policy(import_id, project_id, source, false)
+            .await
+    }
+
+    async fn register_project_sync_source_with_policy(
+        &self,
+        import_id: &str,
+        project_id: &str,
+        source: &SubscriptionSource,
+        reset_schedule: bool,
+    ) -> BrokerResult<()> {
         let now = now_epoch_sec();
-        let mut config = self
+        let existing = self
             .store
             .get_proxy_import_sync_config(import_id)
             .await
-            .map_err(BrokerError::from)?
-            .unwrap_or(ProxyImportSyncConfig {
-                import_id: import_id.to_string(),
-                project_id: project_id.to_string(),
-                source: source.clone(),
-                enabled: true,
-                sync_every_sec: DEFAULT_AUTO_SYNC_EVERY_SEC,
-                full_refresh_every_sec: DEFAULT_AUTO_FULL_REFRESH_EVERY_SEC,
-                last_sync_due_at: None,
-                last_sync_started_at: None,
-                last_sync_finished_at: None,
-                last_full_refresh_due_at: None,
-                last_full_refresh_started_at: None,
-                last_full_refresh_finished_at: None,
-                updated_at: now,
-            });
+            .map_err(BrokerError::from)?;
+        let has_existing = existing.is_some();
+        let mut config = existing.unwrap_or(ProxyImportSyncConfig {
+            import_id: import_id.to_string(),
+            project_id: project_id.to_string(),
+            source: source.clone(),
+            enabled: true,
+            sync_every_sec: DEFAULT_AUTO_SYNC_EVERY_SEC,
+            full_refresh_every_sec: DEFAULT_AUTO_FULL_REFRESH_EVERY_SEC,
+            last_sync_due_at: None,
+            last_sync_started_at: None,
+            last_sync_finished_at: None,
+            last_full_refresh_due_at: None,
+            last_full_refresh_started_at: None,
+            last_full_refresh_finished_at: None,
+            updated_at: now,
+        });
         config.project_id = project_id.to_string();
         config.source = source.clone();
-        config.enabled = true;
-        config.sync_every_sec = DEFAULT_AUTO_SYNC_EVERY_SEC;
-        config.full_refresh_every_sec = DEFAULT_AUTO_FULL_REFRESH_EVERY_SEC;
-        config.last_sync_due_at = Some(preserve_or_advance_due_at(
-            config.last_sync_due_at,
-            now,
-            DEFAULT_AUTO_SYNC_EVERY_SEC,
-        ));
-        config.last_full_refresh_due_at = Some(seed_due_at_if_missing(
-            config.last_full_refresh_due_at,
-            now,
-            DEFAULT_AUTO_FULL_REFRESH_EVERY_SEC,
-        ));
+        if reset_schedule || !has_existing {
+            config.enabled = true;
+            config.sync_every_sec = DEFAULT_AUTO_SYNC_EVERY_SEC;
+            config.full_refresh_every_sec = DEFAULT_AUTO_FULL_REFRESH_EVERY_SEC;
+            config.last_sync_due_at = Some(preserve_or_advance_due_at(
+                config.last_sync_due_at,
+                now,
+                DEFAULT_AUTO_SYNC_EVERY_SEC,
+            ));
+            config.last_full_refresh_due_at = Some(seed_due_at_if_missing(
+                config.last_full_refresh_due_at,
+                now,
+                DEFAULT_AUTO_FULL_REFRESH_EVERY_SEC,
+            ));
+        } else {
+            config.last_sync_due_at = Some(seed_due_at_if_missing(
+                config.last_sync_due_at,
+                now,
+                config.sync_every_sec,
+            ));
+            config.last_full_refresh_due_at = Some(seed_due_at_if_missing(
+                config.last_full_refresh_due_at,
+                now,
+                config.full_refresh_every_sec,
+            ));
+        }
         config.updated_at = now;
         self.store
             .upsert_proxy_import_sync_config(&config)
@@ -2145,6 +2201,57 @@ impl BrokerService {
 
         let source_identity = self.proxy_import_source_identity(source);
         let import_id = self.proxy_import_id(source_scope, &source_identity);
+        self.import_inventory_scope_from_loaded_source(
+            source_scope,
+            import_id,
+            source_identity,
+            requested_name,
+            loaded,
+        )
+        .await
+    }
+
+    async fn import_inventory_scope_from_source_import(
+        &self,
+        import_id: &str,
+        source_scope: &ProxyScope,
+        source: &SubscriptionSource,
+        requested_name: Option<&str>,
+    ) -> BrokerResult<ImportedInventoryOutcome> {
+        let loaded = subscription::load_from_source(&self.http, source)
+            .await
+            .map_err(|err| match err {
+                subscription::SubscriptionLoadError::SourceRead(message) => {
+                    BrokerError::SubscriptionFetch(message)
+                }
+                subscription::SubscriptionLoadError::InvalidPayload(message) => {
+                    BrokerError::SubscriptionInvalidDetail(message)
+                }
+            })?;
+
+        if loaded.nodes.is_empty() {
+            return Err(BrokerError::SubscriptionInvalid);
+        }
+
+        let source_identity = self.proxy_import_source_identity(source);
+        self.import_inventory_scope_from_loaded_source(
+            source_scope,
+            import_id.to_string(),
+            source_identity,
+            requested_name,
+            loaded,
+        )
+        .await
+    }
+
+    async fn import_inventory_scope_from_loaded_source(
+        &self,
+        source_scope: &ProxyScope,
+        import_id: String,
+        source_identity: ProxyImportSourceIdentity,
+        requested_name: Option<&str>,
+        loaded: subscription::LoadedSubscription,
+    ) -> BrokerResult<ImportedInventoryOutcome> {
         self.persist_imported_inventory(
             source_scope,
             import_id,
@@ -6236,6 +6343,65 @@ impl BrokerService {
             .collect::<HashSet<_>>();
         self.rebuild_projects(&affected_projects).await?;
         self.proxy_import_item_from_record(updated).await
+    }
+
+    pub async fn refresh_proxy_import(
+        &self,
+        import_id: &str,
+    ) -> BrokerResult<LoadSubscriptionResponse> {
+        let before = self.get_proxy_import(import_id).await?;
+        if before.import_kind != ProxyImportKind::Subscription {
+            return Err(BrokerError::InvalidRequest(
+                "only subscription imports can be refreshed".to_string(),
+            ));
+        }
+        let source = SubscriptionSource::from_parts(
+            &before.source_identity.source_type,
+            before.source_identity.source_value.clone(),
+        )
+        .ok_or_else(|| {
+            BrokerError::InvalidRequest(format!(
+                "unsupported subscription import source type `{}`",
+                before.source_identity.source_type
+            ))
+        })?;
+
+        let imported = match &before.source_scope {
+            ProxyScope::Global => {
+                let _global_guard = self.lock_project("__global_proxy_scope__").await;
+                self.import_inventory_scope_from_source_import(
+                    &before.import_id,
+                    &before.source_scope,
+                    &source,
+                    None,
+                )
+                .await?
+            }
+            ProxyScope::Project { project_id } => {
+                let _project_guard = self.lock_project(project_id).await;
+                let imported = self
+                    .import_inventory_scope_from_source_import(
+                        &before.import_id,
+                        &before.source_scope,
+                        &source,
+                        None,
+                    )
+                    .await?;
+                self.register_project_sync_source_preserving_schedule(
+                    &before.import_id,
+                    project_id,
+                    &source,
+                )
+                .await?;
+                imported
+            }
+        };
+
+        let (projects, settings) = self.list_project_ids_with_settings().await?;
+        let affected_projects =
+            self.affected_project_ids_for_scope(&before.allocation_scope, &projects, &settings);
+        self.rebuild_projects(&affected_projects).await?;
+        Ok(imported.response)
     }
 
     pub async fn delete_proxy_inventory_node(&self, node_id: &str) -> BrokerResult<()> {
