@@ -452,6 +452,7 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
+          cache-bin: "false"
           workspaces: target-src -> target
 
       - name: Install web dependencies
@@ -511,6 +512,7 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
+          cache-bin: "false"
           workspaces: target-src -> target
 
       - name: Install web dependencies
@@ -570,6 +572,7 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
+          cache-bin: "false"
           workspaces: target-src -> target
 
       - name: Install web dependencies
@@ -629,6 +632,7 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
+          cache-bin: "false"
           workspaces: target-src -> target
 
       - name: Install web dependencies
