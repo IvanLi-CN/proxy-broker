@@ -70,6 +70,7 @@
 - `POST /api/v1/projects/{project_id}/subscriptions/load`：在当前 project scope 内按 source upsert import，并为该 import 建立/更新自动维护配置。
 - 同一 load 接口也接受 inline node-group 内容：不注册自动同步，并把一次提交的全部节点作为单个原始导入持久化。
 - `GET /api/v1/proxy-imports`：返回 import 列表，供 `/proxies` 全局页一维表格展示与操作。
+- `POST /api/v1/proxy-imports/{import_id}/refresh`：从该 import 持久化的 source identity 重新拉取订阅源；全局与本地 subscription import 都支持手动更新，manual node-group import 返回 `invalid_request`。
 - `PATCH/DELETE /api/v1/proxy-imports/{import_id}`：分别更新整批 allocation、删除整批 import，并重建受影响 project 的 effective pool。
 
 ### Edge cases / errors
@@ -77,7 +78,7 @@
 - source 不可解析、订阅无有效代理、所有节点 DNS 都失败时，维持现有订阅无效错误。
 - load 请求同时提交 `source` 与 `content`，或两者都缺失时，返回 `invalid_request`。
 - allocation 指向不存在的 project 时拒绝。
-- 删除 import 时需一并移除其 sync config；全局 import 不允许注册自动同步。
+- 删除 import 时需一并移除其 sync config；全局 import 不允许注册自动同步，但允许通过 import 级 refresh API 手动更新。
 
 ## 接口契约（Interfaces & Contracts）
 
@@ -85,7 +86,7 @@
 
 | 接口（Name） | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc） | 负责人（Owner） | 使用方（Consumers） | 备注（Notes） |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Proxy import admin APIs | HTTP | external | New | ./contracts/http-apis.md | proxy-broker | web admin UI | `GET/PATCH/DELETE /api/v1/proxy-imports*` |
+| Proxy import admin APIs | HTTP | external | New | ./contracts/http-apis.md | proxy-broker | web admin UI | `GET/PATCH/POST/DELETE /api/v1/proxy-imports*` |
 | Import persistence | DB | internal | New | ./contracts/db.md | proxy-broker | Rust store/service | `proxy_imports` 与 import sync configs |
 | Broker store/service import facade | Rust API | internal | Modify | ./contracts/rust-api.md | proxy-broker | api/service/tests | import-level upsert / allocation / sync |
 
@@ -110,6 +111,12 @@
 - Given 某 project 有两个本地订阅 import
   When 自动同步其中一个 source
   Then 只更新对应 import，不覆盖另一个 import 的 source 配置。
+- Given 全局池有一个 subscription import
+  When operator 在 `/proxies` 对该 import 点击“更新”
+  Then 服务端从该 import 的持久化 source 重新拉取并替换同一 import 下的节点，不要求存在 sync config。
+- Given 某 project-local subscription import 已有自定义或禁用的 sync config
+  When operator 手动更新该 import
+  Then 保留 enabled 状态、同步间隔与既有 due time，只更新同一 import 的订阅内容。
 - Given operator 留空节点组名称并粘贴两个节点
   When 导入完成
   Then 列表主列显示自动生成的组名（例如首个节点名 + 计数），且该组只能整批分配/删除。
@@ -119,7 +126,7 @@
 ### Testing
 
 - Unit tests: Rust service/store tests 覆盖多 import 并存、整批 allocation/delete、import-level sync config。
-- Integration tests: API tests 覆盖 `proxy-imports` 列表、整批分配、整批删除。
+- Integration tests: API tests 覆盖 `proxy-imports` 列表、整批分配、整批删除、全局/本地 import 级 refresh 与 manual import 拒绝。
 - E2E tests (if applicable): `/proxies` 全局页 smoke 覆盖 import 表格文案与动作。
 
 ### UI / Storybook (if applicable)
@@ -161,6 +168,13 @@
   evidence_note: 验证 project 侧保留“导入本地代理池 + 是否组合全局池”的入口，不再在该视图里暴露跨配置的节点级分配。
   image:
   ![Project 本地导入与全局池策略](./assets/proxies-project-import-policy.png)
+
+- source_type: storybook_canvas
+  story_id_or_title: `Pages/ProxiesPage/Zh CN`
+  state: import-level subscription refresh controls
+  evidence_note: 验证全局订阅 import 行显示“更新”，批量栏同时保留订阅源级“更新所选”和节点级“刷新所选”，区分重新拉取订阅源与刷新节点元信息。
+  image:
+  ![全局订阅导入更新入口](./assets/proxies-import-refresh-zhcn.png)
 
 - source_type: storybook_canvas
   story_id_or_title: `Features/Proxies/ProxyLoadCard/Node Group Mode`

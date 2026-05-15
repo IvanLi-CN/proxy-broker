@@ -76,6 +76,7 @@
   - `list_proxy_inventory(scope, project_id)`
   - `sync_proxy_imports(import_ids)`
   - `update_proxy_import_allocation(import_id, allocation_scope)`
+  - `refresh_proxy_import(import_id)`
   - `update_proxy_allocation(node_id, allocation_scope)`
   - `delete_proxy_import(import_id)`
   - `delete_proxy_inventory_node(node_id)`
@@ -83,6 +84,7 @@
   - `update_project_proxy_settings(project_id, use_global_proxies)`
   - `load_subscription(project_id, source)` now upserts one project-local original import and rebuilds the effective pool instead of treating the upstream result as the final pool directly
   - `load_global_subscription(source)` now upserts one global original import instead of replacing the entire global scope
+  - `refresh_proxy_import(import_id)` reloads an existing subscription import from its persisted source identity without requiring a sync config; project-local imports keep existing sync config enabled state, intervals, and due times registered
 
 ## Key data contracts
 

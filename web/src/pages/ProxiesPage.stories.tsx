@@ -324,7 +324,6 @@ function InteractiveProjectStory(args: Extract<ProxiesPageProps, { mode: "projec
   const [openingSessionNodeId, setOpeningSessionNodeId] = useState<string | null>(null);
   const [openingBatch, setOpeningBatch] = useState(false);
   const [deletingImportId, setDeletingImportId] = useState<string | null>(null);
-  const [syncingImportIds, setSyncingImportIds] = useState<string[]>([]);
   const [feedback, setFeedback] = useState<{
     title: string;
     description: string;
@@ -421,7 +420,6 @@ function InteractiveProjectStory(args: Extract<ProxiesPageProps, { mode: "projec
           liveNodeStates={liveState}
           queueingOperation={queueingOperation}
           deletingImportId={deletingImportId}
-          syncingImportIds={syncingImportIds}
           openingSessionNodeId={openingSessionNodeId}
           openingBatch={openingBatch}
           suggestedPort={10080}
@@ -558,37 +556,13 @@ function InteractiveProjectStory(args: Extract<ProxiesPageProps, { mode: "projec
               tone: "success",
             });
           }}
-          onSyncImports={async (importIds) => {
-            setSyncingImportIds(importIds);
-            toast.loading("Updating subscription…", {
-              description: `Queued mock subscription update for ${importIds.join(", ")}.`,
-              id: "sync-imports",
-            });
-            await sleep(220);
-            setProxyCatalog((current) => ({
-              ...current,
-              groups: current.groups.map((group) =>
-                importIds.includes(group.import.import_id)
-                  ? {
-                      ...group,
-                      import: {
-                        ...group.import,
-                        proxy_count: group.import.proxy_count + 1,
-                        updated_at: 1_713_310_000,
-                      },
-                    }
-                  : group,
-              ),
-            }));
-            setSyncingImportIds([]);
-            toast.success("Subscription update queued", {
-              description: "The grouped import now reflects a refreshed mock timestamp.",
-              id: "sync-imports",
+          onRefreshImports={async (importIds) => {
+            toast.success("Subscription import updated", {
+              description: `Updated ${importIds.length} import(s) from their persisted source.`,
             });
             setFeedback({
-              title: "Subscription update queued",
-              description:
-                "The selected source-based subscription import refreshed its mock catalog timestamp. Manual node groups do not expose this action.",
+              title: "Subscription import updated",
+              description: `Updated ${importIds.length} subscription import(s) from their persisted source.`,
               tone: "success",
             });
           }}
@@ -741,9 +715,9 @@ export const GlobalProject: Story = {
     onUpdateSystemSettings: fn(),
     onReassignImport: fn(),
     onDeleteImport: fn(),
+    onRefreshImports: fn(),
     onRefreshNodes: fn(),
     onProbeNodes: fn(),
-    onSyncImports: fn(),
   },
   render: renderInShell,
   async play({ canvasElement }) {
@@ -756,6 +730,7 @@ export const GlobalProject: Story = {
     await expect((await canvas.findAllByText(/Remaining/i)).length).toBeGreaterThan(0);
     await expect(await canvas.findByText(/JP-Tokyo-Entry/i)).toBeVisible();
     await expect(await canvas.findByText(/Automatic latency probe/i)).toBeVisible();
+    await expect(await canvas.findByRole("button", { name: /^Update$/i })).toBeVisible();
     await expect(await canvas.findByText(/88 ms/i)).toBeVisible();
     await userEvent.hover(await canvas.findByText(/88 ms/i));
     const dialog = within(canvasElement.ownerDocument.body);
@@ -806,8 +781,8 @@ export const ConcreteProject: Story = {
     onToggleUseGlobalProxies: fn(),
     onRefreshNodes: fn(),
     onProbeNodes: fn(),
-    onSyncImports: fn(),
     onDeleteImport: fn(),
+    onRefreshImports: fn(),
     onOpenSessionByNode: fn(),
     onOpenBatchByNode: fn(),
     deletingImportId: null,
@@ -857,7 +832,9 @@ export const ZhCN: Story = {
   async play({ canvasElement }) {
     const canvas = within(canvasElement);
     await expect(await canvas.findByText(/分组代理目录/i)).toBeVisible();
+    await expect(await canvas.findByText(/更新所选/i)).toBeVisible();
     await expect(await canvas.findByText(/刷新所选/i)).toBeVisible();
+    await expect(await canvas.findByRole("button", { name: /^更新$/i })).toBeVisible();
     await expect(await canvas.findByText(/^global-jp$/i)).toBeVisible();
   },
 };
@@ -1016,9 +993,9 @@ export const AccessDenied: Story = {
     onLoadGlobal: fn(),
     onReassignImport: fn(),
     onDeleteImport: fn(),
+    onRefreshImports: fn(),
     onRefreshNodes: fn(),
     onProbeNodes: fn(),
-    onSyncImports: fn(),
   },
   render: renderInShell,
   async play({ canvasElement }) {

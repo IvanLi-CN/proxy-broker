@@ -103,13 +103,6 @@ function formatImportLabel(item: ProxyImportItem) {
   return item.name?.trim() || item.import_id;
 }
 
-function canSyncImport(item: ProxyImportItem) {
-  return (
-    item.import_kind === "subscription" &&
-    (item.source_identity.source_type === "url" || item.source_identity.source_type === "file")
-  );
-}
-
 function formatImportSourceTitle(item: ProxyImportItem) {
   const sourceTitle = item.subscription_metadata?.source_title?.trim();
   const displayName = item.name?.trim();
@@ -117,6 +110,25 @@ function formatImportSourceTitle(item: ProxyImportItem) {
     return null;
   }
   return sourceTitle;
+}
+
+function canRefreshSubscriptionImport(
+  item: ProxyImportItem,
+  mode: "global" | "project",
+  currentProjectId?: string,
+) {
+  if (item.import_kind !== "subscription") {
+    return false;
+  }
+  if (mode === "global") {
+    return true;
+  }
+  return (
+    item.source_scope.type === "project" &&
+    item.source_scope.project_id === currentProjectId &&
+    item.allocation_scope.type === "project" &&
+    item.allocation_scope.project_id === currentProjectId
+  );
 }
 
 function PageHeader({
@@ -603,8 +615,6 @@ interface SharedCatalogProps {
   queueingOperation: boolean;
   onRefreshNodes: (nodeIds: string[]) => void | Promise<void>;
   onProbeNodes: (nodeIds: string[]) => void | Promise<void>;
-  onSyncImports: (importIds: string[]) => void | Promise<void>;
-  syncingImportIds?: string[];
 }
 
 interface GlobalProxiesPageProps extends SharedCatalogProps {
@@ -625,10 +635,12 @@ interface GlobalProxiesPageProps extends SharedCatalogProps {
   updatingSystemSettings?: boolean;
   reallocatingImportId?: string | null;
   deletingImportId?: string | null;
+  refreshingImportIds?: string[];
   onLoadGlobal: (payload: LoadSubscriptionRequest) => void | Promise<void>;
   onUpdateSystemSettings?: (proxyProbeIntervalSec: number) => void | Promise<void>;
   onReassignImport: (importId: string, scope: ProxyScope) => void | Promise<void>;
   onDeleteImport: (importId: string) => void | Promise<void>;
+  onRefreshImports: (importIds: string[]) => void | Promise<void>;
 }
 
 interface ProjectProxiesPageProps extends SharedCatalogProps {
@@ -647,9 +659,11 @@ interface ProjectProxiesPageProps extends SharedCatalogProps {
   onLoadProject: (payload: LoadSubscriptionRequest) => void | Promise<void>;
   onToggleUseGlobalProxies: (nextValue: boolean) => void | Promise<void>;
   onDeleteImport?: (importId: string) => void | Promise<void>;
+  onRefreshImports?: (importIds: string[]) => void | Promise<void>;
   onOpenSessionByNode: (payload: OpenSessionByNodeRequest) => void | Promise<void>;
   onOpenBatchByNode: (payload: OpenBatchByNodeRequest) => void | Promise<void>;
   deletingImportId?: string | null;
+  refreshingImportIds?: string[];
   openingSessionNodeId?: string | null;
   openingBatch?: boolean;
 }
@@ -679,10 +693,12 @@ function GlobalProxiesView({
   updatingSystemSettings = false,
   reallocatingImportId = null,
   deletingImportId = null,
+  refreshingImportIds = [],
   onLoadGlobal,
   onUpdateSystemSettings = async () => undefined,
   onReassignImport,
   onDeleteImport,
+  onRefreshImports,
   proxyCatalog,
   proxyCatalogLoading,
   proxyCatalogError,
@@ -691,8 +707,6 @@ function GlobalProxiesView({
   queueingOperation,
   onRefreshNodes,
   onProbeNodes,
-  onSyncImports,
-  syncingImportIds = [],
 }: GlobalProxiesPageProps) {
   const { t } = useI18n();
   const canSyncImports = currentUser.status === "resolved" && currentUser.identity.is_admin;
@@ -791,13 +805,13 @@ function GlobalProxiesView({
         queueingOperation={queueingOperation}
         onRefreshNodes={onRefreshNodes}
         onProbeNodes={onProbeNodes}
-        onSyncImports={onSyncImports}
         canSyncImports={canSyncImports}
-        syncingImportIds={syncingImportIds}
         reallocatingImportId={reallocatingImportId}
         deletingImportId={deletingImportId}
+        refreshingImportIds={refreshingImportIds}
         onReassignImport={onReassignImport}
         onDeleteImport={onDeleteImport}
+        onRefreshImports={onRefreshImports}
       />
     </div>
   );
@@ -818,6 +832,7 @@ function ProjectProxiesView({
   onLoadProject,
   onToggleUseGlobalProxies,
   onDeleteImport,
+  onRefreshImports,
   proxyCatalog,
   proxyCatalogLoading,
   proxyCatalogError,
@@ -826,13 +841,12 @@ function ProjectProxiesView({
   queueingOperation,
   onRefreshNodes,
   onProbeNodes,
-  onSyncImports,
   onOpenSessionByNode,
   onOpenBatchByNode,
   deletingImportId = null,
+  refreshingImportIds = [],
   openingSessionNodeId = null,
   openingBatch = false,
-  syncingImportIds = [],
 }: ProjectProxiesPageProps) {
   const { t } = useI18n();
   const canSyncImports = currentUser.status !== "anonymous";
@@ -896,12 +910,12 @@ function ProjectProxiesView({
         queueingOperation={queueingOperation}
         onRefreshNodes={onRefreshNodes}
         onProbeNodes={onProbeNodes}
-        onSyncImports={onSyncImports}
         canSyncImports={canSyncImports}
-        syncingImportIds={syncingImportIds}
         currentProjectId={projectId}
         deletingImportId={deletingImportId}
         onDeleteImport={onDeleteImport}
+        onRefreshImports={onRefreshImports}
+        refreshingImportIds={refreshingImportIds}
         suggestedPort={suggestedPort}
         onOpenSessionByNode={onOpenSessionByNode}
         onOpenBatchByNode={onOpenBatchByNode}
@@ -924,18 +938,18 @@ function GroupedProxyCatalogPanel({
   queueingOperation,
   onRefreshNodes,
   onProbeNodes,
-  onSyncImports,
   canSyncImports,
   onReassignImport,
   onDeleteImport,
+  onRefreshImports,
   suggestedPort,
   reallocatingImportId = null,
   deletingImportId = null,
+  refreshingImportIds = [],
   onOpenSessionByNode,
   onOpenBatchByNode,
   openingSessionNodeId = null,
   openingBatch = false,
-  syncingImportIds = [],
 }: {
   mode: "global" | "project";
   projects?: string[];
@@ -948,14 +962,14 @@ function GroupedProxyCatalogPanel({
   queueingOperation: boolean;
   onRefreshNodes: (nodeIds: string[]) => void | Promise<void>;
   onProbeNodes: (nodeIds: string[]) => void | Promise<void>;
-  onSyncImports: (importIds: string[]) => void | Promise<void>;
   canSyncImports: boolean;
-  syncingImportIds?: string[];
   onReassignImport?: (importId: string, scope: ProxyScope) => void | Promise<void>;
   onDeleteImport?: (importId: string) => void | Promise<void>;
+  onRefreshImports?: (importIds: string[]) => void | Promise<void>;
   suggestedPort?: number | null;
   reallocatingImportId?: string | null;
   deletingImportId?: string | null;
+  refreshingImportIds?: string[];
   onOpenSessionByNode?: (payload: OpenSessionByNodeRequest) => void | Promise<void>;
   onOpenBatchByNode?: (payload: OpenBatchByNodeRequest) => void | Promise<void>;
   openingSessionNodeId?: string | null;
@@ -1020,12 +1034,14 @@ function GroupedProxyCatalogPanel({
   const selectedNodes = selectedNodeIds
     .map((nodeId) => nodeMap.get(nodeId))
     .filter((node): node is ProxyCatalogNodeItem => Boolean(node));
-  const selectedSyncableImportIds = canSyncImports
-    ? groups
-        .filter((group) => canSyncImport(group.import))
-        .filter((group) => group.nodes.some((node) => selectedNodeIds.includes(node.node_id)))
-        .map((group) => group.import.import_id)
-    : [];
+  const selectedRefreshImportIds = groups
+    .filter(
+      (group) =>
+        canSyncImports &&
+        canRefreshSubscriptionImport(group.import, mode, currentProjectId) &&
+        group.nodes.some((node) => selectedNodeIds.includes(node.node_id)),
+    )
+    .map((group) => group.import.import_id);
   const singleDialogNode = singleDialogNodeId ? (nodeMap.get(singleDialogNodeId) ?? null) : null;
   const pendingDeleteImport = pendingDeleteImportId
     ? (groups.find((group) => group.import.import_id === pendingDeleteImportId)?.import ?? null)
@@ -1082,6 +1098,19 @@ function GroupedProxyCatalogPanel({
               <Button
                 variant="outline"
                 size="sm"
+                disabled={
+                  selectedRefreshImportIds.length === 0 ||
+                  !onRefreshImports ||
+                  refreshingImportIds.length > 0
+                }
+                onClick={() => void onRefreshImports?.(selectedRefreshImportIds)}
+              >
+                <RefreshCcwIcon className="size-3.5" />
+                {t("Update selected")}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
                 disabled={selectedNodeIds.length === 0 || queueingOperation}
                 onClick={() => void onRefreshNodes(selectedNodeIds)}
               >
@@ -1097,20 +1126,6 @@ function GroupedProxyCatalogPanel({
                 <ActivityIcon className="size-3.5" />
                 {t("Probe selected")}
               </Button>
-              {canSyncImports ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  aria-label={t("Sync selected subscriptions")}
-                  disabled={selectedSyncableImportIds.length === 0 || syncingImportIds.length > 0}
-                  onClick={() => void onSyncImports(selectedSyncableImportIds)}
-                >
-                  <RefreshCcwIcon className="size-3.5" />
-                  {syncingImportIds.length > 0
-                    ? t("Updating subscriptions...")
-                    : t("Update selected subscriptions")}
-                </Button>
-              ) : null}
               {mode === "project" ? (
                 <Button
                   size="sm"
@@ -1183,20 +1198,10 @@ function GroupedProxyCatalogPanel({
                     mode === "project" &&
                     group.import.source_scope.type === "project" &&
                     group.import.source_scope.project_id === currentProjectId;
-                  const syncableImport = canSyncImports && canSyncImport(group.import);
-                  const syncingImport = syncingImportIds.includes(group.import.import_id);
-                  const syncButton = syncableImport ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      aria-label={t("Sync subscription")}
-                      disabled={syncingImport || syncingImportIds.length > 0}
-                      onClick={() => void onSyncImports([group.import.import_id])}
-                    >
-                      <RefreshCcwIcon className="size-3.5" />
-                      {syncingImport ? t("Updating...") : t("Update subscription")}
-                    </Button>
-                  ) : null;
+                  const canRefreshImport =
+                    canRefreshSubscriptionImport(group.import, mode, currentProjectId) &&
+                    canSyncImports;
+                  const refreshingImport = refreshingImportIds.includes(group.import.import_id);
 
                   return (
                     <Fragment key={group.import.import_id}>
@@ -1286,7 +1291,17 @@ function GroupedProxyCatalogPanel({
                         <TableCell className="px-3 py-3 align-top text-right">
                           {mode === "global" ? (
                             <div className="flex flex-wrap justify-end gap-2">
-                              {syncButton}
+                              {canRefreshImport ? (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={!onRefreshImports || refreshingImport}
+                                  onClick={() => void onRefreshImports?.([group.import.import_id])}
+                                >
+                                  <RefreshCcwIcon className="size-3.5" />
+                                  {refreshingImport ? t("Updating...") : t("Update")}
+                                </Button>
+                              ) : null}
                               <Select
                                 disabled={
                                   !onReassignImport ||
@@ -1331,23 +1346,33 @@ function GroupedProxyCatalogPanel({
                                 {t("Delete")}
                               </Button>
                             </div>
-                          ) : canDeleteProjectImport ? (
+                          ) : canDeleteProjectImport || canRefreshImport ? (
                             <div className="flex flex-wrap justify-end gap-2">
-                              {syncButton}
-                              <Button
-                                variant="destructive"
-                                size="sm"
-                                disabled={
-                                  !onDeleteImport || deletingImportId === group.import.import_id
-                                }
-                                onClick={() => setPendingDeleteImportId(group.import.import_id)}
-                              >
-                                <Trash2Icon className="size-3.5" />
-                                {t("Delete")}
-                              </Button>
+                              {canRefreshImport ? (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={!onRefreshImports || refreshingImport}
+                                  onClick={() => void onRefreshImports?.([group.import.import_id])}
+                                >
+                                  <RefreshCcwIcon className="size-3.5" />
+                                  {refreshingImport ? t("Updating...") : t("Update")}
+                                </Button>
+                              ) : null}
+                              {canDeleteProjectImport ? (
+                                <Button
+                                  variant="destructive"
+                                  size="sm"
+                                  disabled={
+                                    !onDeleteImport || deletingImportId === group.import.import_id
+                                  }
+                                  onClick={() => setPendingDeleteImportId(group.import.import_id)}
+                                >
+                                  <Trash2Icon className="size-3.5" />
+                                  {t("Delete")}
+                                </Button>
+                              ) : null}
                             </div>
-                          ) : syncButton ? (
-                            <div className="flex flex-wrap justify-end gap-2">{syncButton}</div>
                           ) : (
                             <span className="text-xs text-muted-foreground">—</span>
                           )}

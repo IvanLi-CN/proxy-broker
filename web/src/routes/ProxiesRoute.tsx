@@ -204,6 +204,25 @@ export function ProxiesRoute() {
     },
     onError: (error) => toast.error(formatApiErrorMessage(error, t)),
   });
+  const refreshImportMutation = useMutation({
+    mutationFn: async (importIds: string[]) => {
+      const uniqueImportIds = [...new Set(importIds)];
+      const responses = [];
+      for (const importId of uniqueImportIds) {
+        responses.push(await api.refreshProxyImport(importId));
+      }
+      return { importIds: uniqueImportIds, responses };
+    },
+    onSuccess: async ({ importIds }) => {
+      toast.success(
+        importIds.length === 1
+          ? t("Updated subscription import {importId}", { importId: importIds[0] ?? "" })
+          : t("Updated {count} subscription imports", { count: importIds.length }),
+      );
+      await refreshProxyQueries();
+    },
+    onError: (error) => toast.error(formatApiErrorMessage(error, t)),
+  });
 
   const proxyOperationMutation = useMutation({
     mutationFn: ({
@@ -223,20 +242,6 @@ export function ProxiesRoute() {
           description: t("Run ID: {runId}", { runId: response.run_id }),
         },
       );
-    },
-    onError: (error) => toast.error(formatApiErrorMessage(error, t)),
-  });
-
-  const syncProxyImportsMutation = useMutation({
-    mutationFn: (importIds: string[]) => api.syncProxyImports({ import_ids: importIds }),
-    onSuccess: async (response) => {
-      toast.success(t("Queued subscription update"), {
-        description:
-          response.run_ids.length > 0
-            ? t("Run ID: {runId}", { runId: response.run_ids.join(", ") })
-            : undefined,
-      });
-      await refreshProxyQueries(activeProjectId);
     },
     onError: (error) => toast.error(formatApiErrorMessage(error, t)),
   });
@@ -333,8 +338,8 @@ export function ProxiesRoute() {
         onDeleteImport={async (importId) => {
           await deleteMutation.mutateAsync(importId);
         }}
-        onSyncImports={async (importIds) => {
-          await syncProxyImportsMutation.mutateAsync(importIds);
+        onRefreshImports={async (importIds) => {
+          await refreshImportMutation.mutateAsync(importIds);
         }}
         onOpenSessionByNode={async (payload) => {
           await openSessionByNodeMutation.mutateAsync({
@@ -349,15 +354,15 @@ export function ProxiesRoute() {
           });
         }}
         deletingImportId={deleteMutation.isPending ? (deleteMutation.variables ?? null) : null}
+        refreshingImportIds={
+          refreshImportMutation.isPending ? (refreshImportMutation.variables ?? []) : []
+        }
         openingSessionNodeId={
           openSessionByNodeMutation.isPending
             ? (openSessionByNodeMutation.variables?.payload.node_id ?? null)
             : null
         }
         openingBatch={openBatchByNodeMutation.isPending}
-        syncingImportIds={
-          syncProxyImportsMutation.isPending ? (syncProxyImportsMutation.variables ?? []) : []
-        }
       />
     );
   }
@@ -395,12 +400,15 @@ export function ProxiesRoute() {
       onReassignImport={async (importId, scope) => {
         await reassignMutation.mutateAsync({ importId, scope });
       }}
-      onSyncImports={async (importIds) => {
-        await syncProxyImportsMutation.mutateAsync(importIds);
+      onRefreshImports={async (importIds) => {
+        await refreshImportMutation.mutateAsync(importIds);
       }}
       projects={projects}
       reallocatingImportId={
         reassignMutation.isPending ? (reassignMutation.variables?.importId ?? null) : null
+      }
+      refreshingImportIds={
+        refreshImportMutation.isPending ? (refreshImportMutation.variables ?? []) : []
       }
       proxyCatalog={globalCatalogQuery.data ?? null}
       proxyCatalogLoading={globalCatalogQuery.isLoading}
@@ -422,9 +430,6 @@ export function ProxiesRoute() {
           payload: { view: "global", node_ids: nodeIds },
         });
       }}
-      syncingImportIds={
-        syncProxyImportsMutation.isPending ? (syncProxyImportsMutation.variables ?? []) : []
-      }
     />
   );
 }

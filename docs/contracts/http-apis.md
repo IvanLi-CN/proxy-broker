@@ -213,6 +213,35 @@
   - `project_not_found` (404) when the target project does not exist
   - `proxy_inventory_node_not_found` (404)
 
+## POST /api/v1/proxy-imports/{import_id}/refresh
+
+- Change: New
+- Auth:
+  - admin human or development principal for global imports and cross-scope imports
+  - project-scoped API keys may refresh a project-local import only when its source and allocation are both the same allowed project
+- Success:
+  - `loaded_proxies`
+  - `distinct_ips`
+  - `resolved_name?`
+  - `resolved_name_source?`: `existing_import|parsed_source|generated`
+  - `subscription_metadata?`
+  - `warnings[]`
+- Notes:
+  - refreshes an existing `subscription` import from its persisted `source_identity`
+  - does not require an import-level sync config, so global subscription imports can be refreshed manually
+  - preserves the existing `import_id`, display name, allocation scope, and created timestamp
+  - project-local subscription imports keep their sync config registered for future scheduled syncs without resetting existing enabled state, intervals, or due times
+  - manual node-group imports (`import_kind=single_node`) are rejected
+  - rebuilt projects follow the import's effective allocation scope
+- Error:
+  - `authentication_required` (401)
+  - `admin_required` (403)
+  - `project_access_denied` (403)
+  - `invalid_request` (400) for non-subscription imports or unsupported source types
+  - `subscription_invalid` (400)
+  - `subscription_fetch_failed` (502)
+  - `proxy_inventory_node_not_found` (404)
+
 ## PATCH /api/v1/proxies/{node_id}/allocation
 
 - Change: Compatibility
