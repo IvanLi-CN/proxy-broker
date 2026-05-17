@@ -59,6 +59,7 @@
 - 同一 project 同时最多运行一个自动任务；重叠到期信号必须折叠，不得并发执行。
 - `Tasks` 页面默认聚焦当前 project，管理员可切换为 `all projects` 汇总。
 - 任务页面数据必须通过 `SSE` 实时推送更新，而不是退回轮询。
+- 高频任务不得把每个内部样本或循环迭代都写成 durable `task_run_events`；持久事件应记录阶段切换、批次进度、结果摘要和错误明细，细粒度实时状态通过 `SSE` 增量事件发送。
 
 ### SHOULD
 
@@ -93,6 +94,8 @@
 - `metadata_refresh_incremental`
   - 只针对“新引入的 IP 记录”做 probe 与 geo 更新。
   - 更新 project `ip_records` / `probe_records` 后，同步回填 effective inventory 的 `(node_id, ip)` 级 `proxy_node_metadata`。
+- `proxy_latency_probe`
+  - 对单个样本完成事件使用实时推送；durable `task_run_events` 只保留 started、batch/round summary、completed/error 这类可诊断摘要，避免大目录测速任务把事件表写成资源瓶颈。
 - `metadata_refresh_full`
   - 对当前 project 全量 IP 强制刷新 probe 与 geo，忽略缓存 TTL。
   - 更新 project `ip_records` / `probe_records` 后，同步回填 effective inventory 的 `(node_id, ip)` 级 `proxy_node_metadata`。

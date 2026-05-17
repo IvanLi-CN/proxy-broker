@@ -14,7 +14,9 @@
 - `BrokerStore` adds:
   - `insert_proxy_node_probe_samples(records)`
   - `list_recent_proxy_node_probe_samples(limit_per_node_ip)`
+  - `list_recent_proxy_node_probe_samples_for_pair(node_id, ip, limit)`
   - `get_system_settings()`
   - `upsert_system_settings(settings)`
+- Probe sample persistence may batch writes, but live sample progress must still be emitted through the task event stream. Per-sample live events are not required to be durable `task_run_events`.
 - `BrokerService::enqueue_due_tasks()` includes the global proxy latency probe scheduler. It reads `proxy_probe_interval_sec`, targets subscription imports only, skips when a global probe is pending/running, and uses checked interval arithmetic.
 - `BrokerService::start_proxy_latency_probe()` filters queued/running duplicate node IDs before enqueueing; an all-duplicate request returns a terminal skipped run.

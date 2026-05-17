@@ -68,7 +68,14 @@ const DEFAULT_SESSION_OPTIONS_LIMIT: usize = 25;
 const DEFAULT_SESSION_NODE_OPTIONS_LIMIT: usize = 80;
 const GLOBAL_RUNTIME_PROJECT_ID: &str = "__global__";
 const PROXY_PROBE_ROUNDS: usize = 5;
+const PROXY_PROBE_SAMPLE_FLUSH_SIZE: usize = 100;
 const AUTO_PORT_BIND_ATTEMPTS: usize = 3;
+
+#[derive(Debug, Clone)]
+struct PendingProxyProbeSample {
+    node: ProxyInventoryRecord,
+    record: ProxyNodeProbeSampleRecord,
+}
 
 #[derive(Debug, Clone)]
 pub struct BrokerServiceOptions {
@@ -1615,6 +1622,27 @@ impl BrokerService {
             .map_err(BrokerError::from)?;
         let _ = self.task_events.send(TaskBusEvent::RunEvent(event));
         Ok(())
+    }
+
+    fn emit_transient_task_event(
+        &self,
+        run: &TaskRunRecord,
+        level: TaskEventLevel,
+        stage: TaskRunStage,
+        message: impl Into<String>,
+        payload_json: Option<serde_json::Value>,
+    ) {
+        let event = TaskRunEventRecord {
+            event_id: ids::random_task_event_id(),
+            run_id: run.run_id.clone(),
+            project_id: run.project_id.clone(),
+            at: now_epoch_sec(),
+            level,
+            stage,
+            message: message.into(),
+            payload_json,
+        };
+        let _ = self.task_events.send(TaskBusEvent::RunEvent(event));
     }
 
     async fn mark_task_running(
@@ -3378,6 +3406,19 @@ impl BrokerService {
             Some(total_samples as u64),
         )
         .await?;
+        self.append_task_event(
+            run,
+            TaskEventLevel::Info,
+            TaskRunStage::Probing,
+            "Proxy latency probe started.",
+            Some(serde_json::json!({
+                "targeted_nodes": nodes.len(),
+                "targeted_ips": probe_pairs.len(),
+                "samples": total_samples,
+                "rounds": PROXY_PROBE_ROUNDS,
+            })),
+        )
+        .await?;
 
         let existing = self
             .store
@@ -3394,8 +3435,10 @@ impl BrokerService {
         let mut progress = 0u64;
         let mut failed_samples = 0usize;
         let mut samples_by_pair = HashMap::<(String, String), Vec<Option<u64>>>::new();
+        let mut pending_samples = Vec::<PendingProxyProbeSample>::new();
 
         for round in 0..PROXY_PROBE_ROUNDS {
+            let round_start_progress = progress;
             let mut probe_stream = stream::iter(probe_pairs.clone())
                 .map(|(node, ip)| {
                     let probe_target = probe_target.clone();
@@ -3439,18 +3482,19 @@ impl BrokerService {
                     .or_default()
                     .push(sample);
                 progress += 1;
-                self.persist_proxy_probe_sample(
-                    &node,
-                    &ip,
-                    &probe_target,
-                    sample,
+                let sample_record = ProxyNodeProbeSampleRecord {
+                    node_id: node.node_id.clone(),
+                    ip: ip.clone(),
+                    target_url: probe_target.clone(),
+                    ok: sample.is_some(),
+                    latency_ms: sample,
                     sampled_at,
-                    existing.get(&(node.node_id.clone(), ip.clone())),
-                )
-                .await?;
-                run.progress_current = Some(progress);
-                self.update_task_run_and_emit(run).await?;
-                self.append_task_event(
+                };
+                pending_samples.push(PendingProxyProbeSample {
+                    node: node.clone(),
+                    record: sample_record,
+                });
+                self.emit_transient_task_event(
                     run,
                     TaskEventLevel::Info,
                     TaskRunStage::Probing,
@@ -3463,6 +3507,49 @@ impl BrokerService {
                         "sample_ms": sample,
                         "progress_current": progress,
                         "progress_total": total_samples,
+                    })),
+                );
+
+                if pending_samples.len() >= PROXY_PROBE_SAMPLE_FLUSH_SIZE {
+                    self.persist_proxy_probe_sample_batch(&pending_samples, &existing)
+                        .await?;
+                    pending_samples.clear();
+                    run.progress_current = Some(progress);
+                    self.update_task_run_and_emit(run).await?;
+                    self.append_task_event(
+                        run,
+                        TaskEventLevel::Info,
+                        TaskRunStage::Probing,
+                        "Probe sample batch completed.",
+                        Some(serde_json::json!({
+                            "round": round + 1,
+                            "progress_current": progress,
+                            "progress_total": total_samples,
+                            "batch_size": PROXY_PROBE_SAMPLE_FLUSH_SIZE,
+                        })),
+                    )
+                    .await?;
+                }
+            }
+
+            if !pending_samples.is_empty() {
+                let batch_size = pending_samples.len();
+                self.persist_proxy_probe_sample_batch(&pending_samples, &existing)
+                    .await?;
+                pending_samples.clear();
+                run.progress_current = Some(progress);
+                self.update_task_run_and_emit(run).await?;
+                self.append_task_event(
+                    run,
+                    TaskEventLevel::Info,
+                    TaskRunStage::Probing,
+                    "Probe round completed.",
+                    Some(serde_json::json!({
+                        "round": round + 1,
+                        "round_samples": progress - round_start_progress,
+                        "progress_current": progress,
+                        "progress_total": total_samples,
+                        "batch_size": batch_size,
                     })),
                 )
                 .await?;
@@ -3500,66 +3587,72 @@ impl BrokerService {
         Ok(())
     }
 
-    async fn persist_proxy_probe_sample(
+    async fn persist_proxy_probe_sample_batch(
         &self,
-        node: &ProxyInventoryRecord,
-        primary_ip: &str,
-        probe_target: &str,
-        sample: Option<u64>,
-        sampled_at: i64,
-        previous: Option<&ProxyNodeMetadataRecord>,
+        pending_samples: &[PendingProxyProbeSample],
+        existing: &HashMap<(String, String), ProxyNodeMetadataRecord>,
     ) -> BrokerResult<()> {
-        let sample_record = ProxyNodeProbeSampleRecord {
-            node_id: node.node_id.clone(),
-            ip: primary_ip.to_string(),
-            target_url: probe_target.to_string(),
-            ok: sample.is_some(),
-            latency_ms: sample,
-            sampled_at,
-        };
+        if pending_samples.is_empty() {
+            return Ok(());
+        }
+        let sample_records = pending_samples
+            .iter()
+            .map(|pending| pending.record.clone())
+            .collect::<Vec<_>>();
         self.store
-            .insert_proxy_node_probe_samples(std::slice::from_ref(&sample_record))
+            .insert_proxy_node_probe_samples(&sample_records)
             .await
             .map_err(BrokerError::from)?;
 
-        let recent_samples = self
-            .store
-            .list_recent_proxy_node_probe_samples(10)
-            .await
-            .map_err(BrokerError::from)?
-            .into_iter()
-            .filter(|record| record.node_id == node.node_id && record.ip == primary_ip)
-            .collect::<Vec<_>>();
-        let successes = recent_samples
-            .iter()
-            .filter_map(|record| record.ok.then_some(record.latency_ms).flatten())
-            .collect::<Vec<_>>();
-        let last_probe_samples = recent_samples
-            .iter()
-            .rev()
-            .map(|record| record.ok.then_some(record.latency_ms).flatten())
-            .collect::<Vec<_>>();
-        let latest = recent_samples.first().cloned().unwrap_or(sample_record);
-        let metadata = ProxyNodeMetadataRecord {
-            node_id: node.node_id.clone(),
-            ip: primary_ip.to_string(),
-            country_code: previous
-                .and_then(|record| normalize_country_code(record.country_code.as_deref())),
-            country_name: previous.and_then(|record| record.country_name.clone()),
-            region_name: previous.and_then(|record| record.region_name.clone()),
-            city: previous.and_then(|record| record.city.clone()),
-            geo_source: previous.and_then(|record| record.geo_source.clone()),
-            probe_updated_at: Some(latest.sampled_at),
-            geo_updated_at: previous.and_then(|record| record.geo_updated_at),
-            last_probe_ok: Some(latest.ok),
-            last_latency_ms: latest.latency_ms,
-            median_latency_ms: median_success_latency(&successes),
-            last_probe_samples,
-            recent_probe_samples: recent_samples,
-            updated_at: latest.sampled_at,
-        };
+        let mut metadata_records = Vec::with_capacity(pending_samples.len());
+        for pending in pending_samples {
+            let node = &pending.node;
+            let sample_record = &pending.record;
+            let recent_samples = self
+                .store
+                .list_recent_proxy_node_probe_samples_for_pair(
+                    &sample_record.node_id,
+                    &sample_record.ip,
+                    10,
+                )
+                .await
+                .map_err(BrokerError::from)?;
+            let successes = recent_samples
+                .iter()
+                .filter_map(|record| record.ok.then_some(record.latency_ms).flatten())
+                .collect::<Vec<_>>();
+            let last_probe_samples = recent_samples
+                .iter()
+                .rev()
+                .map(|record| record.ok.then_some(record.latency_ms).flatten())
+                .collect::<Vec<_>>();
+            let latest = recent_samples
+                .first()
+                .cloned()
+                .unwrap_or_else(|| sample_record.clone());
+            let previous = existing.get(&(sample_record.node_id.clone(), sample_record.ip.clone()));
+            metadata_records.push(ProxyNodeMetadataRecord {
+                node_id: sample_record.node_id.clone(),
+                ip: sample_record.ip.clone(),
+                country_code: previous
+                    .and_then(|record| normalize_country_code(record.country_code.as_deref())),
+                country_name: previous.and_then(|record| record.country_name.clone()),
+                region_name: previous.and_then(|record| record.region_name.clone()),
+                city: previous.and_then(|record| record.city.clone()),
+                geo_source: previous.and_then(|record| record.geo_source.clone()),
+                probe_updated_at: Some(latest.sampled_at),
+                geo_updated_at: previous.and_then(|record| record.geo_updated_at),
+                last_probe_ok: Some(latest.ok),
+                last_latency_ms: latest.latency_ms,
+                median_latency_ms: median_success_latency(&successes),
+                last_probe_samples,
+                recent_probe_samples: recent_samples,
+                updated_at: latest.sampled_at,
+            });
+            debug_assert_eq!(node.node_id, sample_record.node_id);
+        }
         self.store
-            .upsert_proxy_node_metadata(&[metadata])
+            .upsert_proxy_node_metadata(&metadata_records)
             .await
             .map_err(BrokerError::from)?;
         Ok(())
@@ -8863,6 +8956,17 @@ mod tests {
                 .await
         }
 
+        async fn list_recent_proxy_node_probe_samples_for_pair(
+            &self,
+            node_id: &str,
+            ip: &str,
+            limit: usize,
+        ) -> anyhow::Result<Vec<ProxyNodeProbeSampleRecord>> {
+            self.inner
+                .list_recent_proxy_node_probe_samples_for_pair(node_id, ip, limit)
+                .await
+        }
+
         async fn get_system_settings(&self) -> anyhow::Result<Option<SystemSettings>> {
             self.inner.get_system_settings().await
         }
@@ -10152,6 +10256,20 @@ proxies:
                 .iter()
                 .all(|record| record.node_id != "node-unresolved"),
             "all-node probe should skip unresolved inventory records"
+        );
+        let events = store
+            .list_task_run_events(&run.run_id)
+            .await
+            .expect("events should list");
+        assert!(
+            events.len() < samples.len(),
+            "probe should persist summary events instead of one event per sample"
+        );
+        assert!(
+            events
+                .iter()
+                .all(|event| !event.message.starts_with("Probe sample finished")),
+            "per-sample probe events should stay transient"
         );
     }
 
