@@ -40,3 +40,4 @@
 - `stage TEXT NOT NULL`
 - `message TEXT NOT NULL`
 - `payload_json TEXT`
+- Durable events are for diagnostic milestones and bounded progress summaries. High-frequency per-sample live updates may be sent over SSE without inserting a `task_run_events` row.

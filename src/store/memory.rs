@@ -523,6 +523,33 @@ impl BrokerStore for MemoryStore {
         Ok(items.into_iter().map(|item| item.record).collect())
     }
 
+    async fn list_recent_proxy_node_probe_samples_for_pair(
+        &self,
+        node_id: &str,
+        ip: &str,
+        limit: usize,
+    ) -> anyhow::Result<Vec<ProxyNodeProbeSampleRecord>> {
+        let guard = self
+            .inner
+            .read()
+            .map_err(|_| anyhow::anyhow!("memory store poisoned"))?;
+        let mut items = guard
+            .proxy_node_probe_samples
+            .iter()
+            .filter(|item| item.record.node_id == node_id && item.record.ip == ip)
+            .cloned()
+            .collect::<Vec<_>>();
+        items.sort_by(|left, right| {
+            right
+                .record
+                .sampled_at
+                .cmp(&left.record.sampled_at)
+                .then_with(|| right.seq.cmp(&left.seq))
+        });
+        items.truncate(limit);
+        Ok(items.into_iter().map(|item| item.record).collect())
+    }
+
     async fn get_system_settings(&self) -> anyhow::Result<Option<SystemSettings>> {
         let guard = self
             .inner

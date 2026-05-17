@@ -2503,6 +2503,7 @@ impl BrokerStore for SqliteStore {
         &self,
         records: &[ProxyNodeProbeSampleRecord],
     ) -> anyhow::Result<()> {
+        let mut pairs = HashSet::<(String, String)>::new();
         let mut tx = self.pool.begin().await?;
         for record in records {
             sqlx::query(
@@ -2522,6 +2523,10 @@ impl BrokerStore for SqliteStore {
             .execute(&mut *tx)
             .await?;
 
+            pairs.insert((record.node_id.clone(), record.ip.clone()));
+        }
+
+        for (node_id, ip) in pairs {
             sqlx::query(
                 r#"
                 DELETE FROM proxy_node_probe_samples
@@ -2534,8 +2539,8 @@ impl BrokerStore for SqliteStore {
                 )
                 "#,
             )
-            .bind(&record.node_id)
-            .bind(&record.ip)
+            .bind(&node_id)
+            .bind(&ip)
             .execute(&mut *tx)
             .await?;
         }
@@ -2550,35 +2555,58 @@ impl BrokerStore for SqliteStore {
         let rows = sqlx::query(
             r#"
             SELECT node_id, ip, target_url, ok, latency_ms, sampled_at
-            FROM proxy_node_probe_samples
+            FROM (
+              SELECT
+                node_id,
+                ip,
+                target_url,
+                ok,
+                latency_ms,
+                sampled_at,
+                sample_id,
+                ROW_NUMBER() OVER (
+                  PARTITION BY node_id, ip
+                  ORDER BY sampled_at DESC, sample_id DESC
+                ) AS row_number
+              FROM proxy_node_probe_samples
+            )
+            WHERE row_number <= ?1
             ORDER BY node_id ASC, ip ASC, sampled_at DESC, sample_id DESC
             "#,
         )
+        .bind(limit_per_node_ip as i64)
         .fetch_all(&self.pool)
         .await?;
 
-        let mut counts = HashMap::<(String, String), usize>::new();
-        let mut items = Vec::new();
-        for row in rows {
-            let node_id: String = row.try_get("node_id")?;
-            let ip: String = row.try_get("ip")?;
-            let count = counts.entry((node_id.clone(), ip.clone())).or_insert(0);
-            if *count >= limit_per_node_ip {
-                continue;
-            }
-            *count += 1;
-            let ok: i64 = row.try_get("ok")?;
-            let latency_ms: Option<i64> = row.try_get("latency_ms")?;
-            items.push(ProxyNodeProbeSampleRecord {
-                node_id,
-                ip,
-                target_url: row.try_get("target_url")?,
-                ok: ok != 0,
-                latency_ms: latency_ms.map(|value| value as u64),
-                sampled_at: row.try_get("sampled_at")?,
-            });
-        }
-        Ok(items)
+        rows.into_iter()
+            .map(map_proxy_node_probe_sample_row)
+            .collect()
+    }
+
+    async fn list_recent_proxy_node_probe_samples_for_pair(
+        &self,
+        node_id: &str,
+        ip: &str,
+        limit: usize,
+    ) -> anyhow::Result<Vec<ProxyNodeProbeSampleRecord>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT node_id, ip, target_url, ok, latency_ms, sampled_at
+            FROM proxy_node_probe_samples
+            WHERE node_id = ?1 AND ip = ?2
+            ORDER BY sampled_at DESC, sample_id DESC
+            LIMIT ?3
+            "#,
+        )
+        .bind(node_id)
+        .bind(ip)
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(map_proxy_node_probe_sample_row)
+            .collect()
     }
 
     async fn get_system_settings(&self) -> anyhow::Result<Option<SystemSettings>> {
@@ -3582,6 +3610,21 @@ fn map_proxy_import_sync_config_row(
     })
 }
 
+fn map_proxy_node_probe_sample_row(
+    row: sqlx::sqlite::SqliteRow,
+) -> anyhow::Result<ProxyNodeProbeSampleRecord> {
+    let ok: i64 = row.try_get("ok")?;
+    let latency_ms: Option<i64> = row.try_get("latency_ms")?;
+    Ok(ProxyNodeProbeSampleRecord {
+        node_id: row.try_get("node_id")?,
+        ip: row.try_get("ip")?,
+        target_url: row.try_get("target_url")?,
+        ok: ok != 0,
+        latency_ms: latency_ms.map(|value| value as u64),
+        sampled_at: row.try_get("sampled_at")?,
+    })
+}
+
 fn merge_proxy_import_records(
     existing: &ProxyImportRecord,
     incoming: &ProxyImportRecord,
@@ -4457,6 +4500,64 @@ mod tests {
         assert_eq!(recent.len(), 10);
         assert_eq!(recent[0].sampled_at, 1_011);
         assert_eq!(recent[9].sampled_at, 1_002);
+        let pair_recent = store
+            .list_recent_proxy_node_probe_samples_for_pair("node-a", "1.1.1.1", 3)
+            .await
+            .expect("pair samples should list");
+        assert_eq!(pair_recent.len(), 3);
+        assert_eq!(pair_recent[0].sampled_at, 1_011);
+        assert_eq!(pair_recent[2].sampled_at, 1_009);
+
+        let _ = tokio::fs::remove_file(path).await;
+    }
+
+    #[tokio::test]
+    async fn proxy_node_probe_samples_global_recent_limits_each_pair_in_sql() {
+        let (store, path) = open_temp_store().await;
+        let mut samples = Vec::new();
+        for index in 0..12 {
+            samples.push(ProxyNodeProbeSampleRecord {
+                node_id: "node-a".to_string(),
+                ip: "1.1.1.1".to_string(),
+                target_url: "https://example.test".to_string(),
+                ok: true,
+                latency_ms: Some(80 + index as u64),
+                sampled_at: 1_000 + index as i64,
+            });
+            samples.push(ProxyNodeProbeSampleRecord {
+                node_id: "node-b".to_string(),
+                ip: "2.2.2.2".to_string(),
+                target_url: "https://example.test".to_string(),
+                ok: true,
+                latency_ms: Some(180 + index as u64),
+                sampled_at: 2_000 + index as i64,
+            });
+        }
+
+        store
+            .insert_proxy_node_probe_samples(&samples)
+            .await
+            .expect("samples should insert");
+
+        let recent = store
+            .list_recent_proxy_node_probe_samples(3)
+            .await
+            .expect("recent samples should list");
+        assert_eq!(recent.len(), 6);
+        assert_eq!(
+            recent
+                .iter()
+                .filter(|record| record.node_id == "node-a" && record.ip == "1.1.1.1")
+                .count(),
+            3
+        );
+        assert_eq!(
+            recent
+                .iter()
+                .filter(|record| record.node_id == "node-b" && record.ip == "2.2.2.2")
+                .count(),
+            3
+        );
 
         let _ = tokio::fs::remove_file(path).await;
     }

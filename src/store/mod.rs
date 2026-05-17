@@ -108,6 +108,12 @@ pub trait BrokerStore: Send + Sync {
         &self,
         limit_per_node_ip: usize,
     ) -> anyhow::Result<Vec<ProxyNodeProbeSampleRecord>>;
+    async fn list_recent_proxy_node_probe_samples_for_pair(
+        &self,
+        node_id: &str,
+        ip: &str,
+        limit: usize,
+    ) -> anyhow::Result<Vec<ProxyNodeProbeSampleRecord>>;
 
     async fn get_system_settings(&self) -> anyhow::Result<Option<SystemSettings>>;
     async fn upsert_system_settings(&self, settings: &SystemSettings) -> anyhow::Result<()>;

@@ -63,7 +63,7 @@
 - 节点测速样本必须持久化到节点/IP 层历史，按 `(node_id, ip)` 保留最新 10 条；`proxy_node_metadata.last_probe_samples` 继续兼容保留，并额外输出 `recent_probe_samples`。
 - Project 元信息刷新与自动维护任务必须把 legacy project `ip_records` / `probe_records` 投影到 effective inventory 的 `(node_id, ip)` 级 `proxy_node_metadata`，避免升级到节点级元信息读面后丢失地理与测速摘要。
 - 投影节点级 metadata 时，若 legacy source 缺少 geo 或 probe 观测，必须保留既有节点级 geo / probe 字段；不得用空 legacy 记录覆盖已有节点级观测。
-- 批量测速必须按 `probe_concurrency` 并发执行每轮节点测速，并在单个样本完成后立即写入历史和 metadata。
+- 批量测速必须按 `probe_concurrency` 并发执行每轮节点测速；单个样本完成后必须通过实时事件推送，持久化写入与 metadata 刷新必须使用有界批次，并且读取最近样本时只能读取目标 `(node_id, ip)` 或由 SQL 层按 pair 截断后的结果。
 - queued/running 测速任务已覆盖的节点必须从新请求中忽略；若请求节点全部重复，则创建 `skipped` task run 而不是排空任务。
 - 系统设置必须提供 admin-only 的自动测速间隔读写 API，`proxy_probe_interval_sec` 默认 `900`，最小值 `60`。
 - 自动测速调度必须按配置间隔覆盖所有订阅导入节点，不覆盖纯手工 node group，并使用 checked arithmetic 避免时间溢出。
@@ -87,7 +87,7 @@
 - Global 视图加载 `proxy-catalog(view=global)`，显示 import 分组与节点明细；允许选择节点并触发 refresh / probe，但不显示 create-session 动作。
 - Project 视图加载 `proxy-catalog(view=project, project_id=...)`，显示当前 effective pool 的 grouped nodes；允许对单节点或选中节点批量创建会话。
 - `proxy-ops/probe` 为每个目标节点固定选择主 IP（`resolved_ips[0]`）做 5 轮 breadth-first delay probe；每轮样本通过流式事件推送，最终汇总为节点中位延迟。
-- `proxy-ops/probe` 在每个样本返回后立即追加 `proxy_node_probe_samples`，刷新对应 `(node_id, ip)` 的 metadata 摘要，并让 catalog 与会话节点候选读取同一份 `recent_probe_samples`。
+- `proxy-ops/probe` 在样本返回后通过实时事件推送节点级进度；服务端按有界批次追加 `proxy_node_probe_samples` 并刷新对应 `(node_id, ip)` 的 metadata 摘要。catalog 与会话节点候选读取同一份 `recent_probe_samples`，查询必须在 store/SQL 层完成每个 pair 的最新 10 条截断，不得全表拉取后在调用方过滤。
 - `/proxies` 节点状态列和 `SessionNodeSelectDialog` 候选项都以最新样本为主显示，并在 tooltip 中按最新优先展示最多 10 条历史样本。
 - Global `/proxies` admin 视图提供自动测速间隔设置；保存后调度器使用新间隔安排下一次全局订阅节点自动测速。
 - 会话节点候选项中的“Current session/project last used”和时间保持同一行，窄宽时只截断时间文本，不撑高候选卡片。

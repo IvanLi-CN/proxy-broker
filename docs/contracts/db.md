@@ -156,3 +156,5 @@
 - `subscription_nodes` / `ip_records` / `probe_records` / `sessions` 继续作为按 project 物化后的 effective snapshot。
 - 元信息刷新与自动维护任务会把 legacy project `ip_records` / `probe_records` 投影到 effective inventory 的 `(node_id, ip)` 级 `proxy_node_metadata`；节点级记录缺失时，服务端查询仍可读取 legacy 表做 best-effort fallback。
 - `project_proxy_settings` 让 existing / new projects 都能持久化 `use_global_proxies`，默认值为启用。
+- `proxy_node_probe_samples` 最近样本读取必须在 store/SQL 层按 `(node_id, ip)` 限量，调用方不得全表读取后再筛选目标 pair。
+- `task_run_events` 保存诊断里程碑和有界进度摘要；高频 per-sample 实时状态可以通过 SSE 广播，但不应逐条写入 durable events。
