@@ -101,6 +101,7 @@ jobs:
             .github/scripts/metadata_gate.py \
             .github/scripts/release_snapshot.py \
             .github/scripts/test-release-workflow.py \
+            .github/scripts/test-notify-release-failure.py \
             .github/scripts/verify_manifest_platforms.py
           bash -n .github/scripts/package_release_asset.sh
 
@@ -108,6 +109,7 @@ jobs:
         run: |
           bash .github/scripts/test-release-snapshot.sh
           python3 .github/scripts/test-release-workflow.py
+          python3 .github/scripts/test-notify-release-failure.py
           bash .github/scripts/test-workflow-concurrency.sh
 
       - name: Upload Storybook artifact

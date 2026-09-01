@@ -15,7 +15,7 @@
 
 | ID   | Title | Status | Spec | Last | Notes |
 |-----:|-------|--------|------|------|-------|
-| zdmrs | Release 失败 Telegram 告警接入 | 待实现 | `zdmrs-release-failure-telegram-alerts/SPEC.md` | 2026-04-12 | release notifier wrapper、SHA 标记、Telegram smoke test |
+| zdmrs | Release 失败 Telegram 告警接入 | 已实现 | `zdmrs-release-failure-telegram-alerts/SPEC.md` | 2026-09-01 | Oidrune pinned notify workflow、完整 summary、workflow contract test |
 | h2w7p | Forward Auth 身份识别、管理员授权与 Project API Key | 已完成 | `h2w7p-forward-auth-admin-and-project-keys/SPEC.md` | 2026-03-20 | 新增 Forward Auth 身份解析、管理员白名单、开发模式与 Project 级 API Key 管理 |
 | r2m7k | PR Label 发版与通配监听 | 已完成 | `r2m7k-pr-label-release-and-wildcard-listen/SPEC.md` | 2026-03-28 | 新增 session 端口池约束与 wildcard listener 的 LAN 暴露契约，避免已创建 session 落到未对外开放的端口 |
 | s3zu5 | 管理台 UI 控制室重构 | 已完成 | `s3zu5-admin-ui-refresh/SPEC.md` | 2026-04-11 | 移除 Overview / Sessions / IP Extract 的冗余辅助说明卡片，并刷新 Storybook 视觉证据 |
