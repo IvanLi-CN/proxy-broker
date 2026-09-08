@@ -32,33 +32,35 @@ def require_rust_cache_does_not_restore_bins() -> None:
 
 def main() -> int:
     workflow = WORKFLOW.read_text(encoding="utf-8")
-    require("issues: write" in workflow, "release publisher must be allowed to comment on PRs")
     require(
-        "pull-requests: write" in workflow,
-        "release publisher must request pull request write permission for PR comments",
-    )
-    require("name: Comment on source PR" in workflow, "release workflow must comment on the source PR")
-    require(
-        "if: needs.release-meta.outputs.pr_number != ''" in workflow,
-        "release PR comment step must be skipped when the snapshot has no PR number",
+        "issues: write" not in workflow,
+        "release publisher must not request issue write permission for source PR comments",
     )
     require(
-        "proxy-broker:release-success:${releaseTag}" in workflow,
-        "release PR comments must carry a stable idempotency marker",
+        "pull-requests: write" not in workflow,
+        "release publisher must not request pull request write permission for source PR comments",
     )
     require(
-        "github.rest.issues.updateComment" in workflow and "github.rest.issues.createComment" in workflow,
-        "release PR comments must be idempotent across reruns",
+        "name: Comment on source PR" not in workflow,
+        "release workflow must not comment on the source PR",
     )
     require(
-        "release_html_url" in workflow and "RELEASE_URL: ${{ steps.ensure-release.outputs.release_html_url }}" in workflow,
-        "release PR comments must link to the published GitHub Release",
+        "github.rest.issues." not in workflow,
+        "release workflow must not call the issue comment API",
     )
-    comment_index = workflow.index("name: Comment on source PR")
+    require(
+        "pr_number: ${{ steps.snapshot.outputs.pr_number }}" not in workflow,
+        "release workflow must not expose source PR metadata for post-publish comments",
+    )
+    assets_index = workflow.index("name: Upload binary release assets")
     mark_released_index = workflow.index("name: Mark snapshot as released")
     require(
-        comment_index < mark_released_index,
-        "release PR comment must run before marking the snapshot released",
+        assets_index < mark_released_index,
+        "release snapshot must be marked after binary assets are uploaded",
+    )
+    require(
+        "python3 .github/scripts/release_snapshot.py mark-released" in workflow[mark_released_index:],
+        "release workflow must mark the snapshot as released after publication",
     )
     require_rust_cache_does_not_restore_bins()
     return 0
